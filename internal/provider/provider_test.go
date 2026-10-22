@@ -120,7 +120,7 @@ func TestLocalHTTPProviderForwardsNonStreamingRequest(t *testing.T) {
 }
 
 func TestLocalHTTPProviderForwardsStreamCallbacks(t *testing.T) {
-	client := &fakeHTTPClient{streamBody: []byte("data: {\\"choices\\":[]}\\n\\n")}
+	client := &fakeHTTPClient{streamBody: []byte("data: {\"choices\":[]}\n\n")}
 	p := NewLocalHTTPProvider("ollama", Capabilities{Streaming: true}, client)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
