@@ -23,7 +23,7 @@ export async function loadRequests() {
     $('requestsTable').innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
-          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
+          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
             rows
               .map((x) => {
                 const rid = String(x.request_id || '');
@@ -38,7 +38,7 @@ export async function loadRequests() {
                   x.status === 'running'
                     ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">结束</button>`
                     : '';
-                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
+                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
               })
               .join(''),
         );
@@ -230,7 +230,7 @@ function detailSections(j) {
     'swap',
     `<section class="req-section"><h3>概览</h3>${reqKv([
       ['Request ID', s.request_id || log.request_id],
-      ['状态', (s.status || log.status) + ' · HTTP ' + (s.http_status ?? log.http_status ?? '—')],
+      ['状态', (s.status || log.status) + ' · Gateway HTTP ' + (s.http_status ?? log.http_status ?? '—') + ((s.upstream_http_status ?? log.upstream_http_status) != null ? ' · 上游 HTTP ' + (s.upstream_http_status ?? log.upstream_http_status) : '')],
       ['请求 URL', displayRequestTarget({ method: s.method || log.method, request_url: s.request_url || log.request_url, endpoint: s.endpoint || log.endpoint })],
       ['API Key', (s.api_key || log.api_key_name || '—') + (s.api_key_id ? ' (#' + s.api_key_id + ')' : '')],
       ['客户端', s.client_name || log.client_name || '—'],
@@ -287,6 +287,9 @@ function detailSections(j) {
     let block = `<section class="req-section"><h3>请求分析</h3>${reqKv([
       ['Gateway 准备', ph.prep_ms != null ? ph.prep_ms + ' ms' : null],
       ['模型加载/等待', ph.model_load_ms != null ? ph.model_load_ms + ' ms' : null],
+      ['上游响应头', ph.time_to_upstream_headers_ms != null ? ph.time_to_upstream_headers_ms + ' ms' : null],
+      ['首字节到达', ph.time_to_first_byte_ms != null ? ph.time_to_first_byte_ms + ' ms' : null],
+      ['首个实际输出 (TTFT)', ph.ttft_ms != null ? ph.ttft_ms + ' ms' : null],
       ['上游推理', ph.upstream_ms != null ? ph.upstream_ms + ' ms' : null],
       ['首条正文 content', ph.ttft_content_ms != null ? ph.ttft_content_ms + ' ms' : null],
       ['Prefill→首 token', ph.prefill_until_first_ms != null ? ph.prefill_until_first_ms + ' ms' : null],

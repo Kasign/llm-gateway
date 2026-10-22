@@ -473,13 +473,13 @@
       const j = await api("/api/requests?" + q);
       const rows = j.data || [];
       $("requestsTable").innerHTML = !rows.length ? emptyState("\u6682\u65E0\u8BB0\u5F55") : wrapTable(
-        "<tr><th>\u65F6\u95F4</th><th>Request ID</th><th>\u5BA2\u6237\u7AEF</th><th>\u5BC6\u94A5</th><th>\u8BF7\u6C42 URL</th><th>\u6A21\u578B</th><th>\u6D41\u5F0F</th><th>\u72B6\u6001</th><th>HTTP</th><th>TTFT</th><th>\u8017\u65F6</th><th>Token</th><th>\u4F53\u79EF</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
+        "<tr><th>\u65F6\u95F4</th><th>Request ID</th><th>\u5BA2\u6237\u7AEF</th><th>\u5BC6\u94A5</th><th>\u8BF7\u6C42 URL</th><th>\u6A21\u578B</th><th>\u6D41\u5F0F</th><th>\u72B6\u6001</th><th>HTTP \u7F51\u5173/\u4E0A\u6E38</th><th>TTFT</th><th>\u8017\u65F6</th><th>Token</th><th>\u4F53\u79EF</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
           const rid = String(x.request_id || "");
           const ridShort = rid.length > 10 ? rid.slice(0, 8) + "\u2026" : rid;
           const target = displayRequestTarget(x);
           const sz = (Number(x.request_bytes || 0) / 1024).toFixed(1) + " / " + (Number(x.response_bytes || 0) / 1024).toFixed(1) + " KB";
           const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">\u7ED3\u675F</button>` : "";
-          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
+          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
         }).join("")
       );
     } catch (e) {
@@ -641,7 +641,7 @@
       "swap",
       `<section class="req-section"><h3>\u6982\u89C8</h3>${reqKv([
         ["Request ID", s.request_id || log.request_id],
-        ["\u72B6\u6001", (s.status || log.status) + " \xB7 HTTP " + (s.http_status ?? log.http_status ?? "\u2014")],
+        ["\u72B6\u6001", (s.status || log.status) + " \xB7 Gateway HTTP " + (s.http_status ?? log.http_status ?? "\u2014") + ((s.upstream_http_status ?? log.upstream_http_status) != null ? " \xB7 \u4E0A\u6E38 HTTP " + (s.upstream_http_status ?? log.upstream_http_status) : "")],
         ["\u8BF7\u6C42 URL", displayRequestTarget({ method: s.method || log.method, request_url: s.request_url || log.request_url, endpoint: s.endpoint || log.endpoint })],
         ["API Key", (s.api_key || log.api_key_name || "\u2014") + (s.api_key_id ? " (#" + s.api_key_id + ")" : "")],
         ["\u5BA2\u6237\u7AEF", s.client_name || log.client_name || "\u2014"],
@@ -696,6 +696,9 @@
       let block = `<section class="req-section"><h3>\u8BF7\u6C42\u5206\u6790</h3>${reqKv([
         ["Gateway \u51C6\u5907", ph.prep_ms != null ? ph.prep_ms + " ms" : null],
         ["\u6A21\u578B\u52A0\u8F7D/\u7B49\u5F85", ph.model_load_ms != null ? ph.model_load_ms + " ms" : null],
+        ["\u4E0A\u6E38\u54CD\u5E94\u5934", ph.time_to_upstream_headers_ms != null ? ph.time_to_upstream_headers_ms + " ms" : null],
+        ["\u9996\u5B57\u8282\u5230\u8FBE", ph.time_to_first_byte_ms != null ? ph.time_to_first_byte_ms + " ms" : null],
+        ["\u9996\u4E2A\u5B9E\u9645\u8F93\u51FA (TTFT)", ph.ttft_ms != null ? ph.ttft_ms + " ms" : null],
         ["\u4E0A\u6E38\u63A8\u7406", ph.upstream_ms != null ? ph.upstream_ms + " ms" : null],
         ["\u9996\u6761\u6B63\u6587 content", ph.ttft_content_ms != null ? ph.ttft_content_ms + " ms" : null],
         ["Prefill\u2192\u9996 token", ph.prefill_until_first_ms != null ? ph.prefill_until_first_ms + " ms" : null],
