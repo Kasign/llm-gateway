@@ -22,7 +22,10 @@ import (
 func (s *Server) newInferencePipeline() *core.Pipeline {
 	// 工厂每次解析时获取当前 llamaClient，管理员切换本地后端后不会持有旧客户端。
 	if s.providers == nil {
-		s.providers = provider.NewLocalRegistry(func() provider.LocalHTTPClient { return s.llamaClient() })
+		s.providers = provider.NewLocalRegistry(
+			func() provider.LocalHTTPClient { return s.llamaClient() },
+			func(id string) provider.LocalModelManager { return &serverLocalModelManager{s: s, backend: id} },
+		)
 	}
 	return &core.Pipeline{
 		Resolve: s.resolveInference,
