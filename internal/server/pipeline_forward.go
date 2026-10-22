@@ -106,7 +106,12 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		err = mapped
 	}
 	if res.Status == 0 {
-		res.Status = http.StatusBadGateway
+		if err != nil {
+			// 保留 Provider 的稳定错误映射，例如上游建连/读取超时应为 504，而不是被默认值覆盖成 502。
+			res.Status, _, _ = core.Unpack(err)
+		} else {
+			res.Status = http.StatusBadGateway
+		}
 	}
 	return res, err
 }

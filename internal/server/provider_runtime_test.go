@@ -1,9 +1,16 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
 )
 
@@ -38,3 +45,73 @@ func TestRemoteProviderRuntimeResolutionUsesConfiguredURLAndDefaultModel(t *test
 	}
 }
 
+
+
+type fakeForwardProvider struct {
+	id     string
+	result core.Result
+	err    error
+}
+
+func (p fakeForwardProvider) ID() string { return p.id }
+
+func (p fakeForwardProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{Protocol: "test"}
+}
+
+func (p fakeForwardProvider) Forward(context.Context, provider.InferenceCall) (core.Result, error) {
+	return p.result, p.err
+}
+
+func TestInferenceForwarderPreservesProviderTimeoutStatus(t *testing.T) {
+	registry := provider.NewRegistry()
+	if err := registry.Register("remote-test", func() provider.Provider {
+		return fakeForwardProvider{
+			id:  "remote-test",
+			err: provider.NewHTTPError("remote-test", http.StatusGatewayTimeout, errors.New("timeout")),
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{providers: registry, upstream: settings.Upstream{Backend: "remote-test"}}
+	st := core.State{
+		ID: "forward-timeout-test", Method: http.MethodPost, Path: "/v1/chat/completions",
+		Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
+		Header: make(http.Header), Model: core.ModelChoice{UpstreamID: "remote-model"},
+	}
+	result, err := (inferenceForwarder{s: s}).Forward(context.Background(), st, nil)
+	if err == nil {
+		t.Fatal("expected provider timeout error")
+	}
+	if result.Status != http.StatusGatewayTimeout {
+		t.Fatalf("result status = %d, want 504", result.Status)
+	}
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Status != http.StatusGatewayTimeout {
+		t.Fatalf("error = %#v, want core 504 error", err)
+	}
+}
+
+func TestInferenceForwarderUsesBadGatewayForUnclassifiedTransportError(t *testing.T) {
+	registry := provider.NewRegistry()
+	if err := registry.Register("remote-test", func() provider.Provider {
+		return fakeForwardProvider{id: "remote-test", err: errors.New("connection reset")}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{providers: registry, upstream: settings.Upstream{Backend: "remote-test"}}
+	st := core.State{
+		ID: "forward-transport-error-test", Method: http.MethodPost, Path: "/v1/chat/completions",
+		Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
+		Header: make(http.Header), Model: core.ModelChoice{UpstreamID: "remote-model"},
+	}
+	result, err := (inferenceForwarder{s: s}).Forward(context.Background(), st, nil)
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if result.Status != http.StatusBadGateway {
+		t.Fatalf("result status = %d, want 502", result.Status)
+	}
+}
