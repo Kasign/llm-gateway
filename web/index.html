@@ -81,7 +81,7 @@
         </div>
 
         <div class="card backend-card">
-          <div class="card-head"><div><h2>上游推理服务</h2><p>切换 API 流量使用的推理后端；模型加载请在「本地模型」</p></div></div>
+          <div class="card-head"><div><h2>上游推理服务</h2><p>选择 API 流量使用的本地后端或已配置的远程 Provider；远程模型由 deploy/config.yaml 的 default_model 指定</p></div></div>
           <div class="backend-toolbar">
             <div class="field sm backend-field"><label>推理后端</label>
               <select id="beBackend"><option value="llamacpp">llama.cpp</option><option value="ollama">Ollama</option></select>

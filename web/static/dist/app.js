@@ -1408,39 +1408,74 @@
       noteEl.innerHTML = j.hot_unload_supported === false ? '<span class="warn">' + esc(j.unload_note || "\u5F53\u524D llama \u53EF\u80FD\u4E0D\u652F\u6301\u70ED\u5378\u8F7D") + "</span>" : "";
     }
   }
+  function backendLabel(id, backends = []) {
+    const item = backends.find((x) => String(x.id || "") === String(id || ""));
+    if (item?.label) return String(item.label);
+    return id === "ollama" ? "Ollama" : id === "llamacpp" ? "llama.cpp" : String(id || "推理后端");
+  }
+  function populateBackendOptions(backends, active) {
+    const select = $("beBackend");
+    if (!select) return;
+    const list = Array.isArray(backends) && backends.length ? backends : [
+      { id: "llamacpp", label: "llama.cpp", kind: "local" },
+      { id: "ollama", label: "Ollama", kind: "local" }
+    ];
+    const target = String(active || select.value || "llamacpp");
+    select.innerHTML = list.map((item) => {
+      const id = String(item.id || "").trim();
+      if (!id) return "";
+      const kind = String(item.kind || "local");
+      const model = kind === "remote" && item.default_model ? " · " + String(item.default_model) : "";
+      return '<option value="' + esc(id) + '" data-kind="' + esc(kind) + '">' + esc(String(item.label || id) + model) + "</option>";
+    }).join("");
+    select.value = list.some((item) => String(item.id || "") === target) ? target : list[0]?.id || "llamacpp";
+  }
+  function selectedBackendOption() {
+    const select = $("beBackend");
+    return select?.selectedOptions?.[0] || null;
+  }
   function backendProbeStatus(block) {
-    if (!block?.base_url) return { cls: "muted", text: "\u672A\u914D\u7F6E" };
-    if (block.reachable === true) return { cls: "ok", text: "\u53EF\u8FBE" };
+    if (block?.configured_remote === true) return { cls: "ok", text: "已配置 · 首次推理时验证连接" };
+    if (!block?.base_url) return { cls: "muted", text: "未配置" };
+    if (block.reachable === true) return { cls: "ok", text: "可达" };
     if (block.reachable === false) {
       const hint = String(block.error || "").trim();
-      return { cls: "err", text: hint ? "\u4E0D\u53EF\u8FBE \xB7 " + hint.slice(0, 80) : "\u4E0D\u53EF\u8FBE" };
+      return { cls: "err", text: hint ? "不可达 · " + hint.slice(0, 80) : "不可达" };
     }
     const checks = block.checks || [];
-    if (!checks.length) return { cls: "muted", text: "\u672A\u914D\u7F6E" };
+    if (!checks.length) return { cls: "muted", text: "未配置" };
     const ok = checks.every((c) => Number(c.http_status) >= 200 && Number(c.http_status) < 400);
     const partial = checks.some((c) => Number(c.http_status) >= 200 && Number(c.http_status) < 400);
-    if (ok) return { cls: "ok", text: "\u53EF\u8FBE" };
-    if (partial) return { cls: "warn", text: "\u90E8\u5206\u53EF\u8FBE" };
-    return { cls: "err", text: "\u4E0D\u53EF\u8FBE" };
+    if (ok) return { cls: "ok", text: "可达" };
+    if (partial) return { cls: "warn", text: "部分可达" };
+    return { cls: "err", text: "不可达" };
   }
   function renderBackendProbeCompact(j) {
     const active = (j.active || {}).backend || "llamacpp";
-    const activeLabel = active === "ollama" ? "Ollama" : "llama.cpp";
-    const pr = j.upstream_probes || {};
+    const backends = Array.isArray(j.available_backends) ? j.available_backends : [
+      { id: "llamacpp", label: "llama.cpp", kind: "local" },
+      { id: "ollama", label: "Ollama", kind: "local" }
+    ];
+    populateBackendOptions(backends, active);
+    const activeItem = backends.find((x) => String(x.id || "") === active);
+    const activeLabel = backendLabel(active, backends);
+    const activeRemote = activeItem?.kind === "remote";
+    const probes = j.upstream_probes || {};
     const pills = [];
-    for (const be of ["llamacpp", "ollama"]) {
-      const block = pr[be];
-      if (!block?.base_url) continue;
-      const label = be === "ollama" ? "Ollama" : "llama.cpp";
-      const st = backendProbeStatus(block);
-      const cur = be === active ? " backend-probe-pill-current" : "";
-      pills.push('<span class="backend-probe-pill ' + st.cls + cur + '">' + esc(label) + " \xB7 " + esc(st.text) + "</span>");
+    for (const item of backends) {
+      const id = String(item.id || "");
+      const block = probes[id];
+      if (!id || !block?.base_url) continue;
+      const status = backendProbeStatus(block);
+      const current = id === active ? " backend-probe-pill-current" : "";
+      pills.push('<span class="backend-probe-pill ' + status.cls + current + '">' + esc(backendLabel(id, backends)) + " · " + esc(status.text) + "</span>");
     }
     const proxyOk = j.health === "ok";
-    const head = proxyOk ? '<span class="backend-probe-lead ok">\u5F53\u524D ' + esc(activeLabel) + " \xB7 \u4EE3\u7406\u53EF\u8FBE</span>" : '<span class="backend-probe-lead err">\u5F53\u524D ' + esc(activeLabel) + " \xB7 " + esc(j.health || "\u5F02\u5E38") + "</span>";
+    const head = activeRemote ? '<span class="backend-probe-lead ok">当前 ' + esc(activeLabel) + " · 已配置（首次推理时验证连接）</span>" : proxyOk ? '<span class="backend-probe-lead ok">当前 ' + esc(activeLabel) + " · 代理可达</span>" : '<span class="backend-probe-lead err">当前 ' + esc(activeLabel) + " · " + esc(j.health || "异常") + "</span>";
     const body = pills.length ? '<div class="backend-probe-pills">' + pills.join("") + "</div>" : "";
     return head + body;
   }
+  let backendProbeInFlight = false;
   function applyBackendProbeUI(j) {
     const probeEl = $("backendProbe");
     if (!probeEl) return;
@@ -1482,59 +1517,62 @@
   }
   function applyBackendFormFromStore() {
     const a = adminStore.upstream;
-    if ($("beBackend") && a?.backend) $("beBackend").value = a.backend;
+    if ($("beBackend") && a?.backend) {
+      const select = $("beBackend");
+      if ([...select.options].some((option) => option.value === a.backend)) select.value = a.backend;
+    }
     const probeEl = $("backendProbe");
     if (probeEl && !probeEl.dataset.probed) {
-      probeEl.innerHTML = '<span class="muted small">\u70B9\u51FB\u300C\u68C0\u6D4B\u8FDE\u901A\u6027\u300D\u67E5\u770B\u5404\u540E\u7AEF\u72B6\u6001</span>';
+      probeEl.innerHTML = '<span class="muted small">点击「检测连通性」查看后端状态；远程连接在首次推理时验证</span>';
     }
   }
   async function loadBackendForm(opts = {}) {
     const probeOnly = opts.probeOnly === true;
     const probeEl = $("backendProbe");
-    if (probeOnly) {
-      try {
-        const j = await api("/api/admin/backend?refresh=1");
-        applyBackendProbeUI(j);
-      } catch (e) {
-        if (probeEl) probeEl.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
-      }
-      return;
-    }
-    if (adminStore.upstream?.backend) {
-      applyBackendFormFromStore();
-      return;
-    }
     try {
-      const j = await api("/api/admin/backend");
-      const a = j.active || {};
-      if ($("beBackend")) $("beBackend").value = a.backend || "llamacpp";
-      if (probeEl && !probeEl.dataset.probed) {
-        probeEl.innerHTML = '<span class="muted small">\u70B9\u51FB\u300C\u68C0\u6D4B\u8FDE\u901A\u6027\u300D\u67E5\u770B\u5404\u540E\u7AEF\u72B6\u6001</span>';
+      const j = await api(probeOnly ? "/api/admin/backend?refresh=1" : "/api/admin/backend");
+      const active = (j.active || {}).backend || "llamacpp";
+      populateBackendOptions(j.available_backends, active);
+      if (probeOnly) {
+        applyBackendProbeUI(j);
+        if (probeEl) probeEl.dataset.probed = "1";
+      } else if (probeEl && !probeEl.dataset.probed) {
+        if (String(j.health || "").startsWith("remote Provider configured")) {
+          applyBackendProbeUI(j);
+        } else {
+          probeEl.innerHTML = '<span class="muted small">点击「检测连通性」查看后端状态；远程连接在首次推理时验证</span>';
+        }
       }
     } catch (e) {
       if (probeEl) probeEl.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
     }
   }
   async function saveBackend() {
-    const backend = $("beBackend").value;
+    const selected = selectedBackendOption();
+    const backend = $("beBackend")?.value || "llamacpp";
+    const targetRemote = selected?.dataset?.kind === "remote";
+    const targetLabel = selected?.textContent || backend;
     const cur = (await api("/api/admin/backend")).active || {};
     const probeEl = $("backendProbe");
     if (backend === cur.backend) {
-      if (probeEl) probeEl.innerHTML = '<span class="muted">\u5F53\u524D\u5DF2\u662F\u8BE5\u4E0A\u6E38\u670D\u52A1</span>';
+      if (probeEl) probeEl.innerHTML = '<span class="muted">当前已是该上游服务</span>';
       return;
     }
-    if (!confirm("\u5207\u6362\u4E0A\u6E38\u5C06\u65AD\u5F00\u5F53\u524D\u540E\u7AEF\u8FDE\u63A5\u5E76\u5C1D\u8BD5\u5378\u8F7D\u65E7\u540E\u7AEF\u5DF2\u52A0\u8F7D\u6A21\u578B\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F")) return;
-    const body = { backend };
-    if (probeEl) probeEl.textContent = "\u5207\u6362\u4E2D\u2026";
+    const confirmText = targetRemote ? "切换到远程 Provider「" + targetLabel + "」后，将使用其配置的默认模型；不会卸载当前本地模型。是否继续？" : "切换本地推理后端可能卸载旧本地后端已加载的模型，是否继续？";
+    if (!confirm(confirmText)) return;
+    if (probeEl) probeEl.textContent = "切换中…";
     try {
-      await api("/api/admin/backend", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (probeEl) probeEl.innerHTML = '<span class="ok">\u5DF2\u5207\u6362\uFF0C\u8BF7\u5728\u300C\u672C\u5730\u6A21\u578B\u300D\u4E2D\u52A0\u8F7D\u6A21\u578B</span>';
+      const result = await api("/api/admin/backend", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ backend }) });
+      const active = result.active || {};
+      if (probeEl) {
+        probeEl.innerHTML = targetRemote ? '<span class="ok">已切换到远程 Provider · 默认模型 ' + esc(active.model_name || "配置模型") + "。远程连接将在首次推理时验证，本地模型不受影响。</span>" : '<span class="ok">已切换本地后端，请在「本地模型」中加载模型</span>';
+      }
       adminStore.reset();
       await loadSystem({ force: "bootstrap" });
-      applyBackendFormFromStore();
-      if ($("models-local")?.classList.contains("active")) await loadRuntime();
+      await loadBackendForm();
+      if (!targetRemote && $("models-local")?.classList.contains("active")) await loadRuntime();
       await loadModels();
-      if ($("benchmark")?.classList.contains("active")) await loadBenchPanel({ resume: false });
+      if (!targetRemote && $("benchmark")?.classList.contains("active")) await loadBenchPanel({ resume: false });
     } catch (e) {
       if (probeEl) probeEl.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
     }

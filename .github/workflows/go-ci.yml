@@ -66,4 +66,6 @@ jobs:
             grep -q 'upstream_http_status' "$asset"
             grep -q 'time_to_upstream_headers_ms' "$asset"
             grep -q 'time_to_first_byte_ms' "$asset"
+            grep -q 'available_backends' "$asset"
+            grep -q 'configured_remote' "$asset"
           done
