@@ -45,3 +45,19 @@ func TestFinishStatusCancellationKeepsCommittedGatewayStatus(t *testing.T) {
 		t.Fatalf("state/code = %q/%q", state, code)
 	}
 }
+
+func TestFinishStatusReadsStatusFromInternalMemorySink(t *testing.T) {
+	sink := newMemSink()
+	sink.WriteHeader(http.StatusBadRequest)
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(
+		context.Background(),
+		core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}},
+		"",
+	)
+	if gatewayStatus != http.StatusBadRequest || upstreamStatus != http.StatusBadRequest {
+		t.Fatalf("gateway/upstream = %d/%d, want 400/400", gatewayStatus, upstreamStatus)
+	}
+	if state != "error" || code != "upstream_http_error" {
+		t.Fatalf("state/code = %q/%q", state, code)
+	}
+}

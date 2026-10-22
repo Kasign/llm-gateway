@@ -114,6 +114,16 @@ func (m *memSink) HeaderWritten() bool {
 	return m.wrote
 }
 
+// StatusCode 返回进程内 sink 已记录的状态码，便于审计逻辑对非 HTTP 调用保持一致。
+func (m *memSink) StatusCode() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.status == 0 && m.wrote {
+		return http.StatusOK
+	}
+	return m.status
+}
+
 func (m *memSink) Bytes() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
