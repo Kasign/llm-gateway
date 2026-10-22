@@ -61,6 +61,22 @@ func (s *Server) probeBackendReachable(ctx context.Context, backend string) bool
 }
 
 func (s *Server) validateUpstreamBackend(ctx context.Context, wantBackend, baseURL string) error {
+	wantBackend = strings.ToLower(strings.TrimSpace(wantBackend))
+	if remote, ok := s.remoteProviderConfig(wantBackend); ok {
+		if strings.TrimRight(strings.TrimSpace(baseURL), "/") != strings.TrimRight(remote.BaseURL, "/") {
+			return fmt.Errorf("remote Provider %q URL must come from deploy/config.yaml", wantBackend)
+		}
+		if s.providers == nil {
+			return fmt.Errorf("remote Provider registry is not initialized")
+		}
+		if _, err := s.providers.Resolve(wantBackend); err != nil {
+			return fmt.Errorf("remote Provider %q is unavailable: %w", wantBackend, err)
+		}
+		return nil
+	}
+	if !isLocalInferenceBackend(wantBackend) {
+		return fmt.Errorf("Provider %q is not configured", wantBackend)
+	}
 	if baseURL == "" {
 		if wantBackend == "ollama" {
 			return fmt.Errorf("未配置 OLLAMA_BASE_URL（Ollama 不能与 llama.cpp 共用地址，请填写独立地址，如 http://ollama:11434）")
@@ -106,18 +122,38 @@ func (s *Server) upstreamURLWarnings() []string {
 }
 
 func (s *Server) configuredBackendURLs() map[string]string {
-	return map[string]string{
+	out := map[string]string{
 		"llamacpp": s.baseURLForBackend("llamacpp"),
 		"ollama":   s.baseURLForBackend("ollama"),
 	}
+	if s != nil && s.cfg != nil {
+		for _, item := range s.cfg.Providers.OpenAICompatible {
+			if item.Enabled {
+				out[item.ID] = item.BaseURL
+			}
+		}
+	}
+	return out
 }
 
 func (s *Server) resolveUpstream(u settings.Upstream) settings.Upstream {
 	u = settings.Normalize(u)
-	u.BaseURL = s.baseURLForBackend(u.Backend)
-	u.ModelsDir = s.fileUpstream.ModelsDir
-	if u.ModelsDir == "" {
-		u.ModelsDir = s.cfg.Storage.ModelsDir
+	if isLocalInferenceBackend(u.Backend) {
+		u.BaseURL = s.baseURLForBackend(u.Backend)
+		u.ModelsDir = s.fileUpstream.ModelsDir
+		if u.ModelsDir == "" {
+			u.ModelsDir = s.cfg.Storage.ModelsDir
+		}
+		return u
+	}
+	u.ModelsDir = ""
+	if remote, ok := s.remoteProviderConfig(u.Backend); ok {
+		u.BaseURL = remote.BaseURL
+		if u.ModelName == "" {
+			u.ModelName = remote.DefaultModel
+		}
+	} else {
+		u.BaseURL = ""
 	}
 	return u
 }
@@ -137,27 +173,35 @@ func (s *Server) llamaClient() *llama.Client {
 func (s *Server) applyUpstream(u settings.Upstream, resetRouter bool) {
 	u = s.resolveUpstream(u)
 	if u.BaseURL == "" {
-		applog.Printf("apply upstream skipped: no base_url for backend=%q (check LLAMA_CPP_BASE_URL / OLLAMA_BASE_URL in .env)", u.Backend)
+		applog.Printf("apply upstream skipped: Provider URL missing for backend=%q", u.Backend)
 		return
 	}
-	client := s.newUpstreamClient(u.BaseURL, u.Backend)
+	localBackend := isLocalInferenceBackend(u.Backend)
+	var client *llama.Client
+	if localBackend {
+		client = s.newUpstreamClient(u.BaseURL, u.Backend)
+	}
 
 	s.upstreamMu.Lock()
 	s.upstream = u
-	s.llama = client
+	// 远程 Provider 不伪装成 llama.Client，保留本地控制客户端供管理接口使用。
+	if localBackend {
+		s.llama = client
+	}
 	s.upstreamMu.Unlock()
 	if resetRouter {
 		s.mu.Lock()
 		s.llamaRouter = nil
 		s.mu.Unlock()
 	}
-
-	s.cfg.Llama.Backend = u.Backend
-	s.cfg.Llama.BaseURL = u.BaseURL
-	s.cfg.Llama.ModelName = u.ModelName
-	s.cfg.Llama.ModelsDir = u.ModelsDir
-	if s.cfg.Llama.ModelsDir == "" {
-		s.cfg.Llama.ModelsDir = s.cfg.Storage.ModelsDir
+	if localBackend {
+		s.cfg.Llama.Backend = u.Backend
+		s.cfg.Llama.BaseURL = u.BaseURL
+		s.cfg.Llama.ModelName = u.ModelName
+		s.cfg.Llama.ModelsDir = u.ModelsDir
+		if s.cfg.Llama.ModelsDir == "" {
+			s.cfg.Llama.ModelsDir = s.cfg.Storage.ModelsDir
+		}
 	}
 }
 
