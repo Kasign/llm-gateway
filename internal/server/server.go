@@ -326,7 +326,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	id := requestID(r.Context())
 	// 创建一条"运行中"的审计记录
 	s.markCallRecorded(r.Context())
-	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: requestPublicURL(r), Method: r.Method, Status: "running", StartedAt: start}
+	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: requestPublicURL(r, s.trustedProxyRanges), Method: r.Method, Status: "running", StartedAt: start}
 	s.audit.CreateRequest(logBase)
 	s.liveStart(r.Context(), logBase)
 	defer s.liveFinish(context.Background(), id)
@@ -1332,7 +1332,8 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 		for i := len(parts) - 1; i >= 0; i-- {
 			addr, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
 			if err != nil {
-				continue
+				// 链路格式异常时停止向左搜索，避免把更左侧的可伪造值当作客户端地址。
+				break
 			}
 			addr = addr.Unmap()
 			if isTrustedProxy(addr, trusted) {

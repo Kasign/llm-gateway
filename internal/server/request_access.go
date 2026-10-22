@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (s *Server) recordCall(r *http.Request, rec *statusRecorder, start time.Tim
 	}
 	item := store.RequestLog{
 		RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
-		Endpoint: clipRunes(path, 128), RequestURL: requestPublicURL(r), Method: r.Method,
+		Endpoint: clipRunes(path, 128), RequestURL: requestPublicURL(r, s.trustedProxyRanges), Method: r.Method,
 		Status: state, HTTPStatus: status, StartedAt: start, FinishedAt: &end,
 		LatencyMS: end.Sub(start).Milliseconds(), ResponseBytes: rec.written, ErrorCode: code, ErrorMessage: msg,
 	}
@@ -106,18 +107,27 @@ func (s *Server) recordCall(r *http.Request, rec *statusRecorder, start time.Tim
 
 // requestPublicURL 是客户端用来访问网关的完整 URL。
 // Host 优先用反代传来的 X-Forwarded-Host，否则用请求的 Host 头，因此能区分域名和 IP。
-func requestPublicURL(r *http.Request) string {
+func requestPublicURL(r *http.Request, trusted []netip.Prefix) string {
 	if r == nil || r.URL == nil {
 		return ""
+	}
+	// X-Forwarded-* 仅在 TCP 对端命中可信代理白名单时才可用于审计 URL。
+	// 直接访问者可以自行伪造这些头，不能让审计记录显示成攻击者指定的域名或协议。
+	trustForwarded := false
+	if peer, ok := parseRemoteAddrIP(r.RemoteAddr); ok {
+		trustForwarded = isTrustedProxy(peer, trusted)
 	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	if proto := strings.ToLower(forwardedValue(r.Header.Get("X-Forwarded-Proto"))); proto == "http" || proto == "https" {
-		scheme = proto
+	host := ""
+	if trustForwarded {
+		if proto := strings.ToLower(forwardedValue(r.Header.Get("X-Forwarded-Proto"))); proto == "http" || proto == "https" {
+			scheme = proto
+		}
+		host = forwardedValue(r.Header.Get("X-Forwarded-Host"))
 	}
-	host := forwardedValue(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = strings.TrimSpace(r.Host)
 	}
