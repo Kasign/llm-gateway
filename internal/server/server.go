@@ -380,8 +380,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	}
 	s.livePatch(r.Context(), id, store.RequestLog{APIKeyID: key.ID, APIKeyName: key.Name})
 
-	backend := s.effectiveUpstream().Backend
-	if _, remote := s.remoteProviderConfig(backend); remote {
+	if _, remote := s.remoteProviderConfig(s.effectiveUpstream().Backend); remote {
 		target, err := s.resolveProxyModelTarget(r.Context())
 		if err != nil {
 			finish(503, "error", "no_proxy_model", err.Error(), 0)
