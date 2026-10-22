@@ -3,6 +3,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,8 +26,13 @@ type Writer struct {
 	ch      chan job
 	wg      sync.WaitGroup
 	dropped atomic.Uint64
-	once    sync.Once
+
+	// mu 同步发送与关闭，防止 Shutdown 关闭 channel 时并发 enqueue/Flush 触发 panic。
+	mu     sync.RWMutex
+	closed bool
 }
+
+var errWriterClosed = errors.New("audit writer is shut down")
 
 func NewWriter(repo *store.Repo, queueSize int) *Writer {
 	if queueSize <= 0 {
@@ -59,13 +65,29 @@ func (w *Writer) loop() {
 }
 
 func (w *Writer) enqueue(fn job) {
+	if fn == nil {
+		return
+	}
+	// 入队使用读锁，Shutdown 需要写锁才能关闭 channel，避免并发向已关闭 channel 发送。
+	w.mu.RLock()
+	if w.closed {
+		w.mu.RUnlock()
+		w.recordDrop("writer_closed")
+		return
+	}
 	select {
 	case w.ch <- fn:
+		w.mu.RUnlock()
 	default:
-		n := w.dropped.Add(1)
-		if n == 1 || n%1000 == 0 {
-			applog.Printf("audit queue full: dropped %d jobs (latest audit IO skipped)", n)
-		}
+		w.mu.RUnlock()
+		w.recordDrop("queue_full")
+	}
+}
+
+func (w *Writer) recordDrop(reason string) {
+	n := w.dropped.Add(1)
+	if n == 1 || n%1000 == 0 {
+		applog.Printf("audit enqueue dropped: reason=%s total=%d", reason, n)
 	}
 }
 
@@ -143,9 +165,16 @@ func (w *Writer) InsertStreamEvents(requestID string, events []store.StreamEvent
 	})
 }
 
-// Shutdown 关闭队列并等待 worker 排空或 ctx 超时。
+// Shutdown 停止接收新任务并关闭队列，worker 会按队列顺序处理已入队任务。
+// 即使 ctx 超时，队列也保持关闭状态；后续 enqueue 会计数丢弃，不会向已关闭 channel 发送。
 func (w *Writer) Shutdown(ctx context.Context) error {
-	w.once.Do(func() { close(w.ch) })
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		close(w.ch)
+	}
+	w.mu.Unlock()
+
 	done := make(chan struct{})
 	go func() {
 		w.wg.Wait()
@@ -166,9 +195,18 @@ func (w *Writer) Flush(ctx context.Context) error {
 		close(done)
 		return nil
 	}
+
+	// 发送哨兵与 Shutdown 共用生命周期锁，避免 Flush 对已关闭 channel 发送。
+	w.mu.RLock()
+	if w.closed {
+		w.mu.RUnlock()
+		return errWriterClosed
+	}
 	select {
 	case w.ch <- fn:
+		w.mu.RUnlock()
 	case <-ctx.Done():
+		w.mu.RUnlock()
 		return ctx.Err()
 	}
 	select {
