@@ -23,7 +23,8 @@ type RequestLog struct {
 	ModelActual    string     `json:"model_actual,omitempty"`
 	Stream         bool       `json:"stream"`
 	Status         string     `json:"status"`
-	HTTPStatus     int        `json:"http_status"`
+	HTTPStatus         int        `json:"http_status"` // Gateway 实际提交给调用方的状态码。
+	UpstreamHTTPStatus int        `json:"upstream_http_status,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	LatencyMS      int64      `json:"latency_ms"`
@@ -125,7 +126,7 @@ func (r *Repo) MarkCancelled(ctx context.Context, id string, finished time.Time,
 }
 
 func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET api_key_id=COALESCE(NULLIF(?,0),api_key_id),api_key_name=COALESCE(NULLIF(?,''),api_key_name),model_requested=COALESCE(NULLIF(?,''),model_requested),model_actual=COALESCE(NULLIF(?,''),model_actual),request_url=COALESCE(NULLIF(?,''),request_url),stream=?,status=?,http_status=?,finished_at=?,latency_ms=?,ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,response_bytes=?,error_code=?,error_message=? WHERE request_id=?`, l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.Stream, l.Status, l.HTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS, l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes, l.ErrorCode, l.ErrorMessage, l.RequestID)
+	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET api_key_id=COALESCE(NULLIF(?,0),api_key_id),api_key_name=COALESCE(NULLIF(?,''),api_key_name),model_requested=COALESCE(NULLIF(?,''),model_requested),model_actual=COALESCE(NULLIF(?,''),model_actual),request_url=COALESCE(NULLIF(?,''),request_url),stream=?,status=?,http_status=?,upstream_http_status=COALESCE(NULLIF(?,0),upstream_http_status),finished_at=?,latency_ms=?,ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,response_bytes=?,error_code=?,error_message=? WHERE request_id=?`, l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.Stream, l.Status, l.HTTPStatus, l.UpstreamHTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS, l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes, l.ErrorCode, l.ErrorMessage, l.RequestID)
 	return err
 }
 
@@ -184,7 +185,7 @@ func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, statu
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	q := `SELECT request_id,COALESCE(api_key_id,0),COALESCE(api_key_name,''),COALESCE(client_ip,''),COALESCE(client_name,''),COALESCE(user_agent,''),endpoint,COALESCE(request_url,''),method,COALESCE(model_requested,''),COALESCE(model_actual,''),stream,status,COALESCE(http_status,0),started_at,finished_at,COALESCE(latency_ms,0),ttft_ms,input_tokens,output_tokens,total_tokens,COALESCE(request_bytes,0),COALESCE(response_bytes,0),COALESCE(error_code,''),COALESCE(error_message,'') FROM request_logs WHERE 1=1`
+	q := `SELECT request_id,COALESCE(api_key_id,0),COALESCE(api_key_name,''),COALESCE(client_ip,''),COALESCE(client_name,''),COALESCE(user_agent,''),endpoint,COALESCE(request_url,''),method,COALESCE(model_requested,''),COALESCE(model_actual,''),stream,status,COALESCE(http_status,0),COALESCE(upstream_http_status,0),started_at,finished_at,COALESCE(latency_ms,0),ttft_ms,input_tokens,output_tokens,total_tokens,COALESCE(request_bytes,0),COALESCE(response_bytes,0),COALESCE(error_code,''),COALESCE(error_message,'') FROM request_logs WHERE 1=1`
 	var args []interface{}
 	if requestID != "" {
 		q += " AND request_id=?"
@@ -213,7 +214,7 @@ func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, statu
 	var out []RequestLog
 	for rows.Next() {
 		var l RequestLog
-		if err := rows.Scan(&l.RequestID, &l.APIKeyID, &l.APIKeyName, &l.ClientIP, &l.ClientName, &l.UserAgent, &l.Endpoint, &l.RequestURL, &l.Method, &l.ModelRequested, &l.ModelActual, &l.Stream, &l.Status, &l.HTTPStatus, &l.StartedAt, &l.FinishedAt, &l.LatencyMS, &l.TTFTMS, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.RequestBytes, &l.ResponseBytes, &l.ErrorCode, &l.ErrorMessage); err != nil {
+		if err := rows.Scan(&l.RequestID, &l.APIKeyID, &l.APIKeyName, &l.ClientIP, &l.ClientName, &l.UserAgent, &l.Endpoint, &l.RequestURL, &l.Method, &l.ModelRequested, &l.ModelActual, &l.Stream, &l.Status, &l.HTTPStatus, &l.UpstreamHTTPStatus, &l.StartedAt, &l.FinishedAt, &l.LatencyMS, &l.TTFTMS, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.RequestBytes, &l.ResponseBytes, &l.ErrorCode, &l.ErrorMessage); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

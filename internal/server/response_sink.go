@@ -8,9 +8,10 @@ import (
 // responseSink 同时满足 net/http 与 core.ResponseSink。
 // 保活一旦写出，之后的 WriteHeader 不再改状态行。
 type responseSink struct {
-	w     http.ResponseWriter
-	mu    sync.Mutex
-	wrote bool
+	w      http.ResponseWriter
+	mu     sync.Mutex
+	wrote  bool
+	status int
 }
 
 func (s *responseSink) Header() http.Header { return s.w.Header() }
@@ -26,6 +27,7 @@ func (s *responseSink) WriteHeader(status int) {
 		return
 	}
 	s.wrote = true
+	s.status = status
 	s.w.WriteHeader(status)
 }
 
@@ -34,6 +36,7 @@ func (s *responseSink) Write(p []byte) (int, error) {
 	defer s.mu.Unlock()
 	if !s.wrote {
 		s.wrote = true
+		s.status = http.StatusOK
 	}
 	// 持锁写完一整块。保活 goroutine 和上游转发会并发写同一连接，不能在解锁后再写。
 	return s.w.Write(p)
@@ -51,6 +54,16 @@ func (s *responseSink) HeaderWritten() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.wrote
+}
+
+// StatusCode 返回 Gateway 已经提交给客户端的状态行；隐式提交按 HTTP 默认值 200 处理。
+func (s *responseSink) StatusCode() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == 0 && s.wrote {
+		return http.StatusOK
+	}
+	return s.status
 }
 
 // memSink 给没有 HTTP 客户端的进程内调用（benchmark）收集上游输出。

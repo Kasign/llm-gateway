@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
   stream TINYINT(1) NOT NULL DEFAULT 0,
   status VARCHAR(32) NOT NULL DEFAULT 'running',
   http_status SMALLINT UNSIGNED NULL,
+  upstream_http_status SMALLINT UNSIGNED NULL,
   started_at DATETIME(6) NOT NULL,
   finished_at DATETIME(6) NULL,
   latency_ms BIGINT UNSIGNED NULL,

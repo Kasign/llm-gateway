@@ -356,7 +356,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	if !st.UpstreamStart.IsZero() {
 		upstreamMS = end.Sub(st.UpstreamStart).Milliseconds()
 	}
-	status, state, code, msg := finishStatus(ctx, ev, o.s.cancelReason(st.ID))
+	gatewayStatus, upstreamStatus, state, code, msg := finishStatus(ctx, ev, o.s.cancelReason(st.ID))
 	var ttft *int64
 	var timings streamTimings
 	var inTok, outTok, totTok *int64
@@ -414,7 +414,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
 		Endpoint: st.Path, RequestURL: st.RequestURL, Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
-		Stream: st.Stream, Status: state, HTTPStatus: status, FinishedAt: &end, LatencyMS: totalMS,
+		Stream: st.Stream, Status: state, HTTPStatus: gatewayStatus, UpstreamHTTPStatus: upstreamStatus, FinishedAt: &end, LatencyMS: totalMS,
 		TTFTMS: ttft, InputTokens: inTok, OutputTokens: outTok, TotalTokens: totTok,
 		ResponseBytes: respBytes, ErrorCode: code, ErrorMessage: msg,
 	}
@@ -450,50 +450,82 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		}()
 	}
 	if msg != "" {
-		applog.Printf("[%s] inference finished: state=%s status=%d code=%s latency=%dms error=%s", st.ID, state, status, code, totalMS, msg)
+		applog.Printf("[%s] inference finished: state=%s gateway_status=%d upstream_status=%d code=%s latency=%dms error=%s", st.ID, state, gatewayStatus, upstreamStatus, code, totalMS, msg)
 		return
 	}
-	applog.Printf("[%s] inference finished: state=%s status=%d code=%s latency=%dms", st.ID, state, status, code, totalMS)
+	applog.Printf("[%s] inference finished: state=%s gateway_status=%d upstream_status=%d code=%s latency=%dms", st.ID, state, gatewayStatus, upstreamStatus, code, totalMS)
 }
 
-// finishStatus 把一次 Run 的结果映射成日志里的 HTTP 状态、业务状态和错误码。
-// 流已开始后被取消时，客户端实际收到的是 200，但日志记 499 + cancelled，便于在调用记录里区分。
-func finishStatus(ctx context.Context, ev core.Event, reason string) (status int, state, code, msg string) {
+// finishStatus 分开计算 Gateway 状态与上游状态。流式保活或首个数据块提交状态行后，Gateway 状态不可再被上游改写。
+func finishStatus(ctx context.Context, ev core.Event, reason string) (gatewayStatus, upstreamStatus int, state, code, msg string) {
+	if ev.Result != nil {
+		upstreamStatus = ev.Result.Status
+	}
+
+	committed := false
+	if ev.State.Sink != nil && ev.State.Sink.HeaderWritten() {
+		committed = true
+		if statusSink, ok := ev.State.Sink.(interface{ StatusCode() int }); ok {
+			gatewayStatus = statusSink.StatusCode()
+		}
+		if gatewayStatus == 0 {
+			gatewayStatus = http.StatusOK
+		}
+	}
+
+	fallbackStatus := 0
+	if ev.Err != nil {
+		fallbackStatus, code, msg = core.Unpack(ev.Err)
+	} else if upstreamStatus != 0 {
+		fallbackStatus = upstreamStatus
+	} else {
+		fallbackStatus = http.StatusOK
+	}
+	if !committed {
+		gatewayStatus = fallbackStatus
+	}
+
 	if isDeadline(ctx, ev.Err) {
 		if reason == "" {
 			reason = "网关请求超时"
 		}
-		return 504, "error", "gateway_timeout", reason
+		if !committed {
+			gatewayStatus = http.StatusGatewayTimeout
+		}
+		return gatewayStatus, upstreamStatus, "error", "gateway_timeout", reason
 	}
 	if ev.Err != nil && (isCancel(ctx) || isCancelErr(ev.Err)) {
-		status = 499
-		if ev.Result != nil && ev.Result.Status >= 400 && ev.Result.Status != 499 {
-			status = ev.Result.Status
-		}
 		if reason == "" {
 			reason = "客户端连接已断开"
 		}
-		return status, "cancelled", "cancelled", reason
+		if !committed {
+			gatewayStatus = 499
+		}
+		return gatewayStatus, upstreamStatus, "cancelled", "cancelled", reason
+	}
+
+	diagnosticStatus := upstreamStatus
+	if diagnosticStatus == 0 {
+		diagnosticStatus = fallbackStatus
 	}
 	if ev.Err != nil {
-		status, code, msg = core.Unpack(ev.Err)
-		if ev.Result != nil && ev.Result.Status != 0 {
-			status = ev.Result.Status
+		if upstreamStatus >= 400 {
+			body := []byte(nil)
+			if ev.Result != nil {
+				body = ev.Result.Body
+			}
+			return gatewayStatus, upstreamStatus, "error", "upstream_http_error", upstreamErrorMessage(upstreamStatus, body, ev.Err)
 		}
-		return status, "error", code, msg
+		return gatewayStatus, upstreamStatus, "error", code, msg
 	}
-	status = 200
-	if ev.Result != nil && ev.Result.Status != 0 {
-		status = ev.Result.Status
-	}
-	if status < 200 || status >= 300 {
+	if diagnosticStatus < 200 || diagnosticStatus >= 300 {
 		body := []byte(nil)
 		if ev.Result != nil {
 			body = ev.Result.Body
 		}
-		return status, "error", "upstream_http_error", upstreamErrorMessage(status, body, nil)
+		return gatewayStatus, upstreamStatus, "error", "upstream_http_error", upstreamErrorMessage(diagnosticStatus, body, nil)
 	}
-	return status, "success", "", ""
+	return gatewayStatus, upstreamStatus, "success", "", ""
 }
 
 func isCancel(ctx context.Context) bool {
