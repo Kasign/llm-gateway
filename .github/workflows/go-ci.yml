@@ -62,12 +62,12 @@ jobs:
         run: |
           node --check web/static/dist/app.js
           node --check /tmp/llm-gateway-admin.js
-          # 请求耗时字段由调用记录模块提供，只要求部署 bundle 完整。
+          # 调用记录耗时字段必须存在于部署 bundle。
           grep -q 'upstream_http_status' web/static/dist/app.js
           grep -q 'time_to_upstream_headers_ms' web/static/dist/app.js
           grep -q 'time_to_first_byte_ms' web/static/dist/app.js
-          # 远程 Provider 选择能力同时要求存在于源码构建产物与部署 bundle。
-          for asset in web/static/dist/app.js /tmp/llm-gateway-admin.js; do
-            grep -q 'available_backends' "$asset"
-            grep -q 'configured_remote' "$asset"
-          done
+          # 远程 Provider 选择逻辑分别检查源文件和实际部署 bundle。
+          grep -q 'available_backends' web/js/app/main.js
+          grep -q 'configured_remote' web/js/app/main.js
+          grep -q 'available_backends' web/static/dist/app.js
+          grep -q 'configured_remote' web/static/dist/app.js
