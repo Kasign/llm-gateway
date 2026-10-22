@@ -77,11 +77,38 @@ func (s *Server) runtimeAPI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) buildAdminRuntimeOverview(ctx context.Context) (map[string]interface{}, error) {
 	u := s.effectiveUpstream()
-	if u.Backend == "ollama" {
+	switch {
+	case u.Backend == "ollama":
 		return s.buildOllamaRuntimeOverview(ctx)
+	case u.Backend == "llamacpp":
+		return s.buildLlamacppRuntimeSnapshot(ctx)
+	case s.isConfiguredProvider(u.Backend):
+		// 远程 Provider 的运行时由供应商管理；不能回退展示本地 llama.cpp/Ollama 状态。
+		return map[string]interface{}{
+			"backend":                u.Backend,
+			"base_url":               u.BaseURL,
+			"active_model":           u.ModelName,
+			"remote_provider":        true,
+			"local_model_management": false,
+			"loaded":                 []interface{}{},
+			"catalog":                []interface{}{},
+			"unload_note":            "远程 Provider 不支持本地模型加载/卸载；模型生命周期由远程服务管理",
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown active Provider %q", u.Backend)
 	}
-	return s.buildLlamacppRuntimeSnapshot(ctx)
 }
+
+// localRuntimeBackend 保护只能操作本地模型的旧运行时接口，拒绝把远程 Provider ID 当成本地后端。
+func localRuntimeBackend(id string) (string, error) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !isLocalInferenceBackend(id) {
+		return "", fmt.Errorf("当前后端 %q 不支持本地模型加载/卸载操作", id)
+	}
+	return id, nil
+}
+
+
 
 func (s *Server) runtimeUnloadAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
@@ -92,6 +119,11 @@ func (s *Server) runtimeUnloadAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 405, "method_not_allowed", "POST required")
 		return
 	}
+	backend, err := localRuntimeBackend(s.effectiveUpstream().Backend)
+	if err != nil {
+		jsonError(w, 400, "unsupported_operation", err.Error())
+		return
+	}
 	var in struct {
 		ModelID  string `json:"model_id"`
 		ModelKey string `json:"model_key"`
@@ -100,7 +132,7 @@ func (s *Server) runtimeUnloadAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "invalid_body", err.Error())
 		return
 	}
-	result, err := s.InferenceUnload(r.Context(), "llamacpp", in.ModelID, in.ModelKey, nil)
+	result, err := s.InferenceUnload(r.Context(), backend, in.ModelID, in.ModelKey, nil)
 	if err != nil {
 		jsonError(w, 502, "unload_failed", err.Error())
 		return
@@ -118,6 +150,11 @@ func (s *Server) runtimeSelectAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 405, "method_not_allowed", "POST required")
 		return
 	}
+	backend, err := localRuntimeBackend(s.effectiveUpstream().Backend)
+	if err != nil {
+		jsonError(w, 400, "unsupported_operation", err.Error())
+		return
+	}
 	var in struct {
 		ModelID  string `json:"model_id"`
 		ModelKey string `json:"model_key"`
@@ -126,7 +163,7 @@ func (s *Server) runtimeSelectAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "invalid_body", err.Error())
 		return
 	}
-	res, err := s.InferenceLoad(r.Context(), "llamacpp", in.ModelID, in.ModelKey, nil)
+	res, err := s.InferenceLoad(r.Context(), backend, in.ModelID, in.ModelKey, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "model_id or model_key") {
 			jsonError(w, 400, "model_required", err.Error())
@@ -139,13 +176,13 @@ func (s *Server) runtimeSelectAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 502, "load_failed", err.Error())
 		return
 	}
-	snap, _ := s.buildLlamacppRuntimeSnapshot(r.Context())
+	snap, _ := s.buildAdminRuntimeOverview(r.Context())
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":      true,
 		"active_model": res.LoadedAs,
 		"runtime":      snap,
 	})
-	applog.Infof("runtime select: model_id=%q backend=llamacpp", res.LoadedAs)
+	applog.Infof("runtime select: model_id=%q backend=%s", res.LoadedAs, backend)
 }
 
 func (s *Server) buildLlamacppRuntimeSnapshot(ctx context.Context) (map[string]interface{}, error) {
