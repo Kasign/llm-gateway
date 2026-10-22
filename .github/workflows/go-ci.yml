@@ -32,3 +32,17 @@ jobs:
 
       - name: 构建 Gateway
         run: go build -o /tmp/llm-gateway ./cmd/gateway
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 构建管理台
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 检查已提交的 dist 与源码一致
+        run: git diff --exit-code -- web/static/dist/app.js
