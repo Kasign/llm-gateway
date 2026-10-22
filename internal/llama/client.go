@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -777,6 +778,22 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 }
 
 // Proxy 非流式 chat：向 c.base+path（如 /v1/chat/completions）发 POST，读完整响应后写回客户端（出网点）。
+const maxProxyResponseBodyBytes int64 = 32 << 20
+
+var errUpstreamResponseTooLarge = errors.New("upstream response exceeds the 32 MiB limit")
+
+// readProxyResponseBody 为非流式代理设置严格响应体上限，避免上游意外返回超大正文时耗尽网关内存。
+func readProxyResponseBody(body io.Reader, maxBytes int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return b, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, errUpstreamResponseTooLarge
+	}
+	return b, nil
+}
+
 func (c *Client) Proxy(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, body io.Reader) (int64, []byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, r.Method, c.base+path, body)
 	if err != nil {
@@ -791,8 +808,12 @@ func (c *Client) Proxy(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	}
 	defer resp.Body.Close()
 	copyHeaders(w.Header(), resp.Header)
-	b, err := io.ReadAll(resp.Body)
+	b, err := readProxyResponseBody(resp.Body, maxProxyResponseBodyBytes)
 	if err != nil {
+		// 超限时还没有向客户端提交状态行，可以返回明确的网关错误而不是转发被截断的 JSON。
+		if errors.Is(err, errUpstreamResponseTooLarge) {
+			return 0, nil, http.StatusBadGateway, err
+		}
 		return int64(len(b)), b, resp.StatusCode, err
 	}
 	w.WriteHeader(resp.StatusCode)
