@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/live"
 	"github.com/whl/llm-gateway/internal/store"
 )
@@ -102,7 +103,10 @@ func TestRepeatKeepaliveRecordsEachWrite(t *testing.T) {
 }
 
 func TestNoteKeepaliveRecordsEachWrite(t *testing.T) {
-	s := &Server{live: live.NewRegistry()}
+	// 此用例显式开启原始 SSE 留存，验证开启诊断后仍保留 Gateway 自己的保活行。
+	cfg := &config.Config{}
+	cfg.Logging.StoreStreamRaw = true
+	s := &Server{cfg: cfg, live: live.NewRegistry()}
 	const id = "req-keepalive"
 	s.callBegin(id, nil)
 	s.liveStart(context.Background(), store.RequestLog{RequestID: id, Status: "running", StartedAt: time.Now()})

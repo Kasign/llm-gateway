@@ -13,10 +13,15 @@ import (
 
 func TestUpstreamRuntimeSnapshotCacheInvalidatesWhenUpstreamStops(t *testing.T) {
 	var tagsHits atomic.Int32
+	var upstreamStopped atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/tags":
 			tagsHits.Add(1)
+			if upstreamStopped.Load() {
+				http.Error(w, "upstream stopped", http.StatusServiceUnavailable)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"models":[{"name":"m:latest","model":"m:latest","size":1}]}`))
 		case "/api/ps":
@@ -40,8 +45,8 @@ func TestUpstreamRuntimeSnapshotCacheInvalidatesWhenUpstreamStops(t *testing.T) 
 		t.Fatalf("expected 1 catalog row, got %#v err=%v", snap1, err)
 	}
 
-	srv.Close()
-	// 快照 TTL 内可能仍命中缓存；上游变更/宕机后由 invalidate 或 TTL 过期触发重拉。
+	// 保留测试服务以便统计刷新请求；通过返回 503 模拟上游已不可用。
+	upstreamStopped.Store(true)
 	s.invalidateUpstreamRuntimeSnapshotCache()
 
 	snap2, err2 := s.upstreamRuntimeSnapshot(ctx, "ollama", client, "")
