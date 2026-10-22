@@ -838,9 +838,12 @@ func (c *Client) StreamProxy(ctx context.Context, w http.ResponseWriter, r *http
 			if err := writeOut(chunk); err != nil {
 				return err
 			}
-			onChunk(chunk)
+			// 先把当前数据块 Flush 给调用方，再运行同步观察器，避免日志解析延迟本块交付。
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
+			}
+			if onChunk != nil {
+				onChunk(chunk)
 			}
 		}
 		if e == io.EOF {

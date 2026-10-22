@@ -62,13 +62,13 @@ func (f inferenceForwarder) stream(ctx context.Context, st core.State, req *http
 	var ttft *int64
 	err := f.s.llamaClient().StreamProxy(ctx, w, req, upPath, bytes.NewReader(st.Body), func(chunk []byte) {
 		bytesN += int64(len(chunk))
-		if onChunk != nil {
-			onChunk(chunk)
-		}
-		// TTFT 只看上游真实数据；保活注释在 WarmStart 写出，不经过这里。
+		// StreamProxy 已先 Flush 当前块。在进入同步观察器之前采样，避免日志处理耗时污染 TTFT。
 		if ttft == nil {
 			v := time.Since(st.Started).Milliseconds()
 			ttft = &v
+		}
+		if onChunk != nil {
+			onChunk(chunk)
 		}
 	}, func(_ http.Header, code int) {
 		status = code
