@@ -1,0 +1,45 @@
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: llm-gateway
+    restart: unless-stopped
+
+    # 只允许本机访问，由 1Panel/OpenResty 对公网反代。
+    ports:
+      - "127.0.0.1:8088:8088"
+
+    # 允许 Gateway 通过 host.docker.internal 访问宿主机服务（备用连接方式）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Gateway 需要下载 GGUF，模型文件直接写入宿主机目录。
+    volumes:
+      - "${MODEL_HOST_DIR}:/data/models"
+      - "./config.yaml:/etc/llm-gateway/config.yaml:ro"
+
+    # config.yaml 支持 ${ENV_NAME} 环境变量展开。
+    environment:
+      CONFIG_FILE: /etc/llm-gateway/config.yaml
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      LLM_GATEWAY_DB_PASSWORD: ${LLM_GATEWAY_DB_PASSWORD}
+      LLM_GATEWAY_ADMIN_API_KEY: ${LLM_GATEWAY_ADMIN_API_KEY}
+      LLM_GATEWAY_ADMIN_USERNAME: ${LLM_GATEWAY_ADMIN_USERNAME}
+      LLM_GATEWAY_ADMIN_PASSWORD_HASH: ${LLM_GATEWAY_ADMIN_PASSWORD_HASH}
+      LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      LLAMA_UPSTREAM_API_KEY: ${LLAMA_UPSTREAM_API_KEY}
+      LLM_BACKEND: ${LLM_BACKEND}
+      REDIS_ROOT_PASSWORD: ${REDIS_ROOT_PASSWORD}
+
+    # 模型下载目录通常由宿主机 root 创建；首次部署先使用 root 简化权限问题。
+    user: "0:0"
+
+    networks:
+      - existing-ai
+
+networks:
+  existing-ai:
+    external: true
+    name: ${EXISTING_DOCKER_NETWORK}

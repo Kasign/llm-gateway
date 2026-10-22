@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=static/dist/app.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

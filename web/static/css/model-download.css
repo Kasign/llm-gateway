@@ -1,0 +1,63 @@
+.catalog-toolbar{align-items:flex-end}
+.catalog-results{margin-top:12px}
+.catalog-results .table-wrap{max-height:520px}
+.catalog-meta{font-size:12px;color:var(--text-3)}
+.field label[title],.field input[title],.field select[title],.field textarea[title]{cursor:inherit}
+.inference-policy-root{padding:0 2px 4px}
+.inference-policy-root .inf-toolbar{align-items:flex-end;margin-bottom:12px;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.inference-policy-root .inf-policy-lead{margin:0 0 10px;max-width:52rem}
+.inference-policy-root .policy-row{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.inference-policy-root .inf-policy-option{
+  display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-size:13px;line-height:1.45;
+}
+.inference-policy-root .inf-policy-option:has(input:checked){
+  border-color:rgba(99,102,241,.45);background:linear-gradient(135deg,rgba(99,102,241,.1),transparent 55%),var(--surface-2);
+}
+.inference-policy-root .inf-policy-option input{margin-top:3px;flex-shrink:0}
+.inference-policy-root .inf-policy-option span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.inference-policy-root .inf-policy-option b{font-weight:650;color:var(--text)}
+.inference-params-root .param-section{
+  border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:14px;background:var(--surface-2);
+}
+.inference-params-root .param-section h3{margin:0 0 6px;font-size:14px;font-weight:700}
+.inference-params-root .param-section-desc{margin:0 0 12px;font-size:12px;line-height:1.5;color:var(--text-3)}
+.inference-params-root .inf-hint{margin:0 0 14px;max-width:52rem}
+.inference-policy-root .param-desc{margin:0 0 8px;font-size:13px;line-height:1.45;color:var(--text-2)}
+.inference-policy-root .param-meta{margin:0 0 4px;font-size:12px;line-height:1.45;color:var(--text-3)}
+.inference-policy-root .param-meta .k{display:inline-block;min-width:2.5em;font-weight:600;color:var(--text-2);margin-right:6px}
+.inference-params-root .param-field-list{display:flex;flex-direction:column;gap:10px}
+.inference-params-root .param-field-card{
+  border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--surface-1);
+}
+.inference-params-root .param-field-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px}
+.inference-params-root .param-field-head label{font-weight:600;font-size:13px;margin:0}
+.inference-params-root .param-key{font-size:11px;color:var(--text-3);font-weight:400}
+.inference-params-root .param-desc{margin:0 0 8px;font-size:13px;line-height:1.45;color:var(--text-2)}
+.inference-params-root .param-meta{margin:0 0 4px;font-size:12px;line-height:1.45;color:var(--text-3)}
+.inference-params-root .param-meta .k{display:inline-block;min-width:2.5em;font-weight:600;color:var(--text-2);margin-right:6px}
+.inference-params-root .param-rec{color:var(--text-2)}
+.inference-params-root .param-control{margin-top:8px}
+.inference-params-root .param-control input,
+.inference-params-root .param-control select,
+.inference-params-root .param-control textarea{
+  width:100%;max-width:420px;font-size:13px;padding:8px 10px;border-radius:8px;
+  background:var(--surface-2);border:1px solid var(--border);
+}
+.inference-params-root .param-control textarea{max-width:100%;min-height:72px;resize:vertical;font-family:inherit}
+.inference-params-root .param-control input::placeholder,
+.inference-params-root .param-control textarea::placeholder{color:var(--text-3);opacity:.85}
+.inference-params-root .param-input-note{margin:6px 0 0;font-size:11px;line-height:1.45;color:var(--text-3)}
+.inference-params-root .param-input-note.from-config{color:var(--accent);opacity:.95}
+.inference-params-root .param-input-note.from-factory{color:var(--text-2)}
+.inference-params-root .param-input-note.no-factory{font-style:normal}
+.runtime-overview-summary strong{color:var(--text)}
+.ollama-pull-overlay{
+  position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.ollama-pull-dialog{max-width:520px;width:100%;max-height:85vh;overflow:auto;margin:0}
+.ollama-tag-list{display:flex;flex-direction:column;gap:8px;max-height:240px;overflow:auto}
+.ollama-tag-option{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 8px;border-radius:8px;background:var(--surface-2)}
+.ollama-tag-option:hover{background:var(--surface-1)}
+.ollama-tag-option input{flex-shrink:0}

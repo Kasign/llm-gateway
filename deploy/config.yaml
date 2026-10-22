@@ -1,0 +1,68 @@
+server:
+  host: 0.0.0.0
+  port: 8088
+
+auth:
+  # 管理 API 密钥和 Web 登录都只写在 deploy/.env，这里只做引用。
+  admin_api_key: "${LLM_GATEWAY_ADMIN_API_KEY}"
+  admin_username: "${LLM_GATEWAY_ADMIN_USERNAME}"
+  admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"
+  session_ttl_hours: 168
+
+database:
+  # 连接现有 MariaDB。建议使用同一 Docker network 内的容器服务名（注意与 compose 里服务名大小写一致）。
+  host: "Mariadb"
+  port: 3306
+
+  name: "llm_gateway"
+  user: "llm_gateway"
+  password: "${LLM_GATEWAY_DB_PASSWORD}"
+
+  auto_init: true
+  admin_user: "root"
+  admin_password: "${MARIADB_ROOT_PASSWORD}"
+
+  migration_file: /app/migrations/001_init.sql
+
+redis:
+  addr: "Redis:6379"
+  password: "${REDIS_ROOT_PASSWORD}"
+  db: 0
+
+llama:
+  # 空库第一次启动时 /v1 走哪个上游。管理台切换后以数据库为准。
+  backend: "${LLM_BACKEND}"
+  # 两个上游的地址只在 .env 配置，这里只引用。
+  llamacpp_base_url: "${LLAMA_CPP_BASE_URL}"
+  ollama_base_url: "${OLLAMA_BASE_URL}"
+  # 可选：仅当 llama.cpp 启用了 --api-key 时填写
+  upstream_api_key: "${LLAMA_UPSTREAM_API_KEY}"
+  # 等待上游的最长时间（秒）。全进程共用，不按上游拆开。
+  request_timeout_seconds: 3600
+  # 同时只允许少量模型驻留内存时的加载策略（1=偏单模型串行）
+  models_max: 1
+  auto_load_on_proxy: true
+  # 不写 warm_start 时关闭。Codex 长连接需要开启，避免读空闲超时。
+  warm_start: true
+  warm_start_comment: keepalive
+  # 未填或 <=0 时按 15 秒重复，直到本次请求结束。
+  warm_start_interval_seconds: 15
+  # 单次输出上限，同时裁剪 max_tokens 和 max_output_tokens。管理台可按上游覆盖。
+  max_output_tokens: 8192
+
+storage:
+  models_dir: /data/models
+
+download:
+  # GGUF 列表/下载与 HF 模型搜索；国内可用 https://hf-mirror.com
+  hf_base_url: "https://hf-mirror.com"
+  # 管理台「模型下载」Ollama 库搜索（公网库页面，不是本机 OLLAMA_BASE_URL）
+  ollama_library_url: "https://ollama.com"
+  timeout_seconds: 3600
+  catalog_timeout_seconds: 60
+  user_agent: "llm-gateway/3.0"
+
+logging:
+  enabled: true
+  verbose: false
+  store_payload: true

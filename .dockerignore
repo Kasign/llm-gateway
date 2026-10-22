@@ -1,0 +1,7 @@
+.git
+.gitignore
+*.log
+*.gguf
+*.part
+data/models/*
+!data/models/.gitkeep

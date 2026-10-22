@@ -1,0 +1,17 @@
+{
+    "name": "Go Dev Container",
+    "image": "golang:1.23",
+    "features": {
+        "ghcr.io/devcontainers/features/go:1": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "golang.go"
+            ]
+        }
+    },
+    // 确保调试端口被暴露
+    "forwardPorts": [2345],
+    "postCreateCommand": "go install github.com/go-delve/delve/cmd/dlv@latest"
+}

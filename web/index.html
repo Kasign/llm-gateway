@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LLM Gateway</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/model-download.css">
+</head>
+<body>
+<div id="authScreen" class="auth-page show" aria-hidden="false">
+  <div class="auth-page-layout">
+    <section class="auth-page-hero" aria-hidden="true">
+      <div class="auth-page-hero-inner">
+        <div class="logo auth-page-logo">GW</div>
+        <h1>LLM Gateway</h1>
+        <p>管理控制台</p>
+      </div>
+    </section>
+    <main class="auth-page-main">
+      <div class="auth-page-form-wrap">
+        <h2 class="auth-page-title">登录</h2>
+        <div id="authMsg" class="auth-page-msg"></div>
+        <form id="authLoginForm" class="auth-page-form" method="post" action="/" onsubmit="submitLogin(event);return false">
+          <div class="field auth-field">
+            <label for="authLoginUser">用户名</label>
+            <input id="authLoginUser" name="username" autocomplete="username" required>
+          </div>
+          <div class="field auth-field">
+            <label for="authLoginPass">密码</label>
+            <input id="authLoginPass" name="password" type="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" id="authLoginBtn" class="btn primary auth-page-submit">登录</button>
+        </form>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="appShell" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">GW</div>
+      <div><h1>LLM Gateway</h1><p>管理控制台</p></div>
+    </div>
+    <nav class="nav" aria-label="主导航">
+      <button type="button" class="active" data-tab="dashboard"><span class="dot"></span>首页</button>
+      <button type="button" data-tab="models-local"><span class="dot"></span>本地模型</button>
+      <button type="button" data-tab="models-download"><span class="dot"></span>模型下载</button>
+      <button type="button" data-tab="models-inference"><span class="dot"></span>服务参数</button>
+      <button type="button" data-tab="keys"><span class="dot"></span>服务密钥</button>
+      <button type="button" data-tab="requests"><span class="dot"></span>调用记录</button>
+      <button type="button" data-tab="benchmark"><span class="dot"></span>性能测试</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-account">
+        <button type="button" id="sidebarAccountBtn" class="sidebar-account-btn" onclick="openAccountSettings()">
+          <span class="dot"></span>账号
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar compact">
+      <div class="topbar-title">LLM Gateway 控制台</div>
+      <div class="topbar-actions">
+        <button type="button" id="btnRefreshDashboard" class="btn ghost sm" onclick="refreshAll()">刷新首页</button>
+      </div>
+    </header>
+    <div id="globalMsg" class="msg muted" hidden></div>
+
+    <div class="content">
+      <!-- Dashboard -->
+      <section id="dashboard" class="panel active">
+        <div class="card compact">
+          <div class="card-head"><div><h2>系统状态</h2><p>上方三表盘为宿主机 CPU / 内存 / 硬盘；下方为依赖服务与推理内存</p></div>
+            <button type="button" class="btn sm ghost" onclick="loadSystem().then(applyBackendFormFromStore);loadDashboardRecent()">刷新</button>
+          </div>
+          <div id="system"></div>
+        </div>
+
+        <div class="card backend-card">
+          <div class="card-head"><div><h2>上游推理服务</h2><p>切换 API 流量使用的推理后端；模型加载请在「本地模型」</p></div></div>
+          <div class="backend-toolbar">
+            <div class="field sm backend-field"><label>推理后端</label>
+              <select id="beBackend"><option value="llamacpp">llama.cpp</option><option value="ollama">Ollama</option></select>
+            </div>
+            <div class="btn-row backend-actions">
+              <button type="button" class="btn primary" onclick="saveBackend()">切换上游服务</button>
+              <button type="button" id="btnProbeUpstream" class="btn ghost">检测连通性</button>
+            </div>
+          </div>
+          <div id="backendProbe" class="backend-probe-compact msg muted"></div>
+        </div>
+
+        <div class="card compact">
+          <div class="card-head"><div><h2>最近调用</h2><p>最近 5 条 API 请求</p></div>
+            <button type="button" class="btn sm ghost" onclick="goTab('requests')">全部</button>
+          </div>
+          <div id="dashRecentRequests"></div>
+        </div>
+      </section>
+
+      <!-- Local models -->
+      <section id="models-local" class="panel">
+        <div class="card mm-section">
+          <div class="card-head">
+            <div><h2>运行概览</h2><p class="muted">当前推理后端在内存中的模型（与上方「当前后端」一致；加载/卸载见下方对应模型表）</p></div>
+            <div class="mm-toolbar">
+              <button type="button" class="btn sm" onclick="loadLocalModelsPanel()">刷新</button>
+            </div>
+          </div>
+          <div id="runtimeOverviewSummary" class="runtime-overview-grid"></div>
+          <div id="runtimeUnloadNote" class="runtime-overview-foot small muted"></div>
+        </div>
+        <div class="card mm-section">
+          <div class="card-head"><div><h2>Llama 模型（GGUF）</h2><p>网关已注册的 GGUF 文件</p></div></div>
+          <div id="ggufMsg" class="msg muted" style="margin-bottom:8px"></div>
+          <div id="modelTable"></div>
+        </div>
+        <div class="card mm-section">
+          <div class="card-head">
+            <div><h2>Ollama模型</h2><p>与 <code>OLLAMA_BASE_URL</code> 同步的磁盘模型</p></div>
+            <button type="button" class="btn sm" onclick="loadOllamaLibrary()">刷新列表</button>
+          </div>
+          <div id="ollamaMsg" class="msg muted"></div>
+          <div id="ollamaTable" style="margin-top:10px"></div>
+        </div>
+        <div id="mmActionLogCard" class="card compact mm-action-log-card mm-section">
+          <div class="card-head" style="margin-bottom:6px">
+            <div><h2 style="font-size:13px;margin:0">操作日志</h2><p class="small muted" style="margin:4px 0 0">加载/卸载操作会追加在此</p></div>
+            <button type="button" class="btn sm ghost" onclick="clearMmActionLog()">清空</button>
+          </div>
+          <div id="mmActionLog" class="ops-log muted mm-action-log-body">暂无操作…</div>
+        </div>
+      </section>
+
+      <!-- Model download -->
+      <section id="models-download" class="panel">
+        <div class="mm-head">
+          <div><h2>模型下载</h2><p>Hugging Face GGUF 与 Ollama 库；任务进度见下方统一列表</p></div>
+        </div>
+        <div id="mm-download-inner">
+          <div class="card mm-section">
+            <div class="card-head">
+              <div><h2>发现模型</h2><p>搜索 Hugging Face（GGUF）与 Ollama 公共库；复制名称后可在下方安装或 pull</p></div>
+              <button type="button" class="btn sm" onclick="ModelDownload.search()">搜索</button>
+            </div>
+            <div class="mm-pull catalog-toolbar">
+              <div class="field" style="flex:2;min-width:220px;margin:0">
+                <label for="catalogQuery">关键词</label>
+                <input id="catalogQuery" placeholder="例如 qwen、llama3.2" autocomplete="off">
+              </div>
+              <div class="field sm" style="margin:0">
+                <label for="catalogSource">渠道</label>
+                <select id="catalogSource">
+                  <option value="all">全部</option>
+                  <option value="hf">Hugging Face</option>
+                  <option value="ollama">Ollama 库</option>
+                </select>
+              </div>
+              <div class="field sm" style="margin:0">
+                <label for="catalogSort">排序</label>
+                <select id="catalogSort">
+                  <option value="hot">最热（下载量）</option>
+                  <option value="newest">最新</option>
+                </select>
+              </div>
+              <div class="field sm" style="margin:0;max-width:120px">
+                <label for="catalogHfGguf" title="仅影响 Hugging Face 结果：只显示带 GGUF 的仓库">HF 仅 GGUF</label>
+                <select id="catalogHfGguf"><option value="1">是</option><option value="0">否</option></select>
+              </div>
+            </div>
+            <div id="catalogMsg" class="msg muted"></div>
+            <div id="catalogResults" class="catalog-results"></div>
+          </div>
+          <div class="card mm-section">
+            <div class="card-head"><div><h2>从 Hugging Face 安装 GGUF</h2><p>也可在上方搜索结果中选 HF 模型后点「选文件」</p></div></div>
+            <div class="row">
+              <div class="field"><label>仓库</label><input id="repo" placeholder="org/model-GGUF"></div>
+              <div class="field sm"><label>分支/版本</label><input id="revision" value="main"></div>
+              <button type="button" class="btn primary" onclick="listFiles()">读取 GGUF</button>
+            </div>
+            <div id="filesMsg" class="msg muted"></div>
+            <div id="filesBox" style="margin-top:8px"></div>
+            <div id="installForm" class="card compact" style="display:none;margin-top:12px;background:var(--surface-2)">
+              <div class="row">
+                <div class="field"><label>模型键</label><input id="modelKey"></div>
+                <div class="field"><label>显示名称</label><input id="displayName"></div>
+                <div class="field sm"><label>量化</label><input id="quant"></div>
+              </div>
+              <div class="row">
+                <div class="field"><label>文件名</label><input id="filename" readonly></div>
+                <button type="button" class="btn primary" onclick="installModel()">开始下载</button>
+              </div>
+            </div>
+          </div>
+          <div class="card mm-section">
+            <div class="card-head"><div><h2>下载任务</h2><p>HF GGUF 与 Ollama pull 进度；进行中可取消，完成后在「本地模型」查看 Ollama 列表</p></div>
+              <div class="mm-toolbar">
+                <button type="button" id="btnClearFailedDownloads" class="btn sm ghost" onclick="clearFailedDownloads()" hidden>清除失败记录</button>
+                <button type="button" class="btn sm ghost" onclick="loadDownloads()">刷新</button>
+              </div>
+            </div>
+            <div id="downloads"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="models-inference" class="panel">
+        <div class="mm-head">
+          <div><h2>服务参数</h2><p>各后端默认推理参数与合并策略（保存后作用于 /v1 代理）</p></div>
+        </div>
+        <div class="card mm-section">
+          <div class="card-head">
+            <div><h2>合并策略</h2><p class="small muted">决定 /v1 转发时客户端 JSON 与网关默认的合并方式（按后端分别保存）</p></div>
+          </div>
+          <div id="inferencePolicyRoot" class="inference-policy-root muted">加载中…</div>
+        </div>
+        <div class="card mm-section">
+          <div class="card-head">
+            <div><h2>参数配置</h2><p class="small muted">当前后端的默认采样与网关限制；与合并策略一并保存</p></div>
+            <button type="button" class="btn sm" onclick="InferenceParams.load()">刷新</button>
+          </div>
+          <div id="inferenceParamsRoot" class="inference-params-root muted">加载中…</div>
+        </div>
+      </section>
+
+      <section id="account" class="panel">
+        <div class="card admin-auth-card">
+          <div class="card-head">
+            <div><h2>控制台账号</h2><p>修改 Web 登录用户名或密码；保存后写入数据库，其他已登录会话将失效。客户端 <code>/v1</code> API Key 不受影响。</p></div>
+            <button type="button" id="btnAccountLogout" class="btn ghost sm">登出</button>
+          </div>
+          <div id="accountCurrent" class="small muted" style="margin-bottom:12px">—</div>
+          <form id="accountForm" class="account-form" method="post" action="/" onsubmit="submitAccountCredentials(event);return false">
+            <div class="field auth-field"><label for="acctCurrentPass">当前密码</label><input id="acctCurrentPass" type="password" autocomplete="current-password" required></div>
+            <div class="field auth-field"><label for="acctNewUser">新用户名（留空不改）</label><input id="acctNewUser" autocomplete="username" pattern="[A-Za-z0-9_]+" minlength="3" maxlength="64"></div>
+            <div class="field auth-field"><label for="acctNewPass">新密码（留空不改）</label><input id="acctNewPass" type="password" autocomplete="new-password" minlength="8"></div>
+            <div class="field auth-field"><label for="acctNewPass2">确认新密码</label><input id="acctNewPass2" type="password" autocomplete="new-password" minlength="8"></div>
+            <button type="submit" class="btn primary">保存</button>
+          </form>
+          <div id="accountMsg" class="msg" style="margin-top:10px"></div>
+        </div>
+      </section>
+
+      <!-- Keys -->
+      <section id="keys" class="panel">
+        <div class="card admin-auth-card">
+          <div class="card-head">
+            <div><h2>API 管理员密钥（可选）</h2><p>脚本或自动化调用 <code>/api/*</code> 时使用，与 deploy/.env 中 <code>LLM_GATEWAY_ADMIN_API_KEY</code> 一致；浏览器登录请用全屏登录页账号</p></div>
+            <span id="adminKeyStatus"></span>
+          </div>
+          <div class="row">
+            <div class="field"><label>密钥</label>
+              <input id="adminKey" type="password" placeholder="粘贴管理员密钥" autocomplete="off">
+            </div>
+            <button type="button" class="btn primary" onclick="saveKey()">保存</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>生成服务密钥</h2><p>供客户端调用 <code>/v1/*</code>，与管理员密钥无关</p></div></div>
+          <div class="row">
+            <div class="field"><label>名称</label><input id="keyName" placeholder="例如 Mac-Cursor"></div>
+            <div class="field sm"><label>每分钟请求数</label><input id="keyRPM" type="number" value="60" min="1"></div>
+            <div class="field"><label>允许模型</label><input id="keyModels" placeholder="留空表示全部"></div>
+            <div class="field"><label>过期时间（ISO）</label><input id="keyExpires"></div>
+            <button type="button" class="btn primary" onclick="createKey()">生成</button>
+          </div>
+          <div id="newKeyBox" style="display:none;margin-top:10px"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div><h2>服务密钥列表</h2></div>
+            <button type="button" class="btn sm ghost" onclick="loadKeysPanel()">刷新</button>
+          </div>
+          <div id="keyTable"></div>
+        </div>
+      </section>
+
+      <!-- Requests -->
+      <section id="requests" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>调用记录</h2><p>详情含完整请求/响应与流式 SSE 逐条；需 <code>logging.store_payload: true</code>（默认已开）。清空后不可恢复</p></div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+              <button type="button" class="btn sm ghost" onclick="loadRequests()">刷新列表</button>
+              <button type="button" class="btn danger sm" onclick="clearRequests()">清空历史</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field"><label>模型</label><input id="rqModel"></div>
+            <div class="field sm"><label>状态</label>
+              <select id="rqStatus"><option value="">全部</option><option value="success">成功</option><option value="error">失败</option></select>
+            </div>
+            <div class="field"><label>密钥名称</label><input id="rqKey"></div>
+            <button type="button" class="btn" onclick="loadRequests()">查询</button>
+          </div>
+          <div id="requestsTable" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- Benchmark -->
+      <section id="benchmark" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>性能测试</h2>
+              <p>对<strong>当前已加载的上游模型</strong>发一次<strong>流式</strong>请求，实时展示正文/思考与阶段耗时；请在「模型管理」中先加载模型</p>
+            </div>
+            <button type="button" class="btn sm" onclick="loadBenchPanel()">刷新模型信息</button>
+          </div>
+          <div id="benchTarget" class="bench-target">正在读取当前模型…</div>
+          <p id="benchPresetHint" class="req-note" style="margin:8px 0 0"></p>
+          <div class="field bench-prompt-block" style="margin-top:12px">
+            <div class="bench-prompt-head">
+              <label for="benchPrompt">提示词</label>
+              <button type="button" class="btn sm ghost" id="benchParamsOpenBtn" onclick="openBenchParamsDrawer()">推理参数</button>
+            </div>
+            <textarea id="benchPrompt" rows="4">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">开始测试</button>
+            <button type="button" class="btn danger" id="benchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
+          </div>
+          <div id="benchMetrics" class="bench-metrics"></div>
+          <div id="benchAnalysis" class="bench-analysis" style="display:none"></div>
+          <div class="card-head" style="margin-top:8px;margin-bottom:8px"><h2 style="font-size:14px">正文 content</h2></div>
+          <div id="benchAnswer" class="bench-answer muted">运行测试后，模型正文会显示在这里（流式实时追加）</div>
+          <div id="benchReasoningWrap" style="display:none">
+            <div class="card-head" style="margin-top:12px;margin-bottom:8px"><h2 style="font-size:14px">思考 reasoning</h2></div>
+            <div id="benchReasoning" class="bench-answer bench-reasoning muted"></div>
+          </div>
+          <details class="bench-fold" id="benchEventsFold" style="display:none">
+            <summary>流式事件 <span id="benchEventsCount" class="small muted"></span></summary>
+            <div class="fold-body" id="benchEventsTable"></div>
+          </details>
+          <details class="bench-fold">
+            <summary>请求入参</summary>
+            <div class="fold-body"><pre id="benchReqPreview" class="bench-out">—</pre></div>
+          </details>
+          <details class="bench-fold">
+            <summary>原始 SSE / JSON 响应</summary>
+            <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="detailModal" class="modal"><div class="card">
+  <div class="card-head"><h2 style="margin:0">请求详情</h2><button type="button" class="btn sm" onclick="closeModal()">关闭</button></div>
+  <div id="detailBody" class="req-detail"></div>
+</div></div>
+
+<div id="benchParamsDrawer" class="drawer-root" aria-hidden="true" hidden>
+  <div class="drawer-backdrop" onclick="closeBenchParamsDrawer()" aria-hidden="true"></div>
+  <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="benchParamsDrawerTitle" onclick="event.stopPropagation()">
+    <div class="drawer-head">
+      <div>
+        <h2 id="benchParamsDrawerTitle">推理参数</h2>
+        <p class="small muted" style="margin:4px 0 0">与性能测试请求一并提交；切换上游服务时仍按原预设逻辑恢复</p>
+      </div>
+      <button type="button" class="btn sm ghost" onclick="closeBenchParamsDrawer()">关闭</button>
+    </div>
+    <div class="drawer-body">
+      <div class="bench-params bench-params-drawer">
+        <div class="field sm"><label for="benchTokens" title="completion 上限（token 数）。越大输出越长、耗时与显存占用越高。整数，常用 256~8192；性能测试默认 4000。">max_tokens</label><input id="benchTokens" type="number" value="4000" min="1" max="8192" title="completion 上限（token 数）。越大输出越长、耗时与显存占用越高。整数，常用 256~8192；性能测试默认 4000。"></div>
+        <div class="field sm"><label for="benchTemperature" title="采样温度。越高越发散、越低越稳定。浮点 0~2，常用 0.2（偏稳定/可复现）或 0.7~1.0（更随机）。默认 0.2。">temperature</label><input id="benchTemperature" type="number" step="0.05" min="0" max="2" value="0.2" title="采样温度。越高越发散、越低越稳定。浮点 0~2，常用 0.2（偏稳定/可复现）或 0.7~1.0（更随机）。默认 0.2。"></div>
+        <div class="field sm"><label for="benchTopP" title="核采样 top_p：在累计概率达 p 的 token 里采样。浮点 0~1，1 几乎不截断；常用 0.9~0.95。与 temperature 配合调节随机性。默认 0.9。">top_p</label><input id="benchTopP" type="number" step="0.05" min="0" max="1" value="0.9" title="核采样 top_p：在累计概率达 p 的 token 里采样。浮点 0~1，1 几乎不截断；常用 0.9~0.95。与 temperature 配合调节随机性。默认 0.9。"></div>
+        <div class="field sm"><label for="benchTopK" title="每步只从概率最高的 K 个 token 里采样。整数 ≥0，0 或留空表示不限制；llama.cpp 常用 40。越小输出越保守。默认 40。">top_k</label><input id="benchTopK" type="number" step="1" min="0" value="40" title="每步只从概率最高的 K 个 token 里采样。整数 ≥0，0 或留空表示不限制；llama.cpp 常用 40。越小输出越保守。默认 40。"></div>
+        <div class="field sm"><label for="benchMinP" title="最小概率阈值（相对最高 token）：低于该比例的候选被丢弃。浮点 0~1，清空则不传；部分后端支持，常用 0.05~0.1。">min_p</label><input id="benchMinP" type="number" step="0.01" min="0" max="1" value="" title="最小概率阈值（相对最高 token）：低于该比例的候选被丢弃。浮点 0~1，清空则不传；部分后端支持，常用 0.05~0.1。"></div>
+        <div class="field sm"><label for="benchFreqPen" title="OpenAI 式 frequency_penalty：惩罚已出现 token，减轻重复。浮点，一般 -2~2，0 为关闭。默认 0。">frequency_penalty</label><input id="benchFreqPen" type="number" step="0.1" value="0" title="OpenAI 式 frequency_penalty：惩罚已出现 token，减轻重复。浮点，一般 -2~2，0 为关闭。默认 0。"></div>
+        <div class="field sm"><label for="benchPresPen" title="OpenAI 式 presence_penalty：鼓励谈论新话题。浮点，一般 -2~2，0 为关闭。默认 0。">presence_penalty</label><input id="benchPresPen" type="number" step="0.1" value="0" title="OpenAI 式 presence_penalty：鼓励谈论新话题。浮点，一般 -2~2，0 为关闭。默认 0。"></div>
+        <div class="field sm"><label for="benchRepeatPen" title="重复惩罚（llama.cpp / Ollama 常见 repeat_penalty）：&gt;1 抑制重复，&lt;1 更重复。浮点，常用 1.0~1.2。默认 1.1。">repeat_penalty</label><input id="benchRepeatPen" type="number" step="0.05" min="0" value="1.1" title="重复惩罚（llama.cpp / Ollama 常见 repeat_penalty）：大于 1 抑制重复，小于 1 更重复。浮点，常用 1.0~1.2。默认 1.1。"></div>
+        <div class="field sm"><label for="benchSeed" title="随机种子。留空则每次不同；填整数可在相同模型与参数下尽量复现输出（仍受并行/量化影响）。">seed</label><input id="benchSeed" type="number" step="1" value="" title="随机种子。留空则每次不同；填整数可在相同模型与参数下尽量复现输出（仍受并行/量化影响）。"></div>
+        <div class="field sm"><label for="benchThinking" title="是否启用思考链（reasoning）。透传=不在 JSON 里写该字段，由模型/客户端默认；true/false 显式指定。影响 TTFT 与 reasoning 时长。">enable_thinking</label><select id="benchThinking" title="是否启用思考链（reasoning）。透传=不在 JSON 里写该字段；true/false 显式指定。影响 TTFT 与 reasoning 时长。"><option value="">透传（不写）</option><option value="true">true</option><option value="false">false</option></select></div>
+      </div>
+      <div class="field" style="margin-top:10px"><label for="benchStop" title="遇到这些字符串时停止生成。每行一条；留空不传。会占用输出 token 预算前的生成长度。">stop（每行一条，可选）</label><textarea id="benchStop" rows="3" title="遇到这些字符串时停止生成。每行一条；留空不传。"></textarea></div>
+    </div>
+  </aside>
+</div>
+<div id="toastHost" class="toast-host" aria-live="polite"></div>
+<script src="/static/dist/app.js"></script>
+</body>
+</html>

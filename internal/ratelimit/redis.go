@@ -1,0 +1,134 @@
+// ratelimit 用 Redis 做按 API Key 的每分钟请求计数，并暂存模型下载进度。
+package ratelimit
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// Limiter 封装 Redis 客户端，供 server 在鉴权后决定是否放行请求。
+type Limiter struct{ r *redis.Client }
+
+// New 连接 Redis；addr 形如 host:6379。
+func New(addr, password string, db int) *Limiter {
+	return &Limiter{r: redis.NewClient(&redis.Options{Addr: addr, Password: password, DB: db})}
+}
+func (l *Limiter) Ping(ctx context.Context) error { _, err := l.r.Ping(ctx).Result(); return err }
+func (l *Limiter) Close() error                   { return l.r.Close() }
+
+// Allow 在当前分钟桶内递增计数；超过 rpm 返回 false，rpm<=0 表示不限流。
+func (l *Limiter) Allow(ctx context.Context, key string, rpm int) (bool, int64, error) {
+	if rpm <= 0 {
+		return true, 0, nil
+	}
+	// 按 UTC 分钟分桶，键约 70 秒过期，避免 Redis 堆积。
+	bucket := time.Now().UTC().Format("200601021504")
+	k := fmt.Sprintf("llmgw:rl:%s:%s", key, bucket)
+	n, err := l.r.Incr(ctx, k).Result()
+	if err != nil {
+		return false, 0, err
+	}
+	if n == 1 {
+		_ = l.r.Expire(ctx, k, 70*time.Second).Err()
+	}
+	return n <= int64(rpm), n, nil
+}
+func (l *Limiter) SetDownload(ctx context.Context, id string, vals map[string]interface{}) error {
+	k := "llmgw:download:" + id
+	for f, v := range vals {
+		if err := l.r.HSet(ctx, k, f, v).Err(); err != nil {
+			return err
+		}
+	}
+	return l.r.Expire(ctx, k, 24*time.Hour).Err()
+}
+
+func (l *Limiter) GetDownload(ctx context.Context, id string) (map[string]string, error) {
+	return l.r.HGetAll(ctx, "llmgw:download:"+id).Result()
+}
+
+func (l *Limiter) ClearDownload(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	return l.r.Del(ctx, "llmgw:download:"+id).Err()
+}
+
+// DeleteDownloadFields removes hash fields (e.g. stale "error" after retry).
+func (l *Limiter) DeleteDownloadFields(ctx context.Context, id string, fields ...string) error {
+	id = strings.TrimSpace(id)
+	if id == "" || len(fields) == 0 {
+		return nil
+	}
+	return l.r.HDel(ctx, "llmgw:download:"+id, fields...).Err()
+}
+
+const ollamaPullJobsKey = "llmgw:ollama_pull_jobs"
+
+func (l *Limiter) TrackOllamaPullJob(ctx context.Context, jobID string) error {
+	return l.r.SAdd(ctx, ollamaPullJobsKey, jobID).Err()
+}
+
+func (l *Limiter) UntrackOllamaPullJob(ctx context.Context, jobID string) error {
+	return l.r.SRem(ctx, ollamaPullJobsKey, jobID).Err()
+}
+
+func (l *Limiter) ListOllamaPullJobs(ctx context.Context) ([]string, error) {
+	return l.r.SMembers(ctx, ollamaPullJobsKey).Result()
+}
+
+func sessionKey(token string) string { return "llmgw:session:" + token }
+
+// SetSession 保存控制台登录会话；value 为 username|revision。
+func (l *Limiter) SetSession(ctx context.Context, token, username string, revision uint64, ttl time.Duration) error {
+	username = strings.TrimSpace(username)
+	if token == "" || username == "" {
+		return fmt.Errorf("invalid session")
+	}
+	if ttl <= 0 {
+		ttl = 7 * 24 * time.Hour
+	}
+	val := fmt.Sprintf("%s|%d", username, revision)
+	return l.r.Set(ctx, sessionKey(token), val, ttl).Err()
+}
+
+// GetSession 读取会话对应的用户名与凭据 revision。
+func (l *Limiter) GetSession(ctx context.Context, token string) (username string, revision uint64, ok bool, err error) {
+	if token == "" {
+		return "", 0, false, nil
+	}
+	v, err := l.r.Get(ctx, sessionKey(token)).Result()
+	if err == redis.Nil {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, err
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", 0, false, nil
+	}
+	if i := strings.LastIndex(v, "|"); i >= 0 {
+		user := v[:i]
+		var rev uint64
+		_, _ = fmt.Sscanf(v[i+1:], "%d", &rev)
+		if user == "" {
+			return "", 0, false, nil
+		}
+		return user, rev, true, nil
+	}
+	return v, 0, true, nil
+}
+
+// DeleteSession 登出时作废 token。
+func (l *Limiter) DeleteSession(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	return l.r.Del(ctx, sessionKey(token)).Err()
+}

@@ -1,0 +1,540 @@
+import { $, esc } from '../core/dom.js';
+import { api } from '../core/api.js';
+import { fmtDate, statusPill, emptyState, wrapTable, displayUpstreamModel, displayRequestTarget } from '../core/format.js';
+import { setGlobalMsg, showToast } from '../core/notify.js';
+
+let detailPollTimer = null;
+let detailPollId = '';
+let detailEpoch = 0;
+
+export function requestsListHasRows() {
+  return !!$('requestsTable')?.querySelector('table td');
+}
+
+export async function loadRequests() {
+  const q = new URLSearchParams();
+  q.set('limit', '100');
+  if ($('rqModel').value) q.set('model', $('rqModel').value);
+  if ($('rqStatus').value) q.set('status', $('rqStatus').value);
+  if ($('rqKey').value) q.set('key', $('rqKey').value);
+  try {
+    const j = await api('/api/requests?' + q);
+    const rows = j.data || [];
+    $('requestsTable').innerHTML = !rows.length
+      ? emptyState('暂无记录')
+      : wrapTable(
+          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
+            rows
+              .map((x) => {
+                const rid = String(x.request_id || '');
+                const ridShort = rid.length > 10 ? rid.slice(0, 8) + '…' : rid;
+                const target = displayRequestTarget(x);
+                const sz =
+                  (Number(x.request_bytes || 0) / 1024).toFixed(1) +
+                  ' / ' +
+                  (Number(x.response_bytes || 0) / 1024).toFixed(1) +
+                  ' KB';
+                const stopBtn =
+                  x.status === 'running'
+                    ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">结束</button>`
+                    : '';
+                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
+              })
+              .join(''),
+        );
+  } catch (e) {
+    $('requestsTable').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+  }
+}
+
+export async function clearRequests() {
+  if (!confirm('确定清空全部调用记录？（含 payload 表）')) return;
+  try {
+    const j = await api('/api/requests', { method: 'DELETE' });
+    setGlobalMsg('<span class="ok">已删除 ' + esc(j.deleted) + ' 条记录</span>');
+    loadRequests();
+  } catch (e) {
+    setGlobalMsg('<span class="err">' + esc(e.message) + '</span>');
+  }
+}
+
+export function reqKv(rows) {
+  return (
+    '<dl class="req-kv">' +
+    rows
+      .filter((x) => x[1] != null && x[1] !== '' && x[1] !== '—')
+      .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
+      .join('') +
+    '</dl>'
+  );
+}
+
+export function prettyBodyText(s) {
+  if (s == null || s === '') return '—';
+  const t = String(s).trim();
+  if (t.startsWith('data:') || /\ndata:\s/.test(t)) return String(s);
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return String(s);
+  }
+}
+
+export function reqPanelFold(title, innerHtml) {
+  return `<section class="req-section req-panel-fold"><details class="req-fold req-body-fold"><summary>${esc(title)}</summary><div class="req-fold-inner">${innerHtml}</div></details></section>`;
+}
+
+export function reqCodeBlock(text, large) {
+  const cls = 'req-pre' + (large ? ' req-pre-lg' : '');
+  return `<div class="req-code-wrap"><div class="req-code-bar"><button type="button" class="btn sm ghost req-copy-btn" data-req-copy>复制</button></div><pre class="${cls}">${esc(text)}</pre></div>`;
+}
+
+export async function flashCopyBtn(btn, ok) {
+  const prev = btn.textContent;
+  btn.textContent = ok ? '已复制' : '失败';
+  btn.disabled = !ok;
+  setTimeout(() => {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }, 1400);
+}
+
+export async function copyReqCode(btn) {
+  const pre = btn.closest('.req-code-wrap')?.querySelector('pre');
+  if (!pre) return;
+  await flashCopyBtn(btn, await writeClipboard(pre.textContent || ''));
+}
+
+export async function copyReqStreamAll(btn) {
+  const pre = btn.closest('.req-fold-inner')?.querySelector('.req-sse-all-source pre');
+  if (!pre) return;
+  await flashCopyBtn(btn, await writeClipboard(pre.textContent || ''));
+}
+
+export async function writeClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 非安全上下文没有 clipboard */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+export function formatStreamEventBody(e) {
+  const hasRaw = e.raw_line != null && String(e.raw_line).trim() !== '';
+  if (hasRaw) return String(e.raw_line);
+  const fallback = String(e.preview || '').trim();
+  if (!fallback) return '（本条无 raw_line；多为旧记录，请对新请求查看完整 JSON）';
+  return fallback + '\n（旧数据：仅为解析摘要，非原始 JSON）';
+}
+
+export function formatStreamEventsDump(evs) {
+  return evs
+    .map((e) => {
+      const body = formatStreamEventBody(e);
+      const meta = `#${e.seq} · ${e.at_ms} ms · ${e.kind || '?'}${e.field ? ' · ' + e.field : ''}${e.delta_len ? ' · +' + e.delta_len + ' 字符' : ''}`;
+      return meta + '\n' + body;
+    })
+    .join('\n\n');
+}
+
+export function renderStreamEventsSection(j) {
+  const evs = j.stream_events || [];
+  if (!evs.length) return '';
+  const n = j.stream_event_count ?? evs.length;
+  const dump = formatStreamEventsDump(evs);
+  let inner = '';
+  if (j.stream_events_note) inner += `<p class="req-note">${esc(j.stream_events_note)}</p>`;
+  inner += `<div class="req-stream-toolbar"><button type="button" class="btn sm ghost req-copy-btn" data-req-copy-sse-all>复制全部</button></div>`;
+  inner += `<div class="req-sse-all-source" aria-hidden="true"><pre>${esc(dump)}</pre></div>`;
+  inner += '<div class="req-stream-list">';
+  for (const e of evs) {
+    const body = formatStreamEventBody(e);
+    const label = `<code>#${e.seq}</code> · ${e.at_ms} ms · ${esc(e.kind || '?')}${e.field ? ' · ' + esc(e.field) : ''}${e.delta_len ? ' · +' + e.delta_len + ' 字符' : ''}`;
+    inner += `<details class="req-fold req-nested-fold"><summary>${label}</summary><div class="req-fold-inner">${reqCodeBlock(body, false)}</div></details>`;
+  }
+  inner += '</div>';
+  return reqPanelFold(`流式 SSE 逐条 (${n})`, inner);
+}
+
+function headerRows(obj) {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.keys(obj)
+    .sort((a, b) => a.localeCompare(b))
+    .map((k) => [k, obj[k]]);
+}
+
+function serviceParamRows(obj) {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.keys(obj).map((k) => [k, typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : String(obj[k])]);
+}
+
+export async function cancelRequest(id) {
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    /* 已经是明文 id */
+  }
+  if (!confirm('确定结束这条正在进行的调用？调用方会看到连接中断。')) return;
+  try {
+    await api('/api/requests/' + encodeURIComponent(id) + '/cancel', { method: 'POST' });
+    showToast('已结束这条调用', 'ok');
+    if ($('requests')?.classList.contains('active')) loadRequests();
+    if (detailPollId === id) refreshDetailBody(id).catch(() => {});
+  } catch (e) {
+    showToast(e.message || '结束失败', 'err');
+    if ($('requests')?.classList.contains('active')) loadRequests();
+  }
+}
+
+function detailRequestId(j) {
+  const s = j.summary || {};
+  const log = j.log || {};
+  return String(s.request_id || log.request_id || '');
+}
+
+function detailSections(j) {
+  const s = j.summary || {};
+  const t = j.timing || {};
+  const log = j.log || {};
+  const sections = [];
+  const add = (id, kind, html) => {
+    if (html) sections.push({ id, kind, html });
+  };
+  const rid = detailRequestId(j);
+  const running = j.live || s.status === 'running' || log.status === 'running';
+  if (running && rid) {
+    add(
+      'running',
+      'swap',
+      `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid)}')">结束这条调用</button></p>`,
+    );
+  }
+  if (j.payload_note) add('note', 'swap', `<p class="req-note warn" style="margin:0 0 10px">${esc(j.payload_note)}</p>`);
+  add(
+    'overview',
+    'swap',
+    `<section class="req-section"><h3>概览</h3>${reqKv([
+      ['Request ID', s.request_id || log.request_id],
+      ['状态', (s.status || log.status) + ' · HTTP ' + (s.http_status ?? log.http_status ?? '—')],
+      ['请求 URL', displayRequestTarget({ method: s.method || log.method, request_url: s.request_url || log.request_url, endpoint: s.endpoint || log.endpoint })],
+      ['API Key', (s.api_key || log.api_key_name || '—') + (s.api_key_id ? ' (#' + s.api_key_id + ')' : '')],
+      ['客户端', s.client_name || log.client_name || '—'],
+      ['IP', s.client_ip || log.client_ip],
+      ['错误码', s.error_code || log.error_code],
+      ['错误信息', s.error_message || log.error_message],
+    ])}</section>`,
+  );
+  const clientHeaders = headerRows(j.request_headers);
+  const upstreamHeaders = headerRows(j.upstream_headers);
+  let headerInner = '';
+  if (j.headers_note) headerInner += `<p class="req-note">${esc(j.headers_note)}</p>`;
+  if (clientHeaders.length) {
+    headerInner += `<h4>客户端 → 网关</h4>${reqKv(clientHeaders)}`;
+  }
+  if (upstreamHeaders.length) {
+    headerInner += `<h4>网关 → 上游</h4>${reqKv(upstreamHeaders)}`;
+  }
+  if (headerInner) add('headers', 'swap', `<section class="req-section"><h3>请求头</h3>${headerInner}</section>`);
+  const p = j.request_params || {};
+  const paramRows = [
+    ['客户端 model', p.model_client || s.model_client || log.model_requested || '—'],
+    ['上游 model', p.model_upstream || s.model_upstream || log.model_actual || '—'],
+    ['模型说明', p.model_note || ''],
+    ['流式', p.stream_label || ''],
+    ['流式说明', p.stream_note || ''],
+    ['思考', p.thinking || ''],
+    ['要求返回 token', p.include_usage_label || ''],
+    ...serviceParamRows(p.service_params),
+  ];
+  add('params', 'swap', `<section class="req-section"><h3>请求参数</h3>${reqKv(paramRows)}</section>`);
+  add(
+    'timing',
+    'swap',
+    `<section class="req-section"><h3>耗时与 Token</h3>${reqKv([
+      ['开始', fmtDate(t.started_at || log.started_at)],
+      ['结束', fmtDate(t.finished_at || log.finished_at)],
+      ['总耗时', t.latency_human || (t.latency_ms ?? log.latency_ms) + ' ms'],
+      ['首 token (TTFT)', t.ttft_human || (t.ttft_ms != null ? t.ttft_ms + ' ms' : '—')],
+      ['生成阶段', t.generation_human || (t.generation_ms != null ? t.generation_ms + ' ms' : '—')],
+      [
+        'Token in/out/total',
+        [t.input_tokens ?? log.input_tokens, t.output_tokens ?? log.output_tokens, t.total_tokens ?? log.total_tokens]
+          .map((x) => x ?? '—')
+          .join(' / '),
+      ],
+      ['Token 来源', t.token_source_label || ''],
+      ['请求/响应大小', Number(s.request_kb || 0).toFixed(1) + ' KB / ' + Number(s.response_kb || 0).toFixed(1) + ' KB'],
+    ])}${j.token_note ? `<p class="req-note">${esc(j.token_note)}</p>` : ''}</section>`,
+  );
+  if (j.analysis) {
+    const ph = j.analysis.phases_ms || {};
+    const tp = j.analysis.throughput || {};
+    let block = `<section class="req-section"><h3>请求分析</h3>${reqKv([
+      ['Gateway 准备', ph.prep_ms != null ? ph.prep_ms + ' ms' : null],
+      ['模型加载/等待', ph.model_load_ms != null ? ph.model_load_ms + ' ms' : null],
+      ['上游推理', ph.upstream_ms != null ? ph.upstream_ms + ' ms' : null],
+      ['首条正文 content', ph.ttft_content_ms != null ? ph.ttft_content_ms + ' ms' : null],
+      ['Prefill→首 token', ph.prefill_until_first_ms != null ? ph.prefill_until_first_ms + ' ms' : null],
+      ['思考阶段', ph.thinking_ms != null ? ph.thinking_ms + ' ms' : null],
+      ['正文生成阶段', ph.content_generation_ms != null ? ph.content_generation_ms + ' ms' : null],
+      [
+        '输出速度',
+        tp.output_tokens_per_sec != null
+          ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s (' + tp.generation_window_ms + ' ms 窗口)'
+          : null,
+      ],
+    ])}`;
+    if (j.analysis_note) block += `<p class="req-note">${esc(j.analysis_note)}</p>`;
+    if (tp.note) block += `<p class="req-note">${esc(tp.note)}</p>`;
+    if ((j.analysis.summary || []).length) {
+      block += `<ul class="req-hints">${j.analysis.summary.map((line) => `<li>${esc(line)}</li>`).join('')}</ul>`;
+    }
+    block += `</section>`;
+    add('analysis', 'swap', block);
+  }
+  const hints = j.diagnosis || [];
+  if (hints.length) {
+    add(
+      'hints',
+      'swap',
+      `<section class="req-section"><h3>诊断提示</h3><ul class="req-hints">${hints.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></section>`,
+    );
+  }
+  if (j.content_text) {
+    add('content', 'text', `<section class="req-section"><h3>聚合正文 content</h3><div class="req-text-block">${esc(j.content_text)}</div></section>`);
+  }
+  if (j.reasoning_text) {
+    add(
+      'reasoning',
+      'text',
+      `<section class="req-section"><h3>聚合思考 reasoning</h3><div class="req-text-block reasoning">${esc(j.reasoning_text)}</div></section>`,
+    );
+  }
+  const stream = renderStreamEventsSection(j);
+  if (stream) add('stream', 'stream', stream);
+  const reqBody = j.request_body || j.request_preview || '';
+  if (reqBody) {
+    let inner = '';
+    if (j.request_body_note) inner += `<p class="req-note">${esc(j.request_body_note)}</p>`;
+    else inner += `<p class="req-note">Gateway 记录并转发给上游的 JSON body</p>`;
+    if (j.request_body_bytes) inner += `<p class="req-note">${j.request_body_bytes} bytes</p>`;
+    inner += reqCodeBlock(prettyBodyText(reqBody), true);
+    add('request', 'fold', reqPanelFold('原始请求 body', inner));
+  }
+  const resBody = j.response_body || j.response_preview || '';
+  if (resBody) {
+    let inner = `<p class="req-note">${j.response_body_bytes ? j.response_body_bytes + ' bytes · ' : ''}流式为完整 SSE 文本；非流式为上游 JSON</p>`;
+    inner += reqCodeBlock(prettyBodyText(resBody), true);
+    add('response', 'fold', reqPanelFold('原始响应 body', inner));
+  }
+  add('raw', 'fold', reqPanelFold('API 原始 JSON（调试）', reqCodeBlock(JSON.stringify(j, null, 2), true)));
+  return sections;
+}
+
+function htmlToSection(id, html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html.trim();
+  const el = tpl.content.firstElementChild;
+  el.dataset.detailSection = id;
+  return el;
+}
+
+function patchTextSection(el, html) {
+  const neu = htmlToSection('tmp', html);
+  const a = el.querySelector('.req-text-block');
+  const b = neu.querySelector('.req-text-block');
+  if (a && b) {
+    if (a.textContent !== b.textContent) a.textContent = b.textContent;
+    return el;
+  }
+  neu.dataset.detailSection = el.dataset.detailSection;
+  el.replaceWith(neu);
+  return neu;
+}
+
+function patchFoldSection(el, html) {
+  const neu = htmlToSection('tmp', html);
+  const sum = el.querySelector('details > summary');
+  const nsum = neu.querySelector('details > summary');
+  if (sum && nsum && sum.textContent !== nsum.textContent) sum.textContent = nsum.textContent;
+  const pres = [...el.querySelectorAll('pre')];
+  const npres = [...neu.querySelectorAll('pre')];
+  const notes = [...el.querySelectorAll('.req-note')];
+  const nnotes = [...neu.querySelectorAll('.req-note')];
+  if (pres.length && pres.length === npres.length && notes.length === nnotes.length) {
+    pres.forEach((p, i) => {
+      if (p.textContent !== npres[i].textContent) p.textContent = npres[i].textContent;
+    });
+    notes.forEach((n, i) => {
+      if (n.textContent !== nnotes[i].textContent) n.textContent = nnotes[i].textContent;
+    });
+    return;
+  }
+  const inner = el.querySelector('.req-fold-inner');
+  const ninner = neu.querySelector('.req-fold-inner');
+  if (inner && ninner) inner.replaceWith(ninner);
+}
+
+function streamRowLabel(node) {
+  return node.querySelector('summary')?.textContent || '';
+}
+
+function patchStreamSection(el, html) {
+  const neu = htmlToSection('tmp', html);
+  const sum = el.querySelector('details > summary');
+  const nsum = neu.querySelector('details > summary');
+  if (sum && nsum && sum.textContent !== nsum.textContent) sum.textContent = nsum.textContent;
+  const list = el.querySelector('.req-stream-list');
+  const nlist = neu.querySelector('.req-stream-list');
+  if (list && nlist) {
+    const haveNodes = [...list.querySelectorAll(':scope > details')];
+    const items = [...nlist.querySelectorAll(':scope > details')];
+    const prefixOk =
+      haveNodes.length <= items.length &&
+      haveNodes.every((node, i) => streamRowLabel(node) === streamRowLabel(items[i]));
+    if (!prefixOk) list.replaceChildren(...items);
+    else {
+      for (let i = haveNodes.length; i < items.length; i++) list.appendChild(items[i]);
+    }
+  }
+  const dump = el.querySelector('.req-sse-all-source pre');
+  const ndump = neu.querySelector('.req-sse-all-source pre');
+  if (dump && ndump && dump.textContent !== ndump.textContent) dump.textContent = ndump.textContent;
+  const note = el.querySelector('.req-note');
+  const nnote = neu.querySelector('.req-note');
+  if (note && nnote && note.textContent !== nnote.textContent) note.textContent = nnote.textContent;
+}
+
+// 同一条记录轮询时只改变化的区块，折叠和滚动留在原节点上。
+// 换记录，或关闭后再打开，则整页重画，不沿用上一份详情。
+export function applyRequestDetail(root, j) {
+  const rid = detailRequestId(j);
+  if (root.dataset.detailRequest !== rid) {
+    root.replaceChildren();
+    root.dataset.detailRequest = rid;
+    const card = root.closest('.card');
+    if (card) card.scrollTop = 0;
+  }
+  const sections = detailSections(j);
+  const want = new Set(sections.map((s) => s.id));
+  [...root.children].forEach((el) => {
+    if (!want.has(el.dataset.detailSection)) el.remove();
+  });
+  sections.forEach((sec, i) => {
+    let el = [...root.children].find((n) => n.dataset.detailSection === sec.id);
+    if (!el) {
+      el = htmlToSection(sec.id, sec.html);
+      el._detailHtml = sec.html;
+      root.insertBefore(el, root.children[i] || null);
+      return;
+    }
+    if (root.children[i] !== el) root.insertBefore(el, root.children[i] || null);
+    if (el._detailHtml === sec.html) return;
+    let live = el;
+    if (sec.kind === 'text') live = patchTextSection(el, sec.html);
+    else if (sec.kind === 'fold') patchFoldSection(el, sec.html);
+    else if (sec.kind === 'stream') patchStreamSection(el, sec.html);
+    else {
+      const neu = htmlToSection(sec.id, sec.html);
+      neu._detailHtml = sec.html;
+      el.replaceWith(neu);
+      return;
+    }
+    live._detailHtml = sec.html;
+  });
+}
+
+async function refreshDetailBody(id) {
+  const epoch = detailEpoch;
+  const j = await api('/api/requests/' + encodeURIComponent(id));
+  if (epoch !== detailEpoch || detailPollId !== id) return j;
+  const b = $('detailBody');
+  if (b) applyRequestDetail(b, j);
+  return j;
+}
+
+function stopDetailPoll() {
+  if (detailPollTimer) {
+    clearInterval(detailPollTimer);
+    detailPollTimer = null;
+  }
+  detailPollId = '';
+}
+
+export async function showDetail(id) {
+  let epoch = 0;
+  try {
+    id = decodeURIComponent(id);
+    stopDetailPoll();
+    detailEpoch += 1;
+    epoch = detailEpoch;
+    detailPollId = id;
+    const j = await refreshDetailBody(id);
+    if (epoch !== detailEpoch) return;
+    $('detailModal')?.classList.add('show');
+    if (j.live) {
+      detailPollTimer = setInterval(async () => {
+        if (epoch !== detailEpoch || detailPollId !== id) return;
+        if (!$('detailModal')?.classList.contains('show')) {
+          stopDetailPoll();
+          return;
+        }
+        try {
+          const nj = await refreshDetailBody(id);
+          if (epoch !== detailEpoch || detailPollId !== id) return;
+          if (!nj.live) stopDetailPoll();
+        } catch {
+          if (epoch === detailEpoch && detailPollId === id) stopDetailPoll();
+        }
+      }, 2000);
+    }
+  } catch (e) {
+    if (epoch && epoch !== detailEpoch) return;
+    alert(e.message);
+  }
+}
+
+function resetDetailView() {
+  const body = $('detailBody');
+  if (!body) return;
+  body.replaceChildren();
+  delete body.dataset.detailRequest;
+  const card = body.closest('.card');
+  if (card) card.scrollTop = 0;
+}
+
+export function closeModal() {
+  stopDetailPoll();
+  resetDetailView();
+  $('detailModal')?.classList.remove('show');
+}
+
+$('detailModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'detailModal') closeModal();
+  const copyBtn = e.target.closest?.('[data-req-copy]');
+  if (copyBtn) {
+    e.preventDefault();
+    copyReqCode(copyBtn);
+    return;
+  }
+  const copyAllSse = e.target.closest?.('[data-req-copy-sse-all]');
+  if (copyAllSse) {
+    e.preventDefault();
+    copyReqStreamAll(copyAllSse);
+  }
+});
