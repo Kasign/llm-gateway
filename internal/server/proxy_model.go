@@ -37,6 +37,19 @@ func (s *Server) configuredProxyModelHint() string {
 // 调用方 body 里的 model 不参与此决策（之后会用 rewriteJSONModel 覆盖）。
 func (s *Server) resolveProxyModelTarget(ctx context.Context) (proxyModelTarget, error) {
 	var zero proxyModelTarget
+	active := s.effectiveUpstream()
+	// 远程 Provider 的模型 ID 属于 Provider 配置，不应按本地模型表再次映射：
+	// 例如名称碰巧与本地 model_key 相同，也必须原样转发给远程供应商。
+	if remote, ok := s.remoteProviderConfig(active.Backend); ok {
+		modelID := strings.TrimSpace(active.ModelName)
+		if modelID == "" {
+			modelID = strings.TrimSpace(remote.DefaultModel)
+		}
+		if modelID == "" {
+			return zero, &core.Error{Status: 503, Code: "no_proxy_model", Message: "未配置远程 Provider 默认模型"}
+		}
+		return proxyModelTarget{Hint: modelID, ModelKey: modelID, UpstreamID: modelID}, nil
+	}
 	hint := s.configuredProxyModelHint()
 	adopted := false
 	if hint == "" {

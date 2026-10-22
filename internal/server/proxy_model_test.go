@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"testing"
 
+	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/settings"
 )
@@ -82,5 +84,40 @@ func TestSelectSwitchModelNamePrefersExplicitLoadID(t *testing.T) {
 	got, _ := selectSwitchModelName(cur, "deepseek", "", "deepseek-reasoner")
 	if got != "deepseek-reasoner" {
 		t.Fatalf("model name = %q, want explicit model ID", got)
+	}
+}
+
+func TestResolveProxyModelTargetRemoteUsesProviderModelVerbatim(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1",
+		DefaultModel: "deepseek-chat",
+	}}
+	s := &Server{
+		cfg: cfg,
+		upstream: settings.Upstream{Backend: "deepseek", ModelName: "deepseek-chat"},
+	}
+	got, err := s.resolveProxyModelTarget(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != nil || got.ModelKey != "deepseek-chat" || got.UpstreamID != "deepseek-chat" || got.Hint != "deepseek-chat" {
+		t.Fatalf("remote model target = %+v", got)
+	}
+}
+
+func TestResolveProxyModelTargetRemoteUsesConfiguredDefaultWhenRuntimeNameEmpty(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+		ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1",
+		DefaultModel: "gpt-4.1",
+	}}
+	s := &Server{cfg: cfg, upstream: settings.Upstream{Backend: "openai"}}
+	got, err := s.resolveProxyModelTarget(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != nil || got.ModelKey != "gpt-4.1" || got.UpstreamID != "gpt-4.1" {
+		t.Fatalf("remote default model target = %+v", got)
 	}
 }
