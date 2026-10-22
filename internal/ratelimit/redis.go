@@ -20,20 +20,35 @@ func New(addr, password string, db int) *Limiter {
 func (l *Limiter) Ping(ctx context.Context) error { _, err := l.r.Ping(ctx).Result(); return err }
 func (l *Limiter) Close() error                   { return l.r.Close() }
 
-// Allow 在当前分钟桶内递增计数；超过 rpm 返回 false，rpm<=0 表示不限流。
+// allowRateLimitScript 原子递增固定窗口计数，并为历史上可能遗留的无 TTL key 修复过期时间。
+// Lua 避免 INCR 与 EXPIRE 之间的竞态及忽略 EXPIRE 错误导致的永久 key。
+var allowRateLimitScript = redis.NewScript(`
+local current = redis.call("INCR", KEYS[1])
+if redis.call("TTL", KEYS[1]) < 0 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return current
+`)
+
+// rateLimitBucketKey 保持既有 UTC 固定分钟窗口的 key 格式。
+func rateLimitBucketKey(key string, now time.Time) string {
+	bucket := now.UTC().Format("200601021504")
+	return fmt.Sprintf("llmgw:rl:%s:%s", key, bucket)
+}
+
+// Allow 在当前 UTC 分钟桶内递增计数；超过 rpm 返回 false，rpm<=0 表示不限流。
 func (l *Limiter) Allow(ctx context.Context, key string, rpm int) (bool, int64, error) {
+	return l.allowAt(ctx, key, rpm, time.Now())
+}
+
+func (l *Limiter) allowAt(ctx context.Context, key string, rpm int, now time.Time) (bool, int64, error) {
 	if rpm <= 0 {
 		return true, 0, nil
 	}
-	// 按 UTC 分钟分桶，键约 70 秒过期，避免 Redis 堆积。
-	bucket := time.Now().UTC().Format("200601021504")
-	k := fmt.Sprintf("llmgw:rl:%s:%s", key, bucket)
-	n, err := l.r.Incr(ctx, k).Result()
+	k := rateLimitBucketKey(key, now)
+	n, err := allowRateLimitScript.Run(ctx, l.r, []string{k}, int64(70)).Int64()
 	if err != nil {
 		return false, 0, err
-	}
-	if n == 1 {
-		_ = l.r.Expire(ctx, k, 70*time.Second).Err()
 	}
 	return n <= int64(rpm), n, nil
 }
