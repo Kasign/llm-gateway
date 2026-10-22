@@ -396,7 +396,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
 			data = append(data, map[string]interface{}{
 				"id": modelID, "object": "model", "created": time.Now().Unix(),
-				"owned_by": backend, "display_name": target.UpstreamID,
+				"owned_by": s.effectiveUpstream().Backend, "display_name": target.UpstreamID,
 			})
 		}
 		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
