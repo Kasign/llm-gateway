@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/config"
@@ -35,6 +37,44 @@ func (s *Server) isConfiguredProvider(id string) bool {
 	}
 	_, ok := s.remoteProviderConfig(id)
 	return ok
+}
+
+// activeProviderStatus 按当前生效后端判断依赖状态，不把保留的本地管理客户端当成活动推理端。
+func (s *Server) activeProviderStatus(ctx context.Context) (backend, status string, err error) {
+	if s == nil {
+		return "", "unavailable", fmt.Errorf("server is nil")
+	}
+
+	// 一次读取上游和本地客户端，确保切换后端时检查的是同一份运行时快照。
+	s.upstreamMu.RLock()
+	upstream := s.upstream
+	localClient := s.llama
+	s.upstreamMu.RUnlock()
+
+	backend = strings.ToLower(strings.TrimSpace(upstream.Backend))
+	if backend == "" {
+		return backend, "unconfigured", fmt.Errorf("active Provider is not configured")
+	}
+	if isLocalInferenceBackend(backend) {
+		if localClient == nil {
+			return backend, "unavailable", fmt.Errorf("local Provider %q client is not configured", backend)
+		}
+		if err := localClient.Health(ctx); err != nil {
+			return backend, err.Error(), fmt.Errorf("local Provider %q health check failed: %w", backend, err)
+		}
+		return backend, "ok", nil
+	}
+
+	if _, ok := s.remoteProviderConfig(backend); !ok {
+		return backend, "unconfigured", fmt.Errorf("active Provider %q is not configured", backend)
+	}
+	if s.providers == nil {
+		return backend, "unavailable", fmt.Errorf("active Provider Registry is not initialized")
+	}
+	if _, err := s.providers.Resolve(backend); err != nil {
+		return backend, "unavailable", fmt.Errorf("active Provider %q is unavailable: %w", backend, err)
+	}
+	return backend, "configured; remote connectivity is checked on inference", nil
 }
 
 // availableBackends 仅暴露安全配置的元数据，不返回 API Key。

@@ -155,18 +155,18 @@ func (s *Server) ShutdownAudit(ctx context.Context) error {
 // CheckDependencies 启动时探测 Redis 与 LLM 上游是否可达；失败不阻止进程启动但会打日志。
 // 作用：启动时做一次"健康体检"，看看 Redis 和 llama.cpp 能不能连上，连不上就警告但照样启动。
 func (s *Server) CheckDependencies(ctx context.Context) error {
-	// 探测 Redis：发一个 Ping 命令，能通就说明 Redis 正常
+	// Redis 是请求治理的必需依赖；推理端只检查当前活动 Provider，避免误探测被保留的旧本地客户端。
 	if err := s.limiter.Ping(ctx); err != nil {
 		applog.Printf("dependency check failed: redis: %v", err)
 		return fmt.Errorf("redis: %w", err)
 	}
-	// 探测 llama.cpp：调上游的健康检查接口，能通就说明 AI 引擎正常
-	if err := s.llamaClient().Health(ctx); err != nil {
-		applog.Printf("dependency check failed: llama: %v", err)
-		return fmt.Errorf("llama: %w", err)
+	backend, providerStatus, err := s.activeProviderStatus(ctx)
+	if err != nil {
+		applog.Printf("dependency check failed: active Provider %s: %v", backend, err)
+		return fmt.Errorf("active Provider %s: %w", backend, err)
 	}
-	// 两个都通了，打一条"体检通过"日志
-	applog.Printf("dependency check ok: redis and llama reachable")
+	// 远程 Provider 在启动时只校验配置和 Registry；实际网络连通性在推理请求中验证。
+	applog.Infof("dependency check ok: redis and active Provider %s (%s)", backend, providerStatus)
 	return nil
 }
 
@@ -301,23 +301,29 @@ func (s *Server) withRecover(next http.Handler) http.Handler {
 // health 是健康检查接口（/health）：返回 Redis 和 llama.cpp 是否正常工作。
 // 运维工具（如 Docker、K8s）会定期调这个接口来判断网关是否健康，不健康就重启。
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	// 给健康检查设一个 5 秒超时，避免上游卡死导致健康检查一直挂着
+	// 给健康检查设一个 5 秒超时，避免上游卡死导致健康检查一直挂着。
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	// 检查 llama.cpp 是否可达
-	le := s.llamaClient().Health(ctx)
-	// 检查 Redis 是否可达
-	re := s.limiter.Ping(ctx)
-	// 默认状态是 ok（健康）
-	status := "ok"
-	// 只要有一个不可达，状态就变成 degraded（降级），并返回 503 状态码
-	if le != nil || re != nil {
-		status = "degraded"
-		w.WriteHeader(503)
-		applog.Printf("health degraded: llama=%s redis=%s", errString(le), errString(re))
+
+	backend, providerStatus, providerErr := s.activeProviderStatus(ctx)
+	redisErr := s.limiter.Ping(ctx)
+	// 保留旧 llama 字段。切换到远程 Provider 后，本地客户端仍用于管理操作，但不再决定活动推理服务的健康状态。
+	llamaStatus := "inactive (not checked for active routing)"
+	if isLocalInferenceBackend(backend) {
+		llamaStatus = providerStatus
 	}
-	// 返回 JSON：整体状态、llama 状态、redis 状态、当前时间
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": status, "llama": errString(le), "redis": errString(re), "time": time.Now().UTC()})
+
+	status := "ok"
+	if providerErr != nil || redisErr != nil {
+		status = "degraded"
+		w.WriteHeader(http.StatusServiceUnavailable)
+		applog.Printf("health degraded: active_backend=%s provider=%s redis=%s", backend, providerStatus, errString(redisErr))
+	}
+	// 远程 Provider 只标记为已配置，不虚报网络可达；其实际连通性由推理请求验证。
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": status, "active_backend": backend, "provider": providerStatus,
+		"llama": llamaStatus, "redis": errString(redisErr), "time": time.Now().UTC(),
+	})
 }
 
 // v1Models 是 /v1/models 接口（OpenAI 兼容）：返回当前网关可用的模型列表。
