@@ -255,16 +255,22 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 	resp, err := p.client.Do(req)
 	if err != nil {
 		transportErr := p.transportError(ctx, err)
-		p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
-		return core.Result{}, transportErr
+		written := p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+		return core.Result{ResponseBytes: written}, transportErr
 	}
 	defer resp.Body.Close()
 	if call.OnHeaders != nil {
 		call.OnHeaders(resp.Header, resp.StatusCode)
 	}
 	if isRedirectStatus(resp.StatusCode) {
-		p.writeStreamErrorIfCommitted(call, "provider_redirect_rejected")
-		return core.Result{Status: resp.StatusCode}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
+		written := p.writeStreamErrorIfCommitted(call, "provider_redirect_rejected")
+		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
+	}
+	// Gateway warmStart 可能已提交 HTTP 200；若此时上游返回 401/429/5xx，必须发送 SSE error 而非混入 JSON 错误正文。
+	if (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices) && call.WriterWritten() {
+		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
+		written := p.writeStreamErrorIfCommitted(call, streamErrorCode(upstreamErr))
+		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
 	}
 	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
 	call.Writer.WriteHeader(resp.StatusCode)
@@ -307,8 +313,8 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		}
 		if readErr != nil {
 			transportErr := p.transportError(ctx, readErr)
-			p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
-			return core.Result{Status: resp.StatusCode, ResponseBytes: total}, transportErr
+			errorBytes := p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+			return core.Result{Status: resp.StatusCode, ResponseBytes: total + errorBytes}, transportErr
 		}
 	}
 	return core.Result{Status: resp.StatusCode, ResponseBytes: total}, nil
@@ -335,9 +341,9 @@ func streamErrorCode(err error) string {
 	return "provider_stream_interrupted"
 }
 
-func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string) {
+func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string) int64 {
 	if !call.WriterWritten() {
-		return
+		return 0
 	}
 	body, _ := json.Marshal(map[string]interface{}{
 		"error": map[string]string{
@@ -351,11 +357,16 @@ func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCal
 	// 用原始 ResponseWriter 尝试发送终止事件，不复用尊重 request context 的 ClientWriter：
 	// 超时后 context 已结束，但只要连接仍在，客户端仍应收到明确的 SSE 错误。
 	n, err := call.Writer.Write(chunk)
-	if err == nil && n == len(chunk) {
-		if flusher, ok := call.Writer.(http.Flusher); ok {
-			flusher.Flush()
-		}
+	if err != nil || n != len(chunk) {
+		return 0
 	}
+	if flusher, ok := call.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	if call.OnChunk != nil {
+		call.OnChunk(chunk)
+	}
+	return int64(n)
 }
 
 func (call InferenceCall) WriterWritten() bool {

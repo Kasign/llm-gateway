@@ -304,3 +304,55 @@ func TestOpenAICompatibleProviderWritesSSEErrorAfterUpstreamReadFailure(t *testi
 		t.Fatalf("error event must not expose internal transport detail: %q", body)
 	}
 }
+
+
+func TestOpenAICompatibleProviderWritesSafeSSEErrorForUpstreamStatusAfterCommit(t *testing.T) {
+	const privateError = "provider credential details must not leak"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		body, _ := json.Marshal(map[string]interface{}{
+			"error": map[string]string{"message": privateError},
+		})
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "remote-secret"})
+	writer := newProviderCommittedWriter()
+	_, _ = writer.Write([]byte(": warm start"))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	chunks := 0
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request, Path: "/v1/chat/completions",
+		Body: []byte("{}"), Stream: true,
+		ClientWriter: func(data []byte) error {
+			_, writeErr := writer.Write(data)
+			return writeErr
+		},
+		OnChunk: func([]byte) { chunks++ },
+	})
+	if err == nil {
+		t.Fatal("expected upstream authentication error")
+	}
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.Kind != ErrorAuthentication {
+		t.Fatalf("error = %T %v, want classified authentication error", err, err)
+	}
+	if result.Status != http.StatusUnauthorized {
+		t.Fatalf("upstream result status = %d, want 401", result.Status)
+	}
+	if writer.recorder.Code != http.StatusOK {
+		t.Fatalf("Gateway status = %d, want previously committed 200", writer.recorder.Code)
+	}
+	body := writer.recorder.Body.String()
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "provider_authentication") {
+		t.Fatalf("response is not a safe SSE error event: %q", body)
+	}
+	if strings.Contains(body, privateError) || strings.Contains(body, "remote-secret") {
+		t.Fatalf("upstream error details leaked into SSE: %q", body)
+	}
+	if chunks == 0 {
+		t.Fatal("safe SSE error chunk should be passed to the observer")
+	}
+}
