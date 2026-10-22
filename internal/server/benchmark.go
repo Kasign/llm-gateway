@@ -100,11 +100,41 @@ func (j *benchmarkJob) requestStop() bool {
 	return true
 }
 
-// snapshot 返回不含 cancel 字段的副本，供 HTTP 序列化（避免泄露 context 控制面）。
-func (j *benchmarkJob) snapshot() benchmarkJob {
+// benchmarkJobSnapshot 是用于 HTTP 返回的只读 DTO，不包含互斥锁和取消函数。
+// 不能把 benchmarkJob 按值返回或复制：其中的 sync.RWMutex 复制后会破坏并发语义。
+type benchmarkJobSnapshot struct {
+	ID             string     `json:"job_id"`
+	Status         string     `json:"status"`
+	ModelKey       string     `json:"model_key"`
+	LlamaModel     string     `json:"llama_model"`
+	PromptLen      int        `json:"prompt_len"`
+	MaxTokens      int        `json:"max_tokens"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	LatencyMS      int64      `json:"latency_ms,omitempty"`
+	HTTPStatus     int        `json:"http_status,omitempty"`
+	ResponseBytes  int64      `json:"response_bytes,omitempty"`
+	InputTokens    int64      `json:"input_tokens,omitempty"`
+	OutputTokens   int64      `json:"output_tokens,omitempty"`
+	TotalTokens    int64      `json:"total_tokens,omitempty"`
+	Response       string     `json:"response,omitempty"`
+	Answer         string     `json:"answer,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	RequestID      string     `json:"request_id,omitempty"`
+	Stream         bool       `json:"stream"`
+	TTFTMS         *int64     `json:"ttft_ms,omitempty"`
+	StreamEvents   int        `json:"stream_event_count,omitempty"`
+	ReasoningChars int        `json:"reasoning_chars,omitempty"`
+	ContentText    string     `json:"content_text,omitempty"`
+	ReasoningText  string     `json:"reasoning_text,omitempty"`
+	ContentChars   int        `json:"content_chars,omitempty"`
+}
+
+// snapshot 在锁内复制业务字段到独立 DTO，供 HTTP 序列化使用。
+func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	out := benchmarkJob{
+	out := benchmarkJobSnapshot{
 		ID: j.ID, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
 		PromptLen: j.PromptLen, MaxTokens: j.MaxTokens, StartedAt: j.StartedAt,
 		FinishedAt: j.FinishedAt, LatencyMS: j.LatencyMS, HTTPStatus: j.HTTPStatus,
