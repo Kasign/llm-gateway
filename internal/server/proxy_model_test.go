@@ -76,3 +76,11 @@ func TestProxyModelIDFromSnapshot(t *testing.T) {
 		t.Fatalf("ambiguous catalog model = %q", got)
 	}
 }
+
+func TestSelectSwitchModelNamePrefersExplicitLoadID(t *testing.T) {
+	cur := settings.Upstream{Backend: "llamacpp", ModelName: "local.gguf"}
+	got, _ := selectSwitchModelName(cur, "deepseek", "deepseek-chat", "deepseek-reasoner")
+	if got != "deepseek-reasoner" {
+		t.Fatalf("model name = %q, want explicit model ID", got)
+	}
+}

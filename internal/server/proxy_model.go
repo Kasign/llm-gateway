@@ -25,6 +25,10 @@ func (s *Server) configuredProxyModelHint() string {
 	if h := strings.TrimSpace(u.ModelName); h != "" {
 		return h
 	}
+	// 远程 Provider 不能回退到启动时残留的本地模型名。
+	if !isLocalInferenceBackend(u.Backend) {
+		return ""
+	}
 	return strings.TrimSpace(s.cfg.Llama.ModelName)
 }
 

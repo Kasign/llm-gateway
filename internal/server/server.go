@@ -380,6 +380,35 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	}
 	s.livePatch(r.Context(), id, store.RequestLog{APIKeyID: key.ID, APIKeyName: key.Name})
 
+	backend := s.effectiveUpstream().Backend
+	if _, remote := s.remoteProviderConfig(backend); remote {
+		target, err := s.resolveProxyModelTarget(r.Context())
+		if err != nil {
+			finish(503, "error", "no_proxy_model", err.Error(), 0)
+			jsonError(w, 503, "no_proxy_model", err.Error())
+			return
+		}
+		data := make([]map[string]interface{}, 0, 1)
+		modelID := strings.TrimSpace(target.ModelKey)
+		if target.Model != nil {
+			modelID = target.Model.ModelKey
+		}
+		// 远程 Provider 的 /v1 实际只路由到其当前配置模型，且仍执行每个 Gateway Key 的模型 ACL。
+		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+			data = append(data, map[string]interface{}{
+				"id": modelID, "object": "model", "created": time.Now().Unix(),
+				"owned_by": backend, "display_name": target.UpstreamID,
+			})
+		}
+		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+		s.keys.Touch(context.Background(), key.ID)
+		finish(200, "success", "", "", int64(len(body)))
+		applog.Printf("[%s] /v1/models ok: key=%s models=%d latency=%dms", id, key.Name, len(data), time.Since(start).Milliseconds())
+		return
+	}
+
 	// 从数据库列出所有已安装的模型
 	ms, err := s.models.List(r.Context())
 	if err != nil {

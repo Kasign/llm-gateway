@@ -14,11 +14,15 @@ import (
 // SwitchProxyUpstream updates which backend receives /v1 proxy traffic and optionally loads a model there.
 func (s *Server) SwitchProxyUpstream(ctx context.Context, u settings.Upstream, loadModelID string) error {
 	cur := s.effectiveUpstream()
+	u = s.resolveUpstream(u)
 	loadModelID = strings.TrimSpace(loadModelID)
 	name, byBackend := selectSwitchModelName(cur, u.Backend, u.ModelName, loadModelID)
 	u.ModelName = name
 	u.ModelsByBackend = byBackend
 
+	if !s.isConfiguredProvider(u.Backend) {
+		return fmt.Errorf("Provider %q is not configured", u.Backend)
+	}
 	if err := s.validateUpstreamBackend(ctx, u.Backend, u.BaseURL); err != nil {
 		return err
 	}
@@ -28,17 +32,21 @@ func (s *Server) SwitchProxyUpstream(ctx context.Context, u settings.Upstream, l
 
 	oldBackend, oldURL := cur.Backend, cur.BaseURL
 	s.applyUpstream(u, true)
-	if oldURL != "" && (oldBackend != u.Backend || oldURL != u.BaseURL) {
+	// 仅在本地后端之间切换时释放旧模型；切到远程 Provider 不发送本地模型管理请求。
+	if isLocalInferenceBackend(oldBackend) && isLocalInferenceBackend(u.Backend) &&
+		oldURL != "" && (oldBackend != u.Backend || oldURL != u.BaseURL) {
 		oldClient := s.newUpstreamClient(oldURL, oldBackend)
 		_ = oldClient.UnloadAll(ctx)
 	}
 
 	if loadModelID != "" {
-		if s.cfg.Llama.ModelsMax <= 1 && u.Backend == "ollama" {
-			_ = s.InferenceUnloadAll(ctx, "ollama")
-		}
-		if _, err := s.InferenceLoad(ctx, u.Backend, loadModelID, "", nil); err != nil {
-			return err
+		if isLocalInferenceBackend(u.Backend) {
+			if s.cfg.Llama.ModelsMax <= 1 && u.Backend == "ollama" {
+				_ = s.InferenceUnloadAll(ctx, "ollama")
+			}
+			if _, err := s.InferenceLoad(ctx, u.Backend, loadModelID, "", nil); err != nil {
+				return err
+			}
 		}
 		u.ModelName = loadModelID
 		if u.ModelsByBackend == nil {
@@ -80,10 +88,9 @@ func selectSwitchModelName(cur settings.Upstream, nextBackend, requested, loadMo
 	loadModelID = strings.TrimSpace(loadModelID)
 	var name string
 	switch {
-	case requested != "":
-		name = requested
 	case loadModelID != "":
 		name = loadModelID
+	case requested != "":
 	case nextBackend == cur.Backend:
 		name = cur.ModelName
 	default:

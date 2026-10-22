@@ -142,7 +142,7 @@ docs/                        中文架构、协议和运维文档
 | 阶段 1：日志可靠性 | 进行中 | 99% | 已完成查询凭据脱敏与可信代理 URL 校验，并将 Header 脱敏扩展到自定义 Provider Key、Credential、Private-Key 命名；回归测试待 CI 验证 |
 | 阶段 2：请求边界与路由 | 进行中 | 70% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单和 Redis Lua 原子限流；审计 URL 已改为只信任可信代理的转发头，并对异常 XFF 链路失败关闭，待 CI 验证 |
 | 阶段 3：Provider 抽象 | 进行中 | 50% | 已新增 Provider 契约、Registry、本地 Adapter 与可选模型管理能力；新增 HTTP 状态到稳定错误分类的统一映射和重试标记，待 CI 验证 |
-| 阶段 4：外部 Provider | 进行中 | 35% | 已增加配置加载期安全校验、将远程 Provider 注册到 Registry，并放宽 settings 的 backend ID 结构约束；实际运行时切换、模型列表和 UI 正在接入 |
+| 阶段 4：外部 Provider | 进行中 | 55% | 远程 Provider 已接入后端切换 API、默认模型和模型列表 ACL；切换远端不调用本地加载/卸载接口，管理台动态选项待完成 |
 | 阶段 5：运行治理 | 进行中 | 10% | 增加 Go CI 后修复 vet 揭示的 benchmark 锁复制问题；尚待最新 CI 结果 |
 
 ### 下一步

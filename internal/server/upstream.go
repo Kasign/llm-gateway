@@ -230,15 +230,31 @@ func (s *Server) getBackendAPI(w http.ResponseWriter, r *http.Request) {
 	if proxyActive == "" {
 		proxyActive = s.activeModelHintForBackend(u.Backend)
 	}
+	health := overview.health
+	if _, remote := s.remoteProviderConfig(u.Backend); remote {
+		health = "remote Provider configured; connectivity is checked on inference"
+	}
+	probes := overview.probes
+	if probes == nil {
+		probes = map[string]interface{}{}
+	}
+	for _, item := range s.cfg.Providers.OpenAICompatible {
+		if item.Enabled {
+			probes[item.ID] = map[string]interface{}{
+				"base_url": item.BaseURL, "configured_remote": true, "default_model": item.DefaultModel,
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"active":                      u,
 		"defaults":                    s.fileUpstream,
 		"configured_urls":             s.configuredBackendURLs(),
+		"available_backends":          s.availableBackends(),
 		"url_warnings":                s.upstreamURLWarnings(),
-		"health":                      overview.health,
+		"health":                      health,
 		"url_from_env_only":           true,
-		"upstream_probes":             overview.probes,
+		"upstream_probes":             probes,
 		"inference_active_model_id":   proxyActive,
 		"inference_active_by_backend": overview.activeByBackend,
 	})
@@ -288,14 +304,13 @@ func (s *Server) putBackendAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "invalid_body", err.Error())
 		return
 	}
-	u := settings.Normalize(settings.Upstream{Backend: in.Backend, ModelName: strings.TrimSpace(in.ModelName)})
-	if u.Backend != "llamacpp" && u.Backend != "ollama" {
-		jsonError(w, 400, "invalid_upstream", "backend must be llamacpp or ollama")
+	u := s.resolveUpstream(settings.Normalize(settings.Upstream{Backend: in.Backend, ModelName: strings.TrimSpace(in.ModelName)}))
+	if !s.isConfiguredProvider(u.Backend) {
+		jsonError(w, 400, "invalid_upstream", "Provider ID is not configured")
 		return
 	}
-	u = s.resolveUpstream(u)
 	if u.BaseURL == "" {
-		jsonError(w, 400, "upstream_url_missing", "configure LLAMA_CPP_BASE_URL and OLLAMA_BASE_URL in deploy/.env")
+		jsonError(w, 400, "upstream_url_missing", "Provider URL is missing from deploy/config.yaml or deploy/.env")
 		return
 	}
 	modelID := strings.TrimSpace(in.ModelID)
@@ -314,14 +329,17 @@ func (s *Server) putBackendAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	u = s.effectiveUpstream()
-
+	active := s.effectiveUpstream()
+	health := "configured"
+	if isLocalInferenceBackend(active.Backend) {
+		health = errString(s.llamaClient().Health(r.Context()))
+	} else {
+		health = "remote Provider configured; connectivity is checked on inference"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":         true,
-		"active":          s.effectiveUpstream(),
-		"configured_urls": s.configuredBackendURLs(),
-		"health":          errString(s.llamaClient().Health(r.Context())),
+		"success": true, "active": active, "configured_urls": s.configuredBackendURLs(),
+		"available_backends": s.availableBackends(), "health": health,
 	})
 }
 
@@ -333,7 +351,12 @@ func (s *Server) backendUnloadAllAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 405, "method_not_allowed", "POST required")
 		return
 	}
-	if err := s.InferenceUnloadAll(r.Context(), "llamacpp"); err != nil {
+	backend := s.effectiveUpstream().Backend
+	if !isLocalInferenceBackend(backend) {
+		jsonError(w, 400, "unsupported_operation", "remote Provider has no local model unload operation")
+		return
+	}
+	if err := s.InferenceUnloadAll(r.Context(), backend); err != nil {
 		jsonError(w, 502, "unload_failed", err.Error())
 		return
 	}
@@ -348,14 +371,24 @@ func (s *Server) upstreamModelsAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 405, "method_not_allowed", "GET required")
 		return
 	}
+	active := s.effectiveUpstream()
+	if _, remote := s.remoteProviderConfig(active.Backend); remote {
+		data := []map[string]interface{}{}
+		if name := strings.TrimSpace(active.ModelName); name != "" {
+			data = append(data, map[string]interface{}{"id": name, "object": "model", "owned_by": active.Backend})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": data})
+		return
+	}
 	client := s.llamaClient()
-	b, err := client.List(r.Context())
+	body, err := client.List(r.Context())
 	if err != nil {
 		jsonError(w, 502, "upstream_error", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(b)
+	w.Write(body)
 }
 
 func (s *Server) unloadModelUpstream(ctx context.Context, m *model.Model) error {
