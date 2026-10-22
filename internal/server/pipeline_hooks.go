@@ -116,7 +116,10 @@ func (s *Server) targetOf(id string) proxyModelTarget {
 }
 
 func (s *Server) mutateSanitize(_ context.Context, st core.State) (core.State, error) {
-	st.Body = sanitizeForLlama(st.Path, st.Body)
+	// Qwen/llama.cpp 的 system 合并属于本地模板兼容逻辑；远程 Provider 必须保留调用方原始消息结构。
+	if isLocalInferenceBackend(s.effectiveUpstream().Backend) {
+		st.Body = sanitizeForLlama(st.Path, st.Body)
+	}
 	return st, nil
 }
 

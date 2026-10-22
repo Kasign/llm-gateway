@@ -13,6 +13,11 @@ func (s *Server) applyInferenceParamsToBody(ctx context.Context, path string, bo
 	if len(body) == 0 {
 		return body
 	}
+	// 当前参数面板只为 llama.cpp/Ollama 定义默认值与 thinking 参数；不可把本地默认采样字段注入 OpenAI/DeepSeek 请求。
+	// 远程 Provider 的专属参数策略应在其各自配置/能力完善后再单独启用。
+	if !isLocalInferenceBackend(s.effectiveUpstream().Backend) {
+		return body
+	}
 	pl := strings.ToLower(path)
 	if !(strings.Contains(pl, "/v1/chat/completions") || strings.Contains(pl, "/v1/messages") || strings.Contains(pl, "/v1/responses")) {
 		return body
