@@ -254,7 +254,9 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return core.Result{}, p.transportError(ctx, err)
+		transportErr := p.transportError(ctx, err)
+		p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+		return core.Result{}, transportErr
 	}
 	defer resp.Body.Close()
 	if call.OnHeaders != nil {
@@ -304,21 +306,33 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 			break
 		}
 		if readErr != nil {
-			return core.Result{Status: resp.StatusCode, ResponseBytes: total}, p.transportError(ctx, readErr)
+			transportErr := p.transportError(ctx, readErr)
+			p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+			return core.Result{Status: resp.StatusCode, ResponseBytes: total}, transportErr
 		}
 	}
 	return core.Result{Status: resp.StatusCode, ResponseBytes: total}, nil
 }
 
 func (p *OpenAICompatibleProvider) transportError(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			return NewHTTPError(p.id, http.StatusGatewayTimeout, ctxErr)
+		}
+		return ctxErr
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return NewHTTPError(p.id, http.StatusGatewayTimeout, err)
 	}
 	return NewHTTPError(p.id, http.StatusBadGateway, err)
+}
+
+func streamErrorCode(err error) string {
+	if mapped := ToCoreError(err); mapped != nil && mapped.Code != "" {
+		return mapped.Code
+	}
+	return "provider_stream_interrupted"
 }
 
 func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string) {
@@ -334,14 +348,10 @@ func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCal
 	})
 	chunk := append([]byte("event: error\ndata: "), body...)
 	chunk = append(chunk, []byte("\n\n")...)
-	writer := call.ClientWriter
-	if writer == nil {
-		writer = func(data []byte) error {
-			_, err := call.Writer.Write(data)
-			return err
-		}
-	}
-	if err := writer(chunk); err == nil {
+	// 用原始 ResponseWriter 尝试发送终止事件，不复用尊重 request context 的 ClientWriter：
+	// 超时后 context 已结束，但只要连接仍在，客户端仍应收到明确的 SSE 错误。
+	n, err := call.Writer.Write(chunk)
+	if err == nil && n == len(chunk) {
 		if flusher, ok := call.Writer.(http.Flusher); ok {
 			flusher.Flush()
 		}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func testRemoteProvider(t *testing.T, server *httptest.Server, opts OpenAICompatibleConfig) *OpenAICompatibleProvider {
@@ -219,5 +220,87 @@ func TestOpenAICompatibleProviderBlocksPrivateNetworkByDefault(t *testing.T) {
 	var providerErr *ProviderError
 	if !errors.As(err, &providerErr) || providerErr.Kind != ErrorUpstream {
 		t.Fatalf("expected classified upstream error, got %T %v", err, err)
+	}
+}
+ 
+func TestOpenAICompatibleTransportErrorMapsDeadlineTo504(t *testing.T) {
+	p := &OpenAICompatibleProvider{id: "test-remote"}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancel()
+
+	err := p.transportError(ctx, context.DeadlineExceeded)
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.Kind != ErrorTimeout {
+		t.Fatalf("transport error = %#v, want ProviderError timeout", err)
+	}
+	mapped := ToCoreError(err)
+	if mapped == nil || mapped.Status != http.StatusGatewayTimeout {
+		t.Fatalf("mapped timeout = %+v, want HTTP 504", mapped)
+	}
+}
+
+type providerCommittedWriter struct {
+	recorder *httptest.ResponseRecorder
+	wrote    bool
+}
+
+func newProviderCommittedWriter() *providerCommittedWriter {
+	return &providerCommittedWriter{recorder: httptest.NewRecorder()}
+}
+func (w *providerCommittedWriter) Header() http.Header { return w.recorder.Header() }
+func (w *providerCommittedWriter) WriteHeader(status int) {
+	if w.wrote {
+		return
+	}
+	w.wrote = true
+	w.recorder.WriteHeader(status)
+}
+func (w *providerCommittedWriter) Write(data []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.recorder.Write(data)
+}
+func (w *providerCommittedWriter) Flush() {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.recorder.Flush()
+}
+func (w *providerCommittedWriter) HeaderWritten() bool { return w.wrote }
+
+func TestOpenAICompatibleProviderWritesSSEErrorAfterUpstreamReadFailure(t *testing.T) {
+	const firstChunk = "data: {\\"choices\\":[{\\"delta\\":{\\"content\\":\\"hello\\"}}]}\\n\\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// 声明更长的 Content-Length 并提前结束，模拟上游在 SSE 中途断流。
+		w.Header().Set("Content-Length", "256")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, firstChunk)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	writer := newProviderCommittedWriter()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request, Path: "/v1/chat/completions", Body: []byte("{}"), Stream: true,
+		ClientWriter: func(data []byte) error {
+			_, err := writer.Write(data)
+			return err
+		},
+	})
+	if err == nil {
+		t.Fatal("expected interrupted stream error")
+	}
+	if result.Status != http.StatusOK {
+		t.Fatalf("upstream status = %d, want original 200", result.Status)
+	}
+	body := writer.recorder.Body.String()
+	if !strings.Contains(body, "hello") || !strings.Contains(body, "event: error") {
+		t.Fatalf("stream should preserve received content and append an SSE error event: %q", body)
+	}
+	if strings.Contains(body, "connection refused") || strings.Contains(body, server.URL) {
+		t.Fatalf("error event must not expose internal transport detail: %q", body)
 	}
 }
