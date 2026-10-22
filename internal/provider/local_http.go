@@ -86,25 +86,41 @@ func (p *LocalHTTPProvider) Forward(ctx context.Context, call InferenceCall) (co
 }
 
 // NewLocalRegistry 将两个已支持的本地后端注册到统一推理接口。
-// 工厂每次解析时获取当前活动客户端，管理员切换上游后不会持有过期客户端。
-func NewLocalRegistry(clientFactory func() LocalHTTPClient) *Registry {
+// managerFactory 可选；没有本地模型控制能力的 Provider 不需要实现空操作。
+func NewLocalRegistry(clientFactory func() LocalHTTPClient, managerFactory ...func(string) LocalModelManager) *Registry {
 	registry := NewRegistry()
-	capabilities := Capabilities{
-		Protocol:             "openai-compatible",
-		ChatCompletions:      true,
-		Streaming:            true,
-		LocalModelManagement: true,
+	var makeManager func(string) LocalModelManager
+	if len(managerFactory) > 0 {
+		makeManager = managerFactory[0]
 	}
-	register := func(id string) Factory {
+	register := func(id string, hasManager bool) Factory {
 		return func() Provider {
 			var client LocalHTTPClient
 			if clientFactory != nil {
 				client = clientFactory()
 			}
+			capabilities := Capabilities{
+				Protocol:             "openai-compatible",
+				ChatCompletions:      true,
+				Streaming:            true,
+				LocalModelManagement: hasManager,
+			}
 			return NewLocalHTTPProvider(id, capabilities, client)
 		}
 	}
-	_ = registry.Register("llamacpp", register("llamacpp"))
-	_ = registry.Register("ollama", register("ollama"))
+	registerLocal := func(id string) {
+		var manager LocalModelManager
+		if makeManager != nil {
+			manager = makeManager(id)
+		}
+		factory := register(id, manager != nil)
+		if manager == nil {
+			_ = registry.Register(id, factory)
+			return
+		}
+		_ = registry.RegisterLocal(id, factory, manager)
+	}
+	registerLocal("llamacpp")
+	registerLocal("ollama")
 	return registry
 }

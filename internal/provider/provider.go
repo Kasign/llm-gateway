@@ -112,7 +112,9 @@ type Provider interface {
 }
 
 // LocalModelManager 是可选控制面能力，不属于所有 Provider 的必选接口。
+// EnsureReady 供请求阶段使用；Load/Unload/Refresh 供管理操作使用。
 type LocalModelManager interface {
+	EnsureReady(context.Context, string, string) error
 	Load(context.Context, string) error
 	Unload(context.Context, string) error
 	Refresh(context.Context) error
@@ -124,10 +126,14 @@ type Factory func() Provider
 type Registry struct {
 	mu        sync.RWMutex
 	factories map[string]Factory
+	managers  map[string]LocalModelManager
 }
 
 func NewRegistry() *Registry {
-	return &Registry{factories: make(map[string]Factory)}
+	return &Registry{
+		factories: make(map[string]Factory),
+		managers:  make(map[string]LocalModelManager),
+	}
 }
 
 func normalizeID(id string) string {
@@ -149,6 +155,38 @@ func (r *Registry) Register(id string, factory Factory) error {
 	}
 	r.factories[key] = factory
 	return nil
+}
+
+// RegisterLocal 将本地 Provider 与可选管理器一起注册，避免请求线程看到半完成注册。
+func (r *Registry) RegisterLocal(id string, factory Factory, manager LocalModelManager) error {
+	if r == nil {
+		return errors.New("provider registry is nil")
+	}
+	key := normalizeID(id)
+	if key == "" || factory == nil {
+		return errors.New("provider ID and factory are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.factories[key]; exists {
+		return fmt.Errorf("%w: %s", ErrProviderExists, key)
+	}
+	r.factories[key] = factory
+	if manager != nil {
+		r.managers[key] = manager
+	}
+	return nil
+}
+
+// ResolveLocalModelManager 获取可选本地控制能力；没有该能力的 Provider 会返回 false。
+func (r *Registry) ResolveLocalModelManager(id string) (LocalModelManager, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	manager, ok := r.managers[normalizeID(id)]
+	r.mu.RUnlock()
+	return manager, ok
 }
 
 func (r *Registry) Resolve(id string) (Provider, error) {

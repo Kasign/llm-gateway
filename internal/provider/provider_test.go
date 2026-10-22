@@ -152,3 +152,65 @@ func TestLocalHTTPProviderForwardsStreamCallbacks(t *testing.T) {
 		t.Fatalf("stream body = %q", recorder.Body.String())
 	}
 }
+
+type fakeLocalManager struct {
+	readyCalls   int
+	loaded       string
+	unloaded     string
+	refreshCalls int
+}
+
+func (m *fakeLocalManager) EnsureReady(context.Context, string, string) error {
+	m.readyCalls++
+	return nil
+}
+func (m *fakeLocalManager) Load(_ context.Context, id string) error {
+	m.loaded = id
+	return nil
+}
+func (m *fakeLocalManager) Unload(_ context.Context, id string) error {
+	m.unloaded = id
+	return nil
+}
+func (m *fakeLocalManager) Refresh(context.Context) error {
+	m.refreshCalls++
+	return nil
+}
+
+func TestLocalRegistryExposesOptionalModelManager(t *testing.T) {
+	client := &fakeHTTPClient{}
+	manager := &fakeLocalManager{}
+	registry := NewLocalRegistry(
+		func() LocalHTTPClient { return client },
+		func(string) LocalModelManager { return manager },
+	)
+	p, err := registry.Resolve("llamacpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Capabilities().LocalModelManagement {
+		t.Fatal("local management capability should be advertised when a manager exists")
+	}
+	gotManager, ok := registry.ResolveLocalModelManager("LLAMACPP")
+	if !ok || gotManager == nil {
+		t.Fatal("local manager should resolve case-insensitively")
+	}
+	if err := gotManager.EnsureReady(context.Background(), "model-key", "upstream-id"); err != nil {
+		t.Fatal(err)
+	}
+	if manager.readyCalls != 1 {
+		t.Fatalf("EnsureReady calls = %d, want 1", manager.readyCalls)
+	}
+
+	registryWithoutManager := NewLocalRegistry(func() LocalHTTPClient { return client })
+	p, err = registryWithoutManager.Resolve("ollama")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Capabilities().LocalModelManagement {
+		t.Fatal("provider without a manager must not advertise local model management")
+	}
+	if _, ok := registryWithoutManager.ResolveLocalModelManager("ollama"); ok {
+		t.Fatal("provider without local management must not receive local model operations")
+	}
+}

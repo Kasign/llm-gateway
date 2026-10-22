@@ -118,6 +118,14 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 	if !s.cfg.Llama.AutoLoadOnProxy {
 		return nil
 	}
+	// 只有注册了本地模型控制能力的 Provider 才自动加载；远程 Provider 不会误调用本地控制 API。
+	if s.providers == nil {
+		return nil
+	}
+	manager, ok := s.providers.ResolveLocalModelManager(s.effectiveUpstream().Backend)
+	if !ok {
+		return nil
+	}
 	target := s.targetOf(st.ID)
 	if target.UpstreamID == "" {
 		target.UpstreamID = st.Model.UpstreamID
@@ -130,7 +138,7 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 		waitCtx, cancel = context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 	}
-	err := s.ensureProxyModelReady(waitCtx, target)
+	err := manager.EnsureReady(waitCtx, target.ModelKey, target.UpstreamID)
 	if err == nil {
 		return nil
 	}
