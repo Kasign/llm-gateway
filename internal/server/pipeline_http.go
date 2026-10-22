@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +15,14 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/store"
 )
+
+const maxInferenceRequestBodyBytes int64 = 64 << 20
+
+// readLimitedRequestBody 严格限制请求体大小。LimitReader 在超限后会表现为 EOF，
+// MaxBytesReader 则会返回 *http.MaxBytesError，让调用方可以明确拒绝过大的请求。
+func readLimitedRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
+	return io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
+}
 
 // serveInference 是 /v1 推理的门外：鉴权、限流、读 body，然后进入固化的 Run。
 // 鉴权和限流不属于主流程，放在读 body 之前，非法请求不消耗内存也不进 Run。
@@ -47,9 +56,14 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		s.rejectInference(w, r, id, start, key, http.StatusTooManyRequests, "rate_limit_exceeded", "rate limit exceeded")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	body, err := readLimitedRequestBody(w, r, maxInferenceRequestBodyBytes)
 	if err != nil {
-		s.rejectInference(w, r, id, start, key, http.StatusBadRequest, "invalid_body", err.Error())
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			s.rejectInference(w, r, id, start, key, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the 64 MiB limit")
+		} else {
+			s.rejectInference(w, r, id, start, key, http.StatusBadRequest, "invalid_body", err.Error())
+		}
 		return
 	}
 	// 跟随客户端连接，并受网关超时限制。取消函数同时交给管理端「结束」。
