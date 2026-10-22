@@ -76,9 +76,12 @@ func TestInferenceForwarderPreservesProviderTimeoutStatus(t *testing.T) {
 
 	s := &Server{providers: registry, upstream: settings.Upstream{Backend: "remote-test"}}
 	st := core.State{
-		ID: "forward-timeout-test", Method: http.MethodPost, Path: "/v1/chat/completions",
-		Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
-		Header: make(http.Header), Model: core.ModelChoice{UpstreamID: "remote-model"},
+		Request: core.Request{
+			ID: "forward-timeout-test", Method: http.MethodPost, Path: "/v1/chat/completions",
+			Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
+			Header: make(http.Header),
+		},
+		Model: core.ModelChoice{UpstreamID: "remote-model"},
 	}
 	result, err := (inferenceForwarder{s: s}).Forward(context.Background(), st, nil)
 	if err == nil {
@@ -103,9 +106,12 @@ func TestInferenceForwarderUsesBadGatewayForUnclassifiedTransportError(t *testin
 
 	s := &Server{providers: registry, upstream: settings.Upstream{Backend: "remote-test"}}
 	st := core.State{
-		ID: "forward-transport-error-test", Method: http.MethodPost, Path: "/v1/chat/completions",
-		Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
-		Header: make(http.Header), Model: core.ModelChoice{UpstreamID: "remote-model"},
+		Request: core.Request{
+			ID: "forward-transport-error-test", Method: http.MethodPost, Path: "/v1/chat/completions",
+			Started: time.Now(), Sink: &responseSink{w: httptest.NewRecorder()},
+			Header: make(http.Header),
+		},
+		Model: core.ModelChoice{UpstreamID: "remote-model"},
 	}
 	result, err := (inferenceForwarder{s: s}).Forward(context.Background(), st, nil)
 	if err == nil {
