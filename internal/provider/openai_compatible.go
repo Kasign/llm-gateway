@@ -252,10 +252,23 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 
 func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call InferenceCall, req *http.Request) (core.Result, error) {
 	req.Header.Set("Accept", "text/event-stream")
+
+	// Responses API 的错误事件带 sequence_number。只旁路观察上游 SSE 序号，
+	// 不改写转发给客户端的原始数据；行/事件解析缓冲区有硬上限。
+	var responseSequence *responsesSequenceTracker
+	if isResponsesAPIPath(call.Path) {
+		responseSequence = &responsesSequenceTracker{}
+	}
+	writeStreamError := func(code string) int64 {
+		if responseSequence != nil {
+			return p.writeStreamErrorIfCommitted(call, code, responseSequence.NextSequence())
+		}
+		return writeStreamError(code)
+	}
 	resp, err := p.client.Do(req)
 	if err != nil {
 		transportErr := p.transportError(ctx, err)
-		written := p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+		written := writeStreamError(streamErrorCode(transportErr))
 		return core.Result{ResponseBytes: written}, transportErr
 	}
 	defer resp.Body.Close()
@@ -263,7 +276,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		call.OnHeaders(resp.Header, resp.StatusCode)
 	}
 	if isRedirectStatus(resp.StatusCode) {
-		written := p.writeStreamErrorIfCommitted(call, "provider_redirect_rejected")
+		written := writeStreamError("provider_redirect_rejected")
 		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
 	// 上游非 2xx 时，不透传供应商原始错误正文，防止暴露内部诊断或凭据上下文。
@@ -273,7 +286,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
 		code := streamErrorCode(upstreamErr)
 		if call.WriterWritten() {
-			written := p.writeStreamErrorIfCommitted(call, code)
+			written := writeStreamError(code)
 			return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
 		}
 
@@ -321,6 +334,9 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 				return core.Result{Status: resp.StatusCode, ResponseBytes: total}, err
 			}
 			total += int64(len(chunk))
+			if responseSequence != nil {
+				responseSequence.Observe(chunk)
+			}
 			if flusher, ok := call.Writer.(http.Flusher); ok {
 				flusher.Flush()
 			}
@@ -333,7 +349,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		}
 		if readErr != nil {
 			transportErr := p.transportError(ctx, readErr)
-			errorBytes := p.writeStreamErrorIfCommitted(call, streamErrorCode(transportErr))
+			errorBytes := writeStreamError(streamErrorCode(transportErr))
 			return core.Result{Status: resp.StatusCode, ResponseBytes: total + errorBytes}, transportErr
 		}
 	}
@@ -361,11 +377,15 @@ func streamErrorCode(err error) string {
 	return "provider_stream_interrupted"
 }
 
-func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string) int64 {
+func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string, sequenceNumber ...int64) int64 {
 	if !call.WriterWritten() {
 		return 0
 	}
-	body := safeProviderErrorBody(code)
+	var sequence int64
+	if len(sequenceNumber) > 0 {
+		sequence = sequenceNumber[0]
+	}
+	body := safeProviderStreamErrorBody(call.Path, code, sequence)
 	chunk := append([]byte("event: error\ndata: "), body...)
 	chunk = append(chunk, []byte("\n\n")...)
 	// 用原始 ResponseWriter 尝试发送终止事件，不复用尊重 request context 的 ClientWriter：
@@ -383,7 +403,132 @@ func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCal
 	return int64(n)
 }
 
-// safeProviderErrorBody 生成稳定且不包含上游原始文本的公共错误正文。
+// isResponsesAPIPath 判断本次请求是否使用 Responses API；查询参数不参与协议判断。
+func isResponsesAPIPath(rawPath string) bool {
+	rawPath = strings.TrimSpace(strings.SplitN(rawPath, "?", 2)[0])
+	rawPath = strings.TrimRight(rawPath, "/")
+	return rawPath == "/v1/responses" || strings.HasSuffix(rawPath, "/v1/responses")
+}
+
+const (
+	// 序号观察器只解析轻量 SSE 元数据，绝不改写实际转发的字节。
+	maxResponsesSSELineBytes  = 64 << 10
+	maxResponsesSSEEventBytes = 256 << 10
+)
+
+type responsesSequenceTracker struct {
+	pending    []byte
+	data       []byte
+	skipLine   bool
+	skipEvent  bool
+	last       int64
+	hasLast    bool
+}
+
+// Observe 从已经交付给客户端的上游原始块里旁路读取 sequence_number。
+// 对不规范/超大 SSE 事件直接放弃该事件的序号解析，保证解析缓冲区有界。
+func (t *responsesSequenceTracker) Observe(chunk []byte) {
+	if t == nil {
+		return
+	}
+	for len(chunk) > 0 {
+		if t.skipLine {
+			newline := bytes.IndexByte(chunk, '\n')
+			if newline < 0 {
+				return
+			}
+			chunk = chunk[newline+1:]
+			t.skipLine = false
+			continue
+		}
+
+		newline := bytes.IndexByte(chunk, '\n')
+		if newline < 0 {
+			if len(t.pending)+len(chunk) > maxResponsesSSELineBytes {
+				t.pending = t.pending[:0]
+				t.skipLine = true
+				t.skipEvent = true
+				t.data = t.data[:0]
+				return
+			}
+			t.pending = append(t.pending, chunk...)
+			return
+		}
+
+		if len(t.pending)+newline > maxResponsesSSELineBytes {
+			t.pending = t.pending[:0]
+			t.skipEvent = true
+			t.data = t.data[:0]
+		} else {
+			t.pending = append(t.pending, chunk[:newline]...)
+			t.consumeLine(t.pending)
+			t.pending = t.pending[:0]
+		}
+		chunk = chunk[newline+1:]
+	}
+}
+
+func (t *responsesSequenceTracker) consumeLine(line []byte) {
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	if len(line) == 0 {
+		if !t.skipEvent && len(t.data) > 0 {
+			var event struct {
+				SequenceNumber *int64 `json:"sequence_number"`
+			}
+			if json.Unmarshal(t.data, &event) == nil && event.SequenceNumber != nil {
+				t.last = *event.SequenceNumber
+				t.hasLast = true
+			}
+		}
+		t.data = t.data[:0]
+		t.skipEvent = false
+		return
+	}
+	if t.skipEvent || len(line) < len("data:") || !bytes.Equal(line[:len("data:")], []byte("data:")) {
+		return
+	}
+
+	value := line[len("data:"):]
+	if len(value) > 0 && value[0] == ' ' {
+		value = value[1:]
+	}
+	extra := len(value)
+	if len(t.data) > 0 {
+		extra++
+	}
+	if len(t.data)+extra > maxResponsesSSEEventBytes {
+		t.data = t.data[:0]
+		t.skipEvent = true
+		return
+	}
+	if len(t.data) > 0 {
+		t.data = append(t.data, '\n')
+	}
+	t.data = append(t.data, value...)
+}
+
+// NextSequence 返回错误事件应使用的下一个序号。尚未收到有效上游事件时从 0 开始。
+func (t *responsesSequenceTracker) NextSequence() int64 {
+	if t == nil || !t.hasLast {
+		return 0
+	}
+	return t.last + 1
+}
+
+// safeProviderStreamErrorBody 根据请求协议生成安全终止事件。
+// Chat Completions 使用 error 包装；Responses API 要求 error 事件数据顶层带 type/code/message/param/sequence_number。
+func safeProviderStreamErrorBody(rawPath, code string, sequenceNumber int64) []byte {
+	if isResponsesAPIPath(rawPath) {
+		body, _ := json.Marshal(map[string]interface{}{
+			"type": "error", "code": code, "message": "upstream provider request failed",
+			"param": nil, "sequence_number": sequenceNumber,
+		})
+		return body
+	}
+	return safeProviderErrorBody(code)
+}
+
+// safeProviderErrorBody 生成稳定且不包含上游原始文本的 Chat Completions 公共错误正文。
 func safeProviderErrorBody(code string) []byte {
 	body, _ := json.Marshal(map[string]interface{}{
 		"error": map[string]string{

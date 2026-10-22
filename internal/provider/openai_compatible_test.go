@@ -442,6 +442,148 @@ func TestOpenAICompatibleProviderWritesSafeSSEErrorForUpstreamStatusAfterCommit(
 	}
 }
 
+func TestOpenAICompatibleProviderWritesResponsesErrorEventAfterCommit(t *testing.T) {
+	const privateError = "provider credential details must not leak"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"`+privateError+`"}}`)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "remote-secret"})
+	writer := newProviderCommittedWriter()
+	// 模拟 warm_start 已经提交了 200 状态行和一个完整 SSE 注释。
+	_, _ = writer.Write([]byte(": warm start\n\n"))
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request, Path: "/v1/responses",
+		Body: []byte("{}"), Stream: true,
+		ClientWriter: func(data []byte) error {
+			_, writeErr := writer.Write(data)
+			return writeErr
+		},
+	})
+	if err == nil {
+		t.Fatal("expected upstream authentication error")
+	}
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.Kind != ErrorAuthentication {
+		t.Fatalf("error = %T %v, want classified authentication error", err, err)
+	}
+	if result.Status != http.StatusUnauthorized || writer.recorder.Code != http.StatusOK {
+		t.Fatalf("upstream/gateway status = %d/%d, want 401/200", result.Status, writer.recorder.Code)
+	}
+	body := writer.recorder.Body.String()
+	payloadBytes := lastSSEDataPayload(t, body)
+	var payload struct {
+		Type           string  `json:"type"`
+		Code           string  `json:"code"`
+		Message        string  `json:"message"`
+		Param          *string `json:"param"`
+		SequenceNumber int64   `json:"sequence_number"`
+		Error          any     `json:"error"`
+	}
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		t.Fatalf("Responses error event data is not JSON: %v", err)
+	}
+	if !strings.Contains(body, "event: error") ||
+		payload.Type != "error" ||
+		payload.Code != "provider_authentication" ||
+		payload.Message != "upstream provider request failed" ||
+		payload.Param != nil ||
+		payload.SequenceNumber != 0 ||
+		payload.Error != nil {
+		t.Fatalf("Responses error event has incompatible shape: body=%q payload=%+v", body, payload)
+	}
+	if strings.Contains(body, privateError) || strings.Contains(body, "remote-secret") {
+		t.Fatalf("upstream error details leaked into Responses SSE: %q", body)
+	}
+}
+
+func TestOpenAICompatibleProviderWritesResponsesSequenceAfterUpstreamReadFailure(t *testing.T) {
+	const firstEvents = "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"delta\":\"hello\"}\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// 提前关闭响应体，模拟已输出部分 Responses 事件后的断流。
+		w.Header().Set("Content-Length", "1024")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, firstEvents)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	writer := newProviderCommittedWriter()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request, Path: "/v1/responses", Body: []byte("{}"), Stream: true,
+		ClientWriter: func(data []byte) error {
+			_, writeErr := writer.Write(data)
+			return writeErr
+		},
+	})
+	if err == nil {
+		t.Fatal("expected interrupted upstream stream error")
+	}
+	if result.Status != http.StatusOK {
+		t.Fatalf("upstream status = %d, want 200", result.Status)
+	}
+	body := writer.recorder.Body.String()
+	if !strings.Contains(body, "hello") || !strings.Contains(body, "event: error") {
+		t.Fatalf("stream should preserve received Responses events and append error event: %q", body)
+	}
+	payloadBytes := lastSSEDataPayload(t, body)
+	var payload struct {
+		Type           string `json:"type"`
+		Code           string `json:"code"`
+		SequenceNumber int64  `json:"sequence_number"`
+	}
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		t.Fatalf("terminal Responses error event is not JSON: %v", err)
+	}
+	if payload.Type != "error" || payload.Code != "provider_upstream" || payload.SequenceNumber != 2 {
+		t.Fatalf("terminal Responses error event = %+v, want type=error code=provider_upstream sequence_number=2", payload)
+	}
+}
+
+func TestResponsesSequenceTrackerHandlesChunkBoundariesAndBoundsMalformedLines(t *testing.T) {
+	tracker := &responsesSequenceTracker{}
+	chunks := []string{
+		"event: response.created\ndata: {\"type\":\"response.created\",",
+		"\"sequence_number\":4}\n\nevent: response.output_text.delta\ndata: {\"sequence_number\":5,",
+		"\"type\":\"response.output_text.delta\"}\n\n",
+	}
+	for _, chunk := range chunks {
+		tracker.Observe([]byte(chunk))
+	}
+	if got := tracker.NextSequence(); got != 6 {
+		t.Fatalf("NextSequence() = %d, want 6", got)
+	}
+
+	oversized := bytes.Repeat([]byte("x"), maxResponsesSSELineBytes+1)
+	tracker.Observe(append(oversized, '\n'))
+	if got := tracker.NextSequence(); got != 6 {
+		t.Fatalf("malformed oversized event changed sequence: got %d, want 6", got)
+	}
+}
+
+func lastSSEDataPayload(t *testing.T, body string) []byte {
+	t.Helper()
+	var last []byte
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(line, "data:") {
+			value := strings.TrimPrefix(line, "data:")
+			value = strings.TrimPrefix(value, " ")
+			last = []byte(value)
+		}
+	}
+	if len(last) == 0 {
+		t.Fatalf("SSE response contains no data payload: %q", body)
+	}
+	return last
+}
+
 func TestForbiddenRemoteIPBlocksSpecialUseRanges(t *testing.T) {
 	blocked := []string{
 		"192.0.2.10", "198.18.0.10", "198.51.100.10", "203.0.113.10",

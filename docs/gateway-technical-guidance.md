@@ -118,6 +118,7 @@
 当前状态：请求记录分别保存 Gateway 已提交状态与上游 HTTP 状态。远程 Provider 流式调用遇到 401、429、503 等非 2xx 时：
 - 如果 Gateway 尚未提交响应，返回原上游 HTTP 状态和脱敏 JSON 错误体，不把供应商原始错误正文或凭据上下文传给客户端。
 - 如果状态行已经提交（例如 warm-start 已发送 SSE 注释、客户端因此收到 200），HTTP 状态无法再改；适配器会追加安全的 SSE `event: error`，并记录真实上游错误状态。
+- Chat Completions 继续使用 `data: {"error": ...}` 形状；`/v1/responses` 使用顶层 `type/code/message/param/sequence_number` 错误事件。序号观察只读取已转发的 SSE 数据，不改写有效负载；观察器的行/事件缓存有硬上限。协议依据：[Responses API 流式事件](https://developers.openai.com/api/reference/resources/responses/streaming-events)。
 - 传输中断也用稳定的流式错误事件收口；不会自动重试已经开始输出的流，避免重复生成内容。
 
 现有单元测试覆盖主要分支，但真实供应商、Codex/SDK 的实际解析和代理链路仍需端到端验证。
