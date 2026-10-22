@@ -1,0 +1,34 @@
+name: Go CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 测试、静态检查与构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: 静态检查
+        run: go vet ./...
+
+      - name: 构建 Gateway
+        run: go build -o /tmp/llm-gateway ./cmd/gateway
