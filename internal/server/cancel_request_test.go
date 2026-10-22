@@ -43,14 +43,14 @@ func TestCloseRunningRequestDropsLive(t *testing.T) {
 func TestFinishStatusKeepsSpecificReason(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, state, code, msg := finishStatus(ctx, core.Event{Err: context.Canceled}, "写回客户端失败：closed")
+	_, _, state, code, msg := finishStatus(ctx, core.Event{Err: context.Canceled}, "写回客户端失败：closed")
 	if state != "cancelled" || code != "cancelled" || msg != "写回客户端失败：closed" {
 		t.Fatalf("%s %s %s", state, code, msg)
 	}
 	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer timeoutCancel()
 	time.Sleep(time.Millisecond)
-	_, state, code, msg = finishStatus(timeoutCtx, core.Event{Err: context.DeadlineExceeded}, "")
+	_, _, state, code, msg = finishStatus(timeoutCtx, core.Event{Err: context.DeadlineExceeded}, "")
 	if state != "error" || code != "gateway_timeout" || msg != "网关请求超时" {
 		t.Fatalf("%s %s %s", state, code, msg)
 	}

@@ -12,7 +12,7 @@ import (
 func TestFinishStatusSeparatesCommittedGatewayAndUpstreamStatus(t *testing.T) {
 	sink := &responseSink{w: httptest.NewRecorder()}
 	_, _ = sink.Write([]byte(": keepalive\n\n"))
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Sink: sink, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
 	if gatewayStatus != http.StatusOK || upstreamStatus != http.StatusBadRequest {
 		t.Fatalf("gateway/upstream = %d/%d, want 200/400", gatewayStatus, upstreamStatus)
 	}
@@ -23,7 +23,7 @@ func TestFinishStatusSeparatesCommittedGatewayAndUpstreamStatus(t *testing.T) {
 
 func TestFinishStatusUsesUpstreamStatusBeforeGatewayCommits(t *testing.T) {
 	sink := &responseSink{w: httptest.NewRecorder()}
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Sink: sink, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
 	if gatewayStatus != http.StatusBadRequest || upstreamStatus != http.StatusBadRequest {
 		t.Fatalf("gateway/upstream = %d/%d, want 400/400", gatewayStatus, upstreamStatus)
 	}
@@ -37,7 +37,7 @@ func TestFinishStatusCancellationKeepsCommittedGatewayStatus(t *testing.T) {
 	_, _ = sink.Write([]byte(": keepalive\n\n"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(ctx, core.Event{State: core.State{Sink: sink, Stream: true}, Result: &core.Result{Status: http.StatusOK}, Err: context.Canceled}, "客户端断开")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(ctx, core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusOK}, Err: context.Canceled}, "客户端断开")
 	if gatewayStatus != http.StatusOK || upstreamStatus != http.StatusOK {
 		t.Fatalf("gateway/upstream = %d/%d, want 200/200", gatewayStatus, upstreamStatus)
 	}
