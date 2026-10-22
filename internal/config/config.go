@@ -70,6 +70,9 @@ type Config struct {
 	Storage struct {
 		ModelsDir string `yaml:"models_dir"`
 	} `yaml:"storage"`
+	Providers struct {
+		OpenAICompatible []OpenAICompatibleProviderConfig `yaml:"openai_compatible"`
+	} `yaml:"providers"`
 	Download struct {
 		HFBaseURL        string `yaml:"hf_base_url"`
 		OllamaLibraryURL string `yaml:"ollama_library_url"`
@@ -287,6 +290,9 @@ func Load(path string) (*Config, error) {
 		return nil, errors.New("auth.admin_api_key must be changed from the example value")
 	}
 	applyAuthEnv(&c)
+	if err := c.validateProviderConfigs(); err != nil {
+		return nil, err
+	}
 	if err := adminuser.NormalizeWebLogin(&c.Auth.AdminUsername, &c.Auth.AdminPassword, &c.Auth.AdminPasswordHash); err != nil {
 		return nil, fmt.Errorf("auth web login: %w", err)
 	}

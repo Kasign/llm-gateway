@@ -26,6 +26,24 @@ func (s *Server) newInferencePipeline() *core.Pipeline {
 			func() provider.LocalHTTPClient { return s.llamaClient() },
 			func(id string) provider.LocalModelManager { return &serverLocalModelManager{s: s, backend: id} },
 		)
+		for _, cfg := range s.cfg.Providers.OpenAICompatible {
+			if !cfg.Enabled {
+				continue
+			}
+			remote, err := provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{
+				ID: cfg.ID, BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, APIKeyHeader: cfg.APIKeyHeader,
+				AllowInsecureHTTP: cfg.AllowInsecureHTTP, AllowPrivateNetwork: cfg.AllowPrivateNetwork,
+				MaxResponseBytes: cfg.MaxResponseBytes,
+			})
+			if err != nil {
+				// Load 已做配置校验；保留 fail-closed 行为，不能注册一个未通过安全校验的远程目标。
+				applog.Printf("remote provider registration skipped: id=%s error=%v", cfg.ID, err)
+				continue
+			}
+			if err := s.providers.Register(cfg.ID, func() provider.Provider { return remote }); err != nil {
+				applog.Printf("remote provider registration failed: id=%s error=%v", cfg.ID, err)
+			}
+		}
 	}
 	return &core.Pipeline{
 		Resolve: s.resolveInference,

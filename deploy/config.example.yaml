@@ -63,3 +63,18 @@ logging:
   # 流事件默认只保存类型、字段、字节数与时间；以下两项会保留原始内容，应谨慎开启。
   store_stream_raw: false
   store_stream_preview: false
+
+
+# 远程 OpenAI-compatible Provider（可选）。API Key 使用环境变量，不能写入 gateway_settings。
+providers:
+  openai_compatible: []
+  # 示例：
+  # openai_compatible:
+  #   - id: deepseek
+  #     enabled: true
+  #     base_url: "https://api.deepseek.com/v1"
+  #     api_key: "${DEEPSEEK_API_KEY}"
+  #     api_key_header: "Authorization"
+  #     default_model: "deepseek-chat"
+  #     allow_insecure_http: false
+  #     allow_private_network: false
