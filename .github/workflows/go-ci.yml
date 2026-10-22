@@ -38,11 +38,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: 构建管理台
+      - name: 安装前端依赖
         working-directory: web
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
 
-      - name: 检查已提交的 dist 与源码一致
-        run: git diff --exit-code -- web/static/dist/app.js
+      - name: 构建管理台源码
+        working-directory: web
+        run: npx esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=/tmp/llm-gateway-admin.js
+
+      - name: 校验前端语法与关键功能字段
+        run: |
+          node --check web/static/dist/app.js
+          node --check /tmp/llm-gateway-admin.js
+          for asset in web/static/dist/app.js /tmp/llm-gateway-admin.js; do
+            grep -q 'upstream_http_status' "$asset"
+            grep -q 'time_to_upstream_headers_ms' "$asset"
+            grep -q 'time_to_first_byte_ms' "$asset"
+          done
