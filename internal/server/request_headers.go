@@ -8,23 +8,28 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 )
 
-// secretHeaders 只用于打码，不是展示白名单。
-// 展示时遍历完整 Header，客户端新来的字段都会留下。
+// secretHeaders 使用小写规范化的名称，覆盖常见云 Provider、反向代理与会话凭据头。
+// 展示仍保留未知 Header；敏感头的值在写入实时详情和 payload 之前统一打码。
 var secretHeaders = map[string]bool{
-	"Authorization": true,
-	"X-Api-Key":     true,
-	"X-Admin-Key":   true,
-	"Cookie":        true,
-	"Set-Cookie":    true,
+	"authorization": true, "proxy-authorization": true,
+	"x-api-key": true, "api-key": true, "apikey": true, "x-admin-key": true,
+	"x-provider-key": true, "x-auth-key": true, "x-goog-api-key": true,
+	"ocp-apim-subscription-key": true,
+	"cookie": true, "set-cookie": true,
+	"token": true, "access-token": true, "refresh-token": true,
+	"access_token": true, "refresh_token": true, "x-auth-token": true,
 }
 
 func isSecretHeader(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "authorization", "x-api-key", "x-admin-key", "cookie", "set-cookie":
+	k := strings.ToLower(strings.TrimSpace(key))
+	if secretHeaders[k] {
 		return true
-	default:
-		return false
 	}
+	// 覆盖带厂商前缀的密钥头，例如 OpenAI-API-Key、X-Access-Token、Client-Secret。
+	return strings.HasSuffix(k, "-api-key") || strings.HasSuffix(k, "_api_key") ||
+		strings.HasSuffix(k, "-token") || strings.HasSuffix(k, "_token") ||
+		strings.HasSuffix(k, "-secret") || strings.HasSuffix(k, "_secret") ||
+		strings.HasSuffix(k, "-signature") || strings.HasSuffix(k, "_signature")
 }
 
 func redactHeaderValue(key, value string) string {

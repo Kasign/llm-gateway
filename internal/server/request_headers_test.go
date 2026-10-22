@@ -18,3 +18,22 @@ func TestFlattenHeadersKeepsUnknownFields(t *testing.T) {
 		t.Fatalf("full header map not kept: %#v", got)
 	}
 }
+
+func TestFlattenHeadersRedactsProviderCredentialHeaders(t *testing.T) {
+	h := map[string][]string{
+		"Proxy-Authorization": {"Basic dXNlcjpwYXNz"},
+		"OpenAI-API-Key":      {"sk-provider-secret"},
+		"X-Access-Token":      {"private-token"},
+		"Client-Secret":       {"client-secret"},
+		"X-Codex-Session":     {"session-123"},
+	}
+	got := flattenHeaders(h)
+	for _, key := range []string{"Proxy-Authorization", "OpenAI-API-Key", "X-Access-Token", "Client-Secret"} {
+		if got[key] != "***" {
+			t.Errorf("%s = %q, want redacted value", key, got[key])
+		}
+	}
+	if got["X-Codex-Session"] != "session-123" {
+		t.Fatalf("non-secret unknown header should remain visible: %#v", got)
+	}
+}
