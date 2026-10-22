@@ -60,7 +60,7 @@ jobs:
 
       # 一次性修复已确认过期的 dist；仅对本次诊断提交运行，修复后立即删除该临时步骤。
       - name: 一次性同步管理台构建产物
-        if: github.ref == 'refs/heads/dev' && github.event_name == 'push' && contains(github.event.head_commit.message, 'ci: 上传生成的管理台 bundle 用于一致性修复')
+        if: github.ref == 'refs/heads/dev' && github.event_name == 'push' && !contains(github.event.head_commit.message, 'build: 同步管理台部署 bundle')
         run: |
           if ! cmp -s /tmp/llm-gateway-admin.js web/static/dist/app.js; then
             cp /tmp/llm-gateway-admin.js web/static/dist/app.js
