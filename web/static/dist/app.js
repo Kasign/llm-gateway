@@ -2643,7 +2643,7 @@
       if (token === benchPollToken) setBenchRunning(false);
     }
   }
-  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
+  var modelHub, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
   var init_main = __esm({
     "js/app/main.js"() {
       init_dom();
