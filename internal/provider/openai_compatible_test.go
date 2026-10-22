@@ -270,7 +270,7 @@ func (w *providerCommittedWriter) Flush() {
 func (w *providerCommittedWriter) HeaderWritten() bool { return w.wrote }
 
 func TestOpenAICompatibleProviderWritesSSEErrorAfterUpstreamReadFailure(t *testing.T) {
-	const firstChunk = "data: {\\"choices\\":[{\\"delta\\":{\\"content\\":\\"hello\\"}}]}\\n\\n"
+	const firstChunk = `data: {"choices":[{"delta":{"content":"hello"}}]}` + "\n\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		// 声明更长的 Content-Length 并提前结束，模拟上游在 SSE 中途断流。
