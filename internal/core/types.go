@@ -34,6 +34,7 @@ type Request struct {
 	ID           string
 	Method       string
 	Path         string
+	RawQuery     string // 原始查询字符串单独保存，避免影响路由匹配与协议判断。
 	Header       map[string][]string
 	Body         []byte
 	ServiceModel string

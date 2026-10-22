@@ -4,12 +4,25 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/llama"
 )
+
+// upstreamPathWithQuery 把调用方原始查询参数附加到出站路径，不污染路由判断所用的 Path。
+func upstreamPathWithQuery(path, rawQuery string) string {
+	if rawQuery == "" {
+		return path
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + rawQuery
+}
 
 // inferenceForwarder 是主流程唯一的出网实现，包住 llama.Client 的 Proxy / StreamProxy。
 // 它只负责转发和写回，不写请求日志；每块上游数据通过 onChunk 交给观察者。
@@ -21,6 +34,7 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 	if upPath == "" {
 		upPath = st.Path
 	}
+	upPath = upstreamPathWithQuery(upPath, st.RawQuery)
 	// llama.Client 需要 http.ResponseWriter。responseSink（/v1）和 memSink（benchmark）都实现了它。
 	rw, ok := st.Sink.(http.ResponseWriter)
 	if !ok || rw == nil {
@@ -35,7 +49,12 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 	if req.Header == nil {
 		req.Header = http.Header{}
 	}
-	applog.Printf("[%s] upstream forward: path=%s stream=%v body=%d", st.ID, upPath, st.Stream, len(st.Body))
+	// 应用日志不记录原始查询参数，避免把参数中的敏感值写入日志。
+	logPath := st.Path
+	if logPath == "" {
+		logPath = strings.SplitN(upPath, "?", 2)[0]
+	}
+	applog.Printf("[%s] upstream forward: path=%s stream=%v body=%d", st.ID, logPath, st.Stream, len(st.Body))
 	// 出网组好请求后记下实际上游头。不改 Pipeline.Run。
 	ctx = llama.WithOutboundHeaderProbe(ctx, func(h http.Header) {
 		f.s.noteActualUpstreamHeaders(st.ID, h)

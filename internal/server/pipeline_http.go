@@ -77,7 +77,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 
 	sink := &responseSink{w: w}
 	_, err = s.pipe.Run(ctx, core.Request{
-		ID: id, Method: r.Method, Path: r.URL.Path, Header: headerMap(r.Header), Body: body,
+		ID: id, Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery, Header: headerMap(r.Header), Body: body,
 		Sink: sink, Started: start, ClientIP: clientIP(r), ClientName: requestClientName(r),
 		UserAgent: r.UserAgent(), RequestURL: requestPublicURL(r), Guards: []core.Guard{s.allowModelsGuard(key)},
 	})

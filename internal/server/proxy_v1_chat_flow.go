@@ -17,7 +17,7 @@ POST /v1/chat/completions（以及同前缀的 /v1/responses 等）
 Run 里各槽位的现实现：
   - Resolve：忽略客户端 JSON 的 model。有 ServiceModel（仅 benchmark 等进程内调用）才用它，否则用管理台当前推理模型。
   - Stamp：把选定的上游 ID 写回 body。
-  - Mutate：sanitize、推理参数。/v1/responses 的路径和 tools 保持原样，交给上游。
+  - Mutate：sanitize、推理参数。Path 不含查询字符串，用于路由匹配；原始 RawQuery 在 Forward 时透传给上游。/v1/responses 的路径和 tools 保持原样，交给上游。
   - Guard：auto_load 时等待模型就绪。chat 失败返回 503；/v1/responses 最多等 20 秒，失败仍转发。
     /v1 另附 allowed_models 检查，benchmark 不附。
   - WarmStart：配置 warm_start 打开且本次是流式时，先写一行 SSE 注释并 flush，再按间隔重复，直到本次 Run 结束。每一次写出各记一条流式事件。不进入回答，也不计入 TTFT。写出失败则取消这次推理。
