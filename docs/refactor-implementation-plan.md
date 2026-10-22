@@ -86,7 +86,7 @@ docs/                        中文架构、协议和运维文档
 验收：无权限请求不会触发模型加载或 Provider 请求；模型列表与 ACL 一致；查询参数、取消和错误映射回归测试通过。
 
 ### 阶段 3：Provider 扩展边界
-状态：进行中。已定义 Provider、Registry、Capabilities、Usage 和稳定错误类型；本地 HTTP Adapter 已接入唯一出网点，首轮 CI 发现一个 import 拼写错误，正在修复后重跑。
+状态：进行中。已定义 Provider、Registry、Capabilities、Usage 和稳定错误类型；本地 HTTP Adapter 已接入唯一出网点，CI 当前修复流式测试数据的字符串转义后重跑。
 
 先建立精简稳定的核心概念：
 - `Provider`：统一推理调用能力。
