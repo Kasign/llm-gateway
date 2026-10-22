@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -18,7 +19,18 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 )
 
-const defaultRemoteResponseLimit int64 = 32 << 20
+const (
+	defaultRemoteResponseLimit int64 = 32 << 20
+	maxRemoteResponseLimit     int64 = 512 << 20
+
+	remoteDialTimeout             = 10 * time.Second
+	remoteTLSHandshakeTimeout     = 10 * time.Second
+	remoteResponseHeaderTimeout   = 5 * time.Minute
+	remoteIdleConnTimeout         = 90 * time.Second
+	remoteMaxIdleConnections      = 100
+	remoteMaxIdleConnectionsPerHost = 16
+	remoteMaxConnectionsPerHost   = 64
+)
 
 // OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
 // 私网访问和明文 HTTP 均默认关闭；只有管理员明确配置后才放行。
@@ -94,6 +106,10 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 	if maxResponseBytes <= 0 {
 		maxResponseBytes = defaultRemoteResponseLimit
 	}
+	// 避免不合理的内存上限配置，也防止 maxResponseBytes+1 在读取时发生整数溢出。
+	if maxResponseBytes > maxRemoteResponseLimit {
+		return nil, fmt.Errorf("provider max_response_bytes must not exceed %d bytes (512 MiB)", maxRemoteResponseLimit)
+	}
 	return &OpenAICompatibleProvider{
 		id:                  id,
 		baseURL:             base,
@@ -163,7 +179,8 @@ func (p *OpenAICompatibleProvider) endpoint(rawPath string) (string, error) {
 	u := *p.baseURL
 	basePath := strings.TrimRight(u.Path, "/")
 	requestPath := requestURL.Path
-	if basePath == "/v1" && strings.HasPrefix(requestPath, "/v1/") {
+	// BaseURL 可包含反向代理前缀，例如 /openai/v1；只要末尾是 /v1，就不能重复拼入版本段。
+	if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(requestPath, "/v1/") {
 		requestPath = strings.TrimPrefix(requestPath, "/v1")
 	}
 	u.Path = path.Join(basePath, requestPath)
@@ -552,10 +569,19 @@ func isRedirectStatus(status int) bool {
 }
 
 func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	dialer := &net.Dialer{Timeout: remoteDialTimeout, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		Proxy: nil,
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		// 自定义 TLS 配置与 DialContext 后显式启用 HTTP/2，兼容只优先提供 h2 的服务。
+		ForceAttemptHTTP2:      true,
+		Proxy:                  nil,
+		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSHandshakeTimeout:    remoteTLSHandshakeTimeout,
+		ResponseHeaderTimeout:  remoteResponseHeaderTimeout,
+		IdleConnTimeout:        remoteIdleConnTimeout,
+		MaxIdleConns:            remoteMaxIdleConnections,
+		MaxIdleConnsPerHost:     remoteMaxIdleConnectionsPerHost,
+		MaxConnsPerHost:         remoteMaxConnectionsPerHost,
+		ExpectContinueTimeout:   time.Second,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -565,7 +591,10 @@ func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 			if ip, parseErr := netip.ParseAddr(strings.Trim(host, "[]")); parseErr == nil {
 				addresses = []netip.Addr{ip.Unmap()}
 			} else {
-				addresses, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+				// DNS 解析单独设置超时；它不能只依赖可能长达一小时的推理请求 Context。
+				lookupCtx, cancel := context.WithTimeout(ctx, remoteDialTimeout)
+				addresses, err = net.DefaultResolver.LookupNetIP(lookupCtx, "ip", host)
+				cancel()
 				if err != nil {
 					return nil, err
 				}
@@ -584,7 +613,7 @@ func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 				}
 				lastErr = dialErr
 			}
-			if blocked == len(addresses) {
+			if len(addresses) > 0 && blocked == len(addresses) {
 				return nil, errors.New("provider host resolves only to private or non-routable addresses")
 			}
 			if lastErr != nil {

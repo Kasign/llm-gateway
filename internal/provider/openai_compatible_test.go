@@ -607,3 +607,77 @@ func TestForbiddenRemoteIPAllowsPublicUnicastExamples(t *testing.T) {
 		}
 	}
 }
+
+
+func TestOpenAICompatibleProviderPreservesVersionedBasePathPrefix(t *testing.T) {
+	var gotPath, gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		ID: "path-prefix", BaseURL: server.URL + "/openai/v1",
+		AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAICompatibleProvider: %v", err)
+	}
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: httptest.NewRecorder(),
+		Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+		Path: "/v1/chat/completions?trace=a%2Fb&debug=1",
+		Body: []byte(`{"messages":[]}`),
+		ModelID: "model-a",
+	})
+	if err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+	if result.Status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", result.Status)
+	}
+	if gotPath != "/openai/v1/chat/completions" {
+		t.Fatalf("upstream path = %q, want /openai/v1/chat/completions", gotPath)
+	}
+	if gotQuery != "trace=a%2Fb&debug=1" {
+		t.Fatalf("upstream query = %q, want original encoded query", gotQuery)
+	}
+}
+
+func TestOpenAICompatibleProviderBoundsResponseLimit(t *testing.T) {
+	base := OpenAICompatibleConfig{
+		ID: "response-limit", BaseURL: "https://api.example.com/v1",
+		MaxResponseBytes: maxRemoteResponseLimit,
+	}
+	p, err := NewOpenAICompatibleProvider(base)
+	if err != nil {
+		t.Fatalf("maximum supported response limit should be accepted: %v", err)
+	}
+	if p.maxResponseBytes != maxRemoteResponseLimit {
+		t.Fatalf("maxResponseBytes = %d, want %d", p.maxResponseBytes, maxRemoteResponseLimit)
+	}
+
+	base.MaxResponseBytes = maxRemoteResponseLimit + 1
+	if _, err := NewOpenAICompatibleProvider(base); err == nil {
+		t.Fatal("response limit above 512 MiB must be rejected")
+	}
+}
+
+func TestRestrictedHTTPClientHasBoundedHTTP2Transport(t *testing.T) {
+	client := newRestrictedHTTPClient(false)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Fatal("custom restricted transport must explicitly enable HTTP/2")
+	}
+	if transport.TLSHandshakeTimeout <= 0 || transport.ResponseHeaderTimeout <= 0 {
+		t.Fatalf("TLS/header timeouts must be bounded: TLS=%s headers=%s", transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout)
+	}
+	if transport.IdleConnTimeout <= 0 || transport.MaxIdleConnsPerHost <= 0 || transport.MaxConnsPerHost <= 0 {
+		t.Fatalf("connection pool must have explicit bounds: idle=%s maxIdlePerHost=%d maxPerHost=%d", transport.IdleConnTimeout, transport.MaxIdleConnsPerHost, transport.MaxConnsPerHost)
+	}
+}

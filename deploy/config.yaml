@@ -89,6 +89,7 @@ providers:
   #     default_model: "deepseek-chat"
   #     allow_insecure_http: false
   #     allow_private_network: false
+  #     max_response_bytes: 33554432 # 可选：默认 32 MiB，最大 512 MiB
   #   - id: openai
   #     enabled: true
   #     base_url: "https://api.openai.com/v1"
@@ -97,3 +98,4 @@ providers:
   #     default_model: "gpt-4.1"
   #     allow_insecure_http: false
   #     allow_private_network: false
+  #     max_response_bytes: 33554432 # 可选：默认 32 MiB，最大 512 MiB
