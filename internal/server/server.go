@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ import (
 type Server struct {
 	// —— 基础依赖 ——
 	cfg *config.Config // 网关的全部配置（从配置文件加载，含 Redis、模型存储、上游地址等）
+	trustedProxyRanges []netip.Prefix // 只有直连来源命中可信网段时，才信任转发 IP 头。
 	db  *sql.DB        // 数据库连接池（SQLite/MySQL，存模型、Key、请求日志等）
 	// —— 数据仓库（各自负责一张表的增删改查）——
 	models   *model.Repo    // 模型仓库：管理本地安装了哪些 AI 模型、下载状态、是否启用
@@ -123,6 +125,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 		settings: settings.NewRepo(dbx),                                                                                                          // 设置仓库
 		llama:    llama.New(cfg.Llama.BaseURL, time.Duration(cfg.Llama.RequestTimeout)*time.Second, cfg.Llama.Backend, cfg.Llama.UpstreamAPIKey), // llama.cpp 客户端
 		limiter:  lim, live: live.NewRegistry(), downloader: dl, downloadCancel: make(map[string]context.CancelFunc), benchmarks: newBenchmarkStore(),
+		trustedProxyRanges: parseTrustedProxyRanges(cfg.Server.TrustedProxies),
 		upstream: fileUpstream, fileUpstream: fileUpstream, // 初始时当前上游 = 配置文件默认上游
 	}
 	// 6. 从数据库加载管理员在后台保存的上游设置（如果有的话，覆盖配置文件的默认值）
@@ -323,7 +326,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	id := requestID(r.Context())
 	// 创建一条"运行中"的审计记录
 	s.markCallRecorded(r.Context())
-	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: requestPublicURL(r), Method: r.Method, Status: "running", StartedAt: start}
+	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: requestPublicURL(r), Method: r.Method, Status: "running", StartedAt: start}
 	s.audit.CreateRequest(logBase)
 	s.liveStart(r.Context(), logBase)
 	defer s.liveFinish(context.Background(), id)
@@ -353,7 +356,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	var ok bool
 	key, ok = s.authenticate(r.Context(), r)
 	if !ok {
-		applog.Printf("[%s] /v1/models auth failed: client=%s", id, clientIP(r))
+		applog.Printf("[%s] /v1/models auth failed: client=%s", id, clientIP(r, s.trustedProxyRanges))
 		finish(401, "error", "invalid_api_key", "Invalid API key", 0)
 		jsonError(w, 401, "invalid_api_key", "Invalid API key")
 		return
@@ -461,15 +464,15 @@ func (s *Server) authenticateOutcome(ctx context.Context, r *http.Request) (*aut
 	}
 	k, err := s.keys.GetByRaw(ctx, raw)
 	if err != nil || k == nil {
-		applog.Printf("[%s] auth failed: client=%s key_status=not_found err=%v", requestID(ctx), clientIP(r), err)
+		applog.Printf("[%s] auth failed: client=%s key_status=not_found err=%v", requestID(ctx), clientIP(r, s.trustedProxyRanges), err)
 		return nil, "invalid_api_key"
 	}
 	if k.Status == "expired" {
-		applog.Printf("[%s] auth failed: client=%s key_status=expired", requestID(ctx), clientIP(r))
+		applog.Printf("[%s] auth failed: client=%s key_status=expired", requestID(ctx), clientIP(r, s.trustedProxyRanges))
 		return k, "key_expired"
 	}
 	if k.Status != "active" {
-		applog.Printf("[%s] auth failed: client=%s key_status=%s", requestID(ctx), clientIP(r), k.Status)
+		applog.Printf("[%s] auth failed: client=%s key_status=%s", requestID(ctx), clientIP(r, s.trustedProxyRanges), k.Status)
 		return nil, "invalid_api_key"
 	}
 	return k, ""
@@ -626,12 +629,12 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	// 不是网页登录，再检查有没有配置"管理员 API Key"
 	// 如果根本没配置管理员 Key，说明需要先登录（返回"login required"）
 	if s.cfg.Auth.AdminAPIKey == "" {
-		applog.Printf("admin request rejected: not authenticated: %s from %s", r.URL.Path, clientIP(r))
+		applog.Printf("admin request rejected: not authenticated: %s from %s", r.URL.Path, clientIP(r, s.trustedProxyRanges))
 		jsonError(w, 401, "unauthorized", "login required")
 		return false
 	}
 	// 配置了管理员 Key 但请求里没带对，返回"无效的管理员 Key"
-	applog.Printf("admin auth failed: %s from %s", r.URL.Path, clientIP(r))
+	applog.Printf("admin auth failed: %s from %s", r.URL.Path, clientIP(r, s.trustedProxyRanges))
 	jsonError(w, 401, "invalid_admin_key", "Invalid admin key")
 	return false
 }
@@ -1263,25 +1266,87 @@ func randString(n int) string {
 	return fmt.Sprintf("%0*d", n, time.Now().UnixNano())[:n]
 }
 
-// clientIP 从请求里提取客户端的真实 IP 地址。
-// 优先顺序：X-Real-IP 头 → X-Forwarded-For 头（取第一个，即最原始的客户端）→ 直接连接地址 RemoteAddr。
-// 因为网关可能部署在 Nginx 等反向代理后面，直接连的 IP 可能是代理服务器的，所以要优先读代理头。
-func clientIP(r *http.Request) string {
-	// 1. 优先读 X-Real-IP（Nginx 常用的真实 IP 头）
-	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return strings.TrimSpace(strings.Split(v, ",")[0])
+// parseTrustedProxyRanges 解析可信代理 IP/CIDR。无效项忽略并记录日志，默认不信任任何转发头。
+func parseTrustedProxyRanges(values []string) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(value); err == nil {
+			out = append(out, prefix.Masked())
+			continue
+		}
+		if addr, err := netip.ParseAddr(value); err == nil {
+			addr = addr.Unmap()
+			bits := 128
+			if addr.Is4() {
+				bits = 32
+			}
+			out = append(out, netip.PrefixFrom(addr, bits))
+			continue
+		}
+		applog.Printf("invalid trusted proxy entry ignored: %q", value)
 	}
-	// 2. 再读 X-Forwarded-For（格式：客户端IP, 代理1IP, 代理2IP，取第一个）
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		return strings.TrimSpace(strings.Split(v, ",")[0])
+	return out
+}
+
+func parseRemoteAddrIP(remoteAddr string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(remoteAddr), "[]")
 	}
-	// 3. 都没有就用直接连接的地址（RemoteAddr 格式是 IP:端口，需要拆分）
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, false
 	}
-	// 拆分失败（可能没有端口号），直接返回原始值
-	return r.RemoteAddr
+	return addr.Unmap(), true
+}
+
+func isTrustedProxy(addr netip.Addr, trusted []netip.Prefix) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, prefix := range trusted {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP 只在 TCP 直连来源属于显式配置的可信代理时，才读取转发头。
+// X-Forwarded-For 从右向左跳过可信代理地址，避免客户端伪造一个更靠左的来源 IP。
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
+	peer, ok := parseRemoteAddrIP(r.RemoteAddr)
+	if !ok {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	if !isTrustedProxy(peer, trusted) {
+		return peer.String()
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			addr, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
+			if err != nil {
+				continue
+			}
+			addr = addr.Unmap()
+			if isTrustedProxy(addr, trusted) {
+				continue
+			}
+			return addr.String()
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		if addr, err := netip.ParseAddr(realIP); err == nil {
+			return addr.Unmap().String()
+		}
+	}
+	return peer.String()
 }
 
 // writeJSON 把任意对象序列化成 JSON 并写给客户端（设置正确的 Content-Type）。

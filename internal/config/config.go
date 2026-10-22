@@ -19,8 +19,9 @@ import (
 // Config 是 config.yaml 在内存中的结构；各字段对应部署时需要的连接与行为开关。
 type Config struct {
 	Server struct {
-		Host string `yaml:"host"`
-		Port int    `yaml:"port"`
+		Host           string   `yaml:"host"`
+		Port           int      `yaml:"port"`
+		TrustedProxies []string `yaml:"trusted_proxies"`
 	} `yaml:"server"`
 	Auth struct {
 		AdminAPIKey       string `yaml:"admin_api_key"`

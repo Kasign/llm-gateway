@@ -41,7 +41,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		if code == "key_expired" {
 			msg = "API key expired"
 		}
-		applog.Printf("[%s] auth failed: code=%s client=%s", id, code, clientIP(r))
+		applog.Printf("[%s] auth failed: code=%s client=%s", id, code, clientIP(r, s.trustedProxyRanges))
 		s.rejectInference(w, r, id, start, key, status, code, msg)
 		return
 	}
@@ -78,7 +78,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	sink := &responseSink{w: w}
 	_, err = s.pipe.Run(ctx, core.Request{
 		ID: id, Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery, Header: headerMap(r.Header), Body: body,
-		Sink: sink, Started: start, ClientIP: clientIP(r), ClientName: requestClientName(r),
+		Sink: sink, Started: start, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r),
 		UserAgent: r.UserAgent(), RequestURL: requestPublicURL(r), Guards: []core.Guard{s.allowModelsGuard(key)},
 	})
 	// 已经写过响应头（保活或上游数据）时不能再补 JSON 错误，否则会和流内容混在一起。
@@ -92,7 +92,7 @@ func (s *Server) rejectInference(w http.ResponseWriter, r *http.Request, id stri
 	s.markCallRecorded(r.Context())
 	end := time.Now()
 	item := store.RequestLog{
-		RequestID: id, ClientIP: clientIP(r), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
+		RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
 		Endpoint: r.URL.Path, RequestURL: requestPublicURL(r), Method: r.Method, Status: "error", HTTPStatus: status, StartedAt: start, FinishedAt: &end,
 		LatencyMS: end.Sub(start).Milliseconds(), ErrorCode: code, ErrorMessage: msg,
 	}

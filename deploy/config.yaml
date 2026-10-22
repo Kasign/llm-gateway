@@ -1,6 +1,9 @@
 server:
   host: 0.0.0.0
   port: 8088
+  # 只有配置的实际反向代理来源才可信；留空时忽略转发 IP 头。
+  # 不要无条件配置 0.0.0.0/0。
+  trusted_proxies: []
 
 auth:
   # 管理 API 密钥和 Web 登录都只写在 deploy/.env，这里只做引用。
