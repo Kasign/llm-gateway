@@ -121,6 +121,29 @@ func NewHTTPError(providerID string, status int, cause error) *ProviderError {
 	}
 }
 
+// ToCoreError 将 ProviderError 转换为网关内部错误，不把上游原始响应正文写入对外文案。
+func ToCoreError(err error) *core.Error {
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr == nil {
+		return nil
+	}
+	status := http.StatusBadGateway
+	switch providerErr.Kind {
+	case ErrorInvalidRequest:
+		status = http.StatusBadRequest
+	case ErrorTimeout:
+		status = http.StatusGatewayTimeout
+	case ErrorRateLimit:
+		status = http.StatusServiceUnavailable
+	}
+	code := "provider_" + string(providerErr.Kind)
+	message := "upstream provider request failed"
+	if providerErr.ProviderID != "" {
+		message = fmt.Sprintf("upstream provider %s request failed", providerErr.ProviderID)
+	}
+	return &core.Error{Status: status, Code: code, Message: message}
+}
+
 func (e *ProviderError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -134,6 +157,7 @@ type InferenceCall struct {
 	Request      *http.Request
 	Path         string
 	Body         []byte
+	ModelID      string // Gateway 解析出的上游模型 ID，Provider 不信任调用方原始 model。
 	Stream       bool
 	OnChunk      func([]byte)
 	OnHeaders    func(http.Header, int)

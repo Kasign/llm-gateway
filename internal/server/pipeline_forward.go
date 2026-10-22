@@ -70,6 +70,7 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		Request: req,
 		Path:    upPath,
 		Body:    st.Body,
+		ModelID: st.Model.UpstreamID,
 		Stream:  st.Stream,
 		OnChunk: onChunk,
 		OnHeaders: func(_ http.Header, _ int) {
@@ -100,6 +101,9 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 			res.Status = 499
 		}
 		return res, context.Canceled
+	}
+	if mapped := provider.ToCoreError(err); mapped != nil {
+		err = mapped
 	}
 	if res.Status == 0 {
 		res.Status = http.StatusBadGateway
