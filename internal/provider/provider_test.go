@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/whl/llm-gateway/internal/core"
 )
 
 type fakeHTTPClient struct {
