@@ -12,6 +12,7 @@ import (
 	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/logutil"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -19,6 +20,10 @@ import (
 // 新增改写、检查或日志只改这里的注册，不改 core.Pipeline.Run。
 // Mutate 顺序：先按原始路径 sanitize 和合并推理参数，最后 mutateResponsesBridge 保持路径与 tools 原样。
 func (s *Server) newInferencePipeline() *core.Pipeline {
+	// 工厂每次解析时获取当前 llamaClient，管理员切换本地后端后不会持有旧客户端。
+	if s.providers == nil {
+		s.providers = provider.NewLocalRegistry(func() provider.LocalHTTPClient { return s.llamaClient() })
+	}
 	return &core.Pipeline{
 		Resolve: s.resolveInference,
 		Mutate: []core.Mutator{

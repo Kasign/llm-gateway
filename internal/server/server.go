@@ -30,7 +30,8 @@ import (
 	"github.com/whl/llm-gateway/internal/live"
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/model"
-	"github.com/whl/llm-gateway/internal/ratelimit"
+	"github.com/whl/llm-gateway/internal/provider"
+	"github.com/whl/llm-gateway/internal/ratelimit
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
 )
@@ -49,7 +50,8 @@ type Server struct {
 	audit    *audit.Writer  // 审计写入器：异步批量把日志写进数据库（不阻塞请求）
 	settings *settings.Repo // 设置仓库：管理员在后台保存的上游配置、推理参数等
 	// —— 外部服务客户端 ——
-	llama      *llama.Client            // llama.cpp 上游客户端：真正把请求发给 AI 引擎并拿回结果
+	llama      *llama.Client            // 当前活动本地后端客户端，负责推理传输和控制 API。
+	providers  *provider.Registry       // Provider 注册表，统一推理调用边界。
 	limiter    *ratelimit.Limiter       // Redis 限流器：控制每个 API Key 每分钟能请求多少次
 	live       *live.Registry           // 实时请求看板：内存里记录正在跑的请求，管理后台可实时查看
 	downloader *downloader.HFDownloader // HuggingFace 下载器：从网上下载 AI 模型文件（GGUF 格式）
