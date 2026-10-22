@@ -25,9 +25,33 @@ func isSecretHeader(key string) bool {
 	if secretHeaders[k] {
 		return true
 	}
-	// 覆盖带厂商前缀的密钥头，例如 OpenAI-API-Key、X-Access-Token、Client-Secret。
-	return strings.HasSuffix(k, "-api-key") || strings.HasSuffix(k, "_api_key") ||
-		strings.HasSuffix(k, "-token") || strings.HasSuffix(k, "_token") ||
+
+	// 统一连字符/下划线，兼容不同 Provider 的自定义凭据命名。
+	normalized := strings.NewReplacer("-", "_", ".", "_").Replace(k)
+	for _, marker := range []string{
+		"authorization", "api_key", "apikey", "access_token", "refresh_token",
+		"secret", "password", "credential", "signature", "private_key", "bearer",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+
+	// 一些供应商使用 X-OpenAI-Key、X-Cloud-Key 等没有 api 字样的头；
+	// 只对明确的凭据类前缀做扩展，避免把 Model-Key、Idempotency-Key 一概打码。
+	if strings.HasSuffix(normalized, "_key") {
+		for _, prefix := range []string{
+			"auth", "provider", "openai", "anthropic", "azure", "cloud",
+			"google", "goog", "aws", "amz", "access", "secret", "credential",
+			"private", "bearer",
+		} {
+			if strings.Contains(normalized, prefix) {
+				return true
+			}
+		}
+	}
+	// 兼容标准 Token/Secret/Signature Header 后缀。
+	return strings.HasSuffix(k, "-token") || strings.HasSuffix(k, "_token") ||
 		strings.HasSuffix(k, "-secret") || strings.HasSuffix(k, "_secret") ||
 		strings.HasSuffix(k, "-signature") || strings.HasSuffix(k, "_signature")
 }
