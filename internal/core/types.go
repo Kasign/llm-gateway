@@ -90,8 +90,10 @@ type Result struct {
 	Status        int
 	ResponseBytes int64
 	Body          []byte
-	TTFT          *int64
-	Err           error
+	TTFT             *int64 // 首个实际输出（reasoning/content），不是 role 元数据或首字节。
+	FirstByteMS      *int64
+	UpstreamHeadersMS *int64
+	Err              error
 }
 
 // Event 是发给观察者的一次通知。Chunk 只携带上游字节，不含保活。

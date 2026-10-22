@@ -78,19 +78,17 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 func (f inferenceForwarder) stream(ctx context.Context, st core.State, req *http.Request, w http.ResponseWriter, upPath string, onChunk core.ChunkFunc) (core.Result, error) {
 	var bytesN int64
 	var status int
-	var ttft *int64
+	var upstreamHeadersMS, firstByteMS *int64
 	err := f.s.llamaClient().StreamProxy(ctx, w, req, upPath, bytes.NewReader(st.Body), func(chunk []byte) {
 		bytesN += int64(len(chunk))
-		// StreamProxy 已先 Flush 当前块。在进入同步观察器之前采样，避免日志处理耗时污染 TTFT。
-		if ttft == nil {
-			v := time.Since(st.Started).Milliseconds()
-			ttft = &v
-		}
+		// 当前块已经 Flush；观察器只记录数据，不用 role 事件替代首个实际输出时间。
 		if onChunk != nil {
 			onChunk(chunk)
 		}
 	}, func(_ http.Header, code int) {
 		status = code
+		v := time.Since(st.Started).Milliseconds()
+		upstreamHeadersMS = &v
 	}, func(p []byte) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -101,8 +99,11 @@ func (f inferenceForwarder) stream(ctx context.Context, st core.State, req *http
 			return werr
 		}
 		return nil
+	}, func() {
+		v := time.Since(st.Started).Milliseconds()
+		firstByteMS = &v
 	})
-	res := core.Result{Status: status, ResponseBytes: bytesN, TTFT: ttft}
+	res := core.Result{Status: status, ResponseBytes: bytesN, FirstByteMS: firstByteMS, UpstreamHeadersMS: upstreamHeadersMS}
 	if isCancelErr(err) || isCancelErr(ctx.Err()) {
 		if res.Status < 400 {
 			res.Status = 499

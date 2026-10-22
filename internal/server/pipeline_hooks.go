@@ -358,6 +358,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	}
 	gatewayStatus, upstreamStatus, state, code, msg := finishStatus(ctx, ev, o.s.cancelReason(st.ID))
 	var ttft *int64
+	var firstByteMS, upstreamHeadersMS *int64
 	var timings streamTimings
 	var inTok, outTok, totTok *int64
 	var tokenSrc string
@@ -370,6 +371,8 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		if ev.Result.TTFT != nil {
 			ttft = ev.Result.TTFT
 		}
+		firstByteMS = ev.Result.FirstByteMS
+		upstreamHeadersMS = ev.Result.UpstreamHeadersMS
 		respBytes = ev.Result.ResponseBytes
 		if len(ev.Result.Body) > 0 {
 			resp = ev.Result.Body
@@ -429,6 +432,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,
+		TimeToFirstByteMS: firstByteMS, TimeToUpstreamHeadersMS: upstreamHeadersMS,
 		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, PredictedPerSec: pps,
 	})
 	if o.s.cfg.Logging.StorePayload && (len(st.Body) > 0 || len(resp) > 0) {

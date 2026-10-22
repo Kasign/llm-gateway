@@ -22,8 +22,10 @@ type RequestPhaseMS struct {
 	TotalMS              int64  `json:"total_ms"`
 	PrepMS               int64  `json:"prep_ms"`
 	ModelLoadMS          int64  `json:"model_load_ms"`
-	UpstreamMS           int64  `json:"upstream_ms"`
-	TTFTMS               *int64 `json:"ttft_ms,omitempty"`
+	UpstreamMS             int64  `json:"upstream_ms"`
+	TimeToUpstreamHeadersMS *int64 `json:"time_to_upstream_headers_ms,omitempty"`
+	TimeToFirstByteMS       *int64 `json:"time_to_first_byte_ms,omitempty"`
+	TTFTMS                 *int64 `json:"ttft_ms,omitempty"`
 	TTFTContentMS        *int64 `json:"ttft_content_ms,omitempty"`
 	ThinkingMS           *int64 `json:"thinking_ms,omitempty"`
 	ContentGenerationMS  *int64 `json:"content_generation_ms,omitempty"`
@@ -45,8 +47,10 @@ type analysisInput struct {
 	ModelLoadMS   int64
 	UpstreamMS    int64
 	Stream        bool
-	TTFTMS        *int64
-	StreamTiming  streamTimings
+	TTFTMS                 *int64
+	TimeToFirstByteMS       *int64
+	TimeToUpstreamHeadersMS *int64
+	StreamTiming            streamTimings
 	InputTokens     *int64
 	OutputTokens    *int64
 	TokenSource     string
@@ -65,8 +69,10 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 		TotalMS:              in.TotalMS,
 		PrepMS:               in.PrepMS,
 		ModelLoadMS:          in.ModelLoadMS,
-		UpstreamMS:           in.UpstreamMS,
-		GatewayBeforeInferMS: in.PrepMS + in.ModelLoadMS,
+		UpstreamMS:             in.UpstreamMS,
+		TimeToFirstByteMS:       in.TimeToFirstByteMS,
+		TimeToUpstreamHeadersMS: in.TimeToUpstreamHeadersMS,
+		GatewayBeforeInferMS:    in.PrepMS + in.ModelLoadMS,
 	}
 	if in.StreamTiming.FirstAnyMS != nil {
 		ph.TTFTMS = in.StreamTiming.FirstAnyMS

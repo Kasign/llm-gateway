@@ -823,7 +823,7 @@ func (c *Client) Proxy(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 // StreamProxy 流式 chat：同样 POST 上游，32KB 一块读 upstream body，立刻 Flush 给客户端（SSE 透传）。
 // clientWriter 非 nil 时替代默认 w.Write。
-func (c *Client) StreamProxy(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, body io.Reader, onChunk func([]byte), onHeader func(http.Header, int), clientWriter func([]byte) error) error {
+func (c *Client) StreamProxy(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, body io.Reader, onChunk func([]byte), onHeader func(http.Header, int), clientWriter func([]byte) error, onFirstByte func()) error {
 	req, err := http.NewRequestWithContext(ctx, r.Method, c.base+path, body)
 	if err != nil {
 		return err
@@ -852,9 +852,16 @@ func (c *Client) StreamProxy(ctx context.Context, w http.ResponseWriter, r *http
 		}
 	}
 	buf := make([]byte, 32*1024)
+	firstByteSeen := false
 	for {
 		n, e := resp.Body.Read(buf)
 		if n > 0 {
+			if !firstByteSeen {
+				firstByteSeen = true
+				if onFirstByte != nil {
+					onFirstByte()
+				}
+			}
 			chunk := append([]byte(nil), buf[:n]...)
 			if err := writeOut(chunk); err != nil {
 				return err

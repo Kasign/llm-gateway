@@ -113,3 +113,19 @@ func TestLivePayloadIsNotRetainedWhenDisabled(t *testing.T) {
 		t.Fatalf("payload leaked into live session when disabled: request=%d response=%d", len(snap.ReqBody), len(snap.ResBody))
 	}
 }
+
+func TestRequestTraceDoesNotCountRoleMetadataAsTTFT(t *testing.T) {
+	trace := newRequestTraceForTest(&config.Config{})
+	trace.recordStreamChunk([]byte("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"))
+	if trace.streamTimings().FirstAnyMS != nil {
+		t.Fatal("role metadata must not count as first output")
+	}
+	trace.recordStreamChunk([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+	timings := trace.streamTimings()
+	if timings.FirstAnyMS == nil || timings.FirstContentMS == nil {
+		t.Fatalf("actual content should set TTFT and first-content times: %+v", timings)
+	}
+	if !trace.ttftRecorded {
+		t.Fatal("TTFT should be recorded after actual output")
+	}
+}

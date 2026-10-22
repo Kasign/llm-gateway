@@ -57,17 +57,26 @@ func TestStreamProxyFlushesChunkBeforeObserver(t *testing.T) {
 	writer := &streamFlushWriter{}
 	payload := []byte("{}")
 	observed := false
+	firstByte := false
 	err = client.StreamProxy(context.Background(), writer, request, "/v1/chat/completions", bytes.NewReader(payload), func([]byte) {
 		observed = true
 		if writer.flushed != writer.body.Len() || writer.flushed == 0 {
 			t.Errorf("observer ran before current chunk flush: flushed=%d body=%d", writer.flushed, writer.body.Len())
 		}
-	}, nil, nil)
+	}, nil, nil, func() {
+		firstByte = true
+		if writer.body.Len() != 0 {
+			t.Errorf("first-byte callback should run before chunk write, body has %d bytes", writer.body.Len())
+		}
+	})
 	if err != nil {
 		t.Fatalf("StreamProxy: %v", err)
 	}
 	if !observed {
 		t.Fatal("expected onChunk callback")
+	}
+	if !firstByte {
+		t.Fatal("expected first-byte callback")
 	}
 	if writer.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", writer.status)

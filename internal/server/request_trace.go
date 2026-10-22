@@ -94,7 +94,7 @@ func (t *requestTrace) recordStreamChunk(chunk []byte) {
 				t.timing.FirstContentMS = &v
 			}
 		}
-		if !t.ttftRecorded && (d.Content != "" || d.Reasoning != "" || d.Role != "") {
+		if !t.ttftRecorded && (d.Content != "" || d.Reasoning != "") {
 			t.ttftRecorded = true
 			v := at
 			t.timing.FirstAnyMS = &v

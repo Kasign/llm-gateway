@@ -54,7 +54,7 @@ docs/                        中文架构、协议和运维文档
 验收：有清晰的 API/配置兼容清单；能区分已确认缺陷、现有设计和未验证事项；没有在基线未清楚前大规模搬迁目录。
 
 ### 阶段 1：日志与请求生命周期可靠性（第一优先级）
-状态：进行中。已完成流式事件留存治理、审计队列生命周期同步、SSE Flush 顺序、请求/响应大小限制、关键事件容量预留及 Gateway/上游状态码分离；最新 CI 的 go test、go vet、build 正在持续验证。
+状态：进行中。已完成流事件留存治理、审计队列生命周期保护、请求/响应上限、Gateway/上游状态分离；首包指标正在拆分上游响应头、首字节、首个实际输出及首段正文时间，待 CI 验证。
 
 重点文件：`internal/server/pipeline_hooks.go`、`internal/server/request_trace.go`、`internal/audit/writer.go`、`internal/llama/client.go`、`internal/server/request_analysis*.go`。
 
