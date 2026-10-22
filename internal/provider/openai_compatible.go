@@ -263,7 +263,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		if responseSequence != nil {
 			return p.writeStreamErrorIfCommitted(call, code, responseSequence.NextSequence())
 		}
-		return writeStreamError(code)
+		return p.writeStreamErrorIfCommitted(call, code)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {

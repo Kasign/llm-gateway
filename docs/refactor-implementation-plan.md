@@ -153,7 +153,7 @@ docs/                        中文架构、协议和运维文档
 
 - 旧版 `provider_mutation_test.go` 曾把 `Path/Body` 错放在 `core.State` 顶层；正确布局是嵌入 `core.Request`。当前 `provider_mutation_test.go` 已按真实字段布局修复，当前 `provider_runtime_test.go` 也与 `internal/core/types.go` 一致，不需要重复修改。
 - 远程 SSE 测试曾出现字符串字面量语法错误，后续提交已修复；最近基线 CI 已通过。
-- 远程流式非 2xx 已有回归测试：未提交响应时保持上游 HTTP 状态并返回安全 JSON；响应已提交时发出脱敏 SSE `event: error`。本功能组按 Chat Completions 与 Responses API 分别构造终止事件，并通过分片/超大行序号观察测试覆盖边界；本次提交的 CI 结果仍以 Actions 实际状态为准。真实 SDK 与真实供应商的端到端行为仍未验收。
+- 远程流式非 2xx 已有回归测试：未提交响应时保持上游 HTTP 状态并返回安全 JSON；响应已提交时发出脱敏 SSE `event: error`。本功能组按 Chat Completions 与 Responses API 分别构造终止事件，并通过分片/超大行序号观察测试覆盖边界；首轮 CI 在 `internal/provider/openai_compatible.go` 报 `undefined: writeStreamError`，根因是闭包默认分支被替换成自调用；本修复恢复对底层写出函数的调用，并补齐序号测试的 `bytes` 依赖。修复提交的 CI 结果仍待确认。真实 SDK 与真实供应商的端到端行为仍未验收。
 
 ### 下一步
 
