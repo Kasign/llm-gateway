@@ -84,6 +84,43 @@ func (e *ProviderError) Error() string {
 	return message
 }
 
+// NewHTTPError 将上游 HTTP 状态码映射为稳定的 Provider 错误类别。
+// Retryable 只是可重试建议；是否重试还必须检查响应是否已提交给调用方。
+func NewHTTPError(providerID string, status int, cause error) *ProviderError {
+	kind := ErrorUnknown
+	retryable := false
+
+	switch {
+	case status == http.StatusBadRequest || status == http.StatusRequestEntityTooLarge || status == http.StatusUnprocessableEntity:
+		kind = ErrorInvalidRequest
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		kind = ErrorAuthentication
+	case status == http.StatusNotFound:
+		kind = ErrorModelNotFound
+	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
+		kind = ErrorTimeout
+		retryable = true
+	case status == http.StatusTooManyRequests:
+		kind = ErrorRateLimit
+		retryable = true
+	case status >= 500 && status <= 599:
+		kind = ErrorUpstream
+		retryable = status == http.StatusInternalServerError ||
+			status == http.StatusBadGateway ||
+			status == http.StatusServiceUnavailable
+	case status >= 300 && status <= 399:
+		kind = ErrorProtocol
+	}
+
+	return &ProviderError{
+		ProviderID: normalizeID(providerID),
+		Kind:       kind,
+		StatusCode: status,
+		Retryable:  retryable,
+		Err:        cause,
+	}
+}
+
 func (e *ProviderError) Unwrap() error {
 	if e == nil {
 		return nil

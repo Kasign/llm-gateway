@@ -214,3 +214,44 @@ func TestLocalRegistryExposesOptionalModelManager(t *testing.T) {
 		t.Fatal("provider without local management must not receive local model operations")
 	}
 }
+
+func TestNewHTTPErrorMapsStableCategories(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		wantKind  ErrorKind
+		retryable bool
+	}{
+		{name: "bad request", status: http.StatusBadRequest, wantKind: ErrorInvalidRequest},
+		{name: "unauthorized", status: http.StatusUnauthorized, wantKind: ErrorAuthentication},
+		{name: "forbidden", status: http.StatusForbidden, wantKind: ErrorAuthentication},
+		{name: "model missing", status: http.StatusNotFound, wantKind: ErrorModelNotFound},
+		{name: "timeout", status: http.StatusRequestTimeout, wantKind: ErrorTimeout, retryable: true},
+		{name: "rate limit", status: http.StatusTooManyRequests, wantKind: ErrorRateLimit, retryable: true},
+		{name: "bad gateway", status: http.StatusBadGateway, wantKind: ErrorUpstream, retryable: true},
+		{name: "service unavailable", status: http.StatusServiceUnavailable, wantKind: ErrorUpstream, retryable: true},
+		{name: "not implemented", status: http.StatusNotImplemented, wantKind: ErrorUpstream},
+		{name: "redirect", status: http.StatusFound, wantKind: ErrorProtocol},
+		{name: "unknown", status: 0, wantKind: ErrorUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewHTTPError(" OpenAI-Compatible ", tt.status, errors.New("upstream returned private response body"))
+			if err.ProviderID != "openai-compatible" {
+				t.Fatalf("ProviderID = %q", err.ProviderID)
+			}
+			if err.Kind != tt.wantKind || err.Retryable != tt.retryable {
+				t.Fatalf("kind/retryable = %q/%v, want %q/%v", err.Kind, err.Retryable, tt.wantKind, tt.retryable)
+			}
+			if err.StatusCode != tt.status {
+				t.Fatalf("StatusCode = %d, want %d", err.StatusCode, tt.status)
+			}
+			if strings.Contains(err.Error(), "private response body") {
+				t.Fatal("public error text must not leak raw upstream response content")
+			}
+			if !errors.Is(err, err.Err) {
+				t.Fatal("ProviderError should preserve the underlying error for internal diagnostics")
+			}
+		})
+	}
+}
