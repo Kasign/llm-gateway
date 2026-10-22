@@ -271,3 +271,41 @@ type forwardFunc func(context.Context, State, ChunkFunc) (Result, error)
 func (f forwardFunc) Forward(ctx context.Context, st State, onChunk ChunkFunc) (Result, error) {
 	return f(ctx, st, onChunk)
 }
+
+func TestRequestGuardsRunBeforeGlobalGuards(t *testing.T) {
+	var order []string
+	forwardCalled := false
+	p := &Pipeline{
+		Resolve: func(context.Context, State) (ModelChoice, error) {
+			return ModelChoice{ModelKey: "private-model", UpstreamID: "private-upstream"}, nil
+		},
+		Guard: []Guard{func(context.Context, State) error {
+			order = append(order, "global")
+			return nil
+		}},
+		Forward: forwardFunc(func(context.Context, State, ChunkFunc) (Result, error) {
+			forwardCalled = true
+			return Result{Status: 200}, nil
+		}),
+	}
+	_, err := p.Run(context.Background(), Request{
+		Body: []byte(`{}`),
+		Guards: []Guard{func(context.Context, State) error {
+			order = append(order, "request")
+			return &Error{Status: 403, Code: "model_not_allowed", Message: "model is not allowed"}
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected request-level guard to reject")
+	}
+	status, code, _ := Unpack(err)
+	if status != 403 || code != "model_not_allowed" {
+		t.Fatalf("error = %d/%s, want 403/model_not_allowed", status, code)
+	}
+	if forwardCalled {
+		t.Fatal("forwarder must not run after request guard rejection")
+	}
+	if len(order) != 1 || order[0] != "request" {
+		t.Fatalf("guard order = %v, want only request guard", order)
+	}
+}

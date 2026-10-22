@@ -383,12 +383,19 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 500, "database_error", err.Error())
 		return
 	}
-	// 组装 OpenAI 兼容格式的模型列表（只包含已启用的模型）
+	// 组装 OpenAI 兼容格式的模型列表。只展示已启用且与当前 Key 的 ACL 匹配的模型。
+	// 上游 ID 优先用成功加载/同步时持久化的映射，避免为列表中每个模型额外请求上游。
+	backend := s.effectiveUpstream().Backend
 	data := make([]map[string]interface{}, 0, len(ms))
 	for _, m := range ms {
-		if m.Enabled {
-			data = append(data, map[string]interface{}{"id": m.ModelKey, "object": "model", "created": m.CreatedAt.Unix(), "owned_by": "llm-gateway", "display_name": m.DisplayName})
+		if !m.Enabled {
+			continue
 		}
+		upstreamID := model.UpstreamNameForBackend(m.RuntimeJSON, backend)
+		if !modelAllowedForKey(key, m.ModelKey, upstreamID, m.ModelKey) {
+			continue
+		}
+		data = append(data, map[string]interface{}{"id": m.ModelKey, "object": "model", "created": m.CreatedAt.Unix(), "owned_by": "llm-gateway", "display_name": m.DisplayName})
 	}
 	// 额外：如果网关配置了"代理目标模型"，也把它加进列表（即使它不在本地模型表里）
 	// 这样客户端能看到网关实际会用哪个模型
@@ -405,7 +412,11 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		// 不在列表里且不为空，就插到最前面
+		// 活动模型也必须经过同一套 ACL。未获授权时不加入模型列表。
+		if !modelAllowedForKey(key, id, target.UpstreamID, target.Hint) {
+			found = true // 表示无需插入未授权模型。
+		}
+		// 不在列表里、已授权且不为空，就插到最前面
 		if !found && id != "" {
 			data = append([]map[string]interface{}{{
 				"id": id, "object": "model", "created": time.Now().Unix(), "owned_by": "llm-gateway", "display_name": target.UpstreamID,

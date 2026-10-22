@@ -60,10 +60,11 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (res Result, err error)
 	st.PreparedAt = timeNow()
 	p.emit(ctx, Event{Stage: StagePrepared, State: st})
 
-	// 全局 Guard 先于本次请求附加的 Guard（如 /v1 的 allowed_models）。
-	guards := make([]Guard, 0, len(p.Guard)+len(req.Guards))
-	guards = append(guards, p.Guard...)
+	// 先运行请求级策略/权限检查，再运行全局 Guard。
+	// 请求级 Guard（例如 allowed_models）必须先于可能加载模型等有副作用的全局检查。
+	guards := make([]Guard, 0, len(req.Guards)+len(p.Guard))
 	guards = append(guards, req.Guards...)
+	guards = append(guards, p.Guard...)
 	for _, g := range guards {
 		if g == nil {
 			continue
