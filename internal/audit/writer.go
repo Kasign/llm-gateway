@@ -22,13 +22,14 @@ type job func(context.Context, *store.Repo) error
 
 // Writer 有界队列 + 后台 worker；队列满时丢弃任务并计数，不影响 HTTP 响应。
 type Writer struct {
-	repo    *store.Repo
-	ch      chan job
-	wg      sync.WaitGroup
-	dropped atomic.Uint64
+	repo        *store.Repo
+	ch          chan job
+	normalLimit int
+	wg          sync.WaitGroup
+	dropped     atomic.Uint64
 
-	// mu 同步发送与关闭，防止 Shutdown 关闭 channel 时并发 enqueue/Flush 触发 panic。
-	mu     sync.RWMutex
+	// mu 串行化入队、容量判断与关闭，确保普通事件不会抢占关键记录的预留空间。
+	mu     sync.Mutex
 	closed bool
 }
 
@@ -39,8 +40,9 @@ func NewWriter(repo *store.Repo, queueSize int) *Writer {
 		queueSize = defaultQueueSize
 	}
 	w := &Writer{
-		repo: repo,
-		ch:   make(chan job, queueSize),
+		repo:        repo,
+		ch:          make(chan job, queueSize),
+		normalLimit: queueSize - reservedAuditCapacity(queueSize),
 	}
 	w.wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -64,23 +66,53 @@ func (w *Writer) loop() {
 	}
 }
 
+// reservedAuditCapacity 为请求创建、关键字段更新和最终状态预留队列空间。
+func reservedAuditCapacity(queueSize int) int {
+	if queueSize <= 1 {
+		return 0
+	}
+	reserved := queueSize / 8
+	if reserved < 1 {
+		reserved = 1
+	}
+	if reserved >= queueSize {
+		reserved = queueSize / 2
+	}
+	return reserved
+}
+
 func (w *Writer) enqueue(fn job) {
+	w.enqueueWithPriority(fn, false)
+}
+
+// enqueueCritical 使用预留容量，但仍进入同一 FIFO 队列，保持同一 request_id 的写入顺序。
+func (w *Writer) enqueueCritical(fn job) {
+	w.enqueueWithPriority(fn, true)
+}
+
+func (w *Writer) enqueueWithPriority(fn job, critical bool) {
 	if fn == nil {
 		return
 	}
-	// 入队使用读锁，Shutdown 需要写锁才能关闭 channel，避免并发向已关闭 channel 发送。
-	w.mu.RLock()
+
+	reason := ""
+	w.mu.Lock()
 	if w.closed {
-		w.mu.RUnlock()
-		w.recordDrop("writer_closed")
-		return
+		reason = "writer_closed"
+	} else if !critical && len(w.ch) >= w.normalLimit {
+		// 可丢弃的诊断事件不能占用关键请求日志预留的容量。
+		reason = "normal_capacity_reserved"
+	} else {
+		select {
+		case w.ch <- fn:
+		default:
+			reason = "queue_full"
+		}
 	}
-	select {
-	case w.ch <- fn:
-		w.mu.RUnlock()
-	default:
-		w.mu.RUnlock()
-		w.recordDrop("queue_full")
+	w.mu.Unlock()
+
+	if reason != "" {
+		w.recordDrop(reason)
 	}
 }
 
@@ -93,19 +125,19 @@ func (w *Writer) recordDrop(reason string) {
 
 func (w *Writer) CreateRequest(l store.RequestLog) {
 	rec := l
-	w.enqueue(func(ctx context.Context, r *store.Repo) error {
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
 		return r.CreateRequest(ctx, rec)
 	})
 }
 
 func (w *Writer) UpdateRequestBytes(requestID string, n int64) {
-	w.enqueue(func(ctx context.Context, r *store.Repo) error {
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
 		return r.UpdateRequestBytes(ctx, requestID, n)
 	})
 }
 
 func (w *Writer) PatchRequestAfterParse(requestID, modelRequested string, stream bool) {
-	w.enqueue(func(ctx context.Context, r *store.Repo) error {
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
 		return r.PatchRequestAfterParse(ctx, requestID, modelRequested, stream)
 	})
 }
@@ -114,14 +146,14 @@ func (w *Writer) PatchRequestModelActual(requestID, modelActual string) {
 	if strings.TrimSpace(modelActual) == "" {
 		return
 	}
-	w.enqueue(func(ctx context.Context, r *store.Repo) error {
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
 		return r.PatchRequestModelActual(ctx, requestID, modelActual)
 	})
 }
 
 func (w *Writer) FinishRequest(l store.RequestLog) {
 	rec := l
-	w.enqueue(func(ctx context.Context, r *store.Repo) error {
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
 		return r.FinishRequest(ctx, rec)
 	})
 }
@@ -197,16 +229,16 @@ func (w *Writer) Flush(ctx context.Context) error {
 	}
 
 	// 发送哨兵与 Shutdown 共用生命周期锁，避免 Flush 对已关闭 channel 发送。
-	w.mu.RLock()
+	w.mu.Lock()
 	if w.closed {
-		w.mu.RUnlock()
+		w.mu.Unlock()
 		return errWriterClosed
 	}
 	select {
 	case w.ch <- fn:
-		w.mu.RUnlock()
+		w.mu.Unlock()
 	case <-ctx.Done():
-		w.mu.RUnlock()
+		w.mu.Unlock()
 		return ctx.Err()
 	}
 	select {
