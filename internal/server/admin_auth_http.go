@@ -70,7 +70,7 @@ func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 503, "login_not_configured", "未配置控制台登录，请设置管理员用户名与密码哈希")
 		return
 	}
-	ip := clientIP(r)
+	ip := clientIP(r, s.trustedProxyRanges)
 	allowed, _, err := s.limiter.Allow(r.Context(), "login:"+ip, 12)
 	if err != nil {
 		jsonError(w, 503, "rate_limit_unavailable", err.Error())
@@ -191,7 +191,7 @@ func (s *Server) authCredentialsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !adminuser.CheckPassword(curHash, in.CurrentPassword) {
-		applog.Printf("credentials change rejected: bad current password from=%s", clientIP(r))
+		applog.Printf("credentials change rejected: bad current password from=%s", clientIP(r, s.trustedProxyRanges))
 		jsonError(w, 401, "invalid_credentials", "current password is incorrect")
 		return
 	}
@@ -226,7 +226,7 @@ func (s *Server) authCredentialsPut(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 503, "session_unavailable", err.Error())
 		return
 	}
-	applog.Printf("web login credentials updated: username=%q from=%s", newUser, clientIP(r))
+	applog.Printf("web login credentials updated: username=%q from=%s", newUser, clientIP(r, s.trustedProxyRanges))
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"user": map[string]interface{}{"username": newUser},
 	})

@@ -89,7 +89,7 @@ func (s *Server) recordCall(r *http.Request, rec *statusRecorder, start time.Tim
 		id = newID()
 	}
 	item := store.RequestLog{
-		RequestID: id, ClientIP: clientIP(r), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
+		RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
 		Endpoint: clipRunes(path, 128), RequestURL: requestPublicURL(r), Method: r.Method,
 		Status: state, HTTPStatus: status, StartedAt: start, FinishedAt: &end,
 		LatencyMS: end.Sub(start).Milliseconds(), ResponseBytes: rec.written, ErrorCode: code, ErrorMessage: msg,
