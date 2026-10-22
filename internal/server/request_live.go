@@ -31,12 +31,20 @@ func (s *Server) liveSetHeaders(id string, client, upstream map[string]string) {
 }
 
 func (s *Server) liveSetReqBody(id string, body []byte) {
+	// 正文留存关闭时，实时看板也不保留请求正文，避免配置语义前后不一致。
+	if s == nil || s.cfg == nil || !s.cfg.Logging.StorePayload {
+		return
+	}
 	if sess := s.liveSession(id); sess != nil && len(body) > 0 {
 		sess.SetReqBody(body)
 	}
 }
 
 func (s *Server) liveSetResBody(id string, body []byte) {
+	// 与请求正文保持一致：关闭 Payload 留存时不在实时看板缓存完整响应正文。
+	if s == nil || s.cfg == nil || !s.cfg.Logging.StorePayload {
+		return
+	}
 	if sess := s.liveSession(id); sess != nil && len(body) > 0 {
 		sess.SetResBody(body)
 	}

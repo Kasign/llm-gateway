@@ -2,8 +2,10 @@
 package server
 
 import (
+	"bytes"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/live"
@@ -11,8 +13,12 @@ import (
 	"github.com/whl/llm-gateway/internal/store"
 )
 
-const maxStreamEventsPerRequest = 2000
-const maxStreamEventRawBytes = 65535
+const (
+	maxStreamEventsPerRequest            = 2000
+	maxStreamEventRawBytes               = 65535
+	maxStreamEventContentBytesPerRequest = 512 << 10
+	maxStreamParserLineBytes             = 1 << 20
+)
 
 // requestTrace 绑定一条 request_id；流式片段只缓存在内存，请求结束由 audit 批量异步入库。
 type requestTrace struct {
@@ -23,6 +29,7 @@ type requestTrace struct {
 	seq          int
 	ttftRecorded bool
 	lineCarry    string
+	contentBytes int
 	timing       streamTimings
 	session      *live.Session
 }
@@ -45,6 +52,11 @@ func (t *requestTrace) drainEvents() []store.StreamEvent {
 
 func (t *requestTrace) recordStreamChunk(chunk []byte) {
 	if len(chunk) == 0 {
+		return
+	}
+	// 某些异常上游可能一直不发送换行。限制待解析行，避免 lineCarry 随响应无限增长。
+	if len(t.lineCarry)+len(chunk) > maxStreamParserLineBytes && bytes.IndexByte(chunk, '\n') < 0 {
+		t.lineCarry = ""
 		return
 	}
 	logutil.ForEachStreamDataLine(chunk, &t.lineCarry, func(raw string) {
@@ -119,11 +131,32 @@ func (t *requestTrace) appendStreamEvent(kind, field string, deltaLen int, previ
 	if t.seq >= maxStreamEventsPerRequest {
 		return
 	}
-	t.seq++
+
+	// 原始 SSE 和内容预览必须显式开启，默认仅记录事件类型、字段、大小和时间。
+	if !t.storeStreamPreviewEnabled() {
+		preview = ""
+	}
 	rawStored := ""
-	if strings.TrimSpace(rawLine) != "" {
+	if t.storeStreamRawEnabled() && strings.TrimSpace(rawLine) != "" {
 		rawStored = truncateStreamRaw(rawLine)
 	}
+
+	// 除单条原始行上限外，再限制每请求所有预览与原始行的总字节数。
+	// 即使诊断选项被开启，也不能让大量 SSE 事件无限扩大审计记录。
+	remaining := maxStreamEventContentBytesPerRequest - t.contentBytes
+	if remaining < 0 {
+		remaining = 0
+	}
+	if len(rawStored) > remaining {
+		rawStored = truncateUTF8(rawStored, remaining)
+	}
+	remaining -= len(rawStored)
+	if len(preview) > remaining {
+		preview = truncateUTF8(preview, remaining)
+	}
+	t.contentBytes += len(rawStored) + len(preview)
+
+	t.seq++
 	ev := store.StreamEvent{
 		Seq:      t.seq,
 		AtMS:     time.Since(t.start).Milliseconds(),
@@ -142,17 +175,40 @@ func (t *requestTrace) streamTimings() streamTimings {
 	return t.timing
 }
 
+func (t *requestTrace) storeStreamRawEnabled() bool {
+	return t != nil && t.s != nil && t.s.cfg != nil && t.s.cfg.Logging.StoreStreamRaw
+}
+
+func (t *requestTrace) storeStreamPreviewEnabled() bool {
+	return t != nil && t.s != nil && t.s.cfg != nil && t.s.cfg.Logging.StoreStreamPreview
+}
+
 func previewText(s string, max int) string {
 	s = strings.TrimSpace(s)
 	if max <= 0 || len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	return truncateUTF8(s, max) + "…"
 }
 
 func truncateStreamRaw(s string) string {
 	if len(s) <= maxStreamEventRawBytes {
 		return s
 	}
-	return s[:maxStreamEventRawBytes] + "…"
+	return truncateUTF8(s, maxStreamEventRawBytes-3) + "…"
+}
+
+// truncateUTF8 限制字节长度但不截断到 UTF-8 多字节字符中间。
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	for end > 0 && end < len(s) && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
 }

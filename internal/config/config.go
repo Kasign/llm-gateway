@@ -78,9 +78,11 @@ type Config struct {
 		UserAgent      string `yaml:"user_agent"`
 	} `yaml:"download"`
 	Logging struct {
-		Enabled      *bool `yaml:"enabled"`
-		Verbose      bool  `yaml:"verbose"`
-		StorePayload bool  `yaml:"store_payload"`
+		Enabled            *bool `yaml:"enabled"`
+		Verbose            bool  `yaml:"verbose"`
+		StorePayload       bool  `yaml:"store_payload"`
+		StoreStreamRaw     bool  `yaml:"store_stream_raw"`
+		StoreStreamPreview bool  `yaml:"store_stream_preview"`
 	} `yaml:"logging"`
 }
 

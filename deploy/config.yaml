@@ -65,4 +65,8 @@ download:
 logging:
   enabled: true
   verbose: false
+  # 完整请求/响应正文留存，可能包含提示词、代码和模型回答。
   store_payload: true
+  # 流事件默认只保存类型、字段、字节数与时间；以下两项会保留原始内容，应谨慎开启。
+  store_stream_raw: false
+  store_stream_preview: false
