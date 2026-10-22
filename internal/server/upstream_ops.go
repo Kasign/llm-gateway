@@ -15,9 +15,13 @@ import (
 // SwitchProxyUpstream updates which backend receives /v1 proxy traffic and optionally loads a model there.
 func (s *Server) SwitchProxyUpstream(ctx context.Context, u settings.Upstream, loadModelID string) error {
 	cur := s.effectiveUpstream()
+	requestedModel := strings.TrimSpace(u.ModelName)
 	u = s.resolveUpstream(u)
 	loadModelID = strings.TrimSpace(loadModelID)
-	name, byBackend := selectSwitchModelName(cur, u.Backend, u.ModelName, loadModelID)
+	if requestedModel == "" && loadModelID == "" {
+		requestedModel = strings.TrimSpace(u.ModelName)
+	}
+	name, byBackend := selectSwitchModelName(cur, u.Backend, requestedModel, loadModelID)
 	u.ModelName = name
 	u.ModelsByBackend = byBackend
 
@@ -89,9 +93,10 @@ func selectSwitchModelName(cur settings.Upstream, nextBackend, requested, loadMo
 	loadModelID = strings.TrimSpace(loadModelID)
 	var name string
 	switch {
+	case requested != "":
+		name = requested
 	case loadModelID != "":
 		name = loadModelID
-	case requested != "":
 	case nextBackend == cur.Backend:
 		name = cur.ModelName
 	default:

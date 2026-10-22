@@ -79,7 +79,7 @@ func TestProxyModelIDFromSnapshot(t *testing.T) {
 
 func TestSelectSwitchModelNamePrefersExplicitLoadID(t *testing.T) {
 	cur := settings.Upstream{Backend: "llamacpp", ModelName: "local.gguf"}
-	got, _ := selectSwitchModelName(cur, "deepseek", "deepseek-chat", "deepseek-reasoner")
+	got, _ := selectSwitchModelName(cur, "deepseek", "", "deepseek-reasoner")
 	if got != "deepseek-reasoner" {
 		t.Fatalf("model name = %q, want explicit model ID", got)
 	}

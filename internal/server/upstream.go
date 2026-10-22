@@ -304,12 +304,13 @@ func (s *Server) putBackendAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "invalid_body", err.Error())
 		return
 	}
-	u := s.resolveUpstream(settings.Normalize(settings.Upstream{Backend: in.Backend, ModelName: strings.TrimSpace(in.ModelName)}))
+	u := settings.Normalize(settings.Upstream{Backend: in.Backend, ModelName: strings.TrimSpace(in.ModelName)})
 	if !s.isConfiguredProvider(u.Backend) {
 		jsonError(w, 400, "invalid_upstream", "Provider ID is not configured")
 		return
 	}
-	if u.BaseURL == "" {
+	resolved := s.resolveUpstream(u)
+	if resolved.BaseURL == "" {
 		jsonError(w, 400, "upstream_url_missing", "Provider URL is missing from deploy/config.yaml or deploy/.env")
 		return
 	}
