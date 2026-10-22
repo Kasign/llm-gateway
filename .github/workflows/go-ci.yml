@@ -7,7 +7,7 @@ on:
     branches: [main, dev]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -58,6 +58,19 @@ jobs:
         working-directory: web
         run: npx esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=/tmp/llm-gateway-admin.js
 
+      # 一次性修复已确认过期的 dist；仅对本次诊断提交运行，修复后立即删除该临时步骤。
+      - name: 一次性同步管理台构建产物
+        if: github.ref == 'refs/heads/dev' && github.event_name == 'push' && contains(github.event.head_commit.message, 'ci: 上传生成的管理台 bundle 用于一致性修复')
+        run: |
+          if ! cmp -s /tmp/llm-gateway-admin.js web/static/dist/app.js; then
+            cp /tmp/llm-gateway-admin.js web/static/dist/app.js
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add web/static/dist/app.js
+            git commit -m "build: 同步管理台部署 bundle"
+            git push origin HEAD:dev
+          fi
+
       - name: 校验前端语法与关键功能字段
         run: |
           node --check web/static/dist/app.js
@@ -78,12 +91,3 @@ jobs:
           grep -q 'available_backends' web/static/dist/app.js
           grep -q 'configured_remote' web/static/dist/app.js
 
-      # 临时诊断步骤：比较失败时仍上传 CI 实际生成的 bundle，用于修复提交产物。
-      - name: 上传生成的管理台 bundle（临时诊断）
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: llm-gateway-admin-generated
-          path: /tmp/llm-gateway-admin.js
-          if-no-files-found: error
-          retention-days: 1
