@@ -266,11 +266,31 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		written := p.writeStreamErrorIfCommitted(call, "provider_redirect_rejected")
 		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
-	// Gateway warmStart 可能已提交 HTTP 200；若此时上游返回 401/429/5xx，必须发送 SSE error 而非混入 JSON 错误正文。
-	if (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices) && call.WriterWritten() {
+	// 上游非 2xx 时，不透传供应商原始错误正文，防止暴露内部诊断或凭据上下文。
+	// 如果 Gateway 已提交响应头（例如 warmStart 的 200），用 SSE error 事件收口；
+	// 如果尚未提交，则返回保留上游 HTTP 状态的安全 JSON 错误。
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
-		written := p.writeStreamErrorIfCommitted(call, streamErrorCode(upstreamErr))
-		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
+		code := streamErrorCode(upstreamErr)
+		if call.WriterWritten() {
+			written := p.writeStreamErrorIfCommitted(call, code)
+			return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
+		}
+
+		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
+		call.Writer.Header().Set("Content-Type", "application/json")
+		call.Writer.Header().Set("Cache-Control", "no-store")
+		body := safeProviderErrorBody(code)
+		call.Writer.WriteHeader(resp.StatusCode)
+		n, writeErr := call.Writer.Write(body)
+		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
+		if writeErr != nil {
+			return result, writeErr
+		}
+		if n != len(body) {
+			return result, io.ErrShortWrite
+		}
+		return result, upstreamErr
 	}
 	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
 	call.Writer.WriteHeader(resp.StatusCode)
@@ -345,13 +365,7 @@ func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCal
 	if !call.WriterWritten() {
 		return 0
 	}
-	body, _ := json.Marshal(map[string]interface{}{
-		"error": map[string]string{
-			"message": "upstream provider request failed",
-			"type":    "gateway_error",
-			"code":    code,
-		},
-	})
+	body := safeProviderErrorBody(code)
 	chunk := append([]byte("event: error\ndata: "), body...)
 	chunk = append(chunk, []byte("\n\n")...)
 	// 用原始 ResponseWriter 尝试发送终止事件，不复用尊重 request context 的 ClientWriter：
@@ -367,6 +381,18 @@ func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCal
 		call.OnChunk(chunk)
 	}
 	return int64(n)
+}
+
+// safeProviderErrorBody 生成稳定且不包含上游原始文本的公共错误正文。
+func safeProviderErrorBody(code string) []byte {
+	body, _ := json.Marshal(map[string]interface{}{
+		"error": map[string]string{
+			"message": "upstream provider request failed",
+			"type":    "gateway_error",
+			"code":    code,
+		},
+	})
+	return body
 }
 
 func (call InferenceCall) WriterWritten() bool {

@@ -306,6 +306,90 @@ func TestOpenAICompatibleProviderWritesSSEErrorAfterUpstreamReadFailure(t *testi
 }
 
 
+
+func TestOpenAICompatibleProviderSanitizesUpstreamStatusBeforeCommit(t *testing.T) {
+	const privateError = "provider credential details must not leak"
+	cases := []struct {
+		name       string
+		status     int
+		wantCode   string
+		wantKind   ErrorKind
+		retryAfter string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, wantCode: "provider_authentication", wantKind: ErrorAuthentication},
+		{name: "rate limited", status: http.StatusTooManyRequests, wantCode: "provider_rate_limit", wantKind: ErrorRateLimit, retryAfter: "3"},
+		{name: "upstream unavailable", status: http.StatusServiceUnavailable, wantCode: "provider_upstream", wantKind: ErrorUpstream},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.status)
+				body, _ := json.Marshal(map[string]interface{}{
+					"error": map[string]string{"message": privateError},
+				})
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "remote-secret"})
+			writer := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			result, err := p.Forward(context.Background(), InferenceCall{
+				Writer: writer, Request: request, Path: "/v1/chat/completions",
+				Body: []byte("{}"), Stream: true,
+			})
+			if err == nil {
+				t.Fatal("expected classified upstream error")
+			}
+			var providerErr *ProviderError
+			if !errors.As(err, &providerErr) {
+				t.Fatalf("error = %T %v, want ProviderError", err, err)
+			}
+			if providerErr.Kind != tc.wantKind {
+				t.Fatalf("ProviderError kind = %q, want %q", providerErr.Kind, tc.wantKind)
+			}
+			if result.Status != tc.status || writer.Code != tc.status {
+				t.Fatalf("upstream/gateway status = %d/%d, want %d", result.Status, writer.Code, tc.status)
+			}
+			if writer.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("Content-Type = %q, want application/json", writer.Header().Get("Content-Type"))
+			}
+			if writer.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("Cache-Control = %q, want no-store", writer.Header().Get("Cache-Control"))
+			}
+			if tc.retryAfter != "" && writer.Header().Get("Retry-After") != tc.retryAfter {
+				t.Fatalf("Retry-After = %q, want %q", writer.Header().Get("Retry-After"), tc.retryAfter)
+			}
+			var payload struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+					Code    string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(writer.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("safe error is not JSON: %v; body=%q", err, writer.Body.String())
+			}
+			if payload.Error.Code != tc.wantCode || payload.Error.Type != "gateway_error" {
+				t.Fatalf("error payload = %+v, want code=%q type=gateway_error", payload.Error, tc.wantCode)
+			}
+			if payload.Error.Message != "upstream provider request failed" {
+				t.Fatalf("error message = %q", payload.Error.Message)
+			}
+			if strings.Contains(writer.Body.String(), privateError) || strings.Contains(writer.Body.String(), "remote-secret") {
+				t.Fatalf("raw upstream error details leaked: %q", writer.Body.String())
+			}
+			if int64(writer.Body.Len()) != result.ResponseBytes || string(result.Body) != writer.Body.String() {
+				t.Fatalf("result body metadata does not match public error response: result=%+v body=%q", result, writer.Body.String())
+			}
+		})
+	}
+}
+
 func TestOpenAICompatibleProviderWritesSafeSSEErrorForUpstreamStatusAfterCommit(t *testing.T) {
 	const privateError = "provider credential details must not leak"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
