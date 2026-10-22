@@ -77,3 +77,13 @@ jobs:
           grep -q 'configured_remote' web/js/app/main.js
           grep -q 'available_backends' web/static/dist/app.js
           grep -q 'configured_remote' web/static/dist/app.js
+
+      # 临时诊断步骤：比较失败时仍上传 CI 实际生成的 bundle，用于修复提交产物。
+      - name: 上传生成的管理台 bundle（临时诊断）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-gateway-admin-generated
+          path: /tmp/llm-gateway-admin.js
+          if-no-files-found: error
+          retention-days: 1
