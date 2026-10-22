@@ -13,7 +13,7 @@ import (
 func TestRemoteProviderMutatorsPreserveOriginalRequestBody(t *testing.T) {
 	body := []byte(`{"stream":true,"instructions":"keep instructions","input":[{"role":"developer","content":"keep developer"},{"role":"user","content":"hello"}],"temperature":0.13}`)
 	s := &Server{upstream: settings.Upstream{Backend: "deepseek"}}
-	st := core.State{Path: "/v1/responses", Body: append([]byte(nil), body...)}
+	st := core.State{Request: core.Request{Path: "/v1/responses", Body: append([]byte(nil), body...)}}
 
 	got, err := s.mutateSanitize(context.Background(), st)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestRemoteProviderMutatorsPreserveOriginalRequestBody(t *testing.T) {
 func TestLocalProviderSanitizerStillMergesSystemAndStreamUsage(t *testing.T) {
 	body := []byte(`{"stream":true,"input":[{"role":"developer","content":"system rule"},{"role":"user","content":"hello"}]}`)
 	s := &Server{upstream: settings.Upstream{Backend: "llamacpp"}}
-	got, err := s.mutateSanitize(context.Background(), core.State{Path: "/v1/responses", Body: body})
+	got, err := s.mutateSanitize(context.Background(), core.State{Request: core.Request{Path: "/v1/responses", Body: body}})
 	if err != nil {
 		t.Fatal(err)
 	}
