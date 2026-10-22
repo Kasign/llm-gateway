@@ -456,6 +456,26 @@ func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 	}
 }
 
+// forbiddenRemotePrefixes 覆盖不可直接作为公网 Provider 目标的特殊用途地址段。
+// 规则保守处理：宁可要求管理员显式放行，也不把文档网段、过渡隧道或基准测试地址当作公开服务。
+var forbiddenRemotePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"),
+}
+
 func forbiddenRemoteIP(addr netip.Addr) bool {
 	if !addr.IsValid() {
 		return true
@@ -464,5 +484,13 @@ func forbiddenRemoteIP(addr netip.Addr) bool {
 	if !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
 		return true
 	}
-	return netip.MustParsePrefix("100.64.0.0/10").Contains(addr)
+	if netip.MustParsePrefix("100.64.0.0/10").Contains(addr) {
+		return true
+	}
+	for _, prefix := range forbiddenRemotePrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -438,5 +439,28 @@ func TestOpenAICompatibleProviderWritesSafeSSEErrorForUpstreamStatusAfterCommit(
 	}
 	if chunks == 0 {
 		t.Fatal("safe SSE error chunk should be passed to the observer")
+	}
+}
+
+func TestForbiddenRemoteIPBlocksSpecialUseRanges(t *testing.T) {
+	blocked := []string{
+		"192.0.2.10", "198.18.0.10", "198.51.100.10", "203.0.113.10",
+		"2001:db8::10", "2002:c000:0201::1", "64:ff9b::a00:1",
+	}
+	for _, raw := range blocked {
+		addr := netip.MustParseAddr(raw)
+		if !forbiddenRemoteIP(addr) {
+			t.Errorf("forbiddenRemoteIP(%s) = false, want true", raw)
+		}
+	}
+}
+
+func TestForbiddenRemoteIPAllowsPublicUnicastExamples(t *testing.T) {
+	public := []string{"1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"}
+	for _, raw := range public {
+		addr := netip.MustParseAddr(raw)
+		if forbiddenRemoteIP(addr) {
+			t.Errorf("forbiddenRemoteIP(%s) = true, want false", raw)
+		}
 	}
 }
