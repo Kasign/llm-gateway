@@ -31,7 +31,7 @@ import (
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/model"
 	"github.com/whl/llm-gateway/internal/provider"
-	"github.com/whl/llm-gateway/internal/ratelimit
+	"github.com/whl/llm-gateway/internal/ratelimit"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
 )
