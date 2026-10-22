@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -124,6 +125,11 @@ func requestPublicURL(r *http.Request) string {
 		host = r.URL.Host
 	}
 	uri := r.URL.RequestURI()
+	if query := r.URL.RawQuery; query != "" {
+		// 审计展示 URL 仅脱敏凭据类 query 值；原始 URL/body 仍按原始请求转发，不修改推理语义。
+		parts := strings.SplitN(uri, "?", 2)
+		uri = parts[0] + "?" + redactSensitiveQuery(query)
+	}
 	if uri == "" {
 		uri = "/"
 	}
@@ -131,6 +137,51 @@ func requestPublicURL(r *http.Request) string {
 		return clipRunes(uri, 2048)
 	}
 	return clipRunes(scheme+"://"+host+uri, 2048)
+}
+
+// redactSensitiveQuery 在请求日志 URL 中只替换凭据参数值，保留原始顺序、编码和其它诊断参数。
+func redactSensitiveQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return rawQuery
+	}
+	parts := strings.Split(rawQuery, "&")
+	for i, part := range parts {
+		rawKey := part
+		eq := strings.IndexByte(part, '=')
+		if eq >= 0 {
+			rawKey = part[:eq]
+		}
+		key, err := url.QueryUnescape(rawKey)
+		if err != nil {
+			key = rawKey
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		if !isSensitiveQueryKey(key) {
+			continue
+		}
+		if eq >= 0 {
+			parts[i] = part[:eq+1] + "***"
+		} else {
+			parts[i] = rawKey + "=***"
+		}
+	}
+	return strings.Join(parts, "&")
+}
+
+func isSensitiveQueryKey(key string) bool {
+	switch key {
+	case "authorization", "auth", "token", "access_token", "refresh_token", "id_token",
+		"api_key", "api-key", "apikey", "x-api-key", "key",
+		"client_secret", "secret", "secret_key", "private_key", "password", "passwd",
+		"signature", "sig", "credential", "credentials", "x-amz-credential",
+		"x-amz-signature", "x-amz-security-token":
+		return true
+	}
+	return strings.HasSuffix(key, "_token") ||
+		strings.HasSuffix(key, "_secret") ||
+		strings.HasSuffix(key, "_password") ||
+		strings.HasSuffix(key, "_signature") ||
+		strings.HasSuffix(key, "_api_key")
 }
 
 func forwardedValue(v string) string {

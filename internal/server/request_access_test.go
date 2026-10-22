@@ -58,3 +58,20 @@ func TestAccessErrorMessage(t *testing.T) {
 		t.Fatalf("plain message: %s", got)
 	}
 }
+
+func TestRequestPublicURLRedactsSensitiveQueryValues(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/models?include=reasoning&token=private-token&client_secret=a%2Bb&trace_id=abc", nil)
+	got := requestPublicURL(r)
+	want := "https://api.example.com/v1/models?include=reasoning&token=***&client_secret=***&trace_id=abc"
+	if got != want {
+		t.Fatalf("requestPublicURL() = %q, want %q", got, want)
+	}
+}
+
+func TestRedactSensitiveQueryPreservesRawEncodingAndOrder(t *testing.T) {
+	got := redactSensitiveQuery("metadata%5Bx%5D=a%2Fb&X-Api-Key=secret&include=reasoning&access_token")
+	want := "metadata%5Bx%5D=a%2Fb&X-Api-Key=***&include=reasoning&access_token=***"
+	if got != want {
+		t.Fatalf("redactSensitiveQuery() = %q, want %q", got, want)
+	}
+}
