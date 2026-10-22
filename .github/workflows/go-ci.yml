@@ -62,6 +62,12 @@ jobs:
         run: |
           node --check web/static/dist/app.js
           node --check /tmp/llm-gateway-admin.js
+          # 直接比较 CI 从当前源码生成的 bundle 与已提交部署产物，防止漏提交或提交过期的 dist。
+          if ! cmp -s /tmp/llm-gateway-admin.js web/static/dist/app.js; then
+            echo "::error::web/static/dist/app.js 与当前管理台源码构建结果不一致，请重新生成并提交部署 bundle"
+            diff -u web/static/dist/app.js /tmp/llm-gateway-admin.js | head -120 || true
+            exit 1
+          fi
           # 调用记录耗时字段必须存在于部署 bundle。
           grep -q 'upstream_http_status' web/static/dist/app.js
           grep -q 'time_to_upstream_headers_ms' web/static/dist/app.js
