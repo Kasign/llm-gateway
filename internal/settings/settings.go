@@ -26,8 +26,8 @@ type Upstream struct {
 
 func (u Upstream) Validate() error {
 	u.Backend = strings.ToLower(strings.TrimSpace(u.Backend))
-	if u.Backend != "llamacpp" && u.Backend != "ollama" {
-		return fmt.Errorf("backend must be llamacpp or ollama")
+	if !validBackendID(u.Backend) {
+		return fmt.Errorf("backend ID is invalid")
 	}
 	u.BaseURL = strings.TrimSpace(u.BaseURL)
 	if u.BaseURL == "" {
@@ -56,7 +56,7 @@ func normalizeBackendModels(in map[string]string) map[string]string {
 	for k, v := range in {
 		k = strings.ToLower(strings.TrimSpace(k))
 		v = strings.TrimSpace(v)
-		if (k != "llamacpp" && k != "ollama") || v == "" {
+		if !validBackendID(k) || v == "" {
 			continue
 		}
 		out[k] = v
@@ -65,6 +65,22 @@ func normalizeBackendModels(in map[string]string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+// validBackendID 允许本地后端名和配置中注册的远程 Provider ID，但限制字符避免无效标识混入持久化设置。
+func validBackendID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for i, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+		if i == 0 && !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // Repo 读写 gateway_settings 表中的 JSON 配置项。
