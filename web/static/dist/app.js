@@ -1,13 +1,8 @@
 (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __esm = (fn, res, err) => function __init() {
-    if (err) throw err[0];
-    try {
-      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-    } catch (e) {
-      throw err = [e], e;
-    }
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
   };
   var __export = (target, all) => {
     for (var name in all)
@@ -479,7 +474,7 @@
           const target = displayRequestTarget(x);
           const sz = (Number(x.request_bytes || 0) / 1024).toFixed(1) + " / " + (Number(x.response_bytes || 0) / 1024).toFixed(1) + " KB";
           const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">\u7ED3\u675F</button>` : "";
-          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
+          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
         }).join("")
       );
     } catch (e) {
@@ -1381,7 +1376,7 @@
     const j = modelHub.runtime || {};
     const noteEl = $("runtimeUnloadNote");
     const backend = String(j.backend || "llamacpp").toLowerCase();
-    const backendLabel2 = backend === "ollama" ? "Ollama" : "llama.cpp";
+    const backendLabel3 = backend === "ollama" ? "Ollama" : "llama.cpp";
     const activeModel = String(j.active_model || "").trim() || (findActiveRuntimeItem(j)?.id || "");
     const activeItem = findActiveRuntimeItem(j);
     const typeLine = runtimeOverviewMeta(j, activeItem);
@@ -1402,16 +1397,16 @@
         if (ram > 0) metrics.push(runtimeMetricCell("\u5185\u5B58", fmtSize(ram), ""));
       }
       const metricsHtml = metrics.length ? '<div class="runtime-hero-metrics">' + metrics.join("") + "</div>" : "";
-      el.innerHTML = '<div class="runtime-hero runtime-hero-live' + (metrics.length ? "" : " runtime-hero-live-compact") + '"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-running">\u8FD0\u884C\u4E2D</span><span class="pill pill-backend">' + esc(backendLabel2) + '</span></div><span class="runtime-model-pill" title="' + esc(displayName) + '">' + esc(displayName) + "</span></div>" + metricsHtml + "</div>";
+      el.innerHTML = '<div class="runtime-hero runtime-hero-live' + (metrics.length ? "" : " runtime-hero-live-compact") + '"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-running">\u8FD0\u884C\u4E2D</span><span class="pill pill-backend">' + esc(backendLabel3) + '</span></div><span class="runtime-model-pill" title="' + esc(displayName) + '">' + esc(displayName) + "</span></div>" + metricsHtml + "</div>";
     }
     if (noteEl) {
       noteEl.innerHTML = j.hot_unload_supported === false ? '<span class="warn">' + esc(j.unload_note || "\u5F53\u524D llama \u53EF\u80FD\u4E0D\u652F\u6301\u70ED\u5378\u8F7D") + "</span>" : "";
     }
   }
-  function backendLabel(id, backends = []) {
+  function backendLabel2(id, backends = []) {
     const item = backends.find((x) => String(x.id || "") === String(id || ""));
     if (item?.label) return String(item.label);
-    return id === "ollama" ? "Ollama" : id === "llamacpp" ? "llama.cpp" : String(id || "推理后端");
+    return id === "ollama" ? "Ollama" : id === "llamacpp" ? "llama.cpp" : String(id || "\u63A8\u7406\u540E\u7AEF");
   }
   function populateBackendOptions(backends, active) {
     const select = $("beBackend");
@@ -1425,7 +1420,7 @@
       const id = String(item.id || "").trim();
       if (!id) return "";
       const kind = String(item.kind || "local");
-      const model = kind === "remote" && item.default_model ? " · " + String(item.default_model) : "";
+      const model = kind === "remote" && item.default_model ? " \xB7 " + String(item.default_model) : "";
       return '<option value="' + esc(id) + '" data-kind="' + esc(kind) + '">' + esc(String(item.label || id) + model) + "</option>";
     }).join("");
     select.value = list.some((item) => String(item.id || "") === target) ? target : list[0]?.id || "llamacpp";
@@ -1435,20 +1430,20 @@
     return select?.selectedOptions?.[0] || null;
   }
   function backendProbeStatus(block) {
-    if (block?.configured_remote === true) return { cls: "ok", text: "已配置 · 首次推理时验证连接" };
-    if (!block?.base_url) return { cls: "muted", text: "未配置" };
-    if (block.reachable === true) return { cls: "ok", text: "可达" };
+    if (block?.configured_remote === true) return { cls: "ok", text: "\u5DF2\u914D\u7F6E \xB7 \u9996\u6B21\u63A8\u7406\u65F6\u9A8C\u8BC1\u8FDE\u63A5" };
+    if (!block?.base_url) return { cls: "muted", text: "\u672A\u914D\u7F6E" };
+    if (block.reachable === true) return { cls: "ok", text: "\u53EF\u8FBE" };
     if (block.reachable === false) {
       const hint = String(block.error || "").trim();
-      return { cls: "err", text: hint ? "不可达 · " + hint.slice(0, 80) : "不可达" };
+      return { cls: "err", text: hint ? "\u4E0D\u53EF\u8FBE \xB7 " + hint.slice(0, 80) : "\u4E0D\u53EF\u8FBE" };
     }
     const checks = block.checks || [];
-    if (!checks.length) return { cls: "muted", text: "未配置" };
+    if (!checks.length) return { cls: "muted", text: "\u672A\u914D\u7F6E" };
     const ok = checks.every((c) => Number(c.http_status) >= 200 && Number(c.http_status) < 400);
     const partial = checks.some((c) => Number(c.http_status) >= 200 && Number(c.http_status) < 400);
-    if (ok) return { cls: "ok", text: "可达" };
-    if (partial) return { cls: "warn", text: "部分可达" };
-    return { cls: "err", text: "不可达" };
+    if (ok) return { cls: "ok", text: "\u53EF\u8FBE" };
+    if (partial) return { cls: "warn", text: "\u90E8\u5206\u53EF\u8FBE" };
+    return { cls: "err", text: "\u4E0D\u53EF\u8FBE" };
   }
   function renderBackendProbeCompact(j) {
     const active = (j.active || {}).backend || "llamacpp";
@@ -1458,7 +1453,7 @@
     ];
     populateBackendOptions(backends, active);
     const activeItem = backends.find((x) => String(x.id || "") === active);
-    const activeLabel = backendLabel(active, backends);
+    const activeLabel = backendLabel2(active, backends);
     const activeRemote = activeItem?.kind === "remote";
     const probes = j.upstream_probes || {};
     const pills = [];
@@ -1468,14 +1463,13 @@
       if (!id || !block?.base_url) continue;
       const status = backendProbeStatus(block);
       const current = id === active ? " backend-probe-pill-current" : "";
-      pills.push('<span class="backend-probe-pill ' + status.cls + current + '">' + esc(backendLabel(id, backends)) + " · " + esc(status.text) + "</span>");
+      pills.push('<span class="backend-probe-pill ' + status.cls + current + '">' + esc(backendLabel2(id, backends)) + " \xB7 " + esc(status.text) + "</span>");
     }
     const proxyOk = j.health === "ok";
-    const head = activeRemote ? '<span class="backend-probe-lead ok">当前 ' + esc(activeLabel) + " · 已配置（首次推理时验证连接）</span>" : proxyOk ? '<span class="backend-probe-lead ok">当前 ' + esc(activeLabel) + " · 代理可达</span>" : '<span class="backend-probe-lead err">当前 ' + esc(activeLabel) + " · " + esc(j.health || "异常") + "</span>";
+    const head = activeRemote ? '<span class="backend-probe-lead ok">\u5F53\u524D ' + esc(activeLabel) + " \xB7 \u5DF2\u914D\u7F6E\uFF08\u9996\u6B21\u63A8\u7406\u65F6\u9A8C\u8BC1\u8FDE\u63A5\uFF09</span>" : proxyOk ? '<span class="backend-probe-lead ok">\u5F53\u524D ' + esc(activeLabel) + " \xB7 \u4EE3\u7406\u53EF\u8FBE</span>" : '<span class="backend-probe-lead err">\u5F53\u524D ' + esc(activeLabel) + " \xB7 " + esc(j.health || "\u5F02\u5E38") + "</span>";
     const body = pills.length ? '<div class="backend-probe-pills">' + pills.join("") + "</div>" : "";
     return head + body;
   }
-  let backendProbeInFlight = false;
   function applyBackendProbeUI(j) {
     const probeEl = $("backendProbe");
     if (!probeEl) return;
@@ -1523,7 +1517,7 @@
     }
     const probeEl = $("backendProbe");
     if (probeEl && !probeEl.dataset.probed) {
-      probeEl.innerHTML = '<span class="muted small">点击「检测连通性」查看后端状态；远程连接在首次推理时验证</span>';
+      probeEl.innerHTML = '<span class="muted small">\u70B9\u51FB\u300C\u68C0\u6D4B\u8FDE\u901A\u6027\u300D\u67E5\u770B\u540E\u7AEF\u72B6\u6001\uFF1B\u8FDC\u7A0B\u8FDE\u63A5\u5728\u9996\u6B21\u63A8\u7406\u65F6\u9A8C\u8BC1</span>';
     }
   }
   async function loadBackendForm(opts = {}) {
@@ -1540,7 +1534,7 @@
         if (String(j.health || "").startsWith("remote Provider configured")) {
           applyBackendProbeUI(j);
         } else {
-          probeEl.innerHTML = '<span class="muted small">点击「检测连通性」查看后端状态；远程连接在首次推理时验证</span>';
+          probeEl.innerHTML = '<span class="muted small">\u70B9\u51FB\u300C\u68C0\u6D4B\u8FDE\u901A\u6027\u300D\u67E5\u770B\u540E\u7AEF\u72B6\u6001\uFF1B\u8FDC\u7A0B\u8FDE\u63A5\u5728\u9996\u6B21\u63A8\u7406\u65F6\u9A8C\u8BC1</span>';
         }
       }
     } catch (e) {
@@ -1555,17 +1549,17 @@
     const cur = (await api("/api/admin/backend")).active || {};
     const probeEl = $("backendProbe");
     if (backend === cur.backend) {
-      if (probeEl) probeEl.innerHTML = '<span class="muted">当前已是该上游服务</span>';
+      if (probeEl) probeEl.innerHTML = '<span class="muted">\u5F53\u524D\u5DF2\u662F\u8BE5\u4E0A\u6E38\u670D\u52A1</span>';
       return;
     }
-    const confirmText = targetRemote ? "切换到远程 Provider「" + targetLabel + "」后，将使用其配置的默认模型；不会卸载当前本地模型。是否继续？" : "切换本地推理后端可能卸载旧本地后端已加载的模型，是否继续？";
+    const confirmText = targetRemote ? "\u5207\u6362\u5230\u8FDC\u7A0B Provider\u300C" + targetLabel + "\u300D\u540E\uFF0C\u5C06\u4F7F\u7528\u5176\u914D\u7F6E\u7684\u9ED8\u8BA4\u6A21\u578B\uFF1B\u4E0D\u4F1A\u5378\u8F7D\u5F53\u524D\u672C\u5730\u6A21\u578B\u3002\u662F\u5426\u7EE7\u7EED\uFF1F" : "\u5207\u6362\u672C\u5730\u63A8\u7406\u540E\u7AEF\u53EF\u80FD\u5378\u8F7D\u65E7\u672C\u5730\u540E\u7AEF\u5DF2\u52A0\u8F7D\u7684\u6A21\u578B\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F";
     if (!confirm(confirmText)) return;
-    if (probeEl) probeEl.textContent = "切换中…";
+    if (probeEl) probeEl.textContent = "\u5207\u6362\u4E2D\u2026";
     try {
       const result = await api("/api/admin/backend", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ backend }) });
       const active = result.active || {};
       if (probeEl) {
-        probeEl.innerHTML = targetRemote ? '<span class="ok">已切换到远程 Provider · 默认模型 ' + esc(active.model_name || "配置模型") + "。远程连接将在首次推理时验证，本地模型不受影响。</span>" : '<span class="ok">已切换本地后端，请在「本地模型」中加载模型</span>';
+        probeEl.innerHTML = targetRemote ? '<span class="ok">\u5DF2\u5207\u6362\u5230\u8FDC\u7A0B Provider \xB7 \u9ED8\u8BA4\u6A21\u578B ' + esc(active.model_name || "\u914D\u7F6E\u6A21\u578B") + "\u3002\u8FDC\u7A0B\u8FDE\u63A5\u5C06\u5728\u9996\u6B21\u63A8\u7406\u65F6\u9A8C\u8BC1\uFF0C\u672C\u5730\u6A21\u578B\u4E0D\u53D7\u5F71\u54CD\u3002</span>" : '<span class="ok">\u5DF2\u5207\u6362\u672C\u5730\u540E\u7AEF\uFF0C\u8BF7\u5728\u300C\u672C\u5730\u6A21\u578B\u300D\u4E2D\u52A0\u8F7D\u6A21\u578B</span>';
       }
       adminStore.reset();
       await loadSystem({ force: "bootstrap" });
@@ -2643,7 +2637,7 @@
       if (token === benchPollToken) setBenchRunning(false);
     }
   }
-  var modelHub, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
+  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
   var init_main = __esm({
     "js/app/main.js"() {
       init_dom();
