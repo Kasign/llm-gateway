@@ -111,10 +111,12 @@ func TestOpenAICompatibleProviderSupportsAPIKeyHeaderMode(t *testing.T) {
 }
 
 func TestOpenAICompatibleProviderForwardsAnthropicMessagesHeaders(t *testing.T) {
-	var gotVersion, gotBeta, gotKey, gotAuthorization, gotModel, gotQuery string
+	var gotVersion, gotBeta, gotFutureHeader, gotWorkspace, gotKey, gotAuthorization, gotModel, gotQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotVersion = r.Header.Get("Anthropic-Version")
 		gotBeta = r.Header.Get("Anthropic-Beta")
+		gotFutureHeader = r.Header.Get("Anthropic-Future-Capability")
+		gotWorkspace = r.Header.Get("Anthropic-Workspace-Id")
 		gotKey = r.Header.Get("X-API-Key")
 		gotAuthorization = r.Header.Get("Authorization")
 		gotQuery = r.URL.RawQuery
@@ -133,6 +135,8 @@ func TestOpenAICompatibleProviderForwardsAnthropicMessagesHeaders(t *testing.T) 
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	request.Header.Set("Anthropic-Version", "2023-06-01")
 	request.Header.Set("Anthropic-Beta", "prompt-caching-2024-07-31")
+	request.Header.Set("Anthropic-Future-Capability", "future-value")
+	request.Header.Set("Anthropic-Workspace-Id", "workspace_test")
 	request.Header.Set("X-API-Key", "gateway-caller-secret")
 	request.Header.Set("Authorization", "Bearer gateway-caller-secret")
 	writer := httptest.NewRecorder()
@@ -145,8 +149,9 @@ func TestOpenAICompatibleProviderForwardsAnthropicMessagesHeaders(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotVersion != "2023-06-01" || gotBeta != "prompt-caching-2024-07-31" {
-		t.Fatalf("Anthropic protocol headers = version %q, beta %q", gotVersion, gotBeta)
+	if gotVersion != "2023-06-01" || gotBeta != "prompt-caching-2024-07-31" ||
+		gotFutureHeader != "future-value" || gotWorkspace != "workspace_test" {
+		t.Fatalf("Anthropic protocol headers = version %q, beta %q, future %q, workspace %q", gotVersion, gotBeta, gotFutureHeader, gotWorkspace)
 	}
 	if gotKey != "provider-secret" || gotAuthorization != "" {
 		t.Fatalf("upstream credentials were not isolated: x-api-key=%q authorization=%q", gotKey, gotAuthorization)
@@ -159,11 +164,57 @@ func TestOpenAICompatibleProviderForwardsAnthropicMessagesHeaders(t *testing.T) 
 	}
 }
 
-func TestOpenAICompatibleProviderUsesAnthropicJSONErrorEnvelope(t *testing.T) {
-	const privateError = "provider internal diagnostic must not leak"
+func TestOpenAICompatibleProviderPassesThroughAnthropicJSONErrorAndHeaders(t *testing.T) {
+	const upstreamMessage = "context_management: Extra inputs are not permitted"
+	const upstreamBody = `{"type":"error","error":{"type":"invalid_request_error","message":"context_management: Extra inputs are not permitted"},"request_id":"req_anthropic_123"}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `{"error":{"message":"`+privateError+`"}}`)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("request-id", "req_anthropic_123")
+		w.Header().Set("x-should-retry", "false")
+		w.Header().Set("anthropic-ratelimit-unified-5h-status", "allowed")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "provider-secret", APIKeyHeader: "x-api-key"})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Set("Authorization", "Bearer gateway-caller-secret")
+	request.Header.Set("X-API-Key", "gateway-caller-secret")
+	writer := httptest.NewRecorder()
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request, Path: "/v1/messages",
+		Body: []byte(`{"model":"claude-model","messages":[]}`), ModelID: "claude-model",
+	})
+	if err == nil {
+		t.Fatal("expected classified upstream error")
+	}
+	if result.Status != http.StatusBadRequest || writer.Code != http.StatusBadRequest {
+		t.Fatalf("upstream/gateway status = %d/%d, want 400/400", result.Status, writer.Code)
+	}
+	if writer.Body.String() != upstreamBody {
+		t.Fatalf("Anthropic error body changed; expected capability-rejection text to pass through unchanged: %q", writer.Body.String())
+	}
+	if !strings.Contains(writer.Body.String(), upstreamMessage) {
+		t.Fatalf("missing upstream capability-rejection text: %q", writer.Body.String())
+	}
+	if strings.Contains(writer.Body.String(), "provider-secret") || strings.Contains(writer.Body.String(), "gateway-caller-secret") {
+		t.Fatalf("credentials leaked through error body: %q", writer.Body.String())
+	}
+	if writer.Header().Get("Request-Id") != "req_anthropic_123" ||
+		writer.Header().Get("X-Should-Retry") != "false" ||
+		writer.Header().Get("Anthropic-Ratelimit-Unified-5h-Status") != "allowed" {
+		t.Fatalf("Anthropic retry/usage headers were not preserved: %#v", writer.Header())
+	}
+}
+
+func TestOpenAICompatibleProviderPassesThroughAnthropicStreamErrorBeforeCommit(t *testing.T) {
+	const upstreamBody = `{"type":"error","error":{"type":"overloaded_error","message":"server overloaded"},"request_id":"req_busy"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("request-id", "req_busy")
+		w.WriteHeader(529)
+		_, _ = io.WriteString(w, upstreamBody)
 	}))
 	defer server.Close()
 
@@ -171,30 +222,83 @@ func TestOpenAICompatibleProviderUsesAnthropicJSONErrorEnvelope(t *testing.T) {
 	writer := httptest.NewRecorder()
 	result, err := p.Forward(context.Background(), InferenceCall{
 		Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
-		Path: "/v1/messages", Body: []byte(`{"model":"claude-model","messages":[]}`), ModelID: "claude-model",
+		Path: "/v1/messages?beta=true", Body: []byte(`{"model":"claude-model","messages":[],"stream":true}`),
+		ModelID: "claude-model", Stream: true,
 	})
 	if err == nil {
-		t.Fatal("expected classified upstream authentication error")
+		t.Fatal("expected classified upstream error")
 	}
-	if result.Status != http.StatusUnauthorized || writer.Code != http.StatusUnauthorized {
-		t.Fatalf("upstream/gateway status = %d/%d, want 401/401", result.Status, writer.Code)
+	if result.Status != 529 || writer.Code != 529 || writer.Body.String() != upstreamBody {
+		t.Fatalf("streaming non-2xx was not passed through unchanged: status=%d/%d body=%q", result.Status, writer.Code, writer.Body.String())
+	}
+	if writer.Header().Get("Request-Id") != "req_busy" {
+		t.Fatalf("request ID missing from response headers: %#v", writer.Header())
+	}
+}
+
+func TestAnthropicErrorTypeMapsHTTPStatuses(t *testing.T) {
+	cases := []struct {
+		status int
+		want   string
+	}{
+		{http.StatusBadRequest, "invalid_request_error"},
+		{http.StatusUnauthorized, "authentication_error"},
+		{http.StatusPaymentRequired, "billing_error"},
+		{http.StatusForbidden, "permission_error"},
+		{http.StatusNotFound, "not_found_error"},
+		{http.StatusConflict, "conflict_error"},
+		{http.StatusRequestEntityTooLarge, "request_too_large"},
+		{http.StatusTooManyRequests, "rate_limit_error"},
+		{http.StatusGatewayTimeout, "timeout_error"},
+		{529, "overloaded_error"},
+		{http.StatusBadGateway, "api_error"},
+	}
+	for _, tt := range cases {
+		if got := anthropicErrorTypeForStatus(tt.status); got != tt.want {
+			t.Errorf("status %d: got %q, want %q", tt.status, got, tt.want)
+		}
+		if got := anthropicErrorType(providerErrorCodeForPath("/v1/messages", tt.status,
+			NewHTTPError("test", tt.status, errors.New("mock upstream error")))); got != tt.want {
+			t.Errorf("provider error mapping status %d: got %q, want %q", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestOpenAICompatibleProviderRejectsOversizedAnthropicMessagesRequest(t *testing.T) {
+	var upstreamCalled atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "provider-secret", APIKeyHeader: "x-api-key"})
+	body := make([]byte, AnthropicMessagesMaxRequestBodyBytes+1)
+	writer := httptest.NewRecorder()
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
+		Path: "/v1/messages", Body: body, ModelID: "claude-model",
+	})
+	if err == nil {
+		t.Fatal("expected oversized Anthropic request to be rejected")
+	}
+	if upstreamCalled.Load() {
+		t.Fatal("oversized request reached the upstream")
+	}
+	if result.Status != http.StatusRequestEntityTooLarge || writer.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d/%d, want 413/413", result.Status, writer.Code)
 	}
 	var payload struct {
-		Type  string `json:"type"`
+		Type string `json:"type"`
 		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
+			Type string `json:"type"`
 		} `json:"error"`
 	}
 	if decodeErr := json.Unmarshal(writer.Body.Bytes(), &payload); decodeErr != nil {
 		t.Fatalf("Anthropic error body is not JSON: %v", decodeErr)
 	}
-	if payload.Type != "error" || payload.Error.Type != "authentication_error" ||
-		payload.Error.Message != "upstream provider request failed" {
-		t.Fatalf("incompatible Anthropic error envelope: %+v", payload)
-	}
-	if strings.Contains(writer.Body.String(), privateError) || strings.Contains(writer.Body.String(), "provider-secret") {
-		t.Fatalf("upstream diagnostic or credential leaked: %q", writer.Body.String())
+	if payload.Type != "error" || payload.Error.Type != "request_too_large" {
+		t.Fatalf("wrong oversized-request error body: %+v", payload)
 	}
 }
 
@@ -244,7 +348,7 @@ func TestOpenAICompatibleProviderUsesAnthropicSSEErrorEnvelopeAfterCommit(t *tes
 		t.Fatalf("incompatible Anthropic SSE error envelope: %+v", payload)
 	}
 	if strings.Contains(body, privateError) || strings.Contains(body, "provider-secret") {
-		t.Fatalf("upstream diagnostic or credential leaked: %q", body)
+		t.Fatalf("post-commit fallback SSE event leaked an upstream response body or credential: %q", body)
 	}
 }
 

@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `37a3ae692b6f0560f520ea5b410a40b0fdc54d6c`，GitHub Actions #81（运行 `39894814380`，success）。Go 单测、`go vet`、Gateway 构建、管理台源码构建、前端语法与关键字段检查全部通过。
+> 最近一次已验收代码功能组：提交 `37a3ae692b6f0560f520ea5b410a40b0fdc54d6c`，GitHub Actions #81（运行 `39894814380`，success）。紧随其后的文档提交 `24a7235722c0bd74d5e0a846a68e3ed0934b652a` 对应 Actions #82（运行 `39895034099`，success）。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -146,7 +146,7 @@ docs/                        中文架构、协议和运维文档
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
 | 阶段 2：请求边界与路由 | 进行中 | 95% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护，以及 Agent 入口拒绝请求审计 URL 前缀恢复（Actions #79 通过）。继续补 API/并发契约覆盖与性能基线。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
-| 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | 已覆盖 OpenAI-compatible 基础转发、Anthropic Messages 版本/Beta 头透传与 JSON/SSE 安全错误信封；对应代码提交 `37a3ae6` 的 Actions #81 全部通过。真实供应商端到端、DNS/连接故障注入仍待执行。 |
+| 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | 已覆盖 OpenAI-compatible 基础转发与 Anthropic Messages 的协议头、错误类型、原始错误兼容策略、请求体限制和响应头透传。本轮新代码修改待对应 CI；真实供应商端到端、DNS/连接故障注入仍待执行。 |
 | 阶段 5：运行治理与 CI | 进行中 | 40% | CI 对 Go 测试、`go vet`、构建、管理台源码、前端语法/关键字段持续执行；Actions #81 所有步骤通过。压力测试、线上指标与 Provider 故障注入基线仍缺。 |
 
 ### 已核实的历史 CI 问题
@@ -260,3 +260,14 @@ docs/                        中文架构、协议和运维文档
 - 新增 Mock 上游测试：协议头与模型覆写、Gateway/Provider 凭据隔离、401 JSON 错误脱敏、流式 503 错误事件脱敏，以及客户端响应状态已提交时保持 200 的语义。
 - 代码修改前基线为提交 `275a70e0849536978963cc4fa727e65ff9953044`，Actions #79（运行 `39894282515`）通过。实现提交 `37a3ae692b6f0560f520ea5b410a40b0fdc54d6c` 的 Actions #81（运行 `39894814380`）也完整通过：`go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建和前端 bundle 检查。
 - 当前验收边界：Mock 测试覆盖上述协议头、凭据隔离、401 JSON 和已提交流的 503 错误；真实 Anthropic/Claude Code 端到端与 DNS、连接失败、超时等故障注入仍未验收。
+
+
+### Anthropic Messages 兼容性补齐（2026-10-23，待 CI）
+
+- 对照 [Claude Code gateway compatibility guide](https://code.claude.com/docs/en/llm-gateway-protocol) 与 [Claude API errors](https://platform.claude.com/docs/en/api/errors) 复核后，发现固定请求头白名单、统一错误正文脱敏和提前 warm-start 提交 200 会破坏部分 Claude Code 能力拒绝重试。
+- 本功能组扩大 `anthropic-*` 请求头透传，补齐 `anthropic-ratelimit-unified-*`、`x-should-retry` 等响应头；在 Anthropic Messages 路径保留上游非 2xx 原始错误正文与状态，OpenAI-compatible 其他路径继续使用原来的脱敏规则。
+- 对 `/v1/messages`（含 `count_tokens` 子路径）设置 32,000,000 字节请求上限；Gate 与 Provider 两层校验；拒绝响应和 Pipeline 错误使用 Anthropic JSON 错误信封，覆盖计费、权限、冲突、过大请求、速率限制、超时和过载类型。
+- Anthropic Messages 流式请求不使用 Gateway warm-start 注释，避免先发送 SSE 注释而不可逆地提交 HTTP 200。
+- 变更文件：`internal/provider/openai_compatible.go`、`internal/provider/openai_compatible_test.go`、`internal/server/pipeline_hooks.go`、`internal/server/pipeline_http.go`、`internal/server/keepalive_test.go`、本文档与 `docs/gateway-technical-guidance.md`。
+- 兼容性与安全取舍：原始 Anthropic 上游错误正文可能包含供应商自行生成的诊断信息，因此只对管理员明确配置的 Anthropic Messages 上游保留；Provider URL/凭据边界继续由既有安全配置约束，非 Anthropic API 错误正文不改变。
+- 待验证：Go 单测、`go vet`、Gateway 构建和前端 bundle CI。真实 Anthropic/Claude Code E2E 仍未执行，不能据 Mock 测试宣称端到端认证通过。

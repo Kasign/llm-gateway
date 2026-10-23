@@ -538,7 +538,7 @@ URL 路径前缀仍然合法，例如 `http://llama-cpp:8080/openai/v1`。空的
 
 ### 远程流式错误语义
 
-上游错误正文可能含内部诊断信息或凭据上下文，不直接转发。未提交响应头时，网关保留上游状态码并返回稳定的脱敏 JSON；warm-start 或上游首块已提交状态后，HTTP 状态不可逆，只追加脱敏 SSE 错误事件。Responses API 的追加错误事件维持其所需的 `sequence_number`，且已有测试验证这一收口行为。
+除 Anthropic Messages 的协议兼容例外外，上游错误正文可能含内部诊断信息或凭据上下文，不直接转发。未提交响应头时，网关保留上游状态码并按协议返回错误；warm-start 或上游首块已提交状态后，HTTP 状态不可逆，只能追加适配对应协议的 SSE 错误事件。Responses API 的追加错误事件维持其所需的 `sequence_number`，且已有测试验证这一收口行为。
 
 ### 多 Agent 拒绝请求的审计 URL（已修复并通过 CI）
 
@@ -547,6 +547,10 @@ Agent 入口在 Handler 层剥离路径前缀，再复用标准 /v1/* 处理逻�
 
 ## Anthropic Messages 兼容边界
 
-远程 Provider 对 `POST /v1/messages` 按 Anthropic Messages 的请求结构透传。调用方的 `anthropic-version` 与 `anthropic-beta` 在允许列表内转发；上游凭据仍只使用 Provider 的 `api_key`，例如设置 `api_key_header: x-api-key`，不会把 Gateway 调用方的 `Authorization` 或 `X-API-Key` 透传为厂商凭据。模型字段依然由 Agent/上游配置固定并覆盖。
+远程 Provider 将 `POST /v1/messages` 与可选的 `POST /v1/messages/count_tokens` 作为 Anthropic Messages 请求透传。请求的 `anthropic-*` 头按开放集合转发，不对 beta/新版本头做固定白名单；Provider 凭据仍只使用服务端配置的 `api_key`，调用方 `Authorization` 与 `X-API-Key` 不会作为上游凭据透传。模型字段依然由 Agent/上游配置固定并覆盖。Anthropic Messages 请求体限制为 32,000,000 字节，超限返回 413 `request_too_large`。
 
-该路径的上游错误 JSON 与流式 `event: error` 使用 Anthropic 错误信封，并继续屏蔽厂商原始错误正文。此适配属于 HTTP/协议兼容层，不代表每项 Anthropic Beta 能力或真实 Claude Code 端到端行为都已验收；真实供应商验证仍需单独执行。
+Claude Code 依赖原始上游错误 message 识别部分能力拒绝并自动降级，所以 **仅 Anthropic Messages 路径**在上游已经返回 HTTP 错误且 Gateway 尚未提交响应时，会保留原始 HTTP 状态、错误正文和必要响应头；其他协议仍使用统一脱敏错误。该兼容性例外意味着部署者必须信任配置的 Anthropic-format 上游，不能把不可信服务配置为 Provider。连接超时等没有上游错误正文的情况仍返回网关生成的安全 Anthropic 错误信封。
+
+Claude Code 还使用 `x-should-retry`、`retry-after`、`request-id` 和 `anthropic-ratelimit-unified-*` 响应头；这些在该路径上按白名单/前缀转发。为避免流式请求提前提交 200 并丢失上游 4xx/5xx 错误，Anthropic Messages 路径不发送 Gateway warm-start SSE 注释。网关生成的入口拒绝及 Pipeline 错误也使用 Anthropic 错误信封，并按 HTTP 状态区分 `permission_error`、`billing_error`、`request_too_large`、`overloaded_error` 等类型。
+
+当前只完成 HTTP/协议层测试，尚未完成真实 Anthropic/Claude Code 端到端验收。Claude Code 的 `HEAD /api/hello` 启动探测可以被拒绝；可选 count_tokens 端点已透传，但实际 token-count 结果依赖上游实现与配置。

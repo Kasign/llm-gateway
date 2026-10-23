@@ -13,6 +13,7 @@ import (
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -22,6 +23,25 @@ const maxInferenceRequestBodyBytes int64 = 64 << 20
 // MaxBytesReader 则会返回 *http.MaxBytesError，让调用方可以明确拒绝过大的请求。
 func readLimitedRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
 	return io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
+}
+
+func maxInferenceRequestBodyBytesForPath(rawPath string) int64 {
+	if isAnthropicMessagesRequestPath(rawPath) {
+		return provider.AnthropicMessagesMaxRequestBodyBytes
+	}
+	return maxInferenceRequestBodyBytes
+}
+
+// writeInferenceError 保持 Anthropic Messages 客户端可识别的错误信封；其他入口维持原有统一格式。
+func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code, message string) {
+	if isAnthropicMessagesRequestPath(rawPath) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(status)
+		_, _ = w.Write(provider.AnthropicErrorBodyForStatus(status, message))
+		return
+	}
+	jsonError(w, status, code, message)
 }
 
 // serveInference 是 /v1 推理的门外：鉴权、限流、读 body，然后进入固化的 Run。
@@ -56,11 +76,16 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		s.rejectInference(w, r, id, start, key, http.StatusTooManyRequests, "rate_limit_exceeded", "rate limit exceeded")
 		return
 	}
-	body, err := readLimitedRequestBody(w, r, maxInferenceRequestBodyBytes)
+	maxBodyBytes := maxInferenceRequestBodyBytesForPath(r.URL.Path)
+	body, err := readLimitedRequestBody(w, r, maxBodyBytes)
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			s.rejectInference(w, r, id, start, key, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the 64 MiB limit")
+			message := "request body exceeds the 64 MiB limit"
+			if isAnthropicMessagesRequestPath(r.URL.Path) {
+				message = "request body exceeds the 32 MB Anthropic Messages limit"
+			}
+			s.rejectInference(w, r, id, start, key, http.StatusRequestEntityTooLarge, "request_too_large", message)
 		} else {
 			s.rejectInference(w, r, id, start, key, http.StatusBadRequest, "invalid_body", err.Error())
 		}
@@ -89,7 +114,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	// 已经写过响应头（保活或上游数据）时不能再补 JSON 错误，否则会和流内容混在一起。
 	if err != nil && !sink.HeaderWritten() {
 		status, ecode, msg := core.Unpack(err)
-		jsonError(w, status, ecode, msg)
+		writeInferenceError(w, r.URL.Path, status, ecode, msg)
 	}
 }
 
@@ -116,7 +141,7 @@ func (s *Server) rejectInference(w http.ResponseWriter, r *http.Request, id stri
 		s.audit.CreateRequest(item)
 		s.audit.FinishRequest(item)
 	}
-	jsonError(w, status, code, msg)
+	writeInferenceError(w, r.URL.Path, status, code, msg)
 }
 
 func headerMap(h http.Header) map[string][]string {

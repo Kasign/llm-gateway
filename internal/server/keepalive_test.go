@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/live"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -158,4 +160,31 @@ func (s *failAfterSink) writes() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+func TestWarmStartDoesNotCommitAnthropicMessagesHTTPStatus(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Llama.WarmStart = true
+	s := &Server{cfg: cfg}
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		sink := newMemSink()
+		written := s.warmStart(context.Background(), core.State{
+			ID: "req-anthropic-warmstart", Path: path, Stream: true, Sink: sink,
+		})
+		if written != 0 || len(sink.Bytes()) != 0 {
+			t.Fatalf("warmStart committed Anthropic endpoint %q: bytes=%d payload=%q", path, written, sink.Bytes())
+		}
+	}
+}
+
+func TestMaxInferenceRequestBodyBytesForPath(t *testing.T) {
+	if got := maxInferenceRequestBodyBytesForPath("/v1/messages?beta=true"); got != provider.AnthropicMessagesMaxRequestBodyBytes {
+		t.Fatalf("Anthropic Messages limit = %d, want %d", got, provider.AnthropicMessagesMaxRequestBodyBytes)
+	}
+	if got := maxInferenceRequestBodyBytesForPath("/v1/messages/count_tokens"); got != provider.AnthropicMessagesMaxRequestBodyBytes {
+		t.Fatalf("Anthropic token-count limit = %d, want %d", got, provider.AnthropicMessagesMaxRequestBodyBytes)
+	}
+	if got := maxInferenceRequestBodyBytesForPath("/v1/chat/completions"); got != maxInferenceRequestBodyBytes {
+		t.Fatalf("OpenAI request limit = %d, want %d", got, maxInferenceRequestBodyBytes)
+	}
 }

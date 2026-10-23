@@ -23,6 +23,9 @@ const (
 	defaultRemoteResponseLimit int64 = 32 << 20
 	maxRemoteResponseLimit     int64 = 512 << 20
 
+	// Anthropic Messages 文档规定单请求体上限为 32 MB（十进制字节）。
+	AnthropicMessagesMaxRequestBodyBytes int64 = 32_000_000
+
 	remoteDialTimeout             = 10 * time.Second
 	remoteTLSHandshakeTimeout     = 10 * time.Second
 	remoteResponseHeaderTimeout   = 5 * time.Minute
@@ -139,15 +142,23 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 		}
 		status := http.StatusBadGateway
 		code := "provider_upstream"
+		hasProviderStatus := false
+		var providerErr *ProviderError
+		if errors.As(retErr, &providerErr) && providerErr != nil &&
+			providerErr.StatusCode >= http.StatusBadRequest && providerErr.StatusCode <= 599 {
+			status = providerErr.StatusCode
+			hasProviderStatus = true
+		}
 		if mapped := ToCoreError(retErr); mapped != nil {
-			if mapped.Status >= http.StatusBadRequest && mapped.Status <= 599 {
+			if !hasProviderStatus && mapped.Status >= http.StatusBadRequest && mapped.Status <= 599 {
 				status = mapped.Status
 			}
 			if mapped.Code != "" {
 				code = mapped.Code
 			}
 		}
-		body := safeProviderErrorBodyForPath(call.Path, code)
+		code = providerErrorCodeForPath(call.Path, status, retErr)
+		body := safeProviderErrorBodyForStatus(call.Path, status, code)
 		call.Writer.Header().Set("Content-Type", "application/json")
 		call.Writer.Header().Set("Cache-Control", "no-store")
 		call.Writer.WriteHeader(status)
@@ -165,6 +176,12 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 	if call.Writer == nil || call.Request == nil {
 		return core.Result{}, &ProviderError{ProviderID: p.id, Kind: ErrorInvalidRequest, StatusCode: http.StatusBadRequest, Err: errors.New("request and writer are required")}
 	}
+	if isAnthropicMessagesAPIPath(call.Path) && int64(len(call.Body)) > AnthropicMessagesMaxRequestBodyBytes {
+		return core.Result{}, &ProviderError{
+			ProviderID: p.id, Kind: ErrorInvalidRequest, StatusCode: http.StatusRequestEntityTooLarge,
+			Err: errors.New("Anthropic Messages request body exceeds the 32 MB limit"),
+		}
+	}
 	endpoint, err := p.endpoint(call.Path)
 	if err != nil {
 		return core.Result{}, &ProviderError{ProviderID: p.id, Kind: ErrorInvalidRequest, StatusCode: http.StatusBadRequest, Err: err}
@@ -177,7 +194,7 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 	if err != nil {
 		return core.Result{}, &ProviderError{ProviderID: p.id, Kind: ErrorInvalidRequest, StatusCode: http.StatusBadRequest, Err: err}
 	}
-	copyRemoteRequestHeaders(req.Header, call.Request.Header)
+	copyRemoteRequestHeaders(req.Header, call.Request.Header, call.Path)
 	if p.apiKey != "" {
 		switch p.apiKeyHeader {
 		case "authorization":
@@ -236,32 +253,52 @@ func rewriteRemoteModel(body []byte, modelID string) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-func copyRemoteRequestHeaders(dst, src http.Header) {
-	for _, name := range []string{
-		"content-type", "accept-language", "user-agent",
-		"openai-beta", "openai-organization", "openai-project", "x-title",
-		// Anthropic Messages 的版本头是必需协议字段；Beta 头承载可选协议能力。
-		"anthropic-version", "anthropic-beta",
-	} {
-		for key, values := range src {
-			if strings.EqualFold(key, name) {
-				for _, value := range values {
-					dst.Add(http.CanonicalHeaderKey(name), value)
-				}
-			}
+func copyRemoteRequestHeaders(dst, src http.Header, rawPath string) {
+	anthropicMessages := isAnthropicMessagesAPIPath(rawPath)
+	for key, values := range src {
+		name := strings.ToLower(strings.TrimSpace(key))
+		allowed := false
+		switch name {
+		case "content-type", "accept-language", "user-agent",
+			"openai-beta", "openai-organization", "openai-project", "x-title":
+			allowed = true
+		default:
+			// Anthropic Messages 是扩展式协议：未来新增的 anthropic-* 能力头也必须透传。
+			allowed = anthropicMessages && strings.HasPrefix(name, "anthropic-")
+		}
+		if !allowed {
+			continue
+		}
+		canonical := http.CanonicalHeaderKey(key)
+		for _, value := range values {
+			dst.Add(canonical, value)
 		}
 	}
+	// 调用方 Authorization / X-API-Key 不在允许列表中；下面仅设置服务端 Provider 凭据。
 	dst.Set("Content-Type", "application/json")
 }
 
-func copyRemoteResponseHeaders(dst, src http.Header) {
+func copyRemoteResponseHeaders(dst, src http.Header, rawPath string) {
 	for _, name := range []string{
 		"Content-Type", "Cache-Control", "Retry-After",
-		"X-Request-Id", "Request-Id", "OpenAI-Processing-Ms",
+		"X-Request-Id", "Request-Id", "X-Should-Retry", "OpenAI-Processing-Ms",
 		"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset",
 	} {
 		for _, value := range src.Values(name) {
 			dst.Add(name, value)
+		}
+	}
+	if !isAnthropicMessagesAPIPath(rawPath) {
+		return
+	}
+	// Claude Code 用这些响应头处理自动重试与使用量展示；新窗口维度也应可透传。
+	for key, values := range src {
+		lower := strings.ToLower(key)
+		if !strings.HasPrefix(lower, "anthropic-ratelimit-unified-") {
+			continue
+		}
+		for _, value := range values {
+			dst.Add(http.CanonicalHeaderKey(key), value)
 		}
 	}
 }
@@ -288,15 +325,23 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		return core.Result{Status: resp.StatusCode}, &ProviderError{ProviderID: p.id, Kind: ErrorUpstream, StatusCode: resp.StatusCode, Err: errors.New("provider response exceeds configured size limit")}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		// JSON 与 SSE 错误采用相同的脱敏原则：保留状态码和必要的白名单头，不透传供应商原始错误正文。
 		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
-		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
-		call.Writer.Header().Set("Content-Type", "application/json")
+		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
 		call.Writer.Header().Set("Cache-Control", "no-store")
-		safeBody := safeProviderErrorBodyForPath(call.Path, streamErrorCode(upstreamErr))
+		var errorBody []byte
+		if isAnthropicMessagesAPIPath(call.Path) {
+			// Claude Code 依靠原始错误 message 做能力降级重试；Anthropic Messages 路径保留上游错误正文。
+			errorBody = body
+			if call.Writer.Header().Get("Content-Type") == "" {
+				call.Writer.Header().Set("Content-Type", "application/json")
+			}
+		} else {
+			call.Writer.Header().Set("Content-Type", "application/json")
+			errorBody = safeProviderErrorBodyForStatus(call.Path, resp.StatusCode, providerErrorCodeForPath(call.Path, resp.StatusCode, upstreamErr))
+		}
 		call.Writer.WriteHeader(resp.StatusCode)
-		n, writeErr := call.Writer.Write(safeBody)
-		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: safeBody}
+		n, writeErr := call.Writer.Write(errorBody)
+		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: errorBody}
 		if writeErr != nil {
 			return result, writeErr
 		}
@@ -305,7 +350,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		}
 		return result, upstreamErr
 	}
-	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
+	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
 	call.Writer.WriteHeader(resp.StatusCode)
 	n, writeErr := call.Writer.Write(body)
 	result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
@@ -347,21 +392,34 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		written := writeStreamError("provider_redirect_rejected")
 		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
-	// 上游非 2xx 时，不透传供应商原始错误正文，防止暴露内部诊断或凭据上下文。
-	// 如果 Gateway 已提交响应头（例如 warmStart 的 200），用 SSE error 事件收口；
-	// 如果尚未提交，则返回保留上游 HTTP 状态的安全 JSON 错误。
+	// 上游非 2xx 且响应尚未提交时，Anthropic Messages 必须保留原始错误正文，供 Claude Code 识别能力拒绝。
+	// 其他协议继续使用统一脱敏错误；若已经提交，HTTP 状态不可逆，只能以 SSE error 事件收口。
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
-		code := streamErrorCode(upstreamErr)
+		code := providerErrorCodeForPath(call.Path, resp.StatusCode, upstreamErr)
 		if call.WriterWritten() {
 			written := writeStreamError(code)
 			return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
 		}
 
-		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
-		call.Writer.Header().Set("Content-Type", "application/json")
+		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
 		call.Writer.Header().Set("Cache-Control", "no-store")
-		body := safeProviderErrorBodyForPath(call.Path, code)
+		var body []byte
+		if isAnthropicMessagesAPIPath(call.Path) {
+			upstreamBody, readErr := io.ReadAll(io.LimitReader(resp.Body, p.maxResponseBytes+1))
+			if readErr == nil && int64(len(upstreamBody)) <= p.maxResponseBytes {
+				body = upstreamBody
+				if call.Writer.Header().Get("Content-Type") == "" {
+					call.Writer.Header().Set("Content-Type", "application/json")
+				}
+			} else {
+				call.Writer.Header().Set("Content-Type", "application/json")
+				body = safeProviderErrorBodyForStatus(call.Path, resp.StatusCode, code)
+			}
+		} else {
+			call.Writer.Header().Set("Content-Type", "application/json")
+			body = safeProviderErrorBodyForStatus(call.Path, resp.StatusCode, code)
+		}
 		call.Writer.WriteHeader(resp.StatusCode)
 		n, writeErr := call.Writer.Write(body)
 		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
@@ -373,7 +431,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		}
 		return result, upstreamErr
 	}
-	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
+	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
 	call.Writer.WriteHeader(resp.StatusCode)
 	if flusher, ok := call.Writer.(http.Flusher); ok {
 		flusher.Flush()
@@ -443,6 +501,25 @@ func streamErrorCode(err error) string {
 		return mapped.Code
 	}
 	return "provider_stream_interrupted"
+}
+
+// providerErrorCodeForPath 用真实 HTTP 状态补全 Anthropic 错误分类；通用 Provider 错误码可能将 403 当作鉴权失败。
+func providerErrorCodeForPath(rawPath string, status int, err error) string {
+	if isAnthropicMessagesAPIPath(rawPath) {
+		switch status {
+		case http.StatusPaymentRequired:
+			return "provider_billing"
+		case http.StatusForbidden:
+			return "provider_permission"
+		case http.StatusConflict:
+			return "provider_conflict"
+		case http.StatusRequestEntityTooLarge:
+			return "provider_request_too_large"
+		case 529:
+			return "provider_overloaded"
+		}
+	}
+	return streamErrorCode(err)
 }
 
 func (p *OpenAICompatibleProvider) writeStreamErrorIfCommitted(call InferenceCall, code string, sequenceNumber ...int64) int64 {
@@ -587,7 +664,48 @@ func (t *responsesSequenceTracker) NextSequence() int64 {
 func isAnthropicMessagesAPIPath(rawPath string) bool {
 	rawPath = strings.TrimSpace(strings.SplitN(rawPath, "?", 2)[0])
 	rawPath = strings.TrimRight(rawPath, "/")
-	return rawPath == "/v1/messages"
+	return rawPath == "/v1/messages" || strings.HasPrefix(rawPath, "/v1/messages/")
+}
+
+func anthropicErrorTypeForStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "invalid_request_error"
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusPaymentRequired:
+		return "billing_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusConflict:
+		return "conflict_error"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case http.StatusGatewayTimeout:
+		return "timeout_error"
+	case 529:
+		return "overloaded_error"
+	default:
+		if status >= 400 && status < 500 {
+			return "invalid_request_error"
+		}
+		return "api_error"
+	}
+}
+
+// AnthropicErrorBodyForStatus 生成网关入口拒绝时符合 Anthropic Messages 格式的错误响应。
+func AnthropicErrorBodyForStatus(status int, message string) []byte {
+	body, _ := json.Marshal(map[string]interface{}{
+		"type": "error",
+		"error": map[string]string{
+			"type": anthropicErrorTypeForStatus(status), "message": message,
+		},
+	})
+	return body
 }
 
 // anthropicErrorType 将 Gateway 的稳定错误码映射到 Anthropic Messages 错误类型。
@@ -595,20 +713,30 @@ func anthropicErrorType(code string) string {
 	switch code {
 	case "provider_authentication":
 		return "authentication_error"
+	case "provider_billing":
+		return "billing_error"
+	case "provider_permission":
+		return "permission_error"
 	case "provider_rate_limit":
 		return "rate_limit_error"
 	case "provider_model_not_found":
 		return "not_found_error"
+	case "provider_conflict":
+		return "conflict_error"
+	case "provider_request_too_large":
+		return "request_too_large"
 	case "provider_invalid_request":
 		return "invalid_request_error"
 	case "provider_timeout":
 		return "timeout_error"
+	case "provider_overloaded":
+		return "overloaded_error"
 	default:
 		return "api_error"
 	}
 }
 
-// safeProviderErrorBodyForPath 按目标 API 协议生成不含上游诊断或凭据的 JSON 错误。
+// safeProviderErrorBodyForPath 按协议生成无上游正文可用时的安全错误 JSON。
 func safeProviderErrorBodyForPath(rawPath, code string) []byte {
 	if isAnthropicMessagesAPIPath(rawPath) {
 		body, _ := json.Marshal(map[string]interface{}{
@@ -618,6 +746,13 @@ func safeProviderErrorBodyForPath(rawPath, code string) []byte {
 			},
 		})
 		return body
+	}
+	return safeProviderErrorBody(code)
+}
+
+func safeProviderErrorBodyForStatus(rawPath string, status int, code string) []byte {
+	if isAnthropicMessagesAPIPath(rawPath) {
+		return AnthropicErrorBodyForStatus(status, "upstream provider request failed")
 	}
 	return safeProviderErrorBody(code)
 }

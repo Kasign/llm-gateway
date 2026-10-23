@@ -217,6 +217,13 @@ func (s *Server) allowModelsGuard(key *auth.Key) core.Guard {
 	}
 }
 
+// isAnthropicMessagesRequestPath 判断内部规范化后的 Anthropic Messages 路径，支持可选 count_tokens 子端点。
+func isAnthropicMessagesRequestPath(rawPath string) bool {
+	rawPath = strings.TrimSpace(strings.SplitN(rawPath, "?", 2)[0])
+	rawPath = strings.TrimRight(rawPath, "/")
+	return rawPath == "/v1/messages" || strings.HasPrefix(rawPath, "/v1/messages/")
+}
+
 // warmStart 在出网前给流式调用方写一行 SSE 注释，并按间隔重复，直到这次 Run 结束。
 // 只写一次只能重置一次读空闲计时；本地模型预填往往超过 60 秒，需要在没有上游字节时继续写。
 // 注释行以冒号开头，SSE 解析器（含 Codex）会直接跳过，不会出现在回答里。
@@ -225,6 +232,11 @@ func (s *Server) allowModelsGuard(key *auth.Key) core.Guard {
 // 每一次写出都记一条流式事件。保活不经过 onChunk，因此不计入 TTFT 和响应大小。
 func (s *Server) warmStart(ctx context.Context, st core.State) int {
 	if s.cfg == nil || !s.cfg.WarmStartEnabled() || !st.Stream || st.Sink == nil {
+		return 0
+	}
+	// Anthropic Messages 必须先拿到上游 HTTP 状态和错误正文；提前写 SSE 注释会不可逆地提交 200，
+	// 让 Claude Code 无法根据 400/401/429 等响应识别能力拒绝并执行降级重试。
+	if isAnthropicMessagesRequestPath(st.Path) {
 		return 0
 	}
 	line := ": " + s.cfg.WarmStartComment() + "\n\n"
