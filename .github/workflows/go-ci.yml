@@ -52,6 +52,9 @@ jobs:
       - name: 单元测试
         run: go test ./...
 
+      - name: MariaDB 审计积压集成测试
+        run: go test -count=1 -run TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites -v ./internal/audit
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 

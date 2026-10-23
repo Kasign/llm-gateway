@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已确认 CI 通过的代码功能组：提交 `79e295f8cbf33226453bb8ad1545d740a2ec4273`，GitHub Actions #128（运行 `39922580011`，success）。新提交 `e3d30b539289965976f585e25eb2aca831633a6d` 新增真实 MariaDB 审计写入与积压压力测试，并为 CI 增加独立 MariaDB 服务；当前尚未确认该提交对应的 Actions 结果，因此不将数据库写入压力测试登记为已验收。真实供应商调用仍未执行。
+> 最近一次已通过完整 CI 的功能组：真实 MariaDB 审计写入与队列积压压力测试（代码提交 `e3d30b5`），PR #1 对应 GitHub Actions #134（运行 `39925049261`，success）。独立 MariaDB 测试、全量 Go 单测、race、五项性能基线与 Artifact、`go vet`、Gateway 构建和前端 bundle 校验全部通过。该压测不是生产请求流量或真实供应商 E2E；真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #128 验收了内存队列满载和实时会话并发快照。提交 `e3d30b5` 新增真实 MariaDB 写入与积压排空测试，待本次 CI 结果确认；仍需真实请求流量、同 Runner 重复采样和长期趋势观察。 |
+| 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #128 验收了内存队列满载和实时会话并发快照；Actions #134 通过真实 MariaDB 写入与积压排空测试。仍需持续真实请求流量、P95/输出速率测量、同 Runner 重复采样和长期趋势观察。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector 已覆盖 provider/server/core/audit/live；请求取消、双 Agent 并发解析与双 Provider Chat Completions/Responses JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入、审计队列满载和实时会话并发快照均通过。Actions #128 保留五项性能基线 Artifact；提交 `e3d30b5` 新增 MariaDB 服务和真实写入测试，结果待确认。仍需真实请求负载、同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
+| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector 已覆盖 provider/server/core/audit/live；请求取消、双 Agent 并发解析、双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入和内存压力测试均通过。Actions #134 进一步验证了真实 MariaDB 审计队列写入与积压排空，并上传五项性能基线 Artifact。仍需真实请求负载、同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过。Actions #128 已将 audit/live 加入 race detector，并验证审计队列满载、关键容量预留和实时会话快照/事件/正文上限。当前 CI 基线覆盖 Provider 转发、Agent 模型解析、请求分析、SSE 分片解析/事件生成、并行 onChunk 稳态路径五项；Actions #128 已生成测量 Artifact。提交 `e3d30b5` 增加实际 MariaDB 排队积压与排空验收用例，须以该提交的 Actions 成功记录为准；后续仍需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
+2. **并发契约、数据库积压和确定性网络故障的 CI 验收**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过。Actions #128 已将 audit/live 加入 race detector，并验证内存队列满载和实时会话快照/事件/正文上限。Actions #134 又通过真实 MariaDB 审计积压测试，验证 500 条请求生命周期记录、292 条分析更新、队列满载丢弃计数和 FIFO 排空；五项性能基线继续上传 Artifact。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
@@ -480,9 +480,10 @@ docs/                        中文架构、协议和运维文档
 - [Actions #128 与性能 Artifact](https://github.com/Kasign/llm-gateway/actions/runs/39922580011)，Artifact ID `12487543536`，30 天有效。该压力测试验证内存内数据结构和队列治理，不等同真实流量或 MariaDB 写入压力测试；后续仍需真实请求负载和持续性能趋势验证。
 
 
-### MariaDB 审计写入与队列积压压力测试（2026-10-23，待 CI 验收）
+### MariaDB 审计写入与队列积压压力测试（2026-10-23，Actions #134 已通过）
 
-- 新增 `internal/audit/writer_mariadb_test.go`，通过真实 `go-sql-driver/mysql` 连接 MariaDB，默认在未配置 `MYSQL_TEST_DSN` 时跳过；连接后还会检查所选数据库名必须以 `_test` 结尾，避免误对生产库制造压力。
+- 新增 `internal/audit/writer_mariadb_test.go`，通过真实 `go-sql-driver/mysql` 连接 MariaDB，默认在未配置 `MYSQL_TEST_DSN` 时跳过；连接后会检查所选数据库名必须以 `_test` 结尾，避免误对生产库制造压力。
 - 测试暂停单 Worker 后，由 10 个生产协程入队 500 条请求的创建、实际上游模型字段更新和最终结果写入，共 1,500 个生命周期 SQL 操作；随后继续推送 400 个普通分析更新和 3,000 个关键请求字节更新，验证 2,048 容量队列在积压时保持有界、普通日志不占用关键预留容量、关键任务可使用预留槽，并精确核对拒绝任务计数。
 - 释放 Worker 后，测试直接读取 MariaDB 校验 500 条请求记录全部完成、已接收的 292 条分析字段更新均落库，以及关键更新仍按 FIFO 顺序执行到最后一个已接收值。
-- `.github/workflows/go-ci.yml` 新增 `mariadb:11.4` 服务和专用 `llm_gateway_test` DSN，使常规单测与 `audit` 的 race detector 都能实际执行数据库测试。当前提交的 Actions 结果尚未得到独立核实，因此这里记录为“待 CI 验收”；这类合成队列压测仍不等同生产流量下的吞吐/P95 或真实故障恢复压测。
+- `.github/workflows/go-ci.yml` 配置 `mariadb:11.4` 服务和专用 `llm_gateway_test` DSN，并增加独立的 `MariaDB 审计积压集成测试` 步骤。PR #1 的 Actions #134（运行 `39925049261`）全量成功：Go 单测、该 MariaDB 集成测试、race detector、五项性能基线与 Artifact 上传、`go vet`、Gateway build 和前端 bundle 检查全部通过。Artifact ID `12489171605`，链接：[Actions #134](https://github.com/Kasign/llm-gateway/actions/runs/39925049261)，有效期至 2026-11-22。
+- 本测试验收的是单 Worker 真实数据库写入、队列积压策略和关停排空；并不等同生产请求流量下的吞吐/P95、线上故障恢复或真实供应商 E2E。
