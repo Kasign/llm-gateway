@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态负载与可控上游故障注入，PR #4 的 Actions #149（运行 `39932315169`）已通过。12,000 次稳态请求达到 200.0 req/s，P50/P95/P99 为 4.36/5.58/7.59 ms，全部 12,192 条请求均成功并正确落库；另有 120 个故障/对照请求全部符合预期，429/503 状态与审计字段一致、错误正文已脱敏。75ms 延迟场景 P50/P95 为 80.69/99.92 ms，故障阶段审计排空为 384ms。所有上游仍是本机 Mock，不代表真实模型推理、生产容量或真实供应商 E2E。
+> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态负载与可控上游 429/503 故障注入（PR #4，Actions #149/#150 均通过）。12,000 次稳态请求达到约 200 req/s，全部 12,192 条请求均成功并正确落库；另有 120 个故障/对照请求验证状态码、Retry-After、错误正文脱敏与审计一致性。当前新增的 TCP 连接拒绝与恢复集成测试尚待 CI 验收：预期验证故障时 502、上游状态为空，恢复同一端口后请求成功并正确记录。所有上游仍是本机 Mock，不代表真实模型推理、生产容量或真实供应商 E2E。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成请求/响应留存边界、审计队列满载/排空、60 秒真实 Gateway Handler+Redis+MariaDB 合成负载；Actions #149 另验收了 75ms 上游延迟、429/503 状态透传、Retry-After 透传、错误正文脱敏和数据库状态一致性。仍需真实故障恢复与生产观测。 |
+| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成请求/响应留存边界、审计队列满载/排空、60 秒 Gateway Handler+Redis+MariaDB 合成负载，以及 75ms 上游延迟与 429/503 注入。新增实际 TCP 连接拒绝与同端口恢复测试，要求 MariaDB 将 30 条 502/无上游状态与恢复后 30 条 200 正确区分；当前待 CI 验收。真实公网故障恢复与生产观测仍待。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 76% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力、MariaDB 积压与 60 秒 Gateway 负载均通过。Actions #149 新增 120 次并发故障/对照请求，核对 200/429/503 客户端与上游状态、Retry-After、错误正文脱敏和审计持久化。仍需真实 Provider 与真实公网故障恢复验证。 |
+| 阶段 5：运行治理与 CI | 进行中 | 76% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、确定性 DNS/连接/响应头错误映射、内存压力、MariaDB 积压、60 秒负载和 429/503 故障注入均已验收。当前增加实际 TCP 连接拒绝与恢复集成场景，等待 CI 核对错误边界和状态恢复；真实供应商/公网故障验证仍待。 |
 
 ### 已核实的历史 CI 问题
 
@@ -526,3 +526,11 @@ docs/                        中文架构、协议和运维文档
 - Flush 审计队列后直接查询 MariaDB，确认 120 条审计记录全部存在，客户端与上游状态分别以 60 条 200、30 条 429、30 条 503 正确记录；故障阶段队列排空时间为 384ms。
 - PR #4 对应 Actions #149（运行 `39932315169`）中，该步骤、60 秒稳态负载、全量 Go 测试、race detector、性能基线、`go vet`、Gateway build 和前端 bundle 校验均通过。[Actions #149](https://github.com/Kasign/llm-gateway/actions/runs/39932315169)。故障注入 Artifact ID `12492046864`，负载 Artifact ID `12491363872`，性能基线 Artifact ID `12491613288`；三者计划保留 30 天，预计于 2026-11-22 过期。
 - 本测试只覆盖 OpenAI-compatible JSON 路径的本机可控故障，不替代公网 DNS/连接异常、真实供应商限流/过载语义或生产级故障恢复演练。
+
+
+### Gateway TCP 连接拒绝与恢复（待 CI 验收）
+
+- 在同一个 Gateway Handler、Redis API Key 鉴权/限流、OpenAI-compatible Provider 和 MariaDB 审计实例中开启 `GATEWAY_TRANSPORT_FAILURE_TEST=1`。先关闭本机 Mock 上游 TCP listener，对 Gateway 发起 30 个并发请求，预期每个都返回安全的 HTTP 502，且由于没有收到上游 HTTP 响应，`upstream_http_status` 保持为空。
+- 随后在同一 host:port 重新启动同一 Mock Handler，发起 30 个恢复请求，预期每个均返回 200，且 `upstream_http_status=200`。测试直接 Flush 异步审计队列后查询 MariaDB，核对总共 60 条记录及两种状态的精确数量。
+- `.github/workflows/go-ci.yml` 增加独立的 `Gateway TCP 连接拒绝与恢复验证` 步骤，并上传 30 天测试日志 Artifact。PR 分支测试代码、CI 步骤和文档已更新；当前尚无本分支 Actions 结果，不得将该场景记为通过。
+- 这是本机 loopback TCP 连接拒绝/恢复测试，不等同公网 DNS 故障、真实供应商网络恢复、进程重启或生产容量验收。
