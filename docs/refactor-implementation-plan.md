@@ -271,3 +271,10 @@ docs/                        中文架构、协议和运维文档
 - 变更文件：`internal/provider/openai_compatible.go`、`internal/provider/openai_compatible_test.go`、`internal/server/pipeline_hooks.go`、`internal/server/pipeline_http.go`、`internal/server/keepalive_test.go`、本文档与 `docs/gateway-technical-guidance.md`。
 - 兼容性与安全取舍：原始 Anthropic 上游错误正文可能包含供应商自行生成的诊断信息，因此只对管理员明确配置的 Anthropic Messages 上游保留；Provider URL/凭据边界继续由既有安全配置约束，非 Anthropic API 错误正文不改变。
 - 待验证：Go 单测、`go vet`、Gateway 构建和前端 bundle CI。真实 Anthropic/Claude Code E2E 仍未执行，不能据 Mock 测试宣称端到端认证通过。
+
+
+### CI #83 首轮失败与修复记录（2026-10-23）
+
+- 提交 `dac3f9fb2d8d6a55bdefc745ec76bba42c9c80c5` 对应 Actions 运行 `39895993452` 在 `go test ./...` 阶段失败，日志确认唯一编译诊断为 `internal/provider/openai_compatible.go:348:15: undefined: safeBody`。
+- 原因：Anthropic Messages 错误正文分支重构后实际写入变量已改成 `errorBody`，但 short-write 长度校验仍引用旧名称。
+- 本修复将长度校验统一改为 `len(errorBody)`。需要重新运行完整 CI；修复提交对应 Actions 完成前不标记阶段 4 通过。

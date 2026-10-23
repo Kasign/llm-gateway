@@ -345,7 +345,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		if writeErr != nil {
 			return result, writeErr
 		}
-		if n != len(safeBody) {
+		if n != len(errorBody) {
 			return result, io.ErrShortWrite
 		}
 		return result, upstreamErr
