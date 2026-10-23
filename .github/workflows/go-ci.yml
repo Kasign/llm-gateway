@@ -45,7 +45,7 @@ jobs:
       - name: 性能基线（仅记录，不设阈值）
         run: |
           set -o pipefail
-          go test -run '^$' -bench '^(BenchmarkOpenAICompatibleProviderForwardJSON|BenchmarkResolveInferenceAgentRoute|BenchmarkBuildRequestAnalysis)$' -benchmem -benchtime=1s ./internal/provider ./internal/server | tee /tmp/llm-gateway-benchmarks.txt
+          go test -run '^$' -bench '^(BenchmarkOpenAICompatibleProviderForwardJSON|BenchmarkResolveInferenceAgentRoute|BenchmarkBuildRequestAnalysis|BenchmarkRequestTraceRecordStreamChunk|BenchmarkInferenceObserverOnChunkParallel)$' -benchmem -benchtime=1s ./internal/provider ./internal/server | tee /tmp/llm-gateway-benchmarks.txt
 
       - name: 保存性能基线产物
         uses: actions/upload-artifact@v4

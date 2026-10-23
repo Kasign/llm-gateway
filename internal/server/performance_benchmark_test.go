@@ -2,11 +2,16 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/live"
 	"github.com/whl/llm-gateway/internal/settings"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 var requestAnalysisBenchmarkSink RequestAnalysis
@@ -59,4 +64,60 @@ func BenchmarkBuildRequestAnalysis(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		requestAnalysisBenchmarkSink = buildRequestAnalysis(input)
 	}
+}
+
+
+// BenchmarkRequestTraceRecordStreamChunk 测量 SSE 分片解析与事件元数据生成开销。
+// 不连接数据库，也不保存正文预览或原始 SSE；每次迭代从事件预算起点开始。
+func BenchmarkRequestTraceRecordStreamChunk(b *testing.B) {
+	cfg := &config.Config{}
+	trace := &requestTrace{
+		s: &Server{cfg: cfg}, id: "benchmark-stream-trace",
+		start: time.Now(), stream: true, ttftRecorded: true,
+	}
+	chunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"benchmark token\"}}]}\n\n")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		trace.seq = 0
+		trace.contentBytes = 0
+		trace.lineCarry = ""
+		trace.timing = streamTimings{}
+		trace.recordStreamChunk(chunk)
+	}
+}
+
+// BenchmarkInferenceObserverOnChunkParallel 测量长流稳定阶段的观察器并发热路径。
+// 每个 worker 使用独立请求和 Live Session；模拟事件保留预算已耗尽的长流，
+// 继续测量 token 解析、响应字节计数、请求锁和实时标量更新，不涉及真实模型或 DB。
+func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
+	cfg := &config.Config{} // StorePayload、StoreStreamPreview、StoreStreamRaw 默认关闭。
+	s := &Server{cfg: cfg, live: live.NewRegistry()}
+	observer := inferenceObserver{s: s}
+	chunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"benchmark token\"}}]}\n\n")
+	var nextID atomic.Uint64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		id := fmt.Sprintf("benchmark-observer-%d", nextID.Add(1))
+		s.liveStart(context.Background(), store.RequestLog{
+			RequestID: id, Status: "running", StartedAt: time.Now(),
+		})
+		cs := s.callBegin(id, nil)
+		trace := s.attachRequestTrace(id, time.Now())
+		trace.ttftRecorded = true
+		trace.seq = maxStreamEventsPerRequest // 测量长流达到事件上限后的稳态路径。
+		cs.trace = trace
+		state := core.State{Request: core.Request{
+			ID: id, Method: "POST", Path: "/v1/chat/completions", Stream: true, Started: time.Now(),
+		}}
+
+		for pb.Next() {
+			observer.onChunk(state, chunk)
+		}
+		s.callDrop(id)
+		s.liveFinish(context.Background(), id)
+	})
 }
