@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次完整 CI 成功运行：提交 `08feb2e2be83bb81f4212649ebdacf1f3dfc74b5`，Actions 运行 `39889162077`（success）。该运行覆盖 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及重建 bundle 与已提交 `web/static/dist/app.js` 的精确字节对比。
+> 最近一次已验收代码功能组：提交 `275a70e0849536978963cc4fa727e65ff9953044`，GitHub Actions #79（运行 `39894282515`，success）。Go 单测、`go vet`、Gateway 构建、管理台源码构建、前端语法与关键字段检查全部通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 95% | 分支基线与最近 CI 已核实；仍需补齐 API、配置、数据库兼容清单与可重复性能样本。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 95% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、Redis Lua 原子限流、远程模型 ID 原样映射、请求级 Provider 固定/本地客户端隔离，以及取消与 Finish 终态保护（CI 已通过）。继续补 API/并发契约覆盖与性能基线。 |
+| 阶段 2：请求边界与路由 | 进行中 | 95% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护，以及 Agent 入口拒绝请求审计 URL 前缀恢复（Actions #79 通过）。继续补 API/并发契约覆盖与性能基线。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
-| 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | YAML 环境变量安全展开、厂商自定义 Header/Query 脱敏、远程 Provider URL/SSRF 限制和流式/非流式错误正文脱敏已通过 CI。本组校验本地推理 BaseURL 的凭据边界，待 CI；真实供应商端到端和 DNS/网络故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 40% | CI 已加入源码构建产物与已提交 bundle 的精确字节比较，并已根据失败诊断重新生成过期 bundle；本提交删除临时同步脚本、恢复 `contents: read` 最小权限。压力测试和外部指标仍缺。 |
+| 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | YAML 环境变量安全展开、厂商自定义 Header/Query 脱敏、远程 Provider URL/SSRF 限制、流式/非流式错误正文脱敏及本地推理 BaseURL 凭据边界均已通过对应 CI。真实供应商端到端和 DNS/网络故障注入仍待执行。 |
+| 阶段 5：运行治理与 CI | 进行中 | 40% | CI 对 Go 测试、`go vet`、构建、管理台源码、前端语法/关键字段持续执行；Actions #79 所有步骤通过。压力测试、线上指标与 Provider 故障注入基线仍缺。 |
 
 ### 已核实的历史 CI 问题
 
@@ -157,11 +157,12 @@ docs/                        中文架构、协议和运维文档
 
 ### 下一步
 
-1. 活动 Provider 健康检查已在提交 `d4fcda6` 的完整 CI 运行 `39777021005` 通过。
-2. 已确认前端源码与部署 bundle 旧版本存在差异，当前 bundle 已重建。CI 严格比较保留，临时自动 push 已移除；本清理提交将验证当前 HEAD 的构建一致性。
-3. 补齐 API、配置、数据库迁移与关键响应行为清单，并准备可重复的延迟/内存/并发基线。
-4. 继续评估同步 SSE 解析/实时看板更新的热路径成本，对远程 Provider 做真实服务及故障注入测试。
-5. 每完成一个有边界的功能组，再更新本文并按功能提交。
+1. 补齐 API、配置、数据库迁移与关键响应行为清单，明确兼容性边界。
+2. 为 Provider 契约、Agent 路由和请求生命周期补充并发测试；准备可复现的延迟、内存和并发基线。
+3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
+4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
+5. 受控重试/故障转移必须确认响应尚未提交；SSE 输出开始后禁止切换上游。
+6. 每完成一个有边界的功能组，更新本文并按功能提交；提交后以当前 HEAD 对应 Actions 为验收依据。
 
 ### 已验收功能组：请求级 Provider 固定
 
@@ -243,9 +244,10 @@ docs/                        中文架构、协议和运维文档
 - 后续增强仍未包含：同一 Agent 内多模型别名映射、按 Agent 进行不同的 Key/权限策略、配置热更新、Provider 健康探测与响应提交前的受控重试/故障转移。故障转移不得在已经向客户端写入流式内容后执行。
 - 流式上游错误已 review：上游非 2xx 且客户端响应未提交时返回保留 HTTP 状态的脱敏 JSON；状态已提交时追加安全 SSE `event: error`，不能修改已经发送的 HTTP 状态行。当前测试涵盖 JSON 401/429/503、SSE 状态提交前后与 Responses API 的序号字段。
 
-### 多 Agent 入口拒绝请求的审计 URL 一致性复核（2026-10-23）
+### 多 Agent 入口拒绝请求的审计 URL 一致性复核（2026-10-23，已验收）
 
-- 基线已核实：dev HEAD 为 c3f21d11079b476662996edb2b8afec098098b7f；对应 Actions #78（运行 39891435177）通过 Go 单测、静态检查、构建和前端检查。该结果只作为本次修改前的基线。
-- 代码审查发现：Agent 路由通过 http.StripPrefix 将请求路径归一成 /v1/*，推理成功路径已恢复外部 URL，但鉴权失败、限流拒绝及请求体超限路径的 rejectInference 曾直接记录被剥离后的 URL。
-- 处理方式：将拒绝请求日志构建抽成 buildRejectedInferenceLog，与成功路径统一使用 agentRequestPublicURL；增加回归测试验证 /deepseek/v1/... 前缀保留且查询凭据继续脱敏。
-- 验收规则：本次实现必须以包含该改动的 GitHub Actions 完整结果为准，不能用历史基线 CI 代替。
+- 代码审查发现：Agent 路由通过 http.StripPrefix 将请求路径归一成 /v1/*，鉴权失败、限流拒绝及请求体超限分支此前直接记录剥离后的 URL。
+- 由提交 `275a70e0849536978963cc4fa727e65ff9953044` 修复：拒绝请求日志构建抽成 `buildRejectedInferenceLog`，统一使用 `agentRequestPublicURL` 恢复外部路径。
+- 回归测试 `TestRejectedInferenceLogPreservesAgentURLAndRedactsQuerySecrets` 验证 `/deepseek/v1/...` 前缀保留且查询 token 仍脱敏。
+- GitHub Actions #79（运行 `39894282515`）完整通过：Go 单测、`go vet`、Gateway 构建、管理台源码构建和前端 bundle 检查。
+- 下一步不是继续扩大本次修复范围，而是按上面的清单补充并发/契约测试和真实 Provider 故障注入。
