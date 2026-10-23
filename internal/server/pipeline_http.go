@@ -129,9 +129,13 @@ func (s *Server) cancelRequestAPI(w http.ResponseWriter, r *http.Request, id str
 		jsonError(w, http.StatusBadRequest, "invalid_request", "request id required")
 		return
 	}
-	// 进程内的 Run 优先取消。库里残留的 running（例如进程重启后没写完）没有 cancel 函数，
-	// 也要把记录收成 cancelled，否则列表会一直显示运行中。
+	// stopRun 与 Finish 共用请求状态锁。若 Finish 已经开始，不能再把这条请求报告成取消成功。
 	stopped := s.stopRun(id)
+	if !stopped && s.callIsFinishing(id) {
+		jsonError(w, http.StatusConflict, "not_running", "这条调用已经开始收尾")
+		return
+	}
+	// 进程内的 Run 不存在时，仍允许收口进程重启后残留的 running 记录。
 	closed := s.closeRunningRequest(r.Context(), id)
 	if !stopped && !closed {
 		jsonError(w, http.StatusConflict, "not_running", "这条调用已经不在运行")
@@ -150,15 +154,32 @@ func normalizeRequestID(id string) string {
 }
 
 func (s *Server) stopRun(id string) bool {
-	s.noteCancelReason(id, "管理端结束这次调用")
+	cs := s.callGet(id)
+	var callCancel context.CancelFunc
+	if cs != nil {
+		cs.mu.Lock()
+		// Finish 已经取得状态锁后，取消请求不能再声称取消成功或改写最终状态。
+		if cs.finishing {
+			cs.mu.Unlock()
+			return false
+		}
+		if cs.cancelReason == "" {
+			cs.cancelReason = "管理端结束这次调用"
+		}
+		cs.cancelRequested = true
+		callCancel = cs.cancel
+		cs.cancel = nil
+		cs.mu.Unlock()
+	}
+	// 取消函数在解锁后执行，避免 context 回调和请求状态锁之间形成锁环。
+	if callCancel != nil {
+		callCancel()
+	}
 	stopped := false
 	if s.runs != nil && s.runs.Cancel(id) {
 		stopped = true
 	}
-	if s.cancelCall(id) {
-		stopped = true
-	}
-	return stopped
+	return stopped || callCancel != nil
 }
 
 // closeRunningRequest 把仍显示为运行中的记录收口，并移出实时看板。

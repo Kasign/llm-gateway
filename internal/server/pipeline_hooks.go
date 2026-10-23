@@ -397,6 +397,13 @@ func (o inferenceObserver) onChunk(st core.State, chunk []byte) {
 // Touch / MarkUsed 只在成功后执行，失败的调用不算「使用过」。
 func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	st := ev.State
+	cancelAccepted := o.s.markCallFinishing(st.ID)
+	if o.s.runs != nil && o.s.runs.MarkFinishing(st.ID) {
+		cancelAccepted = true
+	}
+	if cancelAccepted && ev.Err == nil {
+		ev.Err = context.Canceled
+	}
 	// 停掉后续保活。已经写成功的都在事件列表里；正在写出的那一次不等待。
 	o.s.stopKeepalive(st.ID)
 	cs := o.s.callGet(st.ID)

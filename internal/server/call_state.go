@@ -24,6 +24,8 @@ type callState struct {
 	respBytes       int64
 	cancel          context.CancelFunc
 	cancelReason    string
+	cancelRequested bool // 管理端取消已先于 Finish 阶段取得请求锁。
+	finishing       bool // Finish 进入后拒绝新的管理端取消，避免终态与 HTTP 响应不一致。
 	keepaliveStop   func()
 	clientHeaders   map[string]string
 	upstreamHeaders map[string]string
@@ -73,6 +75,30 @@ func (s *Server) cancelReason(id string) string {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.cancelReason
+}
+
+// markCallFinishing 与 stopRun 使用同一把请求锁，确定“取消被接受”或“Finish 已开始”的先后顺序。
+// 返回 true 表示管理端取消先取得请求状态锁；Finish 必须据此保留 cancelled 终态。
+func (s *Server) markCallFinishing(id string) bool {
+	cs := s.callGet(id)
+	if cs == nil {
+		return false
+	}
+	cs.mu.Lock()
+	cs.finishing = true
+	cancelRequested := cs.cancelRequested
+	cs.mu.Unlock()
+	return cancelRequested
+}
+
+func (s *Server) callIsFinishing(id string) bool {
+	cs := s.callGet(id)
+	if cs == nil {
+		return false
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.finishing
 }
 
 // failRun 记录结束原因并取消这次推理。原因已存在时保留先写入的那条。

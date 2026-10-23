@@ -74,3 +74,81 @@ func TestNormalizeRequestID(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+
+func TestStopRunRejectsCancellationAfterFinishStarted(t *testing.T) {
+	s := &Server{runs: newRunCancels()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const id = "req_finishing"
+	s.callBegin(id, nil)
+	s.setCallCancel(id, cancel)
+	s.runs.Register(id, cancel)
+	s.markCallFinishing(id)
+	s.runs.MarkFinishing(id)
+
+	if s.stopRun(id) {
+		t.Fatal("stopRun must reject cancellation after Finish started")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("late cancellation changed the request context")
+	}
+}
+
+func TestStopRunAcceptedBeforeFinishIsPreserved(t *testing.T) {
+	s := &Server{runs: newRunCancels()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const id = "req_cancel_first"
+	s.callBegin(id, nil)
+	s.setCallCancel(id, cancel)
+	s.runs.Register(id, cancel)
+
+	if !s.stopRun(id) {
+		t.Fatal("expected active request to be cancelled")
+	}
+	if !s.markCallFinishing(id) {
+		t.Fatal("Finish did not observe the accepted cancellation")
+	}
+	if !s.runs.MarkFinishing(id) {
+		t.Fatal("run registry did not preserve the accepted cancellation")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("request context was not cancelled")
+	}
+	if got := s.cancelReason(id); got != "管理端结束这次调用" {
+		t.Fatalf("cancel reason = %q", got)
+	}
+}
+
+func TestRunCancelsRejectsCancelAfterFinishStarted(t *testing.T) {
+	runs := newRunCancels()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runs.Register("req_run_finish", cancel)
+	if runs.MarkFinishing("req_run_finish") {
+		t.Fatal("unexpected cancellation request before Finish")
+	}
+	if runs.Cancel("req_run_finish") {
+		t.Fatal("Cancel accepted after Finish started")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("context was cancelled after Finish started")
+	}
+}
+
+func TestRunCancelsFinishObservesEarlierCancellation(t *testing.T) {
+	runs := newRunCancels()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runs.Register("req_run_cancel", cancel)
+	if !runs.Cancel("req_run_cancel") {
+		t.Fatal("active run cancellation was not accepted")
+	}
+	if !runs.MarkFinishing("req_run_cancel") {
+		t.Fatal("Finish did not observe the earlier accepted cancellation")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("context was not cancelled")
+	}
+}

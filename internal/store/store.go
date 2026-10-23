@@ -125,8 +125,29 @@ func (r *Repo) MarkCancelled(ctx context.Context, id string, finished time.Time,
 	return n > 0, err
 }
 
+// FinishRequest 写入请求最终指标。管理员取消可能并发落库；一旦 status 已变成 cancelled，
+ // 本次 Finish 只补充 token/响应等诊断字段，不得把 cancelled 覆盖为 success/error。
 func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET api_key_id=COALESCE(NULLIF(?,0),api_key_id),api_key_name=COALESCE(NULLIF(?,''),api_key_name),model_requested=COALESCE(NULLIF(?,''),model_requested),model_actual=COALESCE(NULLIF(?,''),model_actual),request_url=COALESCE(NULLIF(?,''),request_url),stream=?,status=?,http_status=?,upstream_http_status=COALESCE(NULLIF(?,0),upstream_http_status),finished_at=?,latency_ms=?,ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,response_bytes=?,error_code=?,error_message=? WHERE request_id=?`, l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.Stream, l.Status, l.HTTPStatus, l.UpstreamHTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS, l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes, l.ErrorCode, l.ErrorMessage, l.RequestID)
+	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET
+		api_key_id=COALESCE(NULLIF(?,0),api_key_id),
+		api_key_name=COALESCE(NULLIF(?,''),api_key_name),
+		model_requested=COALESCE(NULLIF(?,''),model_requested),
+		model_actual=COALESCE(NULLIF(?,''),model_actual),
+		request_url=COALESCE(NULLIF(?,''),request_url),
+		stream=?,
+		http_status=CASE WHEN status='cancelled' THEN http_status ELSE ? END,
+		upstream_http_status=COALESCE(NULLIF(?,0),upstream_http_status),
+		finished_at=CASE WHEN status='cancelled' THEN finished_at ELSE ? END,
+		latency_ms=CASE WHEN status='cancelled' THEN latency_ms ELSE ? END,
+		ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,response_bytes=?,
+		error_code=CASE WHEN status='cancelled' THEN error_code ELSE ? END,
+		error_message=CASE WHEN status='cancelled' THEN error_message ELSE ? END,
+		status=CASE WHEN status='cancelled' THEN status ELSE ? END
+		WHERE request_id=?`,
+		l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.Stream,
+		l.HTTPStatus, l.UpstreamHTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS,
+		l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes,
+		l.ErrorCode, l.ErrorMessage, l.Status, l.RequestID)
 	return err
 }
 
