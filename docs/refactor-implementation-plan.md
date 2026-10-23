@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **运行治理的下一项**：开始为远程 OpenAI-compatible Provider 增加配置化并发上限和清晰的过载错误语义；第一期默认值与各 Provider 单独配置均需校验，流式保活已提交时必须返回安全 SSE error，而不是悄悄结束。后续再推进审计队列指标和数据留存策略，完整问题、状态、验收条件见 [未关闭问题与后续验收台账](known-issues-and-followups.md)。
+2. **运行治理的当前功能组**：已在 `feat/provider-concurrency-limits` 实现远程 OpenAI-compatible Provider 配置化并发上限和 fail-fast 过载错误；代码与专项测试已提交，等待完整 CI 验收。完整问题、状态、验收条件见 [未关闭问题与后续验收台账](known-issues-and-followups.md)。后续再推进审计队列指标和数据留存策略。
 3. 真实供应商 E2E 仅在有明确授权的 API Key/计费环境中执行；DNS 状态落库、响应头后断流与生产链路恢复等自动化缺口先集中记录，按问题台账排期，不混同于本地 Mock CI。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。

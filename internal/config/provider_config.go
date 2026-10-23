@@ -20,6 +20,7 @@ type OpenAICompatibleProviderConfig struct {
 	AllowInsecureHTTP   bool   `yaml:"allow_insecure_http"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
+	MaxConcurrentRequests int  `yaml:"max_concurrent_requests"`
 }
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -40,6 +41,9 @@ func (c *Config) validateProviderConfigs() error {
 			return fmt.Errorf("providers.openai_compatible[%d] duplicates Provider ID %q", i, item.ID)
 		}
 		seen[item.ID] = true
+		if item.MaxConcurrentRequests < 0 || item.MaxConcurrentRequests > gatewayprovider.MaxOpenAICompatibleConcurrentRequests {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): max_concurrent_requests must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleConcurrentRequests)
+		}
 		if !item.Enabled {
 			continue
 		}
@@ -53,6 +57,7 @@ func (c *Config) validateProviderConfigs() error {
 			ID: item.ID, BaseURL: item.BaseURL, APIKey: item.APIKey, APIKeyHeader: item.APIKeyHeader,
 			AllowInsecureHTTP: item.AllowInsecureHTTP, AllowPrivateNetwork: item.AllowPrivateNetwork,
 			MaxResponseBytes: item.MaxResponseBytes,
+			MaxConcurrentRequests: item.MaxConcurrentRequests,
 		})
 		if err != nil {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): %w", i, item.ID, err)

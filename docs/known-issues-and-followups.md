@@ -25,7 +25,7 @@
 
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
-| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | 本分支首个实施任务 | 增加 `max_concurrent_requests`、默认值、范围校验与 fail-fast 过载响应；明确上游状态必须仍为空，流式响应已提交时必须写安全 SSE error。 | 单测覆盖并发上限、释放时机、取消、JSON/SSE 与 Responses 序号；配置测试、race 和完整 CI 通过。 |
+| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | 已实现，待本分支 CI 验收 | 已增加 `max_concurrent_requests`（默认值与上限均为 64）与 fail-fast 503；过载时保持 upstream 状态为空，流式已提交时以安全 SSE error 收口。 | 单测覆盖并发上限、许可释放、JSON 和已提交 Responses SSE；配置范围校验、race 和本分支完整 CI 通过后关闭。 |
 | GW-GOV-002 | 当前 RPM 主要按调用方 Key 进行固定窗口计数，尚未提供远程 Provider 独立的并发/速率组合或 Token 预算。 | 待设计 | 在 GW-GOV-001 完成后，依据真实需求决定是否增加 Provider RPM、令牌预算和排队策略；不要与调用方 Key RPM 混为一谈。 | 有明确优先级、失败策略、Redis 不可用行为与多 Agent 隔离测试。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 

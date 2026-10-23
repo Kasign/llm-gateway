@@ -33,6 +33,9 @@ const (
 	remoteMaxIdleConnections      = 100
 	remoteMaxIdleConnectionsPerHost = 16
 	remoteMaxConnectionsPerHost   = 64
+	// MaxOpenAICompatibleConcurrentRequests matches the HTTP transport per-host connection ceiling.
+	MaxOpenAICompatibleConcurrentRequests        = 64
+	defaultOpenAICompatibleMaxConcurrentRequests = 64
 )
 
 // OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
@@ -45,6 +48,8 @@ type OpenAICompatibleConfig struct {
 	AllowInsecureHTTP   bool
 	AllowPrivateNetwork bool
 	MaxResponseBytes    int64
+	// MaxConcurrentRequests 为此 Provider 的最大并发推理数；0 使用默认值 64。
+	MaxConcurrentRequests int
 }
 
 // OpenAICompatibleProvider 负责 OpenAI-compatible JSON 与 SSE 传输，不负责 Gateway 鉴权/模型路由。
@@ -55,6 +60,7 @@ type OpenAICompatibleProvider struct {
 	apiKeyHeader        string
 	allowPrivateNetwork bool
 	maxResponseBytes    int64
+	requestSlots        chan struct{}
 	client              *http.Client
 }
 
@@ -62,6 +68,9 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 	id := normalizeID(cfg.ID)
 	if id == "" || len(id) > 64 {
 		return nil, errors.New("provider ID is required and must be at most 64 characters")
+	}
+	if cfg.MaxConcurrentRequests < 0 || cfg.MaxConcurrentRequests > MaxOpenAICompatibleConcurrentRequests {
+		return nil, fmt.Errorf("provider max_concurrent_requests must be between 0 and %d", MaxOpenAICompatibleConcurrentRequests)
 	}
 	for _, r := range id {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
@@ -105,6 +114,10 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 	if strings.ContainsAny(cfg.APIKey, "\r\n") {
 		return nil, errors.New("provider API key contains invalid characters")
 	}
+	maxConcurrentRequests := cfg.MaxConcurrentRequests
+	if maxConcurrentRequests == 0 {
+		maxConcurrentRequests = defaultOpenAICompatibleMaxConcurrentRequests
+	}
 	maxResponseBytes := cfg.MaxResponseBytes
 	if maxResponseBytes <= 0 {
 		maxResponseBytes = defaultRemoteResponseLimit
@@ -120,6 +133,7 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 		apiKeyHeader:        apiKeyHeader,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		maxResponseBytes:    maxResponseBytes,
+		requestSlots:        make(chan struct{}, maxConcurrentRequests),
 		client:              newRestrictedHTTPClient(cfg.AllowPrivateNetwork),
 	}, nil
 }
@@ -148,6 +162,15 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 			providerErr.StatusCode >= http.StatusBadRequest && providerErr.StatusCode <= 599 {
 			status = providerErr.StatusCode
 			hasProviderStatus = true
+		}
+		var gatewayErr *core.Error
+		if errors.As(retErr, &gatewayErr) && gatewayErr != nil {
+			if gatewayErr.Status >= http.StatusBadRequest && gatewayErr.Status <= 599 {
+				status = gatewayErr.Status
+			}
+			if gatewayErr.Code != "" {
+				code = gatewayErr.Code
+			}
 		}
 		if mapped := ToCoreError(retErr); mapped != nil {
 			if !hasProviderStatus && mapped.Status >= http.StatusBadRequest && mapped.Status <= 599 {
@@ -205,10 +228,55 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 			req.Header.Set("X-API-Key", p.apiKey)
 		}
 	}
+	if err := p.acquireRequestSlot(ctx); err != nil {
+		// 已取消/超时的请求沿用原错误语义；只有资源已满时才是 503 过载。
+		if ctx.Err() != nil {
+			return core.Result{UpstreamStatus: 0}, err
+		}
+		status, _, _ := core.Unpack(err)
+		if status < http.StatusBadRequest || status > 599 {
+			status = http.StatusServiceUnavailable
+		}
+		if call.Stream && call.WriterWritten() {
+			// warm-start 已提交状态行时，不能再返回普通 JSON；必须以 SSE error 结束流。
+			written := int64(0)
+			if isResponsesAPIPath(call.Path) {
+				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit", 0)
+			} else {
+				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit")
+			}
+			return core.Result{Status: status, UpstreamStatus: 0, ResponseBytes: written}, err
+		}
+		return core.Result{Status: status, UpstreamStatus: 0}, err
+	}
+	defer p.releaseRequestSlot()
+
 	if call.Stream {
 		return p.forwardStream(ctx, call, req)
 	}
 	return p.forwardJSON(ctx, call, req)
+}
+
+// acquireRequestSlot 使用 fail-fast 策略，防止 Provider 堆积无界等待中的推理请求。
+func (p *OpenAICompatibleProvider) acquireRequestSlot(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case p.requestSlots <- struct{}{}:
+		return nil
+	default:
+		return &core.Error{
+			Status: http.StatusServiceUnavailable,
+			Code: "provider_concurrency_limit",
+			Message: "upstream provider concurrency limit reached",
+		}
+	}
+}
+
+// releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放许可。
+func (p *OpenAICompatibleProvider) releaseRequestSlot() {
+	<-p.requestSlots
 }
 
 func (p *OpenAICompatibleProvider) endpoint(rawPath string) (string, error) {
@@ -499,6 +567,10 @@ func (p *OpenAICompatibleProvider) transportError(ctx context.Context, err error
 func streamErrorCode(err error) string {
 	if mapped := ToCoreError(err); mapped != nil && mapped.Code != "" {
 		return mapped.Code
+	}
+	var gatewayErr *core.Error
+	if errors.As(err, &gatewayErr) && gatewayErr != nil && gatewayErr.Code != "" {
+		return gatewayErr.Code
 	}
 	return "provider_stream_interrupted"
 }
