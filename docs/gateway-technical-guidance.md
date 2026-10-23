@@ -652,3 +652,14 @@ go test ./internal/provider -run '^TestAnthropicMessagesRealEndpointE2E$' -count
 ### Anthropic E2E 测试夹具验收（CI #116）
 
 提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a` 的 Actions #116（运行 `39906558311`）通过全部 CI，包含新增 `TestAnthropicMessagesRealEndpointE2E`。该用例默认跳过网络访问；当前没有配置真实 Anthropic API Key，因此这只验证了测试编译和安全的默认跳过路径，不代表真实供应商端点已通过。
+
+
+### OpenAI Responses 真正端点 E2E（显式 opt-in）
+
+可使用 `TestOpenAIResponsesRealEndpointE2E` 验证真实 Responses API JSON 往返。先按 OpenAI-compatible E2E 的方式设置 BaseURL、API Key 和模型 ID，再单独开启 `LLM_GATEWAY_RESPONSES_E2E=1`：
+
+```sh
+go test ./internal/provider -run '^TestOpenAIResponsesRealEndpointE2E$' -count=1 -v
+```
+
+测试访问 `/v1/responses`，请求限制为 8 输出 token，90 秒超时；仅打印状态与响应字节数，不打印密钥/响应正文。默认 CI 不发起请求。该用例仅适用于支持 Responses API 的真实端点，不应把普通 Chat Completions 兼容性等同于 Responses 能力。

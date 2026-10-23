@@ -161,7 +161,7 @@ docs/                        中文架构、协议和运维文档
 2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过，且 race detector 通过。当前新增 Provider 转发、Agent 模型解析、请求分析三项 `-benchmem` 基线，由 CI artifact 记录 `ns/op`、`B/op`、`allocs/op`；首次测量待本提交 CI。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
-5. 受控重试/故障转移必须确认响应尚未提交；SSE 输出开始后禁止切换上游。
+5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
 6. 每完成一个有边界的功能组，更新本文并按功能提交；提交后以当前 HEAD 对应 Actions 为验收依据。
 
 ### 已验收功能组：请求级 Provider 固定
@@ -444,3 +444,10 @@ docs/                        中文架构、协议和运维文档
 - 请求使用真实 Provider 安全 Transport，固定 `x-api-key` 与 `Anthropic-Version: 2023-06-01`，发送一条无用户数据的短 Messages 请求，最多请求 12 个输出 token，并在 90 秒后截止。
 - 测试只检查 HTTP 200、assistant message envelope 和至少一个 content block；不打印密钥、上游原始错误或响应内容。默认 CI 不访问外网，不需要 GitHub Secret。
 - 提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a` 的 Actions #116（运行 `39906558311`）通过完整 CI，证明用例可编译并在默认环境跳过；未配置 Anthropic API Key，因此没有调用真实 Claude/Anthropic 端点。真实供应商验收仍待用户在安全环境运行。
+
+
+### 显式开启的 OpenAI Responses E2E（用例已提供，真实端点待运行）
+
+- 新增 `TestOpenAIResponsesRealEndpointE2E`，单独用 `LLM_GATEWAY_RESPONSES_E2E=1` 开启，复用 `LLM_GATEWAY_E2E_BASE_URL`、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL` 和可选 API Key Header。默认不联网。
+- 请求真实 `/v1/responses` 路径，发送一次短输入并把输出限制为 8 token、90 秒截止，验证 HTTP 200 及 Responses 的 `object/id/status/output` 封套。密钥和响应正文不写日志。
+- CI 仅验证编译和默认跳过路径；真实 OpenAI/Codex 端点尚未在当前环境调用。
