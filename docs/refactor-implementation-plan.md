@@ -436,3 +436,11 @@ docs/                        中文架构、协议和运维文档
 
 - 再次逐字符检查生成的 Go 源文件后，发现 Responses fixture 字符串中的转义序列仍被生成层加倍；先前提交 42fddee 的 CI 用于识别该情况，不计作验收。
 - 当前测试源码已把 Go 字符串中的转义恢复为单层，继续使用 JSON Marshal 和通道收集 Mock 观测值。以修复后的新提交全量 CI 为准。
+
+
+### 显式开启的 Anthropic Messages E2E（用例已提供，真实端点未运行）
+
+- 新增 `TestAnthropicMessagesRealEndpointE2E`，默认跳过，只在 `LLM_GATEWAY_ANTHROPIC_E2E=1` 时发起网络请求；需要 HTTPS BaseURL、Anthropic API Key 和 model 环境变量。
+- 请求使用真实 Provider 安全 Transport，固定 `x-api-key` 与 `Anthropic-Version: 2023-06-01`，发送一条无用户数据的短 Messages 请求，最多请求 12 个输出 token，并在 90 秒后截止。
+- 测试只检查 HTTP 200、assistant message envelope 和至少一个 content block；不打印密钥、上游原始错误或响应内容。默认 CI 不访问外网，不需要 GitHub Secret。
+- 当前未在本执行环境中配置 Anthropic API Key，故真实 Claude/Anthropic 端点仍未验收。

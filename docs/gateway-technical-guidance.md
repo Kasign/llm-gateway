@@ -631,3 +631,19 @@ go test ./internal/provider -run '^TestOpenAICompatibleProviderRealEndpointE2E$'
 ### Responses API JSON/SSE 测试验收（CI #114）
 
 提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a` 的 Actions #114（运行 `39906018427`）通过 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`。该测试覆盖成功 JSON 与流式 SSE，验证路径/query、`OpenAI-Beta`、`Accept`、stream 标志、服务端 model 覆盖、Provider Authorization 与调用方凭据隔离、Request-Id 和响应内容透明转发。仍未用真实 OpenAI/Codex 密钥执行真实公网 E2E。
+
+
+### Anthropic Messages 真实端点 E2E（显式 opt-in）
+
+仓库另提供 `TestAnthropicMessagesRealEndpointE2E`，用于在用户控制的环境验证真实 Anthropic Messages 上游。默认跳过，需显式设置 `LLM_GATEWAY_ANTHROPIC_E2E=1`，并提供：
+- `LLM_GATEWAY_ANTHROPIC_E2E_BASE_URL`（HTTPS Base URL，通常以 `/v1` 结尾）
+- `LLM_GATEWAY_ANTHROPIC_E2E_API_KEY`（仅本地环境变量，不应提交到代码）
+- `LLM_GATEWAY_ANTHROPIC_E2E_MODEL`
+
+执行命令：
+
+```sh
+go test ./internal/provider -run '^TestAnthropicMessagesRealEndpointE2E$' -count=1 -v
+```
+
+该测试发送一次短非流式 Messages 请求，固定使用 `x-api-key` 和 `Anthropic-Version: 2023-06-01`，请求最多 12 个输出 token，超时 90 秒。它不打印原始错误正文或响应内容。当前 CI 只验证测试编译和默认跳过，真实 Anthropic 服务仍需单独运行验收。

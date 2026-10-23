@@ -143,3 +143,8 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 ### Responses API 成功路径（CI #114 已通过）
 
 `internal/provider/openai_compatible_test.go` 新增 Mock HTTP 测试，验证 `/v1/responses` JSON/SSE 成功路径、query 与 `OpenAI-Beta` 头、服务端 model 覆盖、Provider key 与调用方凭据隔离、Request-Id 响应头和原始 SSE 字节透明传输。Actions #114（提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a`）全量 CI 已通过。该测试是 Provider adapter 契约测试，并非真实 OpenAI/Codex 服务端到端。
+
+
+### Anthropic Messages 真实端点验收
+
+`internal/provider/anthropic_messages_e2e_test.go`（当前文件名为 `anthropic_messages_e2e_test.go`）提供默认跳过的真实端点探测；只有显式开启环境变量后才使用本机提供的 API Key 调用上游。测试覆盖 HTTPS 配置、`x-api-key`、Anthropic-Version、HTTP 200 和 Messages 响应封套。Mock 测试的 CI 通过不代表真实 Anthropic 供应商端点已验收。
