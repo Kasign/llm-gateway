@@ -110,9 +110,10 @@ func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
 		trace.ttftRecorded = true
 		trace.seq = maxStreamEventsPerRequest // 测量长流达到事件上限后的稳态路径。
 		cs.trace = trace
-		state := core.State{Request: core.Request{
-			ID: id, Method: "POST", Path: "/v1/chat/completions", Stream: true, Started: time.Now(),
-		}}
+		state := core.State{
+		Request: core.Request{ID: id, Method: "POST", Path: "/v1/chat/completions", Started: time.Now()},
+		Stream:  true,
+	}
 
 		for pb.Next() {
 			observer.onChunk(state, chunk)
