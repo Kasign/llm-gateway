@@ -35,6 +35,9 @@ import (
 // across the real HTTP handler, Redis limiter, Provider adapter, and asynchronous MariaDB audit writer.
 // It is a reproducible integration load sample, not a production-capacity or real-provider benchmark.
 func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) != "1" {
+		t.Skip("set GATEWAY_LOAD_TEST=1 to run the timed Gateway request-load sample")
+	}
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
 	redisAddr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
 	if dsn == "" || redisAddr == "" {
@@ -159,7 +162,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	logRepo := store.NewRepo(db)
 	srv := &Server{
 		cfg: cfg, db: db, keys: keyRepo, models: model.NewRepo(db),
-		logs: logRepo, audit: audit.NewWriter(logRepo, 8192), settings: settings.NewRepo(db),
+		logs: logRepo, audit: audit.NewWriter(logRepo, 16384), settings: settings.NewRepo(db),
 		limiter: limiter, live: live.NewRegistry(), runs: newRunCancels(),
 		localClients: make(map[string]localClientEntry),
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
@@ -211,6 +214,34 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		elapsed time.Duration
 		err     string
 	}
+	doRequest := func(index int) requestResult {
+		req, buildErr := http.NewRequest(http.MethodPost, handler.URL+"/loadtest/v1/chat/completions?load_test=1", bytes.NewReader(body))
+		if buildErr != nil {
+			return requestResult{err: "build request: " + buildErr.Error()}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", rawKey)
+		req.Header.Set("X-Request-ID", fmt.Sprintf("gateway-load-%s-%04d", suffix, index))
+
+		requestStart := time.Now()
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			return requestResult{elapsed: time.Since(requestStart), err: "HTTP request: " + requestErr.Error()}
+		}
+		responseBody, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		result := requestResult{elapsed: time.Since(requestStart)}
+		if readErr != nil {
+			result.err = "read response: " + readErr.Error()
+		} else if resp.StatusCode != http.StatusOK {
+			result.err = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(responseBody))
+		} else if !bytes.Contains(responseBody, []byte("\"content\":\"ok\"")) {
+			result.err = fmt.Sprintf("unexpected response body: %s", string(responseBody))
+		}
+		return result
+	}
+
+	// 第一阶段：16 并发突发样本，便于和之前的基线对比。
 	results := make([]requestResult, totalRequests)
 	startGate := make(chan struct{})
 	var workers sync.WaitGroup
@@ -221,31 +252,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 			<-startGate
 			for n := 0; n < requestsPerWorker; n++ {
 				index := workerID*requestsPerWorker + n
-				req, buildErr := http.NewRequest(http.MethodPost, handler.URL+"/loadtest/v1/chat/completions?load_test=1", bytes.NewReader(body))
-				if buildErr != nil {
-					results[index].err = "build request: " + buildErr.Error()
-					continue
-				}
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("X-API-Key", rawKey)
-				req.Header.Set("X-Request-ID", fmt.Sprintf("gateway-load-%s-%04d", suffix, index))
-
-				requestStart := time.Now()
-				resp, requestErr := client.Do(req)
-				if requestErr != nil {
-					results[index] = requestResult{elapsed: time.Since(requestStart), err: "HTTP request: " + requestErr.Error()}
-					continue
-				}
-				responseBody, readErr := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				results[index].elapsed = time.Since(requestStart)
-				if readErr != nil {
-					results[index].err = "read response: " + readErr.Error()
-				} else if resp.StatusCode != http.StatusOK {
-					results[index].err = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(responseBody))
-				} else if !bytes.Contains(responseBody, []byte("\"content\":\"ok\"")) {
-					results[index].err = fmt.Sprintf("unexpected response body: %s", string(responseBody))
-				}
+				results[index] = doRequest(index)
 			}
 		}(worker)
 	}
@@ -256,43 +263,98 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	close(startGate)
 	workers.Wait()
 	loadDuration := time.Since(loadStart)
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
 
-	latenciesMS := make([]float64, 0, totalRequests)
-	failures := 0
+	burstLatenciesMS := make([]float64, 0, totalRequests)
+	burstFailures := 0
 	for i, result := range results {
-		latenciesMS = append(latenciesMS, float64(result.elapsed.Microseconds())/1000)
+		burstLatenciesMS = append(burstLatenciesMS, float64(result.elapsed.Microseconds())/1000)
 		if result.err != "" {
-			failures++
-			if failures <= 10 {
-				t.Errorf("request %d failed: %s", i, result.err)
+			burstFailures++
+			if burstFailures <= 10 {
+				t.Errorf("burst request %d failed: %s", i, result.err)
 			}
 		}
 	}
-	if failures > 0 {
-		t.Fatalf("%d/%d concurrent Gateway requests failed", failures, totalRequests)
+	if burstFailures > 0 {
+		t.Fatalf("%d/%d burst Gateway requests failed", burstFailures, totalRequests)
 	}
 	if got := upstreamRequests.Load(); got != totalRequests {
-		t.Fatalf("mock upstream received %d requests, want %d", got, totalRequests)
+		t.Fatalf("after burst, mock upstream received %d requests, want %d", got, totalRequests)
 	}
 
-	sort.Float64s(latenciesMS)
-	percentile := func(p float64) float64 {
-		index := int(math.Ceil(p*float64(len(latenciesMS)))) - 1
+	percentile := func(values []float64, p float64) float64 {
+		index := int(math.Ceil(p*float64(len(values)))) - 1
 		if index < 0 {
 			index = 0
 		}
-		if index >= len(latenciesMS) {
-			index = len(latenciesMS) - 1
+		if index >= len(values) {
+			index = len(values) - 1
 		}
-		return latenciesMS[index]
+		return values[index]
 	}
-	throughput := float64(totalRequests) / loadDuration.Seconds()
-	t.Logf("Gateway HTTP load sample: requests=%d workers=%d duration=%s throughput=%.1f req/s p50=%.2fms p95=%.2fms p99=%.2fms failures=%d upstream_requests=%d",
-		totalRequests, workerCount, loadDuration.Round(time.Millisecond), throughput,
-		percentile(0.50), percentile(0.95), percentile(0.99), failures, upstreamRequests.Load())
-	t.Logf("Go memory sample: heap_alloc_after=%d bytes total_alloc_delta=%d bytes; use /usr/bin/time -v in CI for process CPU time and peak RSS",
+	sort.Float64s(burstLatenciesMS)
+	burstThroughput := float64(totalRequests) / loadDuration.Seconds()
+	t.Logf("Gateway burst sample: requests=%d workers=%d duration=%s throughput=%.1f req/s p50=%.2fms p95=%.2fms p99=%.2fms failures=%d upstream_requests=%d",
+		totalRequests, workerCount, loadDuration.Round(time.Millisecond), burstThroughput,
+		percentile(burstLatenciesMS, 0.50), percentile(burstLatenciesMS, 0.95), percentile(burstLatenciesMS, 0.99),
+		burstFailures, upstreamRequests.Load())
+
+	// 第二阶段：以 200 请求/秒目标速率持续 5 秒，测量稳态下的请求延迟与审计积压。
+	const (
+		sustainedRequestCount = 1000
+		sustainedInterval     = 5 * time.Millisecond
+	)
+	sustainedResults := make([]requestResult, sustainedRequestCount)
+	sustainedSlots := make(chan struct{}, workerCount)
+	var sustainedWorkers sync.WaitGroup
+	sustainedStart := time.Now()
+	for i := 0; i < sustainedRequestCount; i++ {
+		scheduledAt := sustainedStart.Add(time.Duration(i) * sustainedInterval)
+		if wait := time.Until(scheduledAt); wait > 0 {
+			time.Sleep(wait)
+		}
+		// 生成器遇到并发上限时会等待可用槽位，并把等待时间计入总持续负载时长。
+		sustainedSlots <- struct{}{}
+		sustainedWorkers.Add(1)
+		index := totalRequests + i
+		go func(resultIndex, requestIndex int) {
+			defer sustainedWorkers.Done()
+			defer func() { <-sustainedSlots }()
+			sustainedResults[resultIndex] = doRequest(requestIndex)
+		}(i, index)
+	}
+	sustainedWorkers.Wait()
+	sustainedDuration := time.Since(sustainedStart)
+
+	sustainedLatenciesMS := make([]float64, 0, sustainedRequestCount)
+	sustainedFailures := 0
+	for i, result := range sustainedResults {
+		sustainedLatenciesMS = append(sustainedLatenciesMS, float64(result.elapsed.Microseconds())/1000)
+		if result.err != "" {
+			sustainedFailures++
+			if sustainedFailures <= 10 {
+				t.Errorf("sustained request %d failed: %s", i, result.err)
+			}
+		}
+	}
+	if sustainedFailures > 0 {
+		t.Fatalf("%d/%d sustained Gateway requests failed", sustainedFailures, sustainedRequestCount)
+	}
+	expectedTotalRequests := totalRequests + sustainedRequestCount
+	if got := upstreamRequests.Load(); got != uint64(expectedTotalRequests) {
+		t.Fatalf("mock upstream received %d requests, want %d total across burst and sustained phases", got, expectedTotalRequests)
+	}
+	sort.Float64s(sustainedLatenciesMS)
+	sustainedThroughput := float64(sustainedRequestCount) / sustainedDuration.Seconds()
+	t.Logf("Gateway sustained sample: requests=%d target_rate=%.1f req/s workers_cap=%d duration=%s achieved_throughput=%.1f req/s p50=%.2fms p95=%.2fms p99=%.2fms failures=%d total_upstream_requests=%d",
+		sustainedRequestCount, float64(time.Second)/float64(sustainedInterval), workerCount,
+		sustainedDuration.Round(time.Millisecond), sustainedThroughput,
+		percentile(sustainedLatenciesMS, 0.50), percentile(sustainedLatenciesMS, 0.95), percentile(sustainedLatenciesMS, 0.99),
+		sustainedFailures, upstreamRequests.Load())
+
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	t.Logf("Go memory sample across both phases: heap_alloc_after=%d bytes total_alloc_delta=%d bytes; use /usr/bin/time -v in CI for process CPU time and peak RSS",
 		after.HeapAlloc, after.TotalAlloc-before.TotalAlloc)
 
 	// Flush is an ordered barrier: all audit writes enqueued by these HTTP requests must complete before querying.
@@ -314,9 +376,10 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query persisted audit results: %v", err)
 	}
-	if persisted != totalRequests || successful != totalRequests || modelMatched != totalRequests {
-		t.Fatalf("audit rows = %d, successful = %d, correct model = %d; want %d for each", persisted, successful, modelMatched, totalRequests)
+	expectedTotalRequests := totalRequests + sustainedRequestCount
+	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests {
+		t.Fatalf("audit rows = %d, successful = %d, correct model = %d; want %d for each", persisted, successful, modelMatched, expectedTotalRequests)
 	}
-	t.Logf("MariaDB audit drain: persisted=%d/%d successful=%d model_matched=%d drain_duration=%s",
-		persisted, totalRequests, successful, modelMatched, drainDuration.Round(time.Millisecond))
+	t.Logf("MariaDB audit drain after burst + sustained load: persisted=%d/%d successful=%d model_matched=%d drain_duration=%s",
+		persisted, expectedTotalRequests, successful, modelMatched, drainDuration.Round(time.Millisecond))
 }
