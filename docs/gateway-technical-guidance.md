@@ -554,3 +554,8 @@ Claude Code 依赖原始上游错误 message 识别部分能力拒绝并自动�
 Claude Code 还使用 `x-should-retry`、`retry-after`、`request-id` 和 `anthropic-ratelimit-unified-*` 响应头；这些在该路径上按白名单/前缀转发。为避免流式请求提前提交 200 并丢失上游 4xx/5xx 错误，Anthropic Messages 路径不发送 Gateway warm-start SSE 注释。网关生成的入口拒绝及 Pipeline 错误也使用 Anthropic 错误信封，并按 HTTP 状态区分 `permission_error`、`billing_error`、`request_too_large`、`overloaded_error` 等类型。
 
 当前只完成 HTTP/协议层测试，尚未完成真实 Anthropic/Claude Code 端到端验收。Claude Code 的 `HEAD /api/hello` 启动探测可以被拒绝；可选 count_tokens 端点已透传，但实际 token-count 结果依赖上游实现与配置。
+
+
+### 最近一次 Anthropic 兼容性回归 CI
+
+提交 `b3ec270421daad654c450b20c43782297f882f3f` 对应 GitHub Actions #85（运行 `39896239166`）通过全部流水线：Go 单测、`go vet`、Gateway 构建、管理台源码构建和前端部署 bundle 校验。该 CI 覆盖 HTTP/协议级 Mock 测试；真实 Anthropic/Claude Code 端到端、DNS/连接超时故障注入与在线能力降级仍未验收。
