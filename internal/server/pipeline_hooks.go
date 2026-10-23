@@ -20,10 +20,17 @@ import (
 // 新增改写、检查或日志只改这里的注册，不改 core.Pipeline.Run。
 // Mutate 顺序：先按原始路径 sanitize 和合并推理参数，最后 mutateResponsesBridge 保持路径与 tools 原样。
 func (s *Server) newInferencePipeline() *core.Pipeline {
-	// 工厂每次解析时获取当前 llamaClient，管理员切换本地后端后不会持有旧客户端。
+	// 本地 Provider 按自身 ID 获取缓存客户端；活动后端切换不会让另一个 Provider 借用错误的连接池。
 	if s.providers == nil {
-		s.providers = provider.NewLocalRegistry(
-			func() provider.LocalHTTPClient { return s.llamaClient() },
+		s.providers = provider.NewLocalRegistryWithBackendClient(
+			func(backend string) provider.LocalHTTPClient {
+				client, err := s.localClientForBackend(backend)
+				if err != nil {
+					applog.Printf("local Provider client unavailable: backend=%s error=%v", backend, err)
+					return nil
+				}
+				return client
+			},
 			func(id string) provider.LocalModelManager { return &serverLocalModelManager{s: s, backend: id} },
 		)
 		for _, cfg := range s.cfg.Providers.OpenAICompatible {
@@ -64,15 +71,23 @@ func choiceFromTarget(t proxyModelTarget) core.ModelChoice {
 	if t.Model != nil && t.Model.ModelKey != "" {
 		key = t.Model.ModelKey
 	}
-	return core.ModelChoice{Hint: t.Hint, ModelKey: key, UpstreamID: t.UpstreamID}
+	return core.ModelChoice{ProviderID: t.ProviderID, Hint: t.Hint, ModelKey: key, UpstreamID: t.UpstreamID}
 }
 
 // resolveInference 决定真正使用的模型。客户端 JSON 里的 model（st.ClientModel）只记日志，不参与选择。
 func (s *Server) resolveInference(ctx context.Context, st core.State) (core.ModelChoice, error) {
+	active := s.effectiveUpstream()
 	if name := strings.TrimSpace(st.ServiceModel); name != "" {
-		return s.resolveNamedModel(ctx, st.ID, name)
+		backend := strings.TrimSpace(st.ServiceProviderID)
+		if backend == "" {
+			backend = active.Backend
+		}
+		if !s.isConfiguredProvider(backend) {
+			return core.ModelChoice{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_not_configured", Message: "internal Service Provider is not configured"}
+		}
+		return s.resolveNamedModelForProvider(ctx, st.ID, name, backend)
 	}
-	t, err := s.resolveProxyModelTarget(ctx)
+	t, err := s.resolveProxyModelTargetForUpstream(ctx, active)
 	if err != nil {
 		return core.ModelChoice{}, err
 	}
@@ -80,11 +95,14 @@ func (s *Server) resolveInference(ctx context.Context, st core.State) (core.Mode
 	return choiceFromTarget(t), nil
 }
 
-// resolveNamedModel 给进程内调用方指定模型。外部 HTTP 不设置 ServiceModel，因此走不到这里。
-// 调用方（benchmark）已经完成加载并拿到上游真实名称，所以 UpstreamID 原样使用，
-// 只补上网关 model_key 供日志与 MarkUsed；不在这里重新判断启用状态。
+// resolveNamedModel 保留旧签名，供既有内部调用继续使用。
 func (s *Server) resolveNamedModel(ctx context.Context, requestID, name string) (core.ModelChoice, error) {
-	t := proxyModelTarget{Hint: name, ModelKey: name, UpstreamID: name}
+	return s.resolveNamedModelForProvider(ctx, requestID, name, s.effectiveUpstream().Backend)
+}
+
+// resolveNamedModelForProvider 给内部调用同时固定模型及 Provider，避免并发切换时使用错后端。
+func (s *Server) resolveNamedModelForProvider(ctx context.Context, requestID, name, providerID string) (core.ModelChoice, error) {
+	t := proxyModelTarget{ProviderID: strings.ToLower(strings.TrimSpace(providerID)), Hint: name, ModelKey: name, UpstreamID: name}
 	if m, err := s.models.GetByKey(ctx, name); err == nil && m != nil {
 		t.ModelKey, t.Model = m.ModelKey, m
 	} else if m := s.gatewayModelForUpstreamID(ctx, name); m != nil {
@@ -94,7 +112,8 @@ func (s *Server) resolveNamedModel(ctx context.Context, requestID, name string) 
 	return choiceFromTarget(t), nil
 }
 
-// rememberTarget 保存完整的模型记录。core.ModelChoice 只带 ID，加载模型时还需要 model.Model。
+
+
 func (s *Server) rememberTarget(id string, t proxyModelTarget) {
 	cs := s.callGet(id)
 	if cs == nil {
@@ -117,7 +136,7 @@ func (s *Server) targetOf(id string) proxyModelTarget {
 
 func (s *Server) mutateSanitize(_ context.Context, st core.State) (core.State, error) {
 	// Qwen/llama.cpp 的 system 合并属于本地模板兼容逻辑；远程 Provider 必须保留调用方原始消息结构。
-	if isLocalInferenceBackend(s.effectiveUpstream().Backend) {
+	if isLocalInferenceBackend(s.providerIDForState(st)) {
 		st.Body = sanitizeForLlama(st.Path, st.Body)
 	}
 	return st, nil
@@ -125,7 +144,7 @@ func (s *Server) mutateSanitize(_ context.Context, st core.State) (core.State, e
 
 // mutateInferenceParams 不解析思考或采样字段。合并模块返回完整 body 后，原样交给后续转发。
 func (s *Server) mutateInferenceParams(ctx context.Context, st core.State) (core.State, error) {
-	st.Body = s.applyInferenceParamsToBody(ctx, st.Path, st.Body)
+	st.Body = s.applyInferenceParamsToBodyForBackend(ctx, s.providerIDForState(st), st.Path, st.Body)
 	return st, nil
 }
 
@@ -146,7 +165,7 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 	if s.providers == nil {
 		return nil
 	}
-	manager, ok := s.providers.ResolveLocalModelManager(s.effectiveUpstream().Backend)
+	manager, ok := s.providers.ResolveLocalModelManager(s.providerIDForState(st))
 	if !ok {
 		return nil
 	}

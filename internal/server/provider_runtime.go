@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/core"
 )
 
 // isLocalInferenceBackend 表示需要本地模型加载/卸载控制 API 的后端。
@@ -16,6 +17,20 @@ func isLocalInferenceBackend(id string) bool {
 	default:
 		return false
 	}
+}
+
+// providerIDForState 优先使用 Resolve 阶段固定的 Provider；旧内部调用未提供时回退到活动后端。
+func (s *Server) providerIDForState(st core.State) string {
+	if id := strings.ToLower(strings.TrimSpace(st.Model.ProviderID)); id != "" {
+		return id
+	}
+	if id := strings.ToLower(strings.TrimSpace(st.ServiceProviderID)); id != "" {
+		return id
+	}
+	if s == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
 }
 
 func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProviderConfig, bool) {

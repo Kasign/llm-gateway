@@ -179,7 +179,12 @@ func (s *Server) applyUpstream(u settings.Upstream, resetRouter bool) {
 	localBackend := isLocalInferenceBackend(u.Backend)
 	var client *llama.Client
 	if localBackend {
-		client = s.newUpstreamClient(u.BaseURL, u.Backend)
+		var err error
+		client, err = s.localClientForBackend(u.Backend)
+		if err != nil {
+			applog.Printf("apply upstream skipped: local Provider=%q err=%v", u.Backend, err)
+			return
+		}
 	}
 
 	s.upstreamMu.Lock()

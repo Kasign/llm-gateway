@@ -403,9 +403,18 @@ func (s *Server) resolveUpstreamModelNameForBackend(ctx context.Context, client 
 }
 
 func (s *Server) resolveLlamaModel(ctx context.Context, m *model.Model) string {
-	name, err := s.resolveUpstreamModelName(ctx, m)
-	if err == nil && name != "" {
-		return name
+	active := s.effectiveUpstream()
+	return s.resolveLlamaModelForBackend(ctx, active.Backend, active.ModelName, m)
+}
+
+// resolveLlamaModelForBackend 在显式后端上解析模型名，供已开始的请求/benchmark 在切换后继续使用原目标。
+func (s *Server) resolveLlamaModelForBackend(ctx context.Context, backend, activeModel string, m *model.Model) string {
+	client, err := s.localClientForBackend(backend)
+	if err == nil {
+		name, resolveErr := s.resolveUpstreamModelNameForBackend(ctx, client, backend, activeModel, m)
+		if resolveErr == nil && name != "" {
+			return name
+		}
 	}
 	if stem := strings.TrimSuffix(m.LlamaModelName, ".gguf"); stem != "" {
 		return stem

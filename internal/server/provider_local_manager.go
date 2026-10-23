@@ -28,7 +28,7 @@ func (m *serverLocalModelManager) EnsureReady(ctx context.Context, modelKey, ups
 			target.ModelKey = model.ModelKey
 		}
 	}
-	return m.s.ensureProxyModelReady(ctx, target)
+	return m.s.ensureProxyModelReadyForBackend(ctx, m.backend, target)
 }
 
 func (m *serverLocalModelManager) Load(ctx context.Context, modelID string) error {
@@ -60,4 +60,23 @@ func (m *serverLocalModelManager) Unload(ctx context.Context, modelID string) er
 func (m *serverLocalModelManager) Refresh(ctx context.Context) error {
 	_, err := m.s.InferenceRefreshRegistry(ctx, m.backend)
 	return err
+}
+
+
+// activeModelAdoptionSuppressedKey 防止请求自动加载模型时，把加载完成后的旧模型写回当前路由配置。
+type activeModelAdoptionSuppressedKey struct{}
+
+func suppressActiveModelAdoption(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, activeModelAdoptionSuppressedKey{}, true)
+}
+
+func shouldSuppressActiveModelAdoption(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	suppressed, _ := ctx.Value(activeModelAdoptionSuppressedKey{}).(bool)
+	return suppressed
 }

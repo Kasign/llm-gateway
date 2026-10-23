@@ -58,7 +58,7 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 	if f.s.providers == nil {
 		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_not_configured", Message: "inference Provider registry is not configured"}
 	}
-	active := f.s.effectiveUpstream().Backend
+	active := f.s.providerIDForState(st)
 	p, err := f.s.providers.Resolve(active)
 	if err != nil {
 		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_not_configured", Message: err.Error()}

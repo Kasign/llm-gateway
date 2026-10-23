@@ -255,3 +255,36 @@ func TestNewHTTPErrorMapsStableCategories(t *testing.T) {
 		})
 	}
 }
+
+
+func TestLocalRegistryWithBackendClientUsesMatchingClient(t *testing.T) {
+	llamaClient := &fakeHTTPClient{proxyStatus: http.StatusOK, proxyBody: []byte(`{"backend":"llamacpp"}`)}
+	ollamaClient := &fakeHTTPClient{proxyStatus: http.StatusOK, proxyBody: []byte(`{"backend":"ollama"}`)}
+	clients := map[string]*fakeHTTPClient{
+		"llamacpp": llamaClient,
+		"ollama": ollamaClient,
+	}
+	registry := NewLocalRegistryWithBackendClient(func(id string) LocalHTTPClient {
+		return clients[id]
+	})
+	for _, id := range []string{"llamacpp", "ollama"} {
+		p, err := registry.Resolve(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		if _, err := p.Forward(context.Background(), InferenceCall{
+			Writer: recorder, Request: req, Path: "/v1/chat/completions", Body: []byte("{}"),
+		}); err != nil {
+			t.Fatalf("%s forward: %v", id, err)
+		}
+	}
+	if !strings.Contains(string(llamaClient.proxyBody), "llamacpp") ||
+		!strings.Contains(string(ollamaClient.proxyBody), "ollama") {
+		t.Fatal("test client setup lost backend identity")
+	}
+	if llamaClient.path != "/v1/chat/completions" || ollamaClient.path != "/v1/chat/completions" {
+		t.Fatalf("clients were not selected by their own Provider IDs: llama=%q ollama=%q", llamaClient.path, ollamaClient.path)
+	}
+}

@@ -553,9 +553,11 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	ctx, cancel := context.WithTimeout(stopCtx, time.Duration(s.cfg.Llama.RequestTimeout)*time.Second)
 	defer cancel()
 
+	activeUpstream := s.effectiveUpstream()
+	be := activeUpstream.Backend
 	var llamaName string
 	if m != nil {
-		llamaName = s.resolveLlamaModel(ctx, m)
+		llamaName = s.resolveLlamaModelForBackend(ctx, be, activeUpstream.ModelName, m)
 	} else {
 		llamaName = upstreamOnly
 	}
@@ -579,7 +581,6 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	}()
 
 	loadStart := time.Now()
-	be := s.effectiveUpstream().Backend
 	if m != nil {
 		applog.Infof("[benchmark:%s] ensure model loaded: model_key=%s llama=%s", job.ID, m.ModelKey, llamaName)
 		if res, err := s.InferenceLoad(ctx, be, "", m.ModelKey, nil); err != nil {
@@ -592,7 +593,7 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		} else if res.LoadedAs != "" {
 			llamaName = res.LoadedAs
 		} else {
-			llamaName = s.resolveLlamaModel(ctx, m)
+			llamaName = s.resolveLlamaModelForBackend(ctx, be, activeUpstream.ModelName, m)
 		}
 	} else {
 		applog.Infof("[benchmark:%s] ensure upstream loaded: %s", job.ID, llamaName)
@@ -609,7 +610,9 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	job.mu.Lock()
 	job.LlamaModel = llamaName
 	job.mu.Unlock()
-	if err := s.llamaClient().WaitUntilModelReady(ctx, llamaName); err != nil {
+	if client, clientErr := s.localClientForBackend(be); clientErr != nil {
+		applog.Printf("[benchmark:%s] backend client: %v (will still call chat)", job.ID, clientErr)
+	} else if err := client.WaitUntilModelReady(ctx, llamaName); err != nil {
 		applog.Printf("[benchmark:%s] model ready wait: %v (will still call chat)", job.ID, err)
 	}
 	applog.Debugf("[benchmark:%s] model ready in %dms resolved=%s", job.ID, time.Since(loadStart).Milliseconds(), llamaName)
@@ -629,8 +632,9 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		ID: job.ID, Method: http.MethodPost, Path: "/v1/chat/completions",
 		Header:       map[string][]string{"Content-Type": {"application/json"}, "Accept": {"text/event-stream"}},
 		Body:         body,
-		ServiceModel: llamaName,
-		Sink:         newMemSink(),
+		ServiceModel:       llamaName,
+		ServiceProviderID: be,
+		Sink:               newMemSink(),
 		Started:      job.StartedAt,
 		ClientName:   "benchmark",
 		UserAgent:    "llm-gateway/benchmark",

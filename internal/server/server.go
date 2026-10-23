@@ -56,8 +56,11 @@ type Server struct {
 	live       *live.Registry           // 实时请求看板：内存里记录正在跑的请求，管理后台可实时查看
 	downloader *downloader.HFDownloader // HuggingFace 下载器：从网上下载 AI 模型文件（GGUF 格式）
 	// —— 并发控制锁 ——
-	mu         sync.Mutex   // 通用互斥锁：保护需要串行访问的共享状态
-	upstreamMu sync.RWMutex // 上游配置读写锁：改上游地址时加写锁，读时加读锁（多读单写）
+	mu               sync.Mutex   // 通用互斥锁：保护需要串行访问的共享状态
+	upstreamMu       sync.RWMutex // 上游配置读写锁：改上游地址时加写锁，读时加读锁（多读单写）
+	upstreamChangeMu sync.Mutex   // 串行化管理员切换与请求触发的模型自动采纳。
+	localClientsMu   sync.Mutex   // 保护各本地 Provider 的稳定 HTTP 客户端缓存。
+	localClients     map[string]localClientEntry
 	// —— 上游配置 ——
 	upstream     settings.Upstream // 当前生效的上游配置（管理员在后台改的，优先级高）
 	fileUpstream settings.Upstream // 配置文件里的默认上游配置（管理员没改时用这个）

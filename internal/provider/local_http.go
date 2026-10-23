@@ -85,9 +85,18 @@ func (p *LocalHTTPProvider) Forward(ctx context.Context, call InferenceCall) (co
 	return core.Result{Status: status, ResponseBytes: responseBytes}, err
 }
 
-// NewLocalRegistry 将两个已支持的本地后端注册到统一推理接口。
-// managerFactory 可选；没有本地模型控制能力的 Provider 不需要实现空操作。
+// NewLocalRegistry 保留旧版无参数 clientFactory 契约，兼容既有调用方。
 func NewLocalRegistry(clientFactory func() LocalHTTPClient, managerFactory ...func(string) LocalModelManager) *Registry {
+	var backendFactory func(string) LocalHTTPClient
+	if clientFactory != nil {
+		backendFactory = func(string) LocalHTTPClient { return clientFactory() }
+	}
+	return NewLocalRegistryWithBackendClient(backendFactory, managerFactory...)
+}
+
+// NewLocalRegistryWithBackendClient 按 Provider ID 获取对应客户端，避免切换后端后复用活动后端客户端。
+// managerFactory 可选；没有本地模型控制能力的 Provider 不需要实现空操作。
+func NewLocalRegistryWithBackendClient(clientFactory func(string) LocalHTTPClient, managerFactory ...func(string) LocalModelManager) *Registry {
 	registry := NewRegistry()
 	var makeManager func(string) LocalModelManager
 	if len(managerFactory) > 0 {
@@ -97,7 +106,7 @@ func NewLocalRegistry(clientFactory func() LocalHTTPClient, managerFactory ...fu
 		return func() Provider {
 			var client LocalHTTPClient
 			if clientFactory != nil {
-				client = clientFactory()
+				client = clientFactory(id)
 			}
 			capabilities := Capabilities{
 				Protocol:             "openai-compatible",

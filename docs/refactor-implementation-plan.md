@@ -138,13 +138,13 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次完整 CI 成功运行：提交 `dc66a241f75db8889f06e0cdce763d64dcf61f0f`，Actions 运行 `39779520505`（success）。该运行覆盖 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及重建 bundle 与已提交 `web/static/dist/app.js` 的精确字节对比。
+> 最近一次完整 CI 成功运行：提交 `2fd63021be4826b0f8ee0641a2fc8dbebbc6d24a`，Actions 运行 `39780809886`（success）。该运行覆盖 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及重建 bundle 与已提交 `web/static/dist/app.js` 的精确字节对比。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 95% | 分支基线与最近 CI 已核实；仍需补齐 API、配置、数据库兼容清单与可重复性能样本。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 90% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、Redis Lua 原子限流、远程模型 ID 原样映射；活动 Provider 健康检查改动已在提交 `d4fcda6` 的 CI 运行 `39777021005` 通过。 |
+| 阶段 2：请求边界与路由 | 进行中 | 90% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、Redis Lua 原子限流、远程模型 ID 原样映射与活动 Provider 健康检查。本组固定请求级 Provider 身份、分离本地客户端缓存，并保护模型自动加载与管理员切换时的路由一致性，待 CI 验证。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 90% | 已完成 OpenAI-compatible JSON/SSE、独立凭据、安全配置校验、远程模型映射、默认阻断非公网目标及脱敏错误；本组修复版本化 BaseURL 前缀拼接、HTTP/2/连接超时/连接池边界和响应大小绝对上限，待本次 CI 验证。真实供应商端到端和故障注入仍待执行。 |
 | 阶段 5：运行治理与 CI | 进行中 | 40% | CI 已加入源码构建产物与已提交 bundle 的精确字节比较，并已根据失败诊断重新生成过期 bundle；本提交删除临时同步脚本、恢复 `contents: read` 最小权限。压力测试和外部指标仍缺。 |
@@ -153,7 +153,7 @@ docs/                        中文架构、协议和运维文档
 
 - 旧版 `provider_mutation_test.go` 曾把 `Path/Body` 错放在 `core.State` 顶层；正确布局是嵌入 `core.Request`。当前 `provider_mutation_test.go` 已按真实字段布局修复，当前 `provider_runtime_test.go` 也与 `internal/core/types.go` 一致，不需要重复修改。
 - 远程 SSE 测试曾出现字符串字面量语法错误，后续提交已修复；最近基线 CI 已通过。
-- 远程流式非 2xx 已有回归测试：未提交响应时保持上游 HTTP 状态并返回安全 JSON；响应已提交时发出脱敏 SSE `event: error`。本功能组按 Chat Completions 与 Responses API 分别构造终止事件，并通过分片/超大行序号观察测试覆盖边界；首轮 CI 在 `internal/provider/openai_compatible.go` 报 `undefined: writeStreamError`，根因是闭包默认分支被替换成自调用；本修复恢复对底层写出函数的调用，并补齐序号测试的 `bytes` 依赖。修复提交的 CI 结果仍待确认。真实 SDK 与真实供应商的端到端行为仍未验收。
+- 远程流式非 2xx 已有回归测试：未提交响应时保持上游 HTTP 状态并返回安全 JSON；响应已提交时发出脱敏 SSE `event: error`。Responses API 错误事件已按协议使用顶层 `type/code/message/param/sequence_number`，并有序号观察器的分片/超大行边界测试。首轮 CI 的 `undefined: writeStreamError` 已在提交 `ad4b9a5` 修复，Actions 运行 `39780717182`（success）通过。真实 SDK 与真实供应商的端到端行为仍未验收。
 
 ### 下一步
 
@@ -162,6 +162,14 @@ docs/                        中文架构、协议和运维文档
 3. 补齐 API、配置、数据库迁移与关键响应行为清单，并准备可重复的延迟/内存/并发基线。
 4. 继续评估同步 SSE 解析/实时看板更新的热路径成本，对远程 Provider 做真实服务及故障注入测试。
 5. 每完成一个有边界的功能组，再更新本文并按功能提交。
+
+### 本轮功能组：请求级 Provider 固定（待 CI 验证）
+
+- `core.ModelChoice.ProviderID` 在 Resolve 阶段固定，后续 Mutator、LocalModelManager 和 Forwarder 必须沿用该身份。
+- 内部 benchmark 可设置 `ServiceProviderID`，模型解析、加载、等待与转发使用同一个本地后端。
+- 本地 Registry 按后端 ID 获取独立 HTTP 客户端；客户端按后端/URL 缓存，不依赖活动指针 `s.llama`。
+- 自动加载通过上下文标记抑制全局活动模型采纳，防止旧请求完成后覆盖管理员刚选定的模型。
+- 切换与自动采纳只在保存/应用配置的短阶段互斥，实际模型加载不持锁；新增路由固定、Mutator 选择、管理器选择、客户端缓存及 Provider 工厂回归测试。此功能组的 CI 尚待执行。
 
 ## 7. 中文文档与注释规范
 

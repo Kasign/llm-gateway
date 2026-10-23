@@ -104,7 +104,9 @@ func (s *Server) inferenceLoadSucceeded(ctx context.Context, backend string, gw 
 	} else {
 		s.persistUpstreamNameForID(ctx, backend, loadedAs)
 	}
-	s.maybeUpdateActiveUpstreamModel(ctx, backend, loadedAs)
+	if !shouldSuppressActiveModelAdoption(ctx) {
+		s.maybeUpdateActiveUpstreamModel(ctx, backend, loadedAs)
+	}
 	if backend == "llamacpp" {
 		s.syncGatewayFromLlamacpp(ctx)
 	}

@@ -37,8 +37,9 @@ type Request struct {
 	RawQuery     string // 原始查询字符串单独保存，避免影响路由匹配与协议判断。
 	Header       map[string][]string
 	Body         []byte
-	ServiceModel string
-	Sink         ResponseSink
+	ServiceModel      string
+	ServiceProviderID string // 网关内部调用可固定 Provider；外部 HTTP 请求不会设置此字段。
+	Sink              ResponseSink
 	Started      time.Time
 	ClientIP     string
 	ClientName   string
@@ -63,6 +64,7 @@ func (r Request) HeaderGet(key string) string {
 
 // ModelChoice 是服务选定的模型，不是客户端 JSON 里的 model。
 type ModelChoice struct {
+	ProviderID string // Resolver 选定的 Provider；后续阶段必须沿用。
 	Hint       string
 	ModelKey   string
 	UpstreamID string

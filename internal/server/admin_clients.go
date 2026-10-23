@@ -7,48 +7,66 @@ import (
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/llama"
-)
-
-func (s *Server) llamacppAdminClient() (*llama.Client, string, error) {
+	"gfunc (s *Server) llamacppAdminClient() (*llama.Client, string, error) {
 	base := strings.TrimSpace(s.baseURLForBackend("llamacpp"))
 	if base == "" {
 		return nil, "", errors.New("未配置 LLAMA_CPP_BASE_URL")
 	}
-	return s.newUpstreamClient(base, "llamacpp"), base, nil
+	client, err := s.localClientForBackend("llamacpp")
+	if err != nil {
+		return nil, "", err
+	}
+	return client, base, nil
 }
 
 func (s *Server) adminClientForBackend(backend string) (*llama.Client, string, error) {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case "ollama":
-		base := strings.TrimSpace(s.baseURLForBackend("ollama"))
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	switch backend {
+	case "ollama", "llamacpp":
+		base := strings.TrimSpace(s.baseURLForBackend(backend))
 		if base == "" {
-			return nil, "", errors.New("未配置 OLLAMA_BASE_URL")
+			if backend == "ollama" {
+				return nil, "", errors.New("未配置 OLLAMA_BASE_URL")
+			}
+			return nil, "", errors.New("未配置 LLAMA_CPP_BASE_URL")
 		}
-		return s.newUpstreamClient(base, "ollama"), base, nil
-	case "llamacpp", "":
-		return s.llamacppAdminClient()
+		client, err := s.localClientForBackend(backend)
+		if err != nil {
+			return nil, "", err
+		}
+		return client, base, nil
 	default:
 		return nil, "", errors.New("backend must be llamacpp or ollama")
 	}
 }
 
+// maybeUpdateActiveUpstreamModel 保留旧签名，供 InferenceLoad 等现有内部调用使用。
 func (s *Server) maybeUpdateActiveUpstreamModel(ctx context.Context, backend, modelName string) {
-	modelName = strings.TrimSpace(modelName)
+	s.maybeUpdateActiveUpstreamModelForSnapshot(ctx, s.effectiveUpstream(), backend, modelName)
+}
+
+// maybeUpdateActiveUpstreamModelForSnapshot 仅在解析时的上游仍有效时采纳模型，避免迟到请求覆盖管理员切换。
+func (s *Server) maybeUpdateActiveUpstreamModelForSnapshot(ctx context.Context, expected settings.Upstream, backend, modelName string) {
 	backend = strings.ToLower(strings.TrimSpace(backend))
-	if modelName == "" || backend == "" {
+	modelName = strings.TrimSpace(modelName)
+	if backend == "" || modelName == "" || !strings.EqualFold(strings.TrimSpace(expected.Backend), backend) {
 		return
 	}
-	if s.effectiveUpstream().Backend != backend {
+	s.upstreamChangeMu.Lock()
+	defer s.upstreamChangeMu.Unlock()
+	current := s.effectiveUpstream()
+	if !sameUpstreamRoute(current, expected) {
 		return
 	}
-	u := s.effectiveUpstream()
-	u.ModelName = modelName
-	if u.ModelsByBackend == nil {
-		u.ModelsByBackend = map[string]string{}
+	byBackend := make(map[string]string, len(current.ModelsByBackend)+1)
+	for id, name := range current.ModelsByBackend {
+		byBackend[id] = name
 	}
-	u.ModelsByBackend[backend] = modelName
+	byBackend[backend] = modelName
+	current.ModelsByBackend = byBackend
+	current.ModelName = modelName
 	if s.settings != nil {
-		_ = s.settings.SaveUpstream(ctx, u)
+		_ = s.settings.SaveUpstream(ctx, current)
 	}
-	s.applyUpstream(u, backend == "llamacpp")
+	s.applyUpstream(current, backend == "llamacpp")
 }
