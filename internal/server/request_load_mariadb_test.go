@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,7 +99,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	}
 
 	var upstreamRequests atomic.Uint64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstreamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected upstream path", http.StatusNotFound)
 			return
@@ -146,7 +147,8 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 			}},
 			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
 		})
-	}))
+	})
+	upstream := httptest.NewServer(upstreamHandler)
 	defer upstream.Close()
 
 	const (
@@ -231,6 +233,27 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runConcurrentRequests := func(requestCount, concurrency int, request func(int) requestResult) []requestResult {
+		results := make([]requestResult, requestCount)
+		jobs := make(chan int)
+		var workers sync.WaitGroup
+		workers.Add(concurrency)
+		for i := 0; i < concurrency; i++ {
+			go func() {
+				defer workers.Done()
+				for index := range jobs {
+					results[index] = request(index)
+				}
+			}()
+		}
+		for index := 0; index < requestCount; index++ {
+			jobs <- index
+		}
+		close(jobs)
+		workers.Wait()
+		return results
+	}
+
 	type requestResult struct {
 		elapsed   time.Duration
 		err       string
@@ -281,6 +304,76 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	}
 	doRequest := func(index int) requestResult {
 		return doRequestExpected(index, "", http.StatusOK)
+	}
+
+	// 连接拒绝故障独立运行：先证明 TCP 不可达时返回安全 502 并记录无上游 HTTP 状态，
+	// 再在同一个端口恢复 Mock 服务，验证相同 Gateway/Provider 实例恢复成功转发。
+	if strings.TrimSpace(os.Getenv("GATEWAY_TRANSPORT_FAILURE_TEST")) == "1" {
+		const (
+			failedRequests   = 30
+			recoveryRequests = 30
+			workerLimit      = 16
+		)
+		upstreamAddress := strings.TrimPrefix(upstream.URL, "http://")
+		upstream.Close()
+
+		failures := runConcurrentRequests(failedRequests, workerLimit, func(index int) requestResult {
+			return doRequestExpected(index, "", http.StatusBadGateway)
+		})
+		for index, result := range failures {
+			if result.err != "" {
+				t.Errorf("connection-refused request %d failed contract: %s", index, result.err)
+			}
+		}
+		if got := upstreamRequests.Load(); got != 0 {
+			t.Fatalf("closed upstream unexpectedly accepted %d requests before recovery", got)
+		}
+
+		recoveryListener, err := net.Listen("tcp", upstreamAddress)
+		if err != nil {
+			t.Fatalf("rebind mock upstream address for recovery: %v", err)
+		}
+		recoveryUpstream := httptest.NewUnstartedServer(upstreamHandler)
+		recoveryUpstream.Listener = recoveryListener
+		recoveryUpstream.Start()
+		defer recoveryUpstream.Close()
+
+		recovered := runConcurrentRequests(recoveryRequests, workerLimit, func(index int) requestResult {
+			return doRequestExpected(failedRequests+index, "", http.StatusOK)
+		})
+		for index, result := range recovered {
+			if result.err != "" {
+				t.Errorf("post-recovery request %d failed contract: %s", index, result.err)
+			}
+		}
+		if got := upstreamRequests.Load(); got != recoveryRequests {
+			t.Fatalf("after recovery mock upstream received %d requests, want %d", got, recoveryRequests)
+		}
+
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after connection-refused/recovery test: %v", err)
+		}
+		cancelDrain()
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, gateway502, absentUpstreamStatus, gateway200, upstream200 int
+		err = db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=502),0), COALESCE(SUM(upstream_http_status IS NULL),0), COALESCE(SUM(http_status=200),0), COALESCE(SUM(upstream_http_status=200),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &gateway502, &absentUpstreamStatus, &gateway200, &upstream200)
+		if err != nil {
+			t.Fatalf("query connection failure/recovery audit rows: %v", err)
+		}
+		if persisted != failedRequests+recoveryRequests || gateway502 != failedRequests ||
+			absentUpstreamStatus != failedRequests || gateway200 != recoveryRequests || upstream200 != recoveryRequests {
+			t.Fatalf("connection failure/recovery audit: rows=%d gateway502=%d missing_upstream_status=%d gateway200=%d upstream200=%d",
+				persisted, gateway502, absentUpstreamStatus, gateway200, upstream200)
+		}
+		t.Logf("Gateway TCP connection refusal and recovery: failed_requests=%d status=502 upstream_http_status=absent; recovered_requests=%d status=200; total_audit_rows=%d",
+			failedRequests, recoveryRequests, persisted)
+		return
 	}
 
 	// 故障注入独立运行，复用相同真实 Handler/Redis/MariaDB/Provider fixture，
