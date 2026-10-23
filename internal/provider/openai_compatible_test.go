@@ -112,8 +112,8 @@ func TestOpenAICompatibleProviderSupportsAPIKeyHeaderMode(t *testing.T) {
 }
 
 func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
-	const upstreamJSON = "{\\\"id\\\":\\\"resp_json\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"completed\\\",\\\"model\\\":\\\"gpt-4.1\\\",\\\"output\\\":[{\\\"type\\\":\\\"message\\\",\\\"content\\\":[{\\\"type\\\":\\\"output_text\\\",\\\"text\\\":\\\"hello json\\\"}]}]}"
-	const upstreamSSE = "event: response.created\\ndata: {\\\"type\\\":\\\"response.created\\\",\\\"sequence_number\\\":0,\\\"response\\\":{\\\"id\\\":\\\"resp_stream\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"in_progress\\\",\\\"model\\\":\\\"gpt-4.1\\\"}}\\n\\nevent: response.output_text.delta\\ndata: {\\\"type\\\":\\\"response.output_text.delta\\\",\\\"sequence_number\\\":1,\\\"delta\\\":\\\"hello from Responses\\\"}\\n\\nevent: response.completed\\ndata: {\\\"type\\\":\\\"response.completed\\\",\\\"sequence_number\\\":2,\\\"response\\\":{\\\"id\\\":\\\"resp_stream\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"completed\\\",\\\"model\\\":\\\"gpt-4.1\\\"}}\\n\\n"
+	const upstreamJSON = "{\"id\":\"resp_json\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-4.1\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello json\"}]}]}"
+	const upstreamSSE = "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_stream\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-4.1\"}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"delta\":\"hello from Responses\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_stream\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-4.1\"}}\n\n"
 
 	type upstreamCapture struct {
 		path          string
