@@ -530,3 +530,12 @@ URL 路径前缀仍然合法，例如 `http://llama-cpp:8080/openai/v1`。空的
 入口层只绑定经过配置校验的 Provider，之后复用同一鉴权、限流、模型 ACL、请求生命周期、审计及转发 Pipeline。外部请求不能通过 Header/body 改变路由 Provider；Agent 路由不修改全局 `settings.Upstream`。原有 `/v1/*` 继续指向管理台当前选择的 Provider。
 
 首版每条入口固定一个默认模型。需要单入口下暴露多个模型时，应先设计显式别名/映射和对应的 API Key ACL，不直接信任调用方任意模型字符串，也不在流式响应提交后自动故障切换。
+
+
+### 当前配置方式与兼容边界
+
+`agents` 是进程启动时加载的静态路由配置，配置改动需要重启/重新部署。每个入口当前只绑定一个 Provider 与一个默认模型；客户端请求里的 `model` 不能切换到另一个 Agent/Provider。当前复用同一 Gateway API Key、限流和 `allowed_models` ACL，没有为每个 Agent 配置独立密钥的能力。
+
+### 远程流式错误语义
+
+上游错误正文可能含内部诊断信息或凭据上下文，不直接转发。未提交响应头时，网关保留上游状态码并返回稳定的脱敏 JSON；warm-start 或上游首块已提交状态后，HTTP 状态不可逆，只追加脱敏 SSE 错误事件。Responses API 的追加错误事件维持其所需的 `sequence_number`，且已有测试验证这一收口行为。
