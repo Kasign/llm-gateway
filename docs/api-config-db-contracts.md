@@ -85,7 +85,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
-| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析、双 Provider 的 JSON/SSE data-plane 往返（Actions #101）及 Agent `/v1/models` 固定目标/模型 ACL 测试（Actions #104 均通过）。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
+| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析、双 Provider JSON/SSE data-plane（#101）、模型列表 helper ACL（#104）及完整 Handler 的缺失/无效 Key 401、模型列表 ACL 和 Redis RPM 429（#108）。HTTP 测试使用 test SQL driver；RPM 走真实 Redis。 | Agent 级独立权限策略、动态重载、MariaDB 集成及真实供应商 E2E。 |
 | Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游、DNS NXDOMAIN/timeout、连接拒绝、ResponseHeaderTimeout 错误映射均由 Actions #92/#96 验证；Agent data-plane 对各自上游密钥隔离由 #99 验证；三项性能基准及 Artifact 由 #94/#99 验证。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
@@ -124,3 +124,12 @@ Provider 契约测试新增：
 - Anthropic Messages SSE 成功响应完整透传及 message 生命周期事件覆盖，校验 Provider 凭据、Anthropic-Version、Request-Id、model 覆盖、query 透传。
 - Anthropic /v1/messages/count_tokens 成功请求/响应透传，覆盖实际转发路径、服务端模型和凭据边界。
 Actions #106（提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2`）全量 CI 已通过；测试仍使用本机 Mock HTTP 服务，真实 Anthropic 供应商 E2E 仍待执行。
+
+
+### Agent /v1/models HTTP 鉴权与限流（CI #108）
+
+Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestAgentModelsHTTPHandlerEnforcesAuthAndModelACL` 与 `TestAgentModelsHTTPHandlerEnforcesRedisRPMLimit`：
+- 实际 `Server.Handler()` 的 Agent 路由：缺失或未知 API Key 返回 401。
+- 不受限 Key 只看到该 Agent 的固定模型；AllowedModels 不允许该模型时返回空列表。
+- CI 环境连接真实 Redis 限流器；RPM=1 时第一个请求 200，第二个请求 429。
+- SQL 部分使用 test-only `database/sql/driver` 返回 API Key 行并接受审计写入，不代表 MariaDB/迁移 E2E；真实 schema 与 SQL 兼容仍需专门集成环境覆盖。

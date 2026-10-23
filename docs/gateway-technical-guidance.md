@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 验收：提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`，GitHub Actions #104（运行 `39900465325`，success）。该运行通过 Go 单测、race detector、Agent `/v1/models` ACL、双 Provider JSON/SSE data-plane 集成、ResponseHeaderTimeout 故障注入、三项性能基准、Artifact 上传、`go vet`、Gateway 构建及前端 bundle 检查。真实供应商端到端及线上性能仍未验收。
+> 最近一次完整 CI 验收：提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`，GitHub Actions #108（运行 `39904722392`，success）。该运行通过 Agent `/v1/models` 外层鉴权/ACL/Redis RPM HTTP 集成、race detector、性能基准与 Artifact、`go vet`、Gateway 构建及前端 bundle 检查。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -605,3 +605,8 @@ Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过 Agent 
 - Anthropic-Version、查询参数、Provider 服务端 API Key、model 覆盖、响应 Request-Id 透传和调用方 Authorization 隔离。
 - `/v1/messages/count_tokens` 的请求路径、query、模型覆盖、Anthropic-Version、Provider Key 和 JSON 响应透传。
 - 这些测试以 loopback Mock 为上游，不代表真实 Anthropic/Claude Code 供应商 E2E 已完成。
+
+
+### Agent /v1/models 外层鉴权与 Redis 限流验收（CI #108）
+
+Actions #108 通过实际 `Server.Handler()` 集成：缺失/未知 API Key 返回 401；已鉴权 Key 的模型列表受 AllowedModels 控制；通过真实 Redis 服务验证 RPM 超限返回 429。该测试的 API Key/审计 SQL 使用 test-only driver，仅模拟查行与写入成功，不代表 MariaDB schema/方言的端到端验收。Artifact：[性能基线文件](https://github.com/Kasign/llm-gateway/actions/runs/39904722392/artifacts/12480765287)。

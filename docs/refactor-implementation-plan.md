@@ -138,13 +138,13 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2`，GitHub Actions #106（运行 `39900997516`，success）。在前述 Agent 路由与 ACL 验收基础上，新增 Anthropic Messages 成功 SSE 生命周期与 `count_tokens` 正向透传测试；全量 Go 单测、race、性能基准、Artifact、vet、构建和前端 bundle 检查通过。
+> 最近一次已验收代码功能组：提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`，GitHub Actions #108（运行 `39904722392`，success）。新增 Agent `/v1/models` 完整 HTTP 鉴权/ACL/RPM 集成；完整 Go 单测、race、性能基准与 Artifact、vet、Gateway 构建和前端 bundle 校验通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证 Agent `/v1/models` 固定目标与 Key ACL。持续性能趋势与线上压测仍待。 |
+| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 JSON/SSE 往返、各自密钥及模型固定。仍需更多协议/真实供应商契约验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
 | 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector、请求取消、双 Agent 并发解析与双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 已连续多次成功运行。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
@@ -395,9 +395,10 @@ docs/                        中文架构、协议和运维文档
 - 提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2` 对应 Actions #106（运行 `39900997516`）已通过全量流程：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、三项性能基准、性能 Artifact 上传、`go vet ./...`、Gateway 构建、管理台源码构建与部署 bundle 校验全部成功。
 
 
-### Agent /v1/models HTTP 鉴权、ACL 与 RPM 集成（2026-10-23，待 CI）
+### Agent /v1/models HTTP 鉴权、ACL 与 RPM 集成（2026-10-23，CI #108 已通过）
 
 - 新增专用 HTTP Handler 集成测试，使用 test-only `database/sql/driver` 模拟 API Key 仓库与异步审计数据库，不新增第三方测试依赖。
 - 通过实际 `Server.Handler()`、Agent 前缀路由、`v1Models`、`auth.Repo.GetByRaw`、`Limiter.Allow` 与审计队列，覆盖无 Key/无效 Key 返回 401、不受限 Key 只能看到 Agent 的固定模型、限制到其他模型的 Key 返回空列表。
 - 另有 Redis 可选集成用例：读取 CI 已配置的 `REDIS_TEST_ADDR`，同一 Key 的首个请求通过，超过 RPM 后的后续请求必须返回 429；本地未配置 Redis 时该单项跳过，其他测试仍可运行。
-- 当前 test SQL driver 只模拟 SQL 行与成功写入，不验证 MariaDB 方言或 schema；数据库迁移已有独立测试覆盖。需以本提交完整 CI 的单测、race、性能基准、vet、构建和前端校验作为最终验收。
+- test SQL driver 只模拟 API Key 查询行与成功写入，不验证 MariaDB 方言或 schema；数据库迁移已有独立测试覆盖。RPM 用例在 CI 中使用真实 Redis 服务。提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0` 对应 Actions #108（运行 `39904722392`）已通过全量流程：Go 单测、race、三项性能基准及 Artifact、`go vet`、Gateway 构建、管理台源码构建和部署 bundle 校验均成功。
+- Artifact：[`llm-gateway-performance-baseline-82bd2f5712167707cbfa528e2d9d31a10172cdd0`](https://github.com/Kasign/llm-gateway/actions/runs/39904722392/artifacts/12480765287)，30 天有效。
