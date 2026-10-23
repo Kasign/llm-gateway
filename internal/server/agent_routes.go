@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/netip"
 	"strings"
+	"time"
 
+	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/settings"
@@ -42,6 +45,24 @@ func (s *Server) agentRouteHandler(cfg config.AgentRouteConfig, next http.Handle
 		ctx := context.WithValue(r.Context(), agentRouteContextKey{}, route)
 		stripped.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+
+// agentModelListBody 生成 Agent 的 /v1/models 响应，只公开该 Agent 固定的目标模型，并执行调用方 Key 的模型 ACL。
+func agentModelListBody(route agentRoute, target proxyModelTarget, key *auth.Key) []byte {
+	modelID := strings.TrimSpace(target.ModelKey)
+	if target.Model != nil {
+		modelID = strings.TrimSpace(target.Model.ModelKey)
+	}
+	data := make([]map[string]interface{}, 0, 1)
+	if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+		data = append(data, map[string]interface{}{
+			"id": modelID, "object": "model", "created": time.Now().Unix(),
+			"owned_by": route.ProviderID, "display_name": target.UpstreamID,
+		})
+	}
+	body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
+	return body
 }
 
 // agentRequestPublicURL 在审计 URL 中恢复 Agent 前缀；普通 /v1 请求沿用原有 URL 与 query 脱敏。

@@ -581,3 +581,8 @@ Actions #99（提交 `4ef97c9d9f748db1fd4aa23312ab728a5a1b49f4`）通过 `TestAg
 ### Agent SSE data-plane 验收
 
 提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978` 的 Actions #101 通过双 Agent JSON/SSE 往返测试。流式请求通过相同的 Agent 路由层、Pipeline 和 Provider HTTP adapter；测试确认响应 content type 为 `text/event-stream`、事件内容来自对应上游并以 `data: [DONE]` 收尾，服务端模型和 API Key 不串线，调用方 Authorization/X-API-Key 不泄漏。上游为 loopback Mock，不代表真实供应商 E2E。
+
+
+### Agent 模型发现与 ACL
+
+Agent 的 `GET /<agent-prefix>/v1/models` 返回的不是上游任意模型目录，而是该 Agent 配置的固定 Provider/默认目标模型（或由已解析目标给出的模型 ID），并调用同一套 `modelAllowedForKey` 检查调用方 Key 对公开模型 ID、上游模型 ID 或提示名称的 ACL。当前新增纯函数单测覆盖放行与拒绝语义；它不代替外层 API Key/Redis 限流/审计的 HTTP 集成测试。

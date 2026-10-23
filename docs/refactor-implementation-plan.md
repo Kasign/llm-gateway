@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。双 Agent 的非流式 JSON 与流式 SSE data-plane 集成、race detector、性能基准和 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过。
+> 最近一次已验收代码功能组：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。双 Agent 的非流式 JSON 与流式 SSE data-plane 集成、race detector、性能基准和 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过；独立文档提交 #102 的 CI 仍在执行中。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -371,3 +371,10 @@ docs/                        中文架构、协议和运维文档
 - 两种模式均检查路径前缀剥离、query 透传、Agent 专用 API Key 与调用方凭据隔离，并校验出站 stream 标志与入站一致。
 - 提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978` 对应 Actions #101（运行 `39899727297`）已通过全量流程：普通 Go 单测、`go test -race ./internal/provider ./internal/server ./internal/core`、三项性能基准、Artifact 上传、`go vet ./...`、Gateway 构建、管理台源码构建及前端 bundle 校验全部成功。
 - Artifact：[`llm-gateway-performance-baseline-4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`](https://github.com/Kasign/llm-gateway/actions/runs/39899727297/artifacts/12478586036)，30 天有效。该测试仍使用本机 Mock 上游，不等同真实公网供应商 E2E。
+
+
+### Agent /v1/models 模型发现与 ACL 契约（2026-10-23，待 CI）
+
+- 将 Agent 分支的模型列表组装逻辑提取为纯函数 `agentModelListBody`，供 `GET /<agent-prefix>/v1/models` 复用，避免模型列表行为分散在 HTTP 收尾逻辑内。
+- 新增单元测试覆盖不受限 Key、按公开模型 ID 放行、按上游模型 ID 放行、其他模型被 ACL 拒绝；断言列表只暴露该 Agent 固定的目标模型与 Provider 标识，不把另一个 Agent 或客户端传入的任意模型列出来。
+- 这项测试覆盖模型列表契约与 ACL 过滤，不替代完整外层鉴权、Redis 限流或审计流程集成；需由本提交触发的完整 CI 通过后验收。

@@ -410,18 +410,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, status, code, msg)
 			return
 		}
-		modelID := strings.TrimSpace(target.ModelKey)
-		if target.Model != nil {
-			modelID = target.Model.ModelKey
-		}
-		data := make([]map[string]interface{}, 0, 1)
-		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
-			data = append(data, map[string]interface{}{
-				"id": modelID, "object": "model", "created": time.Now().Unix(),
-				"owned_by": route.ProviderID, "display_name": target.UpstreamID,
-			})
-		}
-		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
+		body := agentModelListBody(route, target, key)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 		s.keys.Touch(context.Background(), key.ID)

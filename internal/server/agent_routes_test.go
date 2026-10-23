@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/settings"
@@ -283,6 +284,64 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 	}
 	if got := s.effectiveUpstream().Backend; got != "llamacpp" {
 		t.Fatalf("Agent data-plane requests changed global active Provider to %q", got)
+	}
+}
+
+func TestAgentModelListBodyHonorsModelACLAndExposesOnlyFixedTarget(t *testing.T) {
+	route := agentRoute{ID: "deepseek-agent", ProviderID: "deepseek", DefaultModel: "deepseek-chat"}
+	target := proxyModelTarget{
+		ProviderID: "deepseek", ModelKey: "deepseek-chat",
+		UpstreamID: "deepseek-chat-upstream", Hint: "deepseek-chat",
+	}
+	decode := func(t *testing.T, body []byte) struct {
+		Object string `json:"object"`
+		Data []struct {
+			ID          string `json:"id"`
+			Object      string `json:"object"`
+			OwnedBy     string `json:"owned_by"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	} {
+		t.Helper()
+		var payload struct {
+			Object string `json:"object"`
+			Data []struct {
+				ID          string `json:"id"`
+				Object      string `json:"object"`
+				OwnedBy     string `json:"owned_by"`
+				DisplayName string `json:"display_name"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("Agent model list is not JSON: %v", err)
+		}
+		return payload
+	}
+
+	cases := []struct {
+		name    string
+		key     *auth.Key
+		wantNum int
+	}{
+		{name: "unrestricted key", key: &auth.Key{}, wantNum: 1},
+		{name: "allow by public model ID", key: &auth.Key{AllowedModels: []string{"deepseek-chat"}}, wantNum: 1},
+		{name: "allow by upstream model ID", key: &auth.Key{AllowedModels: []string{"deepseek-chat-upstream"}}, wantNum: 1},
+		{name: "deny different model", key: &auth.Key{AllowedModels: []string{"gpt-4.1"}}, wantNum: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := decode(t, agentModelListBody(route, target, tc.key))
+			if payload.Object != "list" || len(payload.Data) != tc.wantNum {
+				t.Fatalf("model list object/count = %q/%d, want list/%d: %+v", payload.Object, len(payload.Data), tc.wantNum, payload)
+			}
+			if tc.wantNum == 1 {
+				row := payload.Data[0]
+				if row.ID != "deepseek-chat" || row.Object != "model" ||
+					row.OwnedBy != "deepseek" || row.DisplayName != "deepseek-chat-upstream" {
+					t.Fatalf("Agent model row exposed wrong target: %+v", row)
+				}
+			}
+		})
 	}
 }
 
