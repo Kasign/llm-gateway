@@ -86,7 +86,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
 | Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go`、配置验证测试和请求级 Provider 选择测试。 | Agent 级独立权限策略、动态重载。 |
-| Provider 请求头、API Key 隔离、响应/流错误 | `internal/provider/openai_compatible_test.go` Mock 上游测试；当前补充确定性 DNS NXDOMAIN/timeout 与本机连接拒绝故障注入，待对应 CI 通过后计入。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 路由异常与跨公网故障注入。 |
+| Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游测试及确定性 DNS NXDOMAIN/timeout、本机连接拒绝均通过 Actions #92（运行 `39897633772`）；随后新增的性能基线用于测量本地转发开销。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
 | 前端/API 部署一致性 | CI 从前端源码重建 bundle 并与已提交 `web/static/dist/app.js` 做字节比较。 | 真实 1Panel/OpenResty 反向代理部署验收。 |

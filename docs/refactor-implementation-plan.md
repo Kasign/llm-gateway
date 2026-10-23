@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `b3ec270421daad654c450b20c43782297f882f3f`，GitHub Actions #85（运行 `39896239166`，success）。该运行通过 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建和已提交前端 bundle 一致性校验。
+> 最近一次已验收代码功能组：提交 `b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f`，GitHub Actions #92（运行 `39897633772`，success）。该运行通过常规测试、`go test -race`、`go vet`、Gateway 构建和前端 bundle 校验；本轮新增的性能基线步骤待新提交 CI 首次运行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
-| 阶段 0：基线与计划 | 进行中 | 95% | 分支基线与最近 CI 已核实；仍需补齐 API、配置、数据库兼容清单与可重复性能样本。 |
+| 阶段 0：基线与计划 | 进行中 | 97% | 分支基线、API/配置/数据库契约清单已核实；正在加入可重复且记录分配量的 CI 性能样本。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
 | 阶段 2：请求边界与路由 | 进行中 | 97% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并补双 Agent 并发 Provider/模型隔离（Actions #90 通过）。性能基线与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
-| 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | Anthropic Messages 协议头、错误类型、原始错误兼容策略、32 MB 请求体限制、响应头透传及 warm-start 状态边界均已由提交 `b3ec270` 的 Actions #85 完整 CI 验证。真实供应商端到端、DNS/连接故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 50% | CI 已增加 `go test -race ./internal/provider ./internal/server ./internal/core`；取消/Finish 并发测试与 400 次双 Agent 并发隔离测试均由 Actions #90（提交 `d41e34eb343439b536009a275969c0c49bfdc842`）验证通过。压力测试、延迟/内存基线、真实 Provider 故障注入仍缺。 |
+| 阶段 4：外部 Provider 与密钥 | 进行中 | 97% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout 与本机连接拒绝由提交 `b6415a3` 的 Actions #92 全量 CI 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
+| 阶段 5：运行治理与 CI | 进行中 | 55% | CI 的 race detector、请求取消与双 Agent 并发隔离、DNS/连接故障注入均通过；新增三项性能基准及 30 天 Actions artifact 存档，等待本提交 CI 首次产出测量结果。压力/线上阈值与真实 Provider 故障注入仍缺。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约已通过 CI**：取消/Finish 线性化测试与 400 个双 Agent 并发模型解析均通过 Actions #90；同时 `go test -race ./internal/provider ./internal/server ./internal/core` 通过。下一步准备可复现的延迟、内存和并发基线。
+2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过，且 race detector 通过。当前新增 Provider 转发、Agent 模型解析、请求分析三项 `-benchmem` 基线，由 CI artifact 记录 `ns/op`、`B/op`、`allocs/op`；首次测量待本提交 CI。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 受控重试/故障转移必须确认响应尚未提交；SSE 输出开始后禁止切换上游。
@@ -309,9 +309,17 @@ docs/                        中文架构、协议和运维文档
 - 此文档为现状索引，不替代 OpenAPI；下一步按优先级补性能基线与远程 Provider 网络故障测试。
 
 
-### DNS 与连接层故障注入（2026-10-23，待 CI）
+### DNS 与连接层故障注入（2026-10-23，CI #92 已通过）
 
 - 将私有 HTTP 客户端构造拆为默认入口与包内 Resolver 注入入口；生产环境仍使用 `net.DefaultResolver`，没有新增 YAML/HTTP 配置。
 - 新增确定性 DNS 失败测试：NXDOMAIN 应映射为 502，Resolver timeout 应映射为 504；两者检查 Anthropic Messages 错误信封保持有效，并断言不泄露上游主机名或内部 DNS 诊断。
 - 新增真实本机连接拒绝测试，核对 502 与安全错误信封；这些是本地故障注入，不是外部 OpenAI/DeepSeek/Anthropic 服务端到端验证。
-- 需要通过完整 `go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...` 和构建流水线后再更新验收状态。
+- 提交 `b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f` 对应 Actions #92（运行 `39897633772`）已通过完整流水线：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...`、Gateway 构建和前端 bundle 校验均成功。真实 OpenAI/DeepSeek/Anthropic、DNS 出口策略及跨公网连接故障仍未验收。
+
+
+### 可重复性能基线（新增，待 CI）
+
+- 新增 `BenchmarkOpenAICompatibleProviderForwardJSON`：通过本机 loopback Mock 上游测远程 Provider 适配器/HTTP 转发开销，不将真实供应商网络或推理耗时混入 Gateway 基线。
+- 新增 `BenchmarkResolveInferenceAgentRoute`：测固定 Agent Provider 与默认模型解析路径；新增 `BenchmarkBuildRequestAnalysis`：测请求时间线到分析 DTO 的转换/分配成本，不包含数据库写入。
+- CI 以 `-benchmem -benchtime=1s` 运行三项基准，记录 `ns/op`、`B/op`、`allocs/op`，并上传为按 commit SHA 命名、保留 30 天的 Artifact。该步骤只记录，不设跨 Runner 硬阈值；比较需使用同一 Go 版本/相近 Runner。
+- 本次只建立可重复测量管线，不在首轮结果未产出前宣称已获得基准值或性能提升。
