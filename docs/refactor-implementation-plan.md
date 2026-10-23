@@ -393,3 +393,11 @@ docs/                        中文架构、协议和运维文档
 - 新增 /v1/messages/count_tokens 正向透传测试，检查路径与 query 不丢失、模型由 Provider 配置覆盖、Anthropic-Version 转发、Provider API Key 隔离，以及响应 JSON 原样返回。
 - 这些是本机 Mock HTTP 协议测试；没有真实 Anthropic/Claude Code 端到端凭据或服务可用，因此不据此声称外部供应商完成认证。
 - 提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2` 对应 Actions #106（运行 `39900997516`）已通过全量流程：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、三项性能基准、性能 Artifact 上传、`go vet ./...`、Gateway 构建、管理台源码构建与部署 bundle 校验全部成功。
+
+
+### Agent /v1/models HTTP 鉴权、ACL 与 RPM 集成（2026-10-23，待 CI）
+
+- 新增专用 HTTP Handler 集成测试，使用 test-only `database/sql/driver` 模拟 API Key 仓库与异步审计数据库，不新增第三方测试依赖。
+- 通过实际 `Server.Handler()`、Agent 前缀路由、`v1Models`、`auth.Repo.GetByRaw`、`Limiter.Allow` 与审计队列，覆盖无 Key/无效 Key 返回 401、不受限 Key 只能看到 Agent 的固定模型、限制到其他模型的 Key 返回空列表。
+- 另有 Redis 可选集成用例：读取 CI 已配置的 `REDIS_TEST_ADDR`，同一 Key 的首个请求通过，超过 RPM 后的后续请求必须返回 429；本地未配置 Redis 时该单项跳过，其他测试仍可运行。
+- 当前 test SQL driver 只模拟 SQL 行与成功写入，不验证 MariaDB 方言或 schema；数据库迁移已有独立测试覆盖。需以本提交完整 CI 的单测、race、性能基准、vet、构建和前端校验作为最终验收。
