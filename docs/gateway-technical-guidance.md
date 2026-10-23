@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 成功运行：提交 `a6ca7efb59057adc79bfb931f1478354244632e2`，Actions 运行 `39888566042`（Go CI，success）。该运行通过 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及源码构建产物与部署 bundle 的精确比较。
+> 最近一次完整 CI 成功运行：提交 `08feb2e2be83bb81f4212649ebdacf1f3dfc74b5`，Actions 运行 `39889162077`（Go CI，success）。该运行通过 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及源码构建产物与部署 bundle 的精确比较。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -451,6 +451,12 @@ HTTP/API 层
 远程 Provider 的非 2xx 响应不得因为 `stream=false` 就直接回传供应商原始错误正文。原始错误 JSON 可能包含内部调试上下文、凭据回显或供应商内部标识。非流式 JSON 与流式 SSE 应遵循同一错误策略：按 HTTP 状态分类，保留上游状态码和白名单响应头（例如 `Retry-After`），返回网关固定的安全错误正文，设置 `Cache-Control: no-store`，并将真实状态与错误分类写入审计记录。
 
 回归测试需覆盖 401、429、5xx，检查上游私密错误字符串不会出现在响应中，同时验证安全错误码、状态码、Retry-After 和响应字节统计保持一致。成功的 2xx JSON 响应仍原样转发。
+
+### 4.11 本地推理 BaseURL 凭据边界
+
+本地 `LLAMA_CPP_BASE_URL` 和 `OLLAMA_BASE_URL` 不能通过 URL userinfo（如 `user:password@`）、查询参数或 fragment 携带凭据。BaseURL 会进入启动日志、管理状态或连接诊断，因此这类组件可能把 URL 内的秘密暴露给日志或管理界面。配置加载阶段应拒绝非绝对 HTTP(S) 地址、空主机、userinfo、query、fragment，以及反斜杠/点段路径；错误只指出配置字段，不回显 URL 原文。
+
+URL 路径前缀仍然合法，例如 `http://llama-cpp:8080/openai/v1`。空的非活动本地后端允许不配置；一旦非空，就必须符合 URL 安全约束，避免后来切换后端时才暴露问题。相关测试应覆盖活动/非活动 URL、userinfo/query/fragment、错误 scheme、合法路径前缀和“无不安全 URL 字符串出现在错误中”。
 
 ## 5. 建议整改路线
 

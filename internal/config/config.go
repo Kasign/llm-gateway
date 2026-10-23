@@ -157,6 +157,34 @@ func (c *Config) BaseURLForBackend(backend string) string {
 	}
 }
 
+// validateLocalInferenceBaseURL 防止本地控制客户端通过 URL userinfo/query 承载并泄漏凭据。
+// 空值允许存在于非活动后端；活动后端是否已配置由 Load 后续统一检查。
+func validateLocalInferenceBaseURL(field, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || !u.IsAbs() || u.Hostname() == "" ||
+		u.User != nil || u.RawQuery != "" || u.ForceQuery ||
+		u.Fragment != "" || u.RawFragment != "" || strings.Contains(raw, "#") || u.Opaque != "" {
+		return fmt.Errorf("config field %s must be an absolute HTTP(S) URL without userinfo, query, or fragment", field)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("config field %s must use HTTP or HTTPS", field)
+	}
+	if strings.Contains(u.Host, "\\") || strings.Contains(u.Path, "\\") {
+		return fmt.Errorf("config field %s contains an invalid URL path", field)
+	}
+	for _, segment := range strings.Split(u.Path, "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("config field %s must not contain URL dot segments", field)
+		}
+	}
+	return nil
+}
+
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // 仅展开 ${VAR}，避免 os.ExpandEnv 破坏 pbkdf2 哈希中的 $ 片段。
@@ -361,6 +389,17 @@ func Load(path string) (*Config, error) {
 	}
 	if c.Storage.ModelsDir == "" {
 		return nil, errors.New("storage.models_dir is required")
+	}
+	for _, item := range []struct {
+		field string
+		value string
+	}{
+		{"llama.llamacpp_base_url", c.Llama.LlamaCppBaseURL},
+		{"llama.ollama_base_url", c.Llama.OllamaBaseURL},
+	} {
+		if err := validateLocalInferenceBaseURL(item.field, item.value); err != nil {
+			return nil, err
+		}
 	}
 	llamaCppURL := c.BaseURLForBackend("llamacpp")
 	ollamaURL := c.BaseURLForBackend("ollama")

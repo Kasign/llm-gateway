@@ -122,6 +122,95 @@ providers:
 	}
 }
 
+func TestConfigLoadValidatesLocalInferenceBaseURLs(t *testing.T) {
+	cases := []struct {
+		name           string
+		llamaURL       string
+		ollamaURL      string
+		wantField      string
+		wantSecret     string
+		wantSuccessful bool
+	}{
+		{
+			name: "llama userinfo", llamaURL: "http://user:top-secret@127.0.0.1:8080",
+			ollamaURL: "", wantField: "llama.llamacpp_base_url", wantSecret: "top-secret",
+		},
+		{
+			name: "llama query", llamaURL: "http://127.0.0.1:8080/v1?token=private-token",
+			ollamaURL: "", wantField: "llama.llamacpp_base_url", wantSecret: "private-token",
+		},
+		{
+			name: "llama fragment", llamaURL: "http://127.0.0.1:8080/v1#internal",
+			ollamaURL: "", wantField: "llama.llamacpp_base_url", wantSecret: "internal",
+		},
+		{
+			name: "unsupported scheme", llamaURL: "file:///tmp/llama",
+			ollamaURL: "", wantField: "llama.llamacpp_base_url",
+		},
+		{
+			name: "inactive ollama with userinfo", llamaURL: "http://llama-cpp:8080/v1",
+			ollamaURL: "http://user:ollama-secret@ollama:11434",
+			wantField: "llama.ollama_base_url", wantSecret: "ollama-secret",
+		},
+		{
+			name: "valid path prefix and empty inactive backend", llamaURL: "http://llama-cpp:8080/openai/v1",
+			ollamaURL: "", wantSuccessful: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configText := fmt.Sprintf(`server:
+  host: "127.0.0.1"
+auth:
+  admin_api_key: "admin-key-for-config-test"
+  admin_username: "admin"
+  admin_password: "strong-test-password"
+database:
+  host: "localhost"
+  port: 3306
+  name: "llm_gateway"
+  user: "llm_gateway"
+  password: "db-secret"
+  auto_init: false
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+llama:
+  backend: "llamacpp"
+  llamacpp_base_url: %q
+  ollama_base_url: %q
+storage:
+  models_dir: "/tmp/llm-gateway-models"
+providers:
+  openai_compatible: []
+`, tc.llamaURL, tc.ollamaURL)
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(configText), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(path)
+			if tc.wantSuccessful {
+				if err != nil {
+					t.Fatalf("Load rejected valid URL configuration: %v", err)
+				}
+				if loaded.BaseURLForBackend("llamacpp") != "http://llama-cpp:8080/openai/v1" {
+					t.Fatalf("BaseURLForBackend() = %q", loaded.BaseURLForBackend("llamacpp"))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Load accepted a local BaseURL with unsafe URL components")
+			}
+			if !strings.Contains(err.Error(), tc.wantField) {
+				t.Fatalf("error %q should identify field %q", err, tc.wantField)
+			}
+			if tc.wantSecret != "" && strings.Contains(err.Error(), tc.wantSecret) {
+				t.Fatalf("configuration error leaked URL credential/query detail %q: %v", tc.wantSecret, err)
+			}
+		})
+	}
+}
+
 func TestExpandConfigEnvLoadsRemoteProviderKeyBeforeValidation(t *testing.T) {
 	const envName = "LLM_GATEWAY_TEST_PROVIDER_API_KEY"
 	t.Setenv(envName, "sk-test-remote-key")
