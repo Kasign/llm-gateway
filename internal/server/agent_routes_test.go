@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,5 +103,57 @@ func TestRejectedInferenceLogPreservesAgentURLAndRedactsQuerySecrets(t *testing.
 	}
 	if strings.Contains(logItem.RequestURL, "token=private") {
 		t.Fatalf("rejected Agent request audit URL leaked query credential: %q", logItem.RequestURL)
+	}
+}
+
+
+func TestConcurrentAgentRoutesKeepProviderAndModelIsolation(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
+		{ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat"},
+		{ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4.1"},
+	}
+	s := &Server{
+		cfg: cfg,
+		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://llama:8080", ModelName: "local.gguf"},
+	}
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	errors := make(chan string, iterations*2)
+	for i := 0; i < iterations; i++ {
+		for _, tc := range []struct {
+			provider string
+			model    string
+		}{{"deepseek", "deepseek-chat"}, {"openai", "gpt-4.1"}} {
+			wg.Add(1)
+			go func(i int, providerID, model string) {
+				defer wg.Done()
+				choice, err := s.resolveInference(context.Background(), core.State{
+					Request: core.Request{
+						ID: fmt.Sprintf("agent-concurrent-%s-%d", providerID, i),
+						Method: http.MethodPost, Path: "/v1/chat/completions",
+						RouteProviderID: providerID, RouteDefaultModel: model,
+					},
+					// Client-provided model is intentionally different; it must never switch a pinned Agent Provider.
+					ClientModel: "caller-model-must-not-select-provider",
+				})
+				if err != nil {
+					errors <- fmt.Sprintf("provider %s: resolve failed: %v", providerID, err)
+					return
+				}
+				if choice.ProviderID != providerID || choice.UpstreamID != model || choice.ModelKey != model {
+					errors <- fmt.Sprintf("provider %s model %s resolved to %+v", providerID, model, choice)
+				}
+			}(i, tc.provider, tc.model)
+		}
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+	if got := s.effectiveUpstream().Backend; got != "llamacpp" {
+		t.Fatalf("concurrent Agent resolution mutated the global active Provider: %q", got)
 	}
 }

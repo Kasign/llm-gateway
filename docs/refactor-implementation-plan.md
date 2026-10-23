@@ -147,7 +147,7 @@ docs/                        中文架构、协议和运维文档
 | 阶段 2：请求边界与路由 | 进行中 | 95% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护，以及 Agent 入口拒绝请求审计 URL 前缀恢复（Actions #79 通过）。继续补 API/并发契约覆盖与性能基线。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | Anthropic Messages 协议头、错误类型、原始错误兼容策略、32 MB 请求体限制、响应头透传及 warm-start 状态边界均已由提交 `b3ec270` 的 Actions #85 完整 CI 验证。真实供应商端到端、DNS/连接故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 40% | CI 对 Go 测试、`go vet`、构建、管理台源码、前端语法/关键字段持续执行；Actions #81 所有步骤通过。压力测试、线上指标与 Provider 故障注入基线仍缺。 |
+| 阶段 5：运行治理与 CI | 进行中 | 45% | CI 已增加 `go test -race ./internal/provider ./internal/server ./internal/core`，提交 `c18c20f` 的 Actions #88 完整通过；当前补充双 Agent 并发模型/Provider 隔离测试，待新 CI 验证。压力测试、延迟/内存基线、真实 Provider 故障注入仍缺。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. 为 Provider 契约、Agent 路由和请求生命周期补充并发测试；准备可复现的延迟、内存和并发基线。
+2. 已补取消/Finish 线性化并发测试及 race detector；本轮增加 400 个并发 Agent 模型解析调用，核对 DeepSeek/OpenAI Provider 与默认模型不串线，待本提交 CI 验证。之后准备可复现的延迟、内存和并发基线。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 受控重试/故障转移必须确认响应尚未提交；SSE 输出开始后禁止切换上游。
@@ -291,4 +291,12 @@ docs/                        中文架构、协议和运维文档
 - 该组以提交前完整 CI #86（文档提交 `7a506f50b0cc90b3ace1afbb8e79f1f506a19394`，运行 `39896367757`，success）为基线。本轮并发与 race 检查需要由新提交 CI 通过后再验收。
 
 
-- CI #87（运行 `39896716139`）中新增的 race detector 揭示既有 `TestRepeatKeepaliveStopsOnWriteError` 测试回调与测试 goroutine 之间对 `notes/failed` 普通变量的无同步读写；竞态位于测试本身，不是生产 keepalive 逻辑。现改为缓冲 channel 同步回调结果并以超时防止挂起，保留 `go test -race` 检查；需在后续 CI 复验。
+- CI #87（运行 `39896716139`）的 race detector 揭示既有 `TestRepeatKeepaliveStopsOnWriteError` 测试回调与测试 goroutine 间对普通变量的无同步读写。提交 `c18c20f2f47885522cec40cf045d72966d3a1f78` 将回调结果改为缓冲 channel；其完整 CI #88（运行 `39896961918`）中 `go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...`、Gateway 构建与前端 bundle 校验全部通过。
+
+
+### 双 Agent 并发路由隔离测试（2026-10-23，待 CI）
+
+- 新增 `TestConcurrentAgentRoutesKeepProviderAndModelIsolation`，对两组固定路由并发执行共 400 次模型解析。
+- 每个请求的客户端 `model` 故意与路由模型不同；验收条件是每次结果都必须命中该 Agent 固定的 Provider ID、默认模型，且不能修改全局活动 Provider。
+- 此测试只验证路由选择和并发隔离，不触发真实上游网络请求，也不代替供应商端到端测试。
+- 基线：`c18c20f2f47885522cec40cf045d72966d3a1f78` 的 Actions #88（运行 `39896961918`）通过含 race detector 的完整流水线。本项由新提交触发的 CI 验证。
