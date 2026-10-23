@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`，GitHub Actions #104（运行 `39900465325`，success）。Agent JSON/SSE 双路数据面、模型发现 ACL、race detector、性能基准与 Artifact、`go vet`、Gateway 构建及前端 bundle 校验全部通过；文档提交 #102 也已成功。
+> 最近一次已验收代码功能组：提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2`，GitHub Actions #106（运行 `39900997516`，success）。在前述 Agent 路由与 ACL 验收基础上，新增 Anthropic Messages 成功 SSE 生命周期与 `count_tokens` 正向透传测试；全量 Go 单测、race、性能基准、Artifact、vet、构建和前端 bundle 检查通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -387,9 +387,9 @@ docs/                        中文架构、协议和运维文档
 - CI #103（运行 `39900242374`）确因 `internal/server/server.go:418:107: undefined: data` 编译失败；修复提交 `65d8709` 将 helper 返回的模型数用于日志，CI #104 已通过全部步骤。
 
 
-### Anthropic Messages 成功流式与 count_tokens 契约（2026-10-23，待 CI）
+### Anthropic Messages 成功流式与 count_tokens 契约（2026-10-23，CI #106 已通过）
 
 - 新增成功 SSE 透传测试，覆盖 message_start、content_block_start/delta/stop、message_delta 与 message_stop，验证响应 Content-Type、上游 Request-Id、Anthropic-Version、query、服务端模型覆盖和 API Key 边界。
 - 新增 /v1/messages/count_tokens 正向透传测试，检查路径与 query 不丢失、模型由 Provider 配置覆盖、Anthropic-Version 转发、Provider API Key 隔离，以及响应 JSON 原样返回。
 - 这些是本机 Mock HTTP 协议测试；没有真实 Anthropic/Claude Code 端到端凭据或服务可用，因此不据此声称外部供应商完成认证。
-- 新提交需通过全量单测、race、性能基准、vet、Gateway 构建与前端 bundle 校验后验收。
+- 提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2` 对应 Actions #106（运行 `39900997516`）已通过全量流程：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、三项性能基准、性能 Artifact 上传、`go vet ./...`、Gateway 构建、管理台源码构建与部署 bundle 校验全部成功。

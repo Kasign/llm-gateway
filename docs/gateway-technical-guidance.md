@@ -596,3 +596,12 @@ Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过 Agent 
 ### Anthropic Messages 正向路径测试（待 CI）
 
 新增 Mock Provider 测试覆盖 Messages SSE 成功响应事件序列与可选 count_tokens 端点：用于验证远程 Provider 的实际 HTTP path、query、anthropic-version、model 覆盖和服务端 API Key 隔离。由于上游为 loopback Mock，这些测试仅验证协议适配器，不表示真实 Anthropic/Claude Code 已端到端验收。
+
+
+### Anthropic Messages 成功流式与 count_tokens（CI #106）
+
+提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2` 的 Actions #106 已通过完整 CI。新增测试验证：
+- `/v1/messages` SSE 成功路径透明转发完整的 message_start、content_block、message_delta 和 message_stop 生命周期事件。
+- Anthropic-Version、查询参数、Provider 服务端 API Key、model 覆盖、响应 Request-Id 透传和调用方 Authorization 隔离。
+- `/v1/messages/count_tokens` 的请求路径、query、模型覆盖、Anthropic-Version、Provider Key 和 JSON 响应透传。
+- 这些测试以 loopback Mock 为上游，不代表真实 Anthropic/Claude Code 供应商 E2E 已完成。

@@ -118,9 +118,9 @@ Actions #101（提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`）通过双 Age
 Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过模型列表与 ACL 单元测试：不受限 Key 可看到固定目标模型；AllowedModels 可按公开 model ID 或上游 model ID 放行；不匹配时返回空 data 列表。响应 owned_by 取 Agent Provider ID，display_name 为对应上游模型名称，不会列出其他 Provider 的模型。测试覆盖 helper 契约，不声称完整外层 auth/Redis/audit HTTP 集成已经由该用例覆盖。
 
 
-### Anthropic Messages 成功路径回归（待 CI）
+### Anthropic Messages 成功路径回归（CI #106 已通过）
 
 Provider 契约测试新增：
 - Anthropic Messages SSE 成功响应完整透传及 message 生命周期事件覆盖，校验 Provider 凭据、Anthropic-Version、Request-Id、model 覆盖、query 透传。
 - Anthropic /v1/messages/count_tokens 成功请求/响应透传，覆盖实际转发路径、服务端模型和凭据边界。
-以上当前为本机 Mock 测试，真实 Anthropic 供应商 E2E 仍待执行。
+Actions #106（提交 `4e5d69766e9a16a668e2398b918def97cb64d3f2`）全量 CI 已通过；测试仍使用本机 Mock HTTP 服务，真实 Anthropic 供应商 E2E 仍待执行。
