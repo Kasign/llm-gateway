@@ -278,3 +278,6 @@ docs/                        中文架构、协议和运维文档
 - 提交 `dac3f9fb2d8d6a55bdefc745ec76bba42c9c80c5` 对应 Actions 运行 `39895993452` 在 `go test ./...` 阶段失败，日志确认唯一编译诊断为 `internal/provider/openai_compatible.go:348:15: undefined: safeBody`。
 - 原因：Anthropic Messages 错误正文分支重构后实际写入变量已改成 `errorBody`，但 short-write 长度校验仍引用旧名称。
 - 本修复将长度校验统一改为 `len(errorBody)`。需要重新运行完整 CI；修复提交对应 Actions 完成前不标记阶段 4 通过。
+
+
+- CI #84（运行 `39896121255`）在修正 `safeBody` 编译错误后继续发现新增 Server 测试将嵌入的 `core.Request` 字段写在 `core.State` 顶层。按 `internal/core/types.go` 的真实类型定义改为 `Request: core.Request{...}`；该问题仅在测试编译阶段暴露，下一次 CI 需重新验证全量测试及后续构建步骤。

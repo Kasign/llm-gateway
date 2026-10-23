@@ -169,7 +169,10 @@ func TestWarmStartDoesNotCommitAnthropicMessagesHTTPStatus(t *testing.T) {
 	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
 		sink := newMemSink()
 		written := s.warmStart(context.Background(), core.State{
-			ID: "req-anthropic-warmstart", Path: path, Stream: true, Sink: sink,
+			Request: core.Request{
+				ID: "req-anthropic-warmstart", Path: path, Sink: sink,
+			},
+			Stream: true,
 		})
 		if written != 0 || len(sink.Bytes()) != 0 {
 			t.Fatalf("warmStart committed Anthropic endpoint %q: bytes=%d payload=%q", path, written, sink.Bytes())
