@@ -11,6 +11,7 @@
 - llama.cpp：健康检查、刷新、Load、Unload、删除；按 `models_max` 串行控制模型加载。
 - Web：Dashboard、模型下载/管理、API Key、请求查询/详情、Benchmark、系统状态。
 - 管理台全局状态（单容器 AdminState、bootstrap/lite）：见 **[docs/admin-state.md](docs/admin-state.md)**。
+- API、Provider/Agent 配置、数据库迁移与关键响应契约：见 **[docs/api-config-db-contracts.md](docs/api-config-db-contracts.md)**。
 - Redis：RPM 限流、下载进度、瞬态状态。
 - MariaDB：模型、API Key、请求日志、可选 payload 持久化。
 

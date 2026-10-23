@@ -157,7 +157,7 @@ docs/                        中文架构、协议和运维文档
 
 ### 下一步
 
-1. 补齐 API、配置、数据库迁移与关键响应行为清单，明确兼容性边界。
+1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
 2. 为 Provider 契约、Agent 路由和请求生命周期补充并发测试；准备可复现的延迟、内存和并发基线。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
