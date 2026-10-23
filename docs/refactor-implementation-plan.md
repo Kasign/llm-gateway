@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 60 秒持续 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #3 对应 Actions #145（运行 `39929748367`，success）：192 次突发加 12,000 次稳态请求，共 12,192 次全部成功并正确落库；稳态达到 200 req/s、P95 5.76 ms、P99 8.23 ms，审计排空耗时 4.359 秒。此前 5 秒短样本 P99 波动较大，长样本为后续性能评估提供了更可靠基线。测试使用本机 Mock 上游，不代表真实模型推理或生产容量；真实供应商调用仍未执行。
+> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #3 的 Actions #145（运行 `39929748367`）与 #146（运行 `39930263577`）均全量通过；每轮 192 次突发加 12,000 次稳态请求，共 12,192 次全部成功且正确落库，稳态均达到 200 req/s。两轮 P95 分别为 5.76 ms 和 7.21 ms，P99 分别为 8.23 ms 和 42.62 ms，审计排空时间分别为 4.359 秒和约 2 毫秒。虽然无丢记录，尾延迟与排空时间仍有波动；测试使用本机 Mock 上游，不代表真实模型推理或生产容量，真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 98% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #145 又验收 60 秒、12,000 次稳态请求，突发 + 稳态总计 12,192 条记录全部落库。仍需更长持续负载、故障恢复与生产观测。 |
+| 阶段 1：日志可靠性 | 进行中 | 98% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #145/#146 两轮 60 秒负载的 12,192 条请求记录均全部落库。仍需更长持续负载、故障恢复与生产观测。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 74% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #145 完成 60 秒 Gateway 稳态负载验收，产出吞吐、P50/P95/P99、Go 内存、进程 CPU/RSS 和审计排空数据。仍需更长时段、故障恢复注入和真实 Provider 验证。 |
+| 阶段 5：运行治理与 CI | 进行中 | 74% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #145/#146 两轮 60 秒 Gateway 稳态负载均无请求失败或审计丢失，报告含 P50/P95/P99、Go 内存、进程 CPU/RSS 和排空数据。仍需更长时段、故障恢复注入和真实 Provider 验证。 |
 
 ### 已核实的历史 CI 问题
 
@@ -514,4 +514,5 @@ docs/                        中文架构、协议和运维文档
 - 资源数据：Go HeapAlloc 结束值 6,151,520 bytes，TotalAlloc 增量 688,022,944 bytes；/usr/bin/time -v 的 User CPU 17.89s、System CPU 16.36s、命令墙钟 1:07.41、峰值 RSS 184,772 KiB（约 180.4 MiB），进程退出状态 0。以上 RSS 是 go test 进程，不等于独立线上 Gateway 的 RSS。
 - GitHub Actions #145（运行 39929748367，提交 410f415bc2754fa643b8e4906b03aaefb9f06f83）全量通过：Go 单测、MariaDB 审计积压测试、60 秒 Gateway 负载、race detector、五项性能基线与 Artifact、go vet、Gateway build、前端源码和 bundle 一致性校验全部成功。
 - [Actions #145](https://github.com/Kasign/llm-gateway/actions/runs/39929748367)。60 秒负载报告 Artifact ID 12491177225（gateway-request-load-ca52af8f034fc89fcabde7ceb3ddba8b8d748ea7），性能基线 Artifact ID 12490664029；保留 30 天，预计于 2026-11-22 过期。
-- 与两轮 5 秒样本相比，60 秒样本中稳态 P99 为 8.23ms，未复现先前一次 187.45ms 的尖峰；但目前总共仍只有少量独立 Runner 样本，因此记录为基线而不是保证值。该合成压力测试仍不等同真实供应商 E2E、流式 decode 负载或生产线上压测。
+- Actions #146 的第二轮 60 秒复测也全量通过：突发阶段 192 次、16 并发、664ms、289.3 req/s，P50 21.75ms、P95 388.91ms、P99 406.93ms、失败 0；稳态 12,000 次、59.999s、200.0 req/s，P50 3.96ms、P95 7.21ms、P99 42.62ms、失败 0。MariaDB 再次核对 12,192/12,192 条成功记录且模型字段正确，排空耗时约 2ms。第二轮资源：TotalAlloc 增量 699,113,120 bytes，结束 HeapAlloc 2,593,080 bytes，User CPU 12.29s、System CPU 4.65s、命令墙钟 1:03.48、峰值 RSS 184,768 KiB；负载 Artifact ID 12491686320，性能基线 Artifact ID 12491462016。[Actions #146](https://github.com/Kasign/llm-gateway/actions/runs/39930263577)。
+- 两轮 60 秒稳态均达到 200 req/s、失败为 0，MariaDB 均完整持久化 12,192 条记录；但 P99 从 8.23ms 到 42.62ms，排空时长也从 4.359s 到约 2ms。说明在当前 Runner/Mock 配置下存在尾延迟与审计积压的样本间波动，暂不据此宣称性能改善或设置硬性阈值。该合成压力测试仍不等同真实供应商 E2E、流式 decode 负载或生产线上压测。
