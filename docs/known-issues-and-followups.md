@@ -25,7 +25,7 @@
 
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
-| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | 已实现，待堆叠 PR #7 完整 CI 验收 | 新增 `max_concurrent_requests`（默认值与上限均为 64）与 fail-fast 503；过载时不发起上游请求，且依赖 PR #5 的 `UpstreamStatus` 契约保证上游状态为空。流式已提交时追加安全 SSE error。 | 堆叠 PR #7 的单测、配置范围、race 和完整 CI 通过；PR #5 状态语义依赖保持不变后关闭。 |
+| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Actions #158 已通过；等待 PR #5 合并后重定向 base 复验 | 新增 `max_concurrent_requests`（默认值与上限均为 64）与 fail-fast 503；过载时不发起上游请求，依赖 PR #5 的 `UpstreamStatus` 契约保证上游状态为空。流式已提交时追加安全 SSE error。 | PR #7 的单测、配置范围、race 和完整 CI 已通过；PR #5 合并、PR #7 base 切回 `dev` 后再次完整 CI 通过即关闭。 |
 | GW-GOV-002 | 当前 RPM 主要按调用方 Key 进行固定窗口计数，尚未提供远程 Provider 独立的并发/速率组合或 Token 预算。 | 待设计 | 在 GW-GOV-001 完成后，依据真实需求决定是否增加 Provider RPM、令牌预算和排队策略；不要与调用方 Key RPM 混为一谈。 | 有明确优先级、失败策略、Redis 不可用行为与多 Agent 隔离测试。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
@@ -45,3 +45,10 @@
 3. 按完整功能组提交中文 Conventional Commit；CI 失败必须查看日志并修复，不降低断言。
 4. 真实 E2E 仅在供应商凭据与预算明确可用时执行；Mock CI 不能替代真实端点验收。
 5. “已完成”必须说明验证层级：单测、Mock HTTP、Gateway + Redis/MariaDB 集成、真实供应商 E2E 或生产部署验收。
+
+
+## 2026-10-23 执行记录：并发上限功能与基线依赖
+
+- PR #6（基于旧 `dev` 的第一版）由 Actions #157 暴露编译依赖：旧 Core 没有 `UpstreamStatus` 字段。PR #6 已关闭、未合并；没有删除断言。
+- 当前 PR #7 基于 PR #5 的已通过 Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232` 堆叠，最终功能 Head `dd54cf576ba4a80e7c5d1f2dd0bb3be95a776b4b` 在 [Actions #158](https://github.com/Kasign/llm-gateway/actions/runs/39943828510) 全量通过。
+- 下一项按优先级为 GW-OBS-001：增加审计 Writer 的只读聚合指标（队列深度、成功/失败、丢弃与排队时延），避免为展示指标增加推理热路径上的同步数据库查询。

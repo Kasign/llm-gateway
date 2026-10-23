@@ -147,7 +147,7 @@ docs/                        中文架构、协议和运维文档
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 76% | `dev` 的现有 CI 覆盖 Provider/Server/Core/Audit/Live race、请求取消、Agent JSON/SSE、DNS/连接/响应头超时映射、内存压力、MariaDB 积压、60 秒负载和 429/503 注入。PR #5 的上游状态语义与 TCP 拒绝/恢复已由 Actions #156 全量通过，但尚未合并；当前 PR #7 堆叠在 PR #5 上增加远程 Provider 并发限制。审计指标、Payload 保留策略及真实供应商/公网故障验收仍待，见统一问题台账。 |
+| 阶段 5：运行治理与 CI | 进行中 | 78% | PR #7 的并发限制功能基于 PR #5 状态语义，在 Actions #158 对单测、MariaDB、60 秒负载、429/503、TCP 拒绝/恢复、race、性能、go vet、Gateway build 和前端 bundle 全量验收通过；PR #5/#7 仍未合并。下一项推进审计队列指标，Payload 保留策略及真实供应商/公网验收继续登记在统一问题台账。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **运行治理当前功能组**：远程 OpenAI-compatible Provider 配置化并发上限与 fail-fast 过载处理正在 PR #7 中实施，基于 PR #5 已通过但尚未合并的 `test/gateway-transport-failure-recovery` 分支，确保 `core.Result.UpstreamStatus` 语义存在且不靠删除状态断言规避依赖。PR #7 的目标是完整复跑单测、race、数据库/负载/故障注入及所有构建检查；PR #5 合并后再将 PR #7 base 切回 `dev`。统一问题及验收条件见 [docs/known-issues-and-followups.md](known-issues-and-followups.md)。
+2. **运行治理当前功能组**：远程 OpenAI-compatible Provider 并发上限的代码与测试已在堆叠 PR #7 完成，最终 Head Actions #158 全量通过。PR #7 暂时包含 PR #5 的上游状态语义修复；PR #5 合并后，将 PR #7 base 切回最新 `dev` 并重新验收。下一项开发为审计队列指标可观测性（GW-OBS-001）；统一问题与验收条件见 [docs/known-issues-and-followups.md](known-issues-and-followups.md)。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
@@ -561,3 +561,21 @@ docs/                        中文架构、协议和运维文档
 - TCP 拒绝/恢复测试在同一进程内关闭并重绑 Mock listener；未覆盖公网 DNS 传播、跨网络路由恢复、连接池长时间陈旧、TLS 握手中断、已收到响应头后上游断流、进程重启后的恢复。
 - 现有 DNS 错误测试验证安全错误映射/脱敏；新增长的 `UpstreamStatus=0` 断言直接覆盖 JSON/SSE TCP 拒绝路径，没有单独对 DNS 测试重复断言 upstream 字段为空。DNS/连接错误的运行路径都是未取得 HTTP response 时返回 Provider 传输错误，但 DNS 状态持久化仍应作为后续可补充的专项测试。
 - 60 秒压力覆盖真实 Gateway Handler、Redis、MariaDB 审计与 Mock Provider，但不等价生产推理吞吐、长周期内存稳定性或生产容量认证；性能基准不设门槛，跨 Runner 的尾延迟不可直接横向比较。
+
+
+### 远程 Provider 并发上限验收（2026-10-23，Actions #158 已通过）
+
+- [Actions #158](https://github.com/Kasign/llm-gateway/actions/runs/39943828510) 对 PR #7 最终功能提交 `dd54cf576ba4a80e7c5d1f2dd0bb3be95a776b4b` 的结论为 `success`，26 个步骤成功、0 个失败。单测、MariaDB 审计积压、60 秒 Gateway 负载、429/503 故障注入、TCP 拒绝与恢复、race detector、性能基线、`go vet`、Gateway 构建及前端 bundle 检查全部通过。
+- 并发配置：`providers.openai_compatible[].max_concurrent_requests`，默认值 64，上限 64，0 采用默认值。达到上限时 fail-fast 返回 `503/provider_concurrency_limit`，不会向上游发送额外请求；由于没有发生上游 HTTP 交互，`UpstreamStatus=0`。如果流式响应已提交，则追加安全 SSE error；Responses API 错误事件序号从 0 开始。
+- 测试覆盖 JSON 请求达到上限、释放许可后恢复、配置范围拒绝，以及流式响应已提交时保持 Gateway 已提交状态并输出安全错误；全部包含在完整 CI 中。
+- 60 秒负载：突发 192 次请求、16 并发、446ms、430.2 req/s、P50/P95/P99 为 29.09/64.42/112.34ms、失败 0；稳态 12,000 次请求、200.0 req/s、持续 60.001s、P50/P95/P99 为 4.46/5.90/9.82ms、失败 0。突发与稳态共 12,192 次上游请求，MariaDB 持久化 12,192/12,192 条成功记录且模型字段全匹配，审计队列排空 7.338s。/usr/bin/time 报告 Go test 最大 RSS 184,968 KiB；这是测试进程数据，不代表独立生产 Gateway RSS。负载 Artifact ID `12497481860`。
+- 故障注入：120 次、16 并发、失败 0，Gateway 状态 200/429/503 = 60/30/30；MariaDB 上游 429/503 统计均为 30 条。正常请求 P50 为 11.74ms，受控 75ms 延迟场景 P50/P95 为 85.76/104.05ms，审计排空 393ms。Artifact ID `12496729363`。
+- TCP 拒绝与恢复：30 条连接拒绝均返回 Gateway 502 且上游状态为空；同一端口恢复后 30 条返回 Gateway 200 / upstream 200；60 条审计全部写入。Artifact ID `12497103104`。
+- 性能基线（不设阈值）：ForwardJSON 90,663 ns/op、15,798 B/op、146 allocs/op；路由解析 330.9 ns/op、0 B/op、0 allocs/op；请求分析 1,354 ns/op、592 B/op、17 allocs/op；流式追踪 3,006 ns/op、1,104 B/op、26 allocs/op；并发观察器 4,361 ns/op、1,760 B/op、39 allocs/op。Artifact ID `12497447132`。
+
+### 首轮并发 PR 基线依赖错误与修复记录
+
+- PR #6 的 Actions #157 在编译阶段失败，日志指出新代码引用了 `core.Result.UpstreamStatus`，但该分支从尚未合并 PR #5 的旧 `dev` 分支切出，类型字段不存在。
+- 没有删除测试断言或移除上游状态语义；关闭了未合并 PR #6，并从 PR #5 已通过的 Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232` 建立堆叠分支 `feat/provider-concurrency-limits-stacked`。PR #7 的 Actions #158 已基于含有该类型契约的完整代码全量通过。
+- PR #5 与 PR #7 当前仍均为 Open/未合并。PR #7 在 PR #5 合并前不应独立合并；PR #5 合并后需将 PR #7 base 调整为最新 `dev` 并复核差异及再次执行 CI。
+- 真实供应商 E2E 未执行。此轮所有 HTTP 故障注入和负载均使用本机 loopback Mock 上游及 CI Redis/MariaDB，不代表公网故障恢复或生产容量验收。
