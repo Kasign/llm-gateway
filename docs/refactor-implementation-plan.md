@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：真实 MariaDB 审计写入与队列积压压力测试（代码提交 `e3d30b5`），PR #1 对应 GitHub Actions #134（运行 `39925049261`，success）。独立 MariaDB 测试、全量 Go 单测、race、五项性能基线与 Artifact、`go vet`、Gateway 构建和前端 bundle 校验全部通过。该压测不是生产请求流量或真实供应商 E2E；真实供应商调用仍未执行。
+> 最近一次已通过完整 CI 的功能组：Gateway 并发 HTTP 请求与真实 MariaDB 审计负载采样。PR #2 的修复后提交由 GitHub Actions #138（运行 `39927495481`，success）全量验收；192/192 次请求成功，上游 Mock 调用与数据库审计记录均一致。该结果是 GitHub Runner 上的固定并发样本，不代表真实模型推理或生产容量；真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #128 验收了内存队列满载和实时会话并发快照；Actions #134 通过真实 MariaDB 写入与积压排空测试。仍需持续真实请求流量、P95/输出速率测量、同 Runner 重复采样和长期趋势观察。 |
+| 阶段 1：日志可靠性 | 进行中 | 96% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收真实 MariaDB 写入与积压排空，#138 新增 Gateway HTTP 端到端并发负载采样并验证 192 条请求全部落库。仍需长时间持续负载、故障恢复、真实请求流量和同 Runner 性能趋势。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector 已覆盖 provider/server/core/audit/live；请求取消、双 Agent 并发解析、双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入和内存压力测试均通过。Actions #134 进一步验证了真实 MariaDB 审计队列写入与积压排空，并上传五项性能基线 Artifact。仍需真实请求负载、同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
+| 阶段 5：运行治理与 CI | 进行中 | 70% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #138 新增独立 Gateway HTTP 负载步骤，输出吞吐、P50/P95/P99、Go 堆内存、审计排空时间及进程 CPU/RSS，并上传 30 天负载 Artifact。仍需持续时长更长的稳态负载、故障注入和真实 Provider 验证。 |
 
 ### 已核实的历史 CI 问题
 
@@ -487,3 +487,13 @@ docs/                        中文架构、协议和运维文档
 - 释放 Worker 后，测试直接读取 MariaDB 校验 500 条请求记录全部完成、已接收的 292 条分析字段更新均落库，以及关键更新仍按 FIFO 顺序执行到最后一个已接收值。
 - `.github/workflows/go-ci.yml` 配置 `mariadb:11.4` 服务和专用 `llm_gateway_test` DSN，并增加独立的 `MariaDB 审计积压集成测试` 步骤。PR #1 的 Actions #134（运行 `39925049261`）全量成功：Go 单测、该 MariaDB 集成测试、race detector、五项性能基线与 Artifact 上传、`go vet`、Gateway build 和前端 bundle 检查全部通过。Artifact ID `12489171605`，链接：[Actions #134](https://github.com/Kasign/llm-gateway/actions/runs/39925049261)，有效期至 2026-11-22。
 - 本测试验收的是单 Worker 真实数据库写入、队列积压策略和关停排空；并不等同生产请求流量下的吞吐/P95、线上故障恢复或真实供应商 E2E。
+
+
+### Gateway 并发 HTTP 请求与真实审计负载（2026-10-23，Actions #138 已通过）
+
+- 新增 internal/server/request_load_mariadb_test.go：使用真实 Server.Handler、MariaDB 保存 API Key、Redis 限流器、OpenAI-compatible Provider HTTP Adapter 及本机 httptest Mock Provider；固定 16 个并发 worker、每个 12 次请求，共 192 个非流式 Chat Completions 请求。上游 Mock 固定延迟 2ms，用于比较请求治理与日志链路，不模拟真实模型 token 生成。
+- 测试测量客户端 HTTP 往返耗时并输出吞吐、P50/P95/P99、失败数、Go HeapAlloc/TotalAlloc 增量和审计排空时间；随后 Flush 审计队列并直接查询 MariaDB，要求 192/192 条记录状态为 success、实际模型 ID 正确，且实际到达上游的请求数量也必须恰为 192。
+- Actions #138（运行 39927495481）通过：普通 Go 单测、MariaDB 独立压力、Gateway 负载、竞态检测、五项性能基线与 Artifact、go vet、Gateway 构建和前端 bundle 检查全部成功。独立负载报告观测值：总请求 192、并发 16、请求负载阶段 337ms、吞吐 569.8 req/s、P50 21.81ms、P95 51.15ms、P99 54.57ms、失败 0；192 条请求记录全部持久化且模型字段匹配，审计队列排空耗时 1.779s。Go 运行时测得本次测试末尾 HeapAlloc 3,766,992 bytes、TotalAlloc 增量 10,592,424 bytes。
+- /usr/bin/time -v 记录：测试命令墙钟 4.21s（包含测试初始化、请求、审计 Flush 和清理之前的进程执行时间），User CPU 3.27s、System CPU 0.42s、峰值 RSS 184,820 KiB。该 RSS 是 go test 进程峰值，不能直接等同网关线上独立进程的 RSS。
+- 负载 Artifact ID 12490101408（名称 gateway-request-load-e747c7e894c6bb6f4c52519ae8c6f9e49e50fa83），性能基线 Artifact ID 12490012509；均保留 30 天。见 [Actions #138](https://github.com/Kasign/llm-gateway/actions/runs/39927495481)。
+- 首次 CI #137（运行 39927306192）在编译新增测试时发现将无返回值的 httptest.Server.Close 当成有返回值；已移除多余赋值，并在修复后的 #138 全量验收通过。此测试是短时、固定并发的集成样本；仍不代表真实供应商、流式 decode 速率或长时间稳态容量。
