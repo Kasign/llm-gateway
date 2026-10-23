@@ -68,6 +68,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Gateway 上游延迟与 429/503 故障注入
+        run: |
+          set -o pipefail
+          GATEWAY_LOAD_TEST=1 GATEWAY_FAULT_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-fault-injection.txt
+
+      - name: 保存 Gateway 故障注入产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-fault-injection-${{ github.sha }}
+          path: /tmp/gateway-fault-injection.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
