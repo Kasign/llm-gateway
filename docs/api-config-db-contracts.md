@@ -86,9 +86,19 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
 | Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go`、配置验证测试和请求级 Provider 选择测试。 | Agent 级独立权限策略、动态重载。 |
-| Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游测试及确定性 DNS NXDOMAIN/timeout、本机连接拒绝均通过 Actions #92（运行 `39897633772`）；随后新增的性能基线用于测量本地转发开销。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入。 |
+| Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游测试及确定性 DNS NXDOMAIN/timeout、本机连接拒绝通过 Actions #92；三项可重复性能基准和 Artifact 上传由 Actions #94（运行 `39898164924`）通过。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
 | 前端/API 部署一致性 | CI 从前端源码重建 bundle 并与已提交 `web/static/dist/app.js` 做字节比较。 | 真实 1Panel/OpenResty 反向代理部署验收。 |
 
 这份文档是当前契约的索引，不是 OpenAPI 规范；API 若继续演进，应考虑维护机器可读的 OpenAPI 文件，并以自动测试约束路径、请求/响应模型与错误状态，减少 README、前后端与运行代码之间的漂移。
+
+
+## CI 性能基线首轮样本（2026-10-23）
+
+Actions #94（提交 `1339f5fb61537c08292aa44cec990c5d930401c9`）在 linux/amd64、Go 1.23.12、AMD EPYC 7763 Runner 上产出：
+- Provider loopback Mock 转发：90,352 ns/op、15,795 B/op、146 allocs/op。
+- Agent Provider/模型解析：342.0 ns/op、0 B/op、0 allocs/op。
+- 请求分析 DTO 生成：1,372 ns/op、592 B/op、17 allocs/op。
+
+这些是首轮可重复比较样本，不是生产请求延迟；Provider Mock 不包含公网网络和真实模型推理。CI Artifact 按 commit SHA 保存 30 天：[性能基线文件](https://github.com/Kasign/llm-gateway/actions/runs/39898164924/artifacts/12477692434)。

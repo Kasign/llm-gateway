@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f`，GitHub Actions #92（运行 `39897633772`，success）。该运行通过常规测试、`go test -race`、`go vet`、Gateway 构建和前端 bundle 校验；本轮新增的性能基线步骤待新提交 CI 首次运行。
+> 最近一次已验收代码功能组：提交 `1339f5fb61537c08292aa44cec990c5d930401c9`，GitHub Actions #94（运行 `39898164924`，success）。常规测试、race detector、三项 `-benchmem` 基准、Artifact 上传、`go vet`、Gateway 构建及前端 bundle 校验全部通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
-| 阶段 0：基线与计划 | 进行中 | 97% | 分支基线、API/配置/数据库契约清单已核实；正在加入可重复且记录分配量的 CI 性能样本。 |
+| 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
 | 阶段 2：请求边界与路由 | 进行中 | 97% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并补双 Agent 并发 Provider/模型隔离（Actions #90 通过）。性能基线与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 97% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout 与本机连接拒绝由提交 `b6415a3` 的 Actions #92 全量 CI 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 55% | CI 的 race detector、请求取消与双 Agent 并发隔离、DNS/连接故障注入均通过；新增三项性能基准及 30 天 Actions artifact 存档，等待本提交 CI 首次产出测量结果。压力/线上阈值与真实 Provider 故障注入仍缺。 |
+| 阶段 5：运行治理与 CI | 进行中 | 60% | CI 的 race detector、请求取消与双 Agent 并发隔离、DNS/连接故障注入均通过；三项性能基准已由 Actions #94 运行并作为 30 天 Artifact 存档。仍需相同环境的持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
 ### 已核实的历史 CI 问题
 
@@ -317,12 +317,16 @@ docs/                        中文架构、协议和运维文档
 - 提交 `b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f` 对应 Actions #92（运行 `39897633772`）已通过完整流水线：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...`、Gateway 构建和前端 bundle 校验均成功。真实 OpenAI/DeepSeek/Anthropic、DNS 出口策略及跨公网连接故障仍未验收。
 
 
-### 可重复性能基线（新增，待 CI）
+### 可重复性能基线（CI #94 已通过，首轮结果已记录）
 
 - 新增 `BenchmarkOpenAICompatibleProviderForwardJSON`：通过本机 loopback Mock 上游测远程 Provider 适配器/HTTP 转发开销，不将真实供应商网络或推理耗时混入 Gateway 基线。
 - 新增 `BenchmarkResolveInferenceAgentRoute`：测固定 Agent Provider 与默认模型解析路径；新增 `BenchmarkBuildRequestAnalysis`：测请求时间线到分析 DTO 的转换/分配成本，不包含数据库写入。
 - CI 以 `-benchmem -benchtime=1s` 运行三项基准，记录 `ns/op`、`B/op`、`allocs/op`，并上传为按 commit SHA 命名、保留 30 天的 Artifact。该步骤只记录，不设跨 Runner 硬阈值；比较需使用同一 Go 版本/相近 Runner。
-- 本次只建立可重复测量管线，不在首轮结果未产出前宣称已获得基准值或性能提升。
+- 首轮结果（Actions #94，Go 1.23.12，linux/amd64，AMD EPYC 7763；单 runner，`-benchtime=1s`）：
+  - `BenchmarkOpenAICompatibleProviderForwardJSON`：90,352 ns/op，15,795 B/op，146 allocs/op。
+  - `BenchmarkResolveInferenceAgentRoute`：342.0 ns/op，0 B/op，0 allocs/op。
+  - `BenchmarkBuildRequestAnalysis`：1,372 ns/op，592 B/op，17 allocs/op。
+- [下载性能基线 Artifact](https://github.com/Kasign/llm-gateway/actions/runs/39898164924/artifacts/12477692434)（30 天有效）。这些结果用于同一 CI Runner/Go 版本之间比较；Provider 值来自本机 loopback Mock HTTP 服务，不包含公网 RTT 或模型推理时间。首次样本不能证明性能提升，也不应直接作为生产 SLO。
 
 
 ### CI #93 工作流插入失败与修复（2026-10-23）
@@ -330,3 +334,10 @@ docs/                        中文架构、协议和运维文档
 - 新增性能基线的提交 `6d81f565990061038836a7f8218c336967d8f987` 对应 Actions #93（运行 `39898004302`）在任何 Job 初始化前失败；GitHub 未创建运行 Job，因此没有执行 Go 测试、Benchmark 或构建步骤。
 - 检查确认 `.github/workflows/go-ci.yml` 中新增的 Benchmark shell 命令插入位置破坏了 YAML 结构。当前修复直接从最后一份通过 CI 的工作流（`b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f`，Actions #92）恢复，然后在唯一的静态检查步骤前重新插入 Benchmark 与 Artifact 步骤；原有测试、race、vet、构建及前端检查不做其他变更。
 - 性能基线仍为待验收状态，必须由本修复提交触发的完整 CI 通过，并确认上传了 Benchmark Artifact 后才可标记完成。
+
+
+### CI #94 性能基线验收（2026-10-23）
+
+- 修复提交 `1339f5fb61537c08292aa44cec990c5d930401c9` 的 Actions #94（运行 `39898164924`）完整通过：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、三项 benchmark、artifact upload、`go vet ./...`、Gateway 构建、管理台源码构建与部署 bundle 校验。
+- CI #93（运行 `39898004302`）曾在 job 初始化前失败；本次从上一份通过验收的工作流恢复并重新插入步骤后，#94 正常创建并执行全部步骤。未修改远端历史，也未把 #93 误计为代码测试失败。
+- 后续应以同一 Go 版本/相近 Runner 进行多次采样后分析趋势；暂不设置单次 benchmark 阈值，以免 Runner 噪声造成误报。
