@@ -41,23 +41,30 @@ func TestRepeatKeepaliveStopsOnWriteError(t *testing.T) {
 	sink := &failAfterSink{failAt: 1}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var notes int
-	var failed error
-	stop := repeatKeepalive(ctx, "req-test", sink, ": keepalive\n\n", 10*time.Millisecond, func(int) {
-		notes++
+	notes := make(chan int, 1)
+	failed := make(chan error, 1)
+	stop := repeatKeepalive(ctx, "req-test", sink, ": keepalive\n\n", 10*time.Millisecond, func(n int) {
+		notes <- n
 	}, func(err error) {
-		failed = err
+		failed <- err
 	})
 	defer stop()
-	time.Sleep(80 * time.Millisecond)
+
+	select {
+	case err := <-failed:
+		if err == nil {
+			t.Fatal("expected write failure")
+		}
+	case <-time.After(400 * time.Millisecond):
+		t.Fatal("timed out waiting for keepalive write failure")
+	}
 	if n := sink.writes(); n != 1 {
 		t.Fatalf("writes %d", n)
 	}
-	if notes != 0 {
-		t.Fatalf("recorded failed write: %d", notes)
-	}
-	if failed == nil {
-		t.Fatal("expected write failure")
+	select {
+	case n := <-notes:
+		t.Fatalf("recorded failed write as successful: %d", n)
+	default:
 	}
 }
 
