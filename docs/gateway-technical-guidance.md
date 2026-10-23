@@ -543,3 +543,10 @@ URL 路径前缀仍然合法，例如 `http://llama-cpp:8080/openai/v1`。空的
 ### 多 Agent 拒绝请求的审计 URL（已修复并通过 CI）
 
 Agent 入口在 Handler 层剥离路径前缀，再复用标准 /v1/* 处理逻辑。鉴权失败、限流拒绝与请求体超限等提前退出分支也必须使用可信路由 Context 恢复原始对外 URL。提交 275a70e 修复了拒绝请求日志此前丢失 `/deepseek` 等入口前缀的问题；Actions #79 的回归测试同时验证路径恢复和 token 查询值脱敏。该处理只影响审计展示，不改写真实转发路径或查询参数。
+
+
+## Anthropic Messages 兼容边界
+
+远程 Provider 对 `POST /v1/messages` 按 Anthropic Messages 的请求结构透传。调用方的 `anthropic-version` 与 `anthropic-beta` 在允许列表内转发；上游凭据仍只使用 Provider 的 `api_key`，例如设置 `api_key_header: x-api-key`，不会把 Gateway 调用方的 `Authorization` 或 `X-API-Key` 透传为厂商凭据。模型字段依然由 Agent/上游配置固定并覆盖。
+
+该路径的上游错误 JSON 与流式 `event: error` 使用 Anthropic 错误信封，并继续屏蔽厂商原始错误正文。此适配属于 HTTP/协议兼容层，不代表每项 Anthropic Beta 能力或真实 Claude Code 端到端行为都已验收；真实供应商验证仍需单独执行。

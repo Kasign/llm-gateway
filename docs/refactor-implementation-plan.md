@@ -251,3 +251,11 @@ docs/                        中文架构、协议和运维文档
 - 回归测试 `TestRejectedInferenceLogPreservesAgentURLAndRedactsQuerySecrets` 验证 `/deepseek/v1/...` 前缀保留且查询 token 仍脱敏。
 - GitHub Actions #79（运行 `39894282515`）完整通过：Go 单测、`go vet`、Gateway 构建、管理台源码构建和前端 bundle 检查。
 - 下一步不是继续扩大本次修复范围，而是按上面的清单补充并发/契约测试和真实 Provider 故障注入。
+
+
+### Anthropic Messages 协议透传修复（2026-10-23）
+
+- 代码审查对照 README 的 `/v1/messages` 兼容声明，发现远程 Provider 的请求头白名单漏掉必需的 `anthropic-version`，并未针对 Anthropic Messages 使用其规定的 JSON/SSE 错误信封。
+- 本功能组在同一 Provider 适配器中补充 `anthropic-version`、`anthropic-beta` 头透传；厂商凭据继续由 Provider 独立配置；未提交响应的错误统一生成 Anthropic JSON 错误信封，已提交流则使用 Anthropic SSE error 事件。
+- 新增 Mock 上游测试：协议头与模型覆写、Gateway/Provider 凭据隔离、401 JSON 错误脱敏、流式 503 错误事件脱敏，以及客户端响应状态已提交时保持 200 的语义。
+- 代码修改前最近一次代码功能组基线为提交 `275a70e0849536978963cc4fa727e65ff9953044`，Actions 运行 `39894282515`（success）。本功能组必须由新提交对应的 Actions 验证；真实 Anthropic/Claude Code 端到端兼容性不由 Mock CI 代替。

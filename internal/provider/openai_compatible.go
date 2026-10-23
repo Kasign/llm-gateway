@@ -127,7 +127,38 @@ func (p *OpenAICompatibleProvider) Capabilities() Capabilities {
 	return Capabilities{Protocol: "openai-compatible", ChatCompletions: true, Streaming: true}
 }
 
-func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCall) (core.Result, error) {
+func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCall) (result core.Result, retErr error) {
+	// /v1/messages 使用 Anthropic Messages 错误信封。任何尚未提交响应的 Provider
+	// 错误都在本适配器内按协议收口，避免回到通用 Gateway JSON 错误格式。
+	defer func() {
+		if retErr == nil || !isAnthropicMessagesAPIPath(call.Path) || call.Writer == nil {
+			return
+		}
+		if call.WriterWritten() || result.ResponseBytes > 0 || result.Body != nil {
+			return
+		}
+		status := http.StatusBadGateway
+		code := "provider_upstream"
+		if mapped := ToCoreError(retErr); mapped != nil {
+			if mapped.Status >= http.StatusBadRequest && mapped.Status <= 599 {
+				status = mapped.Status
+			}
+			if mapped.Code != "" {
+				code = mapped.Code
+			}
+		}
+		body := safeProviderErrorBodyForPath(call.Path, code)
+		call.Writer.Header().Set("Content-Type", "application/json")
+		call.Writer.Header().Set("Cache-Control", "no-store")
+		call.Writer.WriteHeader(status)
+		n, writeErr := call.Writer.Write(body)
+		result = core.Result{Status: status, ResponseBytes: int64(n), Body: body, Err: retErr}
+		if writeErr != nil {
+			retErr = writeErr
+		} else if n != len(body) {
+			retErr = io.ErrShortWrite
+		}
+	}()
 	if p == nil || p.client == nil {
 		return core.Result{}, &ProviderError{Kind: ErrorUnknown, StatusCode: http.StatusBadGateway}
 	}
@@ -209,6 +240,8 @@ func copyRemoteRequestHeaders(dst, src http.Header) {
 	for _, name := range []string{
 		"content-type", "accept-language", "user-agent",
 		"openai-beta", "openai-organization", "openai-project", "x-title",
+		// Anthropic Messages 的版本头是必需协议字段；Beta 头承载可选协议能力。
+		"anthropic-version", "anthropic-beta",
 	} {
 		for key, values := range src {
 			if strings.EqualFold(key, name) {
@@ -260,7 +293,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
 		call.Writer.Header().Set("Content-Type", "application/json")
 		call.Writer.Header().Set("Cache-Control", "no-store")
-		safeBody := safeProviderErrorBody(streamErrorCode(upstreamErr))
+		safeBody := safeProviderErrorBodyForPath(call.Path, streamErrorCode(upstreamErr))
 		call.Writer.WriteHeader(resp.StatusCode)
 		n, writeErr := call.Writer.Write(safeBody)
 		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: safeBody}
@@ -328,7 +361,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
 		call.Writer.Header().Set("Content-Type", "application/json")
 		call.Writer.Header().Set("Cache-Control", "no-store")
-		body := safeProviderErrorBody(code)
+		body := safeProviderErrorBodyForPath(call.Path, code)
 		call.Writer.WriteHeader(resp.StatusCode)
 		n, writeErr := call.Writer.Write(body)
 		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
@@ -550,9 +583,57 @@ func (t *responsesSequenceTracker) NextSequence() int64 {
 	return t.last + 1
 }
 
+// isAnthropicMessagesAPIPath 判断 Anthropic Messages 兼容入口；查询参数不参与协议判断。
+func isAnthropicMessagesAPIPath(rawPath string) bool {
+	rawPath = strings.TrimSpace(strings.SplitN(rawPath, "?", 2)[0])
+	rawPath = strings.TrimRight(rawPath, "/")
+	return rawPath == "/v1/messages"
+}
+
+// anthropicErrorType 将 Gateway 的稳定错误码映射到 Anthropic Messages 错误类型。
+func anthropicErrorType(code string) string {
+	switch code {
+	case "provider_authentication":
+		return "authentication_error"
+	case "provider_rate_limit":
+		return "rate_limit_error"
+	case "provider_model_not_found":
+		return "not_found_error"
+	case "provider_invalid_request":
+		return "invalid_request_error"
+	case "provider_timeout":
+		return "timeout_error"
+	default:
+		return "api_error"
+	}
+}
+
+// safeProviderErrorBodyForPath 按目标 API 协议生成不含上游诊断或凭据的 JSON 错误。
+func safeProviderErrorBodyForPath(rawPath, code string) []byte {
+	if isAnthropicMessagesAPIPath(rawPath) {
+		body, _ := json.Marshal(map[string]interface{}{
+			"type": "error",
+			"error": map[string]string{
+				"type": anthropicErrorType(code), "message": "upstream provider request failed",
+			},
+		})
+		return body
+	}
+	return safeProviderErrorBody(code)
+}
+
 // safeProviderStreamErrorBody 根据请求协议生成安全终止事件。
-// Chat Completions 使用 error 包装；Responses API 要求 error 事件数据顶层带 type/code/message/param/sequence_number。
+// Chat Completions 使用 error 包装；Responses API 与 Anthropic Messages 使用各自的事件信封。
 func safeProviderStreamErrorBody(rawPath, code string, sequenceNumber int64) []byte {
+	if isAnthropicMessagesAPIPath(rawPath) {
+		body, _ := json.Marshal(map[string]interface{}{
+			"type": "error",
+			"error": map[string]string{
+				"type": anthropicErrorType(code), "message": "upstream provider request failed",
+			},
+		})
+		return body
+	}
 	if isResponsesAPIPath(rawPath) {
 		body, _ := json.Marshal(map[string]interface{}{
 			"type": "error", "code": code, "message": "upstream provider request failed",
