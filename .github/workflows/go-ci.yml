@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 15
     env:
       REDIS_TEST_ADDR: 127.0.0.1:6379
+      MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
     services:
       redis:
         image: redis:7-alpine
@@ -26,6 +27,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-test-password
+          MARIADB_DATABASE: llm_gateway_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
