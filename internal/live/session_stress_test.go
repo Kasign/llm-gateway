@@ -36,7 +36,7 @@ func TestSessionConcurrentUpdatesAndSnapshotsStayBounded(t *testing.T) {
 	go func() {
 		close(snapshotStarted)
 		defer close(snapshotDone)
-		for !stop.Load() {
+		for {
 			snapshot := registry.SnapshotDetail(requestID)
 			if snapshot == nil || len(snapshot.Events) > maxStreamEvents ||
 				len(snapshot.ReqBody) > maxBodyBytes || len(snapshot.ResBody) > maxBodyBytes {
@@ -48,6 +48,9 @@ func TestSessionConcurrentUpdatesAndSnapshotsStayBounded(t *testing.T) {
 				return
 			}
 			snapshotCount.Add(1)
+			if stop.Load() {
+				return
+			}
 		}
 	}()
 	<-snapshotStarted

@@ -23,7 +23,12 @@ func TestWriterQueueRemainsBoundedUnderConcurrentPressure(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseWorker := func() { releaseOnce.Do(func() { close(release) }) }
-	defer releaseWorker()
+	t.Cleanup(func() {
+		releaseWorker()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = w.Shutdown(ctx)
+	})
 
 	var executed atomic.Int64
 	w.enqueueCritical(func(context.Context, *store.Repo) error {
