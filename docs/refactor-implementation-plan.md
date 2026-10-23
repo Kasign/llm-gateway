@@ -356,3 +356,9 @@ docs/                        中文架构、协议和运维文档
 - 对 `/deepseek/v1/chat/completions` 与 `/openai/v1/chat/completions` 分别断言上游只收到标准 `/v1/chat/completions` 路径、各自原始 query、Agent 默认模型与对应 Provider 凭据。
 - 客户端故意提交不匹配的 `model`，并带 Gateway `Authorization` 与 `X-API-Key`；断言出站请求不会泄露调用方凭据、不会跨 Agent 使用另一条路由的模型/上游，同时全局活动 Provider 保持 `llamacpp`。
 - 该集成测试仅绕过外层 API Key/Redis 限流与审计观察器（这些已有独立测试），实际执行路由归一、模型固定、Pipeline Mutator/Guard、Provider 选择、HTTP 转发及响应回传。需本提交完整 CI 通过后验收。
+
+
+### Agent data-plane 集成测试 CI #98 首轮失败（2026-10-23）
+
+- Actions #98（运行 `39899077307`）在 `go test ./...` 阶段失败。日志显示 Provider Registry 依据既有安全配置规则拒绝测试中使用的 `api_key_header: x-upstream-key`，允许的自定义凭据头是 `Authorization`、`api-key` 或 `x-api-key`。
+- 这属于新增 Mock 测试夹具不符合项目配置契约，不是路由实现失败。将测试的服务端上游密钥改为 `api-key` 头，同时仍发送假的调用方 `Authorization` 与 `X-API-Key`；断言上游收到配置的 Provider 密钥，但不会把调用方凭据透传。当前功能组待修复提交 CI 复验。

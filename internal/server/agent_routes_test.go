@@ -108,7 +108,7 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 			}
 			capture := upstreamCapture{
 				path: r.URL.Path, trace: r.URL.Query().Get("trace"),
-				model: requestPayload.Model, providerKey: r.Header.Get("X-Upstream-Key"),
+				model: requestPayload.Model, providerKey: r.Header.Get("Api-Key"),
 				authorization: r.Header.Get("Authorization"), gatewayKey: r.Header.Get("X-API-Key"),
 			}
 			captureMu.Lock()
@@ -133,12 +133,12 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 		{
 			ID: "deepseek", Enabled: true, BaseURL: deepseekUpstream.URL + "/v1",
 			DefaultModel: "deepseek-chat", APIKey: "deepseek-upstream-secret",
-			APIKeyHeader: "x-upstream-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
 		},
 		{
 			ID: "openai", Enabled: true, BaseURL: openaiUpstream.URL + "/v1",
 			DefaultModel: "gpt-4.1", APIKey: "openai-upstream-secret",
-			APIKeyHeader: "x-upstream-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
 		},
 	}
 	deepseekRoute := config.AgentRouteConfig{
