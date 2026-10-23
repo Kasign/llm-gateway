@@ -323,3 +323,10 @@ docs/                        中文架构、协议和运维文档
 - 新增 `BenchmarkResolveInferenceAgentRoute`：测固定 Agent Provider 与默认模型解析路径；新增 `BenchmarkBuildRequestAnalysis`：测请求时间线到分析 DTO 的转换/分配成本，不包含数据库写入。
 - CI 以 `-benchmem -benchtime=1s` 运行三项基准，记录 `ns/op`、`B/op`、`allocs/op`，并上传为按 commit SHA 命名、保留 30 天的 Artifact。该步骤只记录，不设跨 Runner 硬阈值；比较需使用同一 Go 版本/相近 Runner。
 - 本次只建立可重复测量管线，不在首轮结果未产出前宣称已获得基准值或性能提升。
+
+
+### CI #93 工作流插入失败与修复（2026-10-23）
+
+- 新增性能基线的提交 `6d81f565990061038836a7f8218c336967d8f987` 对应 Actions #93（运行 `39898004302`）在任何 Job 初始化前失败；GitHub 未创建运行 Job，因此没有执行 Go 测试、Benchmark 或构建步骤。
+- 检查确认 `.github/workflows/go-ci.yml` 中新增的 Benchmark shell 命令插入位置破坏了 YAML 结构。当前修复直接从最后一份通过 CI 的工作流（`b6415a39cd0d7ba3c9de3f30e87d4c288a9c176f`，Actions #92）恢复，然后在唯一的静态检查步骤前重新插入 Benchmark 与 Artifact 步骤；原有测试、race、vet、构建及前端检查不做其他变更。
+- 性能基线仍为待验收状态，必须由本修复提交触发的完整 CI 通过，并确认上传了 Benchmark Artifact 后才可标记完成。
