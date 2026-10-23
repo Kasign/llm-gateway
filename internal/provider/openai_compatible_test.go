@@ -165,6 +165,147 @@ func TestOpenAICompatibleProviderForwardsAnthropicMessagesHeaders(t *testing.T) 
 	}
 }
 
+func TestOpenAICompatibleProviderForwardsAnthropicMessagesStream(t *testing.T) {
+	const upstreamSSE = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_stream_test","type":"message","role":"assistant","model":"claude-model-mapped","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello from Anthropic"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":4}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	var gotPath, gotQuery, gotVersion, gotKey, gotAuthorization, gotModel string
+	var gotStream bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		gotVersion = r.Header.Get("Anthropic-Version")
+		gotKey, gotAuthorization = r.Header.Get("X-API-Key"), r.Header.Get("Authorization")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "cannot read request", http.StatusBadRequest)
+			return
+		}
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			http.Error(w, "invalid request JSON", http.StatusBadRequest)
+			return
+		}
+		gotModel, gotStream = payload.Model, payload.Stream
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("request-id", "req_anthropic_stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, upstreamSSE)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{
+		APIKey: "provider-secret", APIKeyHeader: "x-api-key",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Set("Anthropic-Version", "2023-06-01")
+	request.Header.Set("Authorization", "Bearer gateway-caller-secret")
+	request.Header.Set("X-API-Key", "gateway-caller-secret")
+	writer := httptest.NewRecorder()
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request,
+		Path: "/v1/messages?trace_id=anthropic-stream",
+		Body: []byte(`{"model":"client-model","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+		ModelID: "claude-model-mapped", Stream: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != http.StatusOK || writer.Code != http.StatusOK {
+		t.Fatalf("result/writer status = %d/%d, want 200", result.Status, writer.Code)
+	}
+	if !strings.HasPrefix(writer.Header().Get("Content-Type"), "text/event-stream") || writer.Body.String() != upstreamSSE {
+		t.Fatalf("Anthropic SSE response was not transparently forwarded: content-type=%q body=%q", writer.Header().Get("Content-Type"), writer.Body.String())
+	}
+	if !strings.Contains(writer.Body.String(), "event: message_start") ||
+		!strings.Contains(writer.Body.String(), "hello from Anthropic") ||
+		!strings.Contains(writer.Body.String(), "event: message_stop") {
+		t.Fatalf("Anthropic streaming lifecycle events are incomplete: %q", writer.Body.String())
+	}
+	if gotPath != "/v1/messages" || gotQuery != "trace_id=anthropic-stream" {
+		t.Fatalf("upstream path/query = %q/%q", gotPath, gotQuery)
+	}
+	if gotVersion != "2023-06-01" || gotModel != "claude-model-mapped" || !gotStream {
+		t.Fatalf("upstream version/model/stream = %q/%q/%v", gotVersion, gotModel, gotStream)
+	}
+	if gotKey != "provider-secret" || gotAuthorization != "" {
+		t.Fatalf("upstream credential isolation failed: x-api-key=%q authorization=%q", gotKey, gotAuthorization)
+	}
+	if writer.Header().Get("Request-Id") != "req_anthropic_stream" {
+		t.Fatalf("Anthropic request ID header was not forwarded: %#v", writer.Header())
+	}
+}
+
+func TestOpenAICompatibleProviderForwardsAnthropicCountTokensEndpoint(t *testing.T) {
+	const upstreamBody = `{"input_tokens":23}`
+	var gotPath, gotQuery, gotVersion, gotKey, gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		gotVersion, gotKey = r.Header.Get("Anthropic-Version"), r.Header.Get("X-API-Key")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "cannot read request", http.StatusBadRequest)
+			return
+		}
+		var payload struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			http.Error(w, "invalid request JSON", http.StatusBadRequest)
+			return
+		}
+		gotModel = payload.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{
+		APIKey: "provider-secret", APIKeyHeader: "x-api-key",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	request.Header.Set("Anthropic-Version", "2023-06-01")
+	request.Header.Set("X-API-Key", "gateway-caller-secret")
+	writer := httptest.NewRecorder()
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: request,
+		Path: "/v1/messages/count_tokens?trace_id=count-tokens",
+		Body: []byte(`{"model":"client-model","messages":[{"role":"user","content":"hi"}]}`),
+		ModelID: "claude-model-mapped",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != http.StatusOK || writer.Code != http.StatusOK || writer.Body.String() != upstreamBody {
+		t.Fatalf("count_tokens result/body = %+v/%q", result, writer.Body.String())
+	}
+	if gotPath != "/v1/messages/count_tokens" || gotQuery != "trace_id=count-tokens" {
+		t.Fatalf("upstream count_tokens path/query = %q/%q", gotPath, gotQuery)
+	}
+	if gotVersion != "2023-06-01" || gotModel != "claude-model-mapped" || gotKey != "provider-secret" {
+		t.Fatalf("count_tokens header/model/key = %q/%q/%q", gotVersion, gotModel, gotKey)
+	}
+}
+
 func TestOpenAICompatibleProviderPassesThroughAnthropicJSONErrorAndHeaders(t *testing.T) {
 	const upstreamMessage = "context_management: Extra inputs are not permitted"
 	const upstreamBody = `{"type":"error","error":{"type":"invalid_request_error","message":"context_management: Extra inputs are not permitted"},"request_id":"req_anthropic_123"}`

@@ -385,3 +385,11 @@ docs/                        中文架构、协议和运维文档
 - 在 CI #103 运行期间的二次 diff review 发现，抽取 Agent 模型列表生成函数后，日志仍引用原函数内的 `data` 变量，存在编译错误风险。
 - 修复为 `agentModelListBody` 同时返回响应 JSON 和已 ACL 过滤后的模型数量；handler 使用返回数量写审计日志，单元测试也核对返回数量与 JSON 中的 data 数组一致。
 - CI #103（运行 `39900242374`）确因 `internal/server/server.go:418:107: undefined: data` 编译失败；修复提交 `65d8709` 将 helper 返回的模型数用于日志，CI #104 已通过全部步骤。
+
+
+### Anthropic Messages 成功流式与 count_tokens 契约（2026-10-23，待 CI）
+
+- 新增成功 SSE 透传测试，覆盖 message_start、content_block_start/delta/stop、message_delta 与 message_stop，验证响应 Content-Type、上游 Request-Id、Anthropic-Version、query、服务端模型覆盖和 API Key 边界。
+- 新增 /v1/messages/count_tokens 正向透传测试，检查路径与 query 不丢失、模型由 Provider 配置覆盖、Anthropic-Version 转发、Provider API Key 隔离，以及响应 JSON 原样返回。
+- 这些是本机 Mock HTTP 协议测试；没有真实 Anthropic/Claude Code 端到端凭据或服务可用，因此不据此声称外部供应商完成认证。
+- 新提交需通过全量单测、race、性能基准、vet、Gateway 构建与前端 bundle 校验后验收。

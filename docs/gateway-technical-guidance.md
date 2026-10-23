@@ -591,3 +591,8 @@ Agent 的 `GET /<agent-prefix>/v1/models` 返回的不是上游任意模型目�
 ### Agent 模型发现与 ACL 回归验收
 
 Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过 Agent 模型列表 helper 单测，覆盖受限/不受限 Gateway Key、按公开 ID/上游 ID 授权、ACL 不匹配为空列表。Handler 现在调用同一个纯函数产生 list body 与过滤后数量，审计日志不再引用已移入 helper 的局部变量。此测试不替代真实 HTTP Handler 的鉴权、Redis 限流与审计全链路验证。
+
+
+### Anthropic Messages 正向路径测试（待 CI）
+
+新增 Mock Provider 测试覆盖 Messages SSE 成功响应事件序列与可选 count_tokens 端点：用于验证远程 Provider 的实际 HTTP path、query、anthropic-version、model 覆盖和服务端 API Key 隔离。由于上游为 loopback Mock，这些测试仅验证协议适配器，不表示真实 Anthropic/Claude Code 已端到端验收。
