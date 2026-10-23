@@ -163,7 +163,7 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 		call.Writer.Header().Set("Cache-Control", "no-store")
 		call.Writer.WriteHeader(status)
 		n, writeErr := call.Writer.Write(body)
-		result = core.Result{Status: status, ResponseBytes: int64(n), Body: body, Err: retErr}
+		result = core.Result{Status: status, UpstreamStatus: result.UpstreamStatus, ResponseBytes: int64(n), Body: body, Err: retErr}
 		if writeErr != nil {
 			retErr = writeErr
 		} else if n != len(body) {
@@ -315,14 +315,14 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		call.OnHeaders(resp.Header, resp.StatusCode)
 	}
 	if isRedirectStatus(resp.StatusCode) {
-		return core.Result{Status: resp.StatusCode}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
+		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, p.maxResponseBytes+1))
 	if err != nil {
-		return core.Result{Status: resp.StatusCode}, p.transportError(ctx, err)
+		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode}, p.transportError(ctx, err)
 	}
 	if int64(len(body)) > p.maxResponseBytes {
-		return core.Result{Status: resp.StatusCode}, &ProviderError{ProviderID: p.id, Kind: ErrorUpstream, StatusCode: resp.StatusCode, Err: errors.New("provider response exceeds configured size limit")}
+		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode}, &ProviderError{ProviderID: p.id, Kind: ErrorUpstream, StatusCode: resp.StatusCode, Err: errors.New("provider response exceeds configured size limit")}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
@@ -341,7 +341,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 		}
 		call.Writer.WriteHeader(resp.StatusCode)
 		n, writeErr := call.Writer.Write(errorBody)
-		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: errorBody}
+		result := core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: int64(n), Body: errorBody}
 		if writeErr != nil {
 			return result, writeErr
 		}
@@ -353,7 +353,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
 	call.Writer.WriteHeader(resp.StatusCode)
 	n, writeErr := call.Writer.Write(body)
-	result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
+	result := core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: int64(n), Body: body}
 	if writeErr != nil {
 		return result, writeErr
 	}
@@ -390,7 +390,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 	}
 	if isRedirectStatus(resp.StatusCode) {
 		written := writeStreamError("provider_redirect_rejected")
-		return core.Result{Status: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
+		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: written}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
 	// 上游非 2xx 且响应尚未提交时，Anthropic Messages 必须保留原始错误正文，供 Claude Code 识别能力拒绝。
 	// 其他协议继续使用统一脱敏错误；若已经提交，HTTP 状态不可逆，只能以 SSE error 事件收口。
@@ -399,7 +399,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		code := providerErrorCodeForPath(call.Path, resp.StatusCode, upstreamErr)
 		if call.WriterWritten() {
 			written := writeStreamError(code)
-			return core.Result{Status: resp.StatusCode, ResponseBytes: written}, upstreamErr
+			return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: written}, upstreamErr
 		}
 
 		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header, call.Path)
@@ -422,7 +422,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		}
 		call.Writer.WriteHeader(resp.StatusCode)
 		n, writeErr := call.Writer.Write(body)
-		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: body}
+		result := core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: int64(n), Body: body}
 		if writeErr != nil {
 			return result, writeErr
 		}
@@ -457,7 +457,7 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 			}
 			chunk := append([]byte(nil), reader[:n]...)
 			if err := writer(chunk); err != nil {
-				return core.Result{Status: resp.StatusCode, ResponseBytes: total}, err
+				return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: total}, err
 			}
 			total += int64(len(chunk))
 			if responseSequence != nil {
@@ -476,10 +476,10 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 		if readErr != nil {
 			transportErr := p.transportError(ctx, readErr)
 			errorBytes := writeStreamError(streamErrorCode(transportErr))
-			return core.Result{Status: resp.StatusCode, ResponseBytes: total + errorBytes}, transportErr
+			return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: total + errorBytes}, transportErr
 		}
 	}
-	return core.Result{Status: resp.StatusCode, ResponseBytes: total}, nil
+	return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode, ResponseBytes: total}, nil
 }
 
 func (p *OpenAICompatibleProvider) transportError(ctx context.Context, err error) error {

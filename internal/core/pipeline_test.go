@@ -102,7 +102,7 @@ func TestRunOrderAndIgnoresClientModel(t *testing.T) {
 			onChunk([]byte("data: hi\n\n"))
 			ms := int64(40)
 			headerMS := int64(2)
-			return Result{Status: 200, UpstreamHeadersMS: &headerMS, ResponseBytes: 4, TTFT: &ms}, nil
+			return Result{Status: 200, UpstreamStatus: 200, UpstreamHeadersMS: &headerMS, ResponseBytes: 4, TTFT: &ms}, nil
 		}),
 		Observe: obs,
 	}
@@ -327,7 +327,8 @@ func TestRunKeepsTransportFallbackStatusSeparateFromUpstream(t *testing.T) {
 			return ModelChoice{UpstreamID: "configured"}, nil
 		},
 		Forward: forwardFunc(func(context.Context, State, ChunkFunc) (Result, error) {
-			return Result{}, &Error{Status: 502, Code: "provider_upstream", Message: "connection refused"}
+			headerMS := int64(4) // 计时字段不是「已收到 HTTP 响应」的证据。
+			return Result{Status: 502, UpstreamHeadersMS: &headerMS}, &Error{Status: 502, Code: "provider_upstream", Message: "connection refused"}
 		}),
 		Observe: obs,
 	}

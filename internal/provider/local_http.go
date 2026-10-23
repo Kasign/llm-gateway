@@ -56,7 +56,7 @@ func (p *LocalHTTPProvider) Forward(ctx context.Context, call InferenceCall) (co
 
 	if !call.Stream {
 		n, body, status, err := p.client.Proxy(ctx, call.Writer, call.Request, path, bytes.NewReader(call.Body))
-		return core.Result{Status: status, ResponseBytes: n, Body: body}, err
+		return core.Result{Status: status, UpstreamStatus: status, ResponseBytes: n, Body: body}, err
 	}
 
 	var responseBytes int64
@@ -82,7 +82,7 @@ func (p *LocalHTTPProvider) Forward(ctx context.Context, call InferenceCall) (co
 		call.ClientWriter,
 		call.OnFirstByte,
 	)
-	return core.Result{Status: status, ResponseBytes: responseBytes}, err
+	return core.Result{Status: status, UpstreamStatus: status, ResponseBytes: responseBytes}, err
 }
 
 // NewLocalRegistry 保留旧版无参数 clientFactory 契约，兼容既有调用方。

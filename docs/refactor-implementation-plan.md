@@ -534,3 +534,13 @@ docs/                        中文架构、协议和运维文档
 - 随后在同一 host:port 重新启动同一 Mock Handler，发起 30 个恢复请求，预期每个均返回 200，且 `upstream_http_status=200`。测试直接 Flush 异步审计队列后查询 MariaDB，核对总共 60 条记录及两种状态的精确数量。
 - `.github/workflows/go-ci.yml` 增加独立的 `Gateway TCP 连接拒绝与恢复验证` 步骤，并上传 30 天测试日志 Artifact。PR 分支测试代码、CI 步骤和文档已更新；当前尚无本分支 Actions 结果，不得将该场景记为通过。
 - 这是本机 loopback TCP 连接拒绝/恢复测试，不等同公网 DNS 故障、真实供应商网络恢复、进程重启或生产容量验收。
+
+
+### 上游 HTTP 状态与 TCP 传输失败区分（2026-10-23，修复待 CI 验收）
+
+- 实时核对 PR #5：目标分支 `dev`，工作分支 `test/gateway-transport-failure-recovery`，修复前 Head 为 `ef3627726ec364c338f6b1aa5377a10ca016c409`，PR 保持 open、未合并。PR base / `dev` HEAD 为 `950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
+- Actions #154（运行 ID `39935257603`）在“Gateway 上游延迟与 429/503 故障注入”失败。日志中的 MariaDB 聚合结果：120 条记录，Gateway 的 200/429/503 为 60/30/30，但 upstream 的 429/503 为 0/0。该次运行的单测、MariaDB 审计积压和 60 秒 Gateway 负载步骤通过；后续连接恢复、race、性能基线、go vet、构建与前端检查因前置步骤失败而跳过。
+- 根因：`core.Pipeline.Run` 曾用 `UpstreamHeadersMS` 是否为空推断是否收到 HTTP 响应，但该计时字段不是 Provider 状态契约，部分 JSON 路径不填该字段。远程 JSON/SSE 与本地 Provider 没有在所有已收响应路径显式填充 `Result.UpstreamStatus`；本地非流式超限路径还曾把 Gateway 502 放进状态返回值。
+- 本功能组将给远程 Provider 所有已拿到 `http.Response` 的 JSON/SSE 分支、本地 Provider 的 JSON/SSE 分支显式设置 `UpstreamStatus`；连接拒绝等没有 HTTP 响应的情况保持为 0。Pipeline 不再依据状态码或计时字段推断上游状态。本地响应体超限时保留已收到的真实上游状态，Gateway 仍由错误映射返回 502。
+- 新增 Provider 契约测试：JSON/SSE 对真实收到的 Mock HTTP 429、503、200 均记录真实状态；TCP 连接拒绝保持上游状态 0 并映射 Gateway 502。集成层继续保留既有严格 MariaDB 断言：429/503 阶段 120 条日志中 Gateway 与上游状态必须分别为 60/30/30；TCP 拒绝 30 条记录为 Gateway 502 且上游状态为空，同一端口恢复后 30 条记录为 Gateway 200 / upstream 200。
+- 验收边界：以上为本机 loopback Mock 上游与 CI MariaDB 集成测试，不是 OpenAI、DeepSeek、Anthropic 或其他真实供应商 E2E，也不代表生产公网故障恢复或生产容量验收。本节修复在完整 Actions 通过前不得标记为已验收。

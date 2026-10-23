@@ -1475,3 +1475,73 @@ func TestRestrictedHTTPClientHasBoundedHTTP2Transport(t *testing.T) {
 		t.Fatalf("connection pool must have explicit bounds: idle=%s maxIdlePerHost=%d maxPerHost=%d", transport.IdleConnTimeout, transport.MaxIdleConnsPerHost, transport.MaxConnsPerHost)
 	}
 }
+
+
+// TestOpenAICompatibleProviderRecordsObservedUpstreamStatus verifies JSON and SSE requests
+// report an upstream status only after an HTTP response has actually been received.
+func TestOpenAICompatibleProviderRecordsObservedUpstreamStatus(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusOK} {
+			stream, status := stream, status
+			mode := "json"
+			if stream { mode = "stream" }
+			t.Run(mode+"/"+http.StatusText(status), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if status != http.StatusOK { w.Header().Set("Retry-After", "7") }
+					w.WriteHeader(status)
+					if status == http.StatusOK {
+						_, _ = io.WriteString(w, `{"id":"recovered"}`)
+						return
+					}
+					_, _ = io.WriteString(w, `{"error":{"message":"private-provider-diagnostic"}}`)
+				}))
+				defer server.Close()
+				p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "provider-secret"})
+				writer := httptest.NewRecorder()
+				result, err := p.Forward(context.Background(), InferenceCall{
+					Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+					Path: "/v1/chat/completions", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: stream,
+				})
+				if result.Status != status || result.UpstreamStatus != status || writer.Code != status {
+					t.Fatalf("status contract result=%d upstream=%d writer=%d, want %d/%d/%d", result.Status, result.UpstreamStatus, writer.Code, status, status, status)
+				}
+				if status == http.StatusOK {
+					if err != nil { t.Fatalf("successful upstream response returned error: %v", err) }
+				} else {
+					if err == nil { t.Fatal("non-2xx upstream response must return a classified error") }
+					if writer.Header().Get("Retry-After") != "7" { t.Fatalf("Retry-After = %q, want 7", writer.Header().Get("Retry-After")) }
+					if strings.Contains(writer.Body.String(), "private-provider-diagnostic") || strings.Contains(writer.Body.String(), "provider-secret") {
+						t.Fatalf("upstream error body was not redacted: %q", writer.Body.String())
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAICompatibleProviderConnectionRefusalDoesNotInventUpstreamStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	serverURL := server.URL
+	server.Close()
+	p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		ID: "test-remote", BaseURL: serverURL + "/v1", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+	})
+	if err != nil { t.Fatalf("NewOpenAICompatibleProvider: %v", err) }
+	for _, stream := range []bool{false, true} {
+		stream := stream
+		mode := "json"
+		if stream { mode = "stream" }
+		t.Run(mode, func(t *testing.T) {
+			writer := httptest.NewRecorder()
+			result, forwardErr := p.Forward(context.Background(), InferenceCall{
+				Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+				Path: "/v1/chat/completions", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: stream,
+			})
+			if forwardErr == nil { t.Fatal("expected connection refusal") }
+			if result.UpstreamStatus != 0 { t.Fatalf("upstream status = %d, want 0 without an HTTP response", result.UpstreamStatus) }
+			mapped := ToCoreError(forwardErr)
+			if mapped == nil || mapped.Status != http.StatusBadGateway { t.Fatalf("transport error mapping = %+v, want Gateway 502", mapped) }
+		})
+	}
+}
