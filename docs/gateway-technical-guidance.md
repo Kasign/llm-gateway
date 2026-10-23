@@ -610,3 +610,14 @@ Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过 Agent 
 ### Agent /v1/models 外层鉴权与 Redis 限流验收（CI #108）
 
 Actions #108 通过实际 `Server.Handler()` 集成：缺失/未知 API Key 返回 401；已鉴权 Key 的模型列表受 AllowedModels 控制；通过真实 Redis 服务验证 RPM 超限返回 429。该测试的 API Key/审计 SQL 使用 test-only driver，仅模拟查行与写入成功，不代表 MariaDB schema/方言的端到端验收。Artifact：[性能基线文件](https://github.com/Kasign/llm-gateway/actions/runs/39904722392/artifacts/12480765287)。
+
+
+### 真实 OpenAI-compatible Provider E2E（显式 opt-in）
+
+为在不把密钥放入仓库/聊天记录的情况下验证真实供应商，仓库提供 `TestOpenAICompatibleProviderRealEndpointE2E`。默认跳过；只有设置 `LLM_GATEWAY_PROVIDER_E2E=1` 才发起网络请求。请在本机 shell 临时设置 `LLM_GATEWAY_E2E_BASE_URL`（HTTPS `/v1` Base URL）、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL`，必要时设置 `LLM_GATEWAY_E2E_API_KEY_HEADER`（允许值由 Provider 配置校验约束，留空为默认 Authorization）。随后运行：
+
+```sh
+go test ./internal/provider -run '^TestOpenAICompatibleProviderRealEndpointE2E$' -count=1 -v
+```
+
+测试只发出一条短 Chat Completions 请求（最多 8 个输出 token，90 秒超时），不打印 API Key、原始上游错误正文或响应内容。不要把真实密钥写入 shell 历史、仓库文件或 CI 日志；未明确开启时测试不产生任何网络请求。当前 CI 未配置真实供应商密钥，所以只能验证该测试编译及默认跳过，真实端点结果仍需在用户控制的环境执行。

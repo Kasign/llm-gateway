@@ -133,3 +133,8 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 - 不受限 Key 只看到该 Agent 的固定模型；AllowedModels 不允许该模型时返回空列表。
 - CI 环境连接真实 Redis 限流器；RPM=1 时第一个请求 200，第二个请求 429。
 - SQL 部分使用 test-only `database/sql/driver` 返回 API Key 行并接受审计写入，不代表 MariaDB/迁移 E2E；真实 schema 与 SQL 兼容仍需专门集成环境覆盖。
+
+
+### 可选真实 Provider 验收
+
+`internal/provider/openai_compatible_e2e_test.go` 提供显式 opt-in 的真实 Chat Completions 连通/鉴权检查。必须通过本地环境变量开启，CI 默认跳过，密钥不写入仓库。它覆盖真实 HTTPS 端点上的 Provider 请求与响应格式，但不能替代不同供应商型号、账单、限流策略或 Anthropic 原生协议的单独验收。

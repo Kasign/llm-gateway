@@ -402,3 +402,11 @@ docs/                        中文架构、协议和运维文档
 - 另有 Redis 可选集成用例：读取 CI 已配置的 `REDIS_TEST_ADDR`，同一 Key 的首个请求通过，超过 RPM 后的后续请求必须返回 429；本地未配置 Redis 时该单项跳过，其他测试仍可运行。
 - test SQL driver 只模拟 API Key 查询行与成功写入，不验证 MariaDB 方言或 schema；数据库迁移已有独立测试覆盖。RPM 用例在 CI 中使用真实 Redis 服务。提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0` 对应 Actions #108（运行 `39904722392`）已通过全量流程：Go 单测、race、三项性能基准及 Artifact、`go vet`、Gateway 构建、管理台源码构建和部署 bundle 校验均成功。
 - Artifact：[`llm-gateway-performance-baseline-82bd2f5712167707cbfa528e2d9d31a10172cdd0`](https://github.com/Kasign/llm-gateway/actions/runs/39904722392/artifacts/12480765287)，30 天有效。
+
+
+### 显式开启的真实 Provider E2E（用例已提供，尚未连接真实供应商验收）
+
+- 新增 `TestOpenAICompatibleProviderRealEndpointE2E`，默认 `t.Skip`，仅当 `LLM_GATEWAY_PROVIDER_E2E=1` 时发起真实网络请求；要求本地配置 HTTPS BaseURL、API Key 与 Model。API Key 不进入代码、日志或测试输出。
+- 请求走实际 `OpenAICompatibleProvider.Forward` 和安全 HTTP Transport，发送极短、无用户数据的 Chat Completions 请求，并检查 HTTP 200 与可解析的 choices。默认请求体最多请求 8 个输出 token，90 秒上下文截止。
+- 环境变量：`LLM_GATEWAY_E2E_BASE_URL`（例如供应商的 HTTPS `/v1` Base URL）、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL`；可选 `LLM_GATEWAY_E2E_API_KEY_HEADER`（留空则采用默认 Authorization 方式）。
+- 本提交未在当前执行环境中配置或调用真实供应商密钥，因此该用例的真实公网 E2E 状态仍是待运行；CI 只验证默认跳过路径与编译，其余 Provider 行为仍由 Mock 测试覆盖。
