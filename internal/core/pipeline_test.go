@@ -101,7 +101,8 @@ func TestRunOrderAndIgnoresClientModel(t *testing.T) {
 			}
 			onChunk([]byte("data: hi\n\n"))
 			ms := int64(40)
-			return Result{Status: 200, ResponseBytes: 4, TTFT: &ms}, nil
+			headerMS := int64(2)
+			return Result{Status: 200, UpstreamHeadersMS: &headerMS, ResponseBytes: 4, TTFT: &ms}, nil
 		}),
 		Observe: obs,
 	}
