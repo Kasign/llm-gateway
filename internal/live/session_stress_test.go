@@ -36,6 +36,8 @@ func TestSessionConcurrentUpdatesAndSnapshotsStayBounded(t *testing.T) {
 	go func() {
 		close(snapshotStarted)
 		defer close(snapshotDone)
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
 		for {
 			snapshot := registry.SnapshotDetail(requestID)
 			if snapshot == nil || len(snapshot.Events) > maxStreamEvents ||
@@ -51,6 +53,8 @@ func TestSessionConcurrentUpdatesAndSnapshotsStayBounded(t *testing.T) {
 			if stop.Load() {
 				return
 			}
+			// 节流快照频率，持续与写入并发交错，但不把测试本身变成无界分配压力。
+			<-ticker.C
 		}
 	}()
 	<-snapshotStarted
