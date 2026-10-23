@@ -204,9 +204,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.health) // 健康检查：返回 Redis 和 llama.cpp 是否正常
 	// 静态资源不长期缓存，否则改完 app.js 后浏览器仍用旧脚本（例如看不到新按钮）。
 	mux.Handle("/static/", noStoreStatic(http.StripPrefix("/static/", http.FileServer(http.Dir(s.webStaticDir())))))
-	mux.HandleFunc("/v1/models", s.v1Models) // 列出可用模型（OpenAI 兼容格式）
+	mux.HandleFunc("/v1/models", s.v1Models) // 兼容入口：使用管理台当前活动 Provider。
+	// 独立 Agent 入口按最长路径匹配；剥离前缀后复用相同鉴权、限流、Pipeline 与审计。
+	if s.cfg != nil {
+		for _, route := range s.cfg.Agents {
+			if !route.Enabled {
+				continue
+			}
+			mux.Handle(route.PathPrefix+"/v1/models", s.agentRouteHandler(route, http.HandlerFunc(s.v1Models)))
+			mux.Handle(route.PathPrefix+"/v1/", s.agentRouteHandler(route, http.HandlerFunc(s.proxyV1)))
+		}
+	}
 	// 所有 /v1/*（含 /v1/chat/completions）走同一入口 proxyV1；详见 proxy_v1_chat_flow.go 流程说明。
-	mux.HandleFunc("/v1/", s.proxyV1) // 核心代理：把 AI 请求转发给 llama.cpp
+	mux.HandleFunc("/v1/", s.proxyV1) // 兼容原来的全局活动 Provider 入口
 
 	// —— 管理后台页面 ——
 	mux.HandleFunc("/", s.adminPage) // 管理后台首页（Web UI）
@@ -337,7 +347,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 	id := requestID(r.Context())
 	// 创建一条"运行中"的审计记录
 	s.markCallRecorded(r.Context())
-	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: requestPublicURL(r, s.trustedProxyRanges), Method: r.Method, Status: "running", StartedAt: start}
+	logBase := store.RequestLog{RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(), Endpoint: r.URL.Path, RequestURL: agentRequestPublicURL(r, s.trustedProxyRanges), Method: r.Method, Status: "running", StartedAt: start}
 	s.audit.CreateRequest(logBase)
 	s.liveStart(r.Context(), logBase)
 	defer s.liveFinish(context.Background(), id)
@@ -388,6 +398,37 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.livePatch(r.Context(), id, store.RequestLog{APIKeyID: key.ID, APIKeyName: key.Name})
+
+	if route, routed := agentRouteFromContext(r.Context()); routed {
+		target, targetErr := s.resolveAgentRouteTarget(r.Context(), route)
+		if targetErr != nil {
+			status, code, msg := core.Unpack(targetErr)
+			if status < 400 {
+				status, code, msg = http.StatusServiceUnavailable, "agent_route_unavailable", "Agent route is unavailable"
+			}
+			finish(status, "error", code, msg, 0)
+			jsonError(w, status, code, msg)
+			return
+		}
+		modelID := strings.TrimSpace(target.ModelKey)
+		if target.Model != nil {
+			modelID = target.Model.ModelKey
+		}
+		data := make([]map[string]interface{}, 0, 1)
+		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+			data = append(data, map[string]interface{}{
+				"id": modelID, "object": "model", "created": time.Now().Unix(),
+				"owned_by": route.ProviderID, "display_name": target.UpstreamID,
+			})
+		}
+		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+		s.keys.Touch(context.Background(), key.ID)
+		finish(http.StatusOK, "success", "", "", int64(len(body)))
+		applog.Printf("[%s] Agent /%s/v1/models ok: key=%s models=%d latency=%dms", id, route.ID, key.Name, len(data), time.Since(start).Milliseconds())
+		return
+	}
 
 	if _, remote := s.remoteProviderConfig(s.effectiveUpstream().Backend); remote {
 		target, err := s.resolveProxyModelTarget(r.Context())

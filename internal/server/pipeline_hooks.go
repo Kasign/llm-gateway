@@ -87,6 +87,16 @@ func (s *Server) resolveInference(ctx context.Context, st core.State) (core.Mode
 		}
 		return s.resolveNamedModelForProvider(ctx, st.ID, name, backend)
 	}
+	if routeProviderID := strings.TrimSpace(st.RouteProviderID); routeProviderID != "" {
+		target, routeErr := s.resolveAgentRouteTarget(ctx, agentRoute{
+			ProviderID: routeProviderID, DefaultModel: st.RouteDefaultModel,
+		})
+		if routeErr != nil {
+			return core.ModelChoice{}, routeErr
+		}
+		s.rememberTarget(st.ID, target)
+		return choiceFromTarget(target), nil
+	}
 	t, err := s.resolveProxyModelTargetForUpstream(ctx, active)
 	if err != nil {
 		return core.ModelChoice{}, err

@@ -199,12 +199,12 @@ docs/                        中文架构、协议和运维文档
 - 按状态码映射稳定错误分类；保留上游 HTTP 状态、`Retry-After` 等白名单头和准确响应字节统计。
 - 401、429、503 回归测试验证错误响应不包含上游调试正文和供应商 API Key；提交 `08feb2e2be83bb81f4212649ebdacf1f3dfc74b5` 的 Actions 运行 `39889162077`（success）通过完整 CI。
 
-### 本轮功能组：本地推理 BaseURL 凭据边界（待 CI 验证）
+### 已验收功能组：本地推理 BaseURL 凭据边界
 
-- 在配置加载阶段验证非空本地 BaseURL 是绝对 HTTP(S) 地址，并拒绝 userinfo、query、fragment、无 host、非法 scheme、反斜杠和点段路径。
+- 配置加载阶段验证非空本地 BaseURL 是绝对 HTTP(S) 地址，并拒绝 userinfo、query、fragment、无 host、非法 scheme、反斜杠和点段路径。
 - 错误仅包含字段路径，不回显 URL/凭据信息；合法路径前缀仍然允许。
 - 空的非活动本地后端保持可选，但非空的非活动地址同样要通过校验。
-- 新增 Load 集成测试覆盖 URL 边界及合法配置；本组 CI 结果待本次提交后确认。
+- 新增 Load 集成测试覆盖 URL 边界及合法配置；提交 `81fed06053a66e6f635889ce9909c1a7e54775ab` 的 Actions 运行 `39889800933`（success）通过完整 CI。
 
 ## 7. 中文文档与注释规范
 
@@ -213,3 +213,22 @@ docs/                        中文架构、协议和运维文档
 - 不添加逐行重复代码含义的注释；优先使用清晰命名。
 - 配置键、JSON 字段、HTTP 协议字段和 Go 标识符保持稳定，不为中文化破坏 API 兼容性。
 - 对流式响应已提交后不能修改 HTTP 状态等不直观行为，在对应代码处说明原因。
+
+## 8. 多 Agent 并行入口（新增任务，2026-10-23）
+
+### 目标与约定
+
+- 新增可选静态 YAML `agents` 配置，每条定义唯一 ID、独立 URL 前缀、Provider ID 和默认上游模型。
+- 可同时启用 `/ollama/v1/*`、`/llama/v1/*`、`/deepseek/v1/*`、`/gpt/v1/*`，分别路由到 Ollama、llama.cpp、DeepSeek、OpenAI-compatible Provider；由配置决定，不在 Handler 中硬编码厂商。
+- 现有 `/v1/*` 继续使用管理台活动 Provider，保持旧客户端兼容。
+- Agent 入口固定一个配置模型；首阶段不维护动态模型池或故障转移策略。请求体里的 model 不覆盖入口固定模型，与现有全局入口的模型选择原则一致。
+- Agent 入口复用现有 Gateway API Key 鉴权、限流、模型 ACL、请求审计、Pipeline、流式转发和统一 Provider 错误语义；供应商 API Key 仍只来自服务端配置。
+- Provider 路由元数据由 HTTP 路由层写入私有 Context，外部 Header/body 无法修改选择结果；Agent 请求不会更新全局活动 Provider。
+
+### 实施与验收
+
+1. 启动时校验 Agent ID、path_prefix 唯一性、保留路径冲突、Provider 可用性和 default_model。
+2. `/{prefix}/v1/models` 只返回入口绑定的模型，并执行调用方模型 ACL。
+3. 测试前缀剥离、审计 URL 还原与 query 凭据脱敏、Agent 路由选择和全局活动 Provider 不变。
+4. 后续评估 Agent 级模型别名/映射、独立访问策略、运行时热更新和受控故障转移。
+5. 每个功能组提交后核对最新远程 HEAD 与对应 Actions；CI 未通过不能标记验收。

@@ -87,3 +87,31 @@ providers:
   #     default_model: "gpt-4.1"
   #     allow_insecure_http: false
   #     allow_private_network: false
+
+
+# 多 Agent 独立入口（可选）。每个入口固定一个 Provider 和默认模型。
+# 配置好 deepseek/openai 等 OpenAI-compatible Provider 后即可同时暴露：
+# /ollama/v1/*、/llama/v1/*、/deepseek/v1/*、/gpt/v1/*。
+# 现有 /v1/* 入口不受影响，仍使用管理台当前活动 Provider。
+agents: []
+# agents:
+#   - id: ollama
+#     enabled: true
+#     path_prefix: /ollama
+#     provider_id: ollama
+#     default_model: "qwen3:8b"
+#   - id: llama
+#     enabled: true
+#     path_prefix: /llama
+#     provider_id: llamacpp
+#     default_model: "local-model.gguf"
+#   - id: deepseek
+#     enabled: true
+#     path_prefix: /deepseek
+#     provider_id: deepseek
+#     default_model: "deepseek-chat"
+#   - id: gpt
+#     enabled: true
+#     path_prefix: /gpt
+#     provider_id: openai
+#     default_model: "gpt-4.1"

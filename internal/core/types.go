@@ -39,6 +39,8 @@ type Request struct {
 	Body         []byte
 	ServiceModel       string
 	ServiceProviderID  string // 网关内部调用可固定 Provider；外部 HTTP 请求不会设置此字段。
+	RouteProviderID    string // 由 Agent URL 路由层写入的受信任 Provider ID，不读取客户端 Header/body。
+	RouteDefaultModel  string // Agent 路由的默认上游模型 ID。
 	Sink               ResponseSink
 	Started      time.Time
 	ClientIP     string

@@ -58,5 +58,78 @@ func (c *Config) validateProviderConfigs() error {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): %w", i, item.ID, err)
 		}
 	}
+	return c.validateAgentRouteConfigs()
+}
+
+
+// AgentRouteConfig 定义一个独立的 OpenAI-compatible 入口。
+// 多个 Agent 可同时固定到不同 Provider，不依赖管理台的全局活动上游。
+type AgentRouteConfig struct {
+	ID           string `yaml:"id"`
+	Enabled      bool   `yaml:"enabled"`
+	PathPrefix   string `yaml:"path_prefix"`
+	ProviderID   string `yaml:"provider_id"`
+	DefaultModel string `yaml:"default_model"`
+}
+
+var agentPathPrefixPattern = regexp.MustCompile(`^/[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// validateAgentRouteConfigs 在启动时检查 Agent ID、路径和 Provider 引用。
+// 禁止路由覆盖网关保留路径，防止同一 URL 在管理 API 与推理路由间发生歧义。
+func (c *Config) validateAgentRouteConfigs() error {
+	seenIDs := make(map[string]bool)
+	seenPrefixes := make(map[string]bool)
+	for i := range c.Agents {
+		route := &c.Agents[i]
+		route.ID = strings.ToLower(strings.TrimSpace(route.ID))
+		route.PathPrefix = strings.TrimSpace(route.PathPrefix)
+		route.ProviderID = strings.ToLower(strings.TrimSpace(route.ProviderID))
+		route.DefaultModel = strings.TrimSpace(route.DefaultModel)
+
+		if !providerIDPattern.MatchString(route.ID) {
+			return fmt.Errorf("agents[%d].id is invalid", i)
+		}
+		if !agentPathPrefixPattern.MatchString(route.PathPrefix) {
+			return fmt.Errorf("agents[%d].path_prefix must be a single lowercase path segment such as /ollama", i)
+		}
+		switch route.PathPrefix {
+		case "/api", "/v1", "/static", "/health":
+			return fmt.Errorf("agents[%d].path_prefix conflicts with a reserved gateway path", i)
+		}
+		if !providerIDPattern.MatchString(route.ProviderID) {
+			return fmt.Errorf("agents[%d].provider_id is invalid", i)
+		}
+		if seenIDs[route.ID] {
+			return fmt.Errorf("agents[%d] duplicates Agent ID %q", i, route.ID)
+		}
+		if seenPrefixes[route.PathPrefix] {
+			return fmt.Errorf("agents[%d] duplicates path_prefix %q", i, route.PathPrefix)
+		}
+		seenIDs[route.ID] = true
+		seenPrefixes[route.PathPrefix] = true
+		if !route.Enabled {
+			continue
+		}
+		if route.DefaultModel == "" || strings.Contains(route.DefaultModel, "$"+"{") || strings.ContainsAny(route.DefaultModel, "\r\n") {
+			return fmt.Errorf("agents[%d] (%s): default_model is required and must be a resolved single line", i, route.ID)
+		}
+		switch route.ProviderID {
+		case "llamacpp", "ollama":
+			if c.BaseURLForBackend(route.ProviderID) == "" {
+				return fmt.Errorf("agents[%d] (%s): Provider %q has no configured base URL", i, route.ID, route.ProviderID)
+			}
+		default:
+			found := false
+			for _, configured := range c.Providers.OpenAICompatible {
+				if configured.Enabled && configured.ID == route.ProviderID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("agents[%d] (%s): Provider %q is not configured and enabled", i, route.ID, route.ProviderID)
+			}
+		}
+	}
 	return nil
 }

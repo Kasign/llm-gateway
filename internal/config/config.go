@@ -73,6 +73,7 @@ type Config struct {
 	Providers struct {
 		OpenAICompatible []OpenAICompatibleProviderConfig `yaml:"openai_compatible"`
 	} `yaml:"providers"`
+	Agents []AgentRouteConfig `yaml:"agents"`
 	Download struct {
 		HFBaseURL        string `yaml:"hf_base_url"`
 		OllamaLibraryURL string `yaml:"ollama_library_url"`

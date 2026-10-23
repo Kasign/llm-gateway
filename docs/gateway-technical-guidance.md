@@ -521,3 +521,12 @@ URL 路径前缀仍然合法，例如 `http://llama-cpp:8080/openai/v1`。空的
 4. 最后再加自动回退、预算、成本和更复杂的多厂商策略。
 
 不要在日志热路径还会延迟 Flush、内容留存策略还不清晰、审计队列还可能丢关键记录时，直接开始大量接入供应商。否则每多接一种 API 协议，排查错误和验证调用结果都会更加困难。
+
+
+## 多 Agent 独立入口
+
+多 Agent 入口由配置驱动，不要求管理员每次先切换全局活动上游。`agents` 中每条记录指定 `path_prefix`、`provider_id` 和 `default_model`，例如 `/deepseek/v1/chat/completions` 与 `/ollama/v1/chat/completions` 可同时访问。
+
+入口层只绑定经过配置校验的 Provider，之后复用同一鉴权、限流、模型 ACL、请求生命周期、审计及转发 Pipeline。外部请求不能通过 Header/body 改变路由 Provider；Agent 路由不修改全局 `settings.Upstream`。原有 `/v1/*` 继续指向管理台当前选择的 Provider。
+
+首版每条入口固定一个默认模型。需要单入口下暴露多个模型时，应先设计显式别名/映射和对应的 API Key ACL，不直接信任调用方任意模型字符串，也不在流式响应提交后自动故障切换。

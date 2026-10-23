@@ -76,10 +76,15 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	defer s.callDrop(id)
 
 	sink := &responseSink{w: w}
+	routeProviderID, routeDefaultModel := "", ""
+	if route, routed := agentRouteFromContext(r.Context()); routed {
+		routeProviderID, routeDefaultModel = route.ProviderID, route.DefaultModel
+	}
 	_, err = s.pipe.Run(ctx, core.Request{
 		ID: id, Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery, Header: headerMap(r.Header), Body: body,
+		RouteProviderID: routeProviderID, RouteDefaultModel: routeDefaultModel,
 		Sink: sink, Started: start, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r),
-		UserAgent: r.UserAgent(), RequestURL: requestPublicURL(r, s.trustedProxyRanges), Guards: []core.Guard{s.allowModelsGuard(key)},
+		UserAgent: r.UserAgent(), RequestURL: agentRequestPublicURL(r, s.trustedProxyRanges), Guards: []core.Guard{s.allowModelsGuard(key)},
 	})
 	// 已经写过响应头（保活或上游数据）时不能再补 JSON 错误，否则会和流内容混在一起。
 	if err != nil && !sink.HeaderWritten() {
