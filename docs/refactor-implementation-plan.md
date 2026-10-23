@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 突发与稳态 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #2 的提交 `8a56315b1ed673f70eb8aeaefbdf7456ad565be6` 对应 Actions #141（运行 `39928285619`，success）：192 次并发突发加 1,000 次稳态请求，共 1,192 次全部成功且全部正确落库。该测试使用本机 Mock 上游，不能代表真实模型推理或生产容量；真实供应商调用仍未执行。
+> 最近一次已通过完整 CI 的功能组：Gateway 突发与稳态 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #2 的重复验收 Actions #141（运行 `39928285619`）与 #142（运行 `39928783557`）均通过：每次 192 次并发突发加 1,000 次稳态请求，共 1,192 次全部成功且全部正确落库。两轮稳态均达到约 200 req/s，但短样本的 P99 有明显波动，因此暂不设性能阈值。测试使用本机 Mock 上游，不能代表真实模型推理或生产容量；真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 97% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #141 验证 Gateway 突发 + 5 秒持续负载中 1,192 条审计记录全部落库。仍需更长持续负载、故障恢复及生产观测。 |
+| 阶段 1：日志可靠性 | 进行中 | 97% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #141/#142 两轮 Gateway 突发 + 5 秒持续负载都验证 1,192 条审计记录全部落库。仍需更长持续负载、故障恢复及生产观测。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 72% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #141 完整验收 Gateway 突发 + 5 秒稳态 HTTP 负载并上传请求负载与性能 Artifact。仍需更长时间稳态负载、错误注入和真实 Provider 验证。 |
+| 阶段 5：运行治理与 CI | 进行中 | 72% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #141/#142 全量验收 Gateway 突发 + 5 秒稳态 HTTP 负载，负载报告均已保存为 Artifact。稳态吞吐约 200 req/s，但 P99 尚有样本间波动；仍需更长时间稳态负载、错误注入和真实 Provider 验证。 |
 
 ### 已核实的历史 CI 问题
 
@@ -499,4 +499,7 @@ docs/                        中文架构、协议和运维文档
 - Go 内存观测：两阶段累计 TotalAlloc 增量 69,651,152 bytes，测试结束的 HeapAlloc 为 2,379,600 bytes。/usr/bin/time -v 报告：User CPU 2.91s、System CPU 1.16s、命令墙钟 6.59s、峰值 RSS 180,496 KiB（约 176.3 MiB），退出状态 0。这是 go test 进程包含测试初始化与清理的资源样本，不等于独立 Gateway 进程的线上 RSS。
 - GitHub Actions #141（运行 39928285619，提交 8a56315b1ed673f70eb8aeaefbdf7456ad565be6）全量通过：Go 单测、MariaDB 积压集成、该负载步骤、race detector、五项性能基线与 Artifact、go vet、Gateway 构建和前端 bundle 校验。
 - [Actions #141](https://github.com/Kasign/llm-gateway/actions/runs/39928285619)。负载报告 Artifact ID 12489709983（gateway-request-load-012da56adcb0250ff70296513d6b1e708a4a998e），性能基线 Artifact ID 12490985570；均保留 30 天，预计于 2026-11-22 过期。
+- 第二轮重复样本：Actions #142（运行 39928783557）也全量通过。突发阶段 192 次、16 并发、220ms、871.4 req/s，P50 17.02ms、P95 29.75ms、P99 37.12ms、失败 0；稳态 1,000 次目标 200 req/s、4.999s、达到 200.1 req/s，P50 3.50ms、P95 4.27ms、P99 5.23ms、失败 0。共 1,192/1,192 条审计记录成功且模型字段正确，排空约 1ms。
+- 第二轮资源记录：TotalAlloc 增量 69,394,544 bytes、结束 HeapAlloc 2,468,200 bytes；User CPU 3.21s、System CPU 1.43s、命令墙钟 6.73s、峰值 RSS 178,564 KiB（约 174.4 MiB）。负载 Artifact ID 12490352431，性能基线 Artifact ID 12490492858，预计均于 2026-11-22 过期。[Actions #142](https://github.com/Kasign/llm-gateway/actions/runs/39928783557)。
+- 两轮稳态 achieved throughput 都约为 200 req/s；但第一轮 P99 为 187.45ms，第二轮为 5.23ms，P95 分别为 7.18ms 和 4.27ms。这说明 5 秒、1,000 请求样本对尾延迟仍敏感，不应用单次结果宣称性能改善，也暂不据此设置阈值。
 - 此样本覆盖 HTTP 处理和持久化路径，但只运行 5 秒、响应由本地 Mock 生成，不能等价为真实 Provider E2E、长时间稳态容量、流式 decode 速率或生产线上压测。下一步应在相同 Runner 重复样本，再增加更长持续时长和可控延迟/错误注入。
