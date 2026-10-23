@@ -136,7 +136,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	keyName := "gateway-load-" + suffix
 	keyRepo := auth.NewRepo(db)
-	key, rawKey, err := keyRepo.Create(setupCtx, keyName, 10000, nil, nil)
+	key, rawKey, err := keyRepo.Create(setupCtx, keyName, 30000, nil, nil)
 	if err != nil {
 		_ = limiter.Close()
 		_ = db.Close()
@@ -299,9 +299,9 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		percentile(burstLatenciesMS, 0.50), percentile(burstLatenciesMS, 0.95), percentile(burstLatenciesMS, 0.99),
 		burstFailures, upstreamRequests.Load())
 
-	// 第二阶段：以 200 请求/秒目标速率持续 5 秒，测量稳态下的请求延迟与审计积压。
+	// 第二阶段：以 200 请求/秒目标速率持续 60 秒，测量稳态下的请求延迟与审计积压。
 	const (
-		sustainedRequestCount = 1000
+		sustainedRequestCount = 12000
 		sustainedInterval     = 5 * time.Millisecond
 	)
 	sustainedResults := make([]requestResult, sustainedRequestCount)
