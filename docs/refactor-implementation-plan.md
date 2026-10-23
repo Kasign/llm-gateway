@@ -341,3 +341,10 @@ docs/                        中文架构、协议和运维文档
 - 修复提交 `1339f5fb61537c08292aa44cec990c5d930401c9` 的 Actions #94（运行 `39898164924`）完整通过：`go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、三项 benchmark、artifact upload、`go vet ./...`、Gateway 构建、管理台源码构建与部署 bundle 校验。
 - CI #93（运行 `39898004302`）曾在 job 初始化前失败；本次从上一份通过验收的工作流恢复并重新插入步骤后，#94 正常创建并执行全部步骤。未修改远端历史，也未把 #93 误计为代码测试失败。
 - 后续应以同一 Go 版本/相近 Runner 进行多次采样后分析趋势；暂不设置单次 benchmark 阈值，以免 Runner 噪声造成误报。
+
+
+### 上游响应头超时故障注入（2026-10-23，待 CI）
+
+- 新增 `TestOpenAICompatibleProviderMapsResponseHeaderTimeoutTo504`，使用本地 Mock 服务接收请求但延迟响应头，缩短测试 Transport 的 `ResponseHeaderTimeout` 来真实触发 HTTP 客户端超时。
+- 覆盖 OpenAI Chat Completions 和 Anthropic Messages 两条协议：内部错误映射必须是 `provider_timeout` / HTTP 504；Anthropic 路径必须返回 `timeout_error` 信封，且不泄露目标 URL/Transport 原始诊断。
+- 本测试验证 Gateway HTTP 适配器与超时分类，不代表真实公网链路或供应商 SLA；需由本提交完整 CI 复验。

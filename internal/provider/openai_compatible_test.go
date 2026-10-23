@@ -576,6 +576,84 @@ func TestOpenAICompatibleProviderMapsConnectionRefusedTo502(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleProviderMapsResponseHeaderTimeoutTo504(t *testing.T) {
+	started := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		// 模拟上游接收请求但迟迟不发送响应头；Transport 的 ResponseHeaderTimeout 应中断等待。
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	transport, ok := p.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("HTTP transport type = %T, want *http.Transport", p.client.Transport)
+	}
+	transport.ResponseHeaderTimeout = 30 * time.Millisecond
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "OpenAI Chat Completions", path: "/v1/chat/completions"},
+		{name: "Anthropic Messages", path: "/v1/messages"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writer := httptest.NewRecorder()
+			result, forwardErr := p.Forward(context.Background(), InferenceCall{
+				Writer: writer,
+				Request: httptest.NewRequest(http.MethodPost, tc.path, nil),
+				Path: tc.path,
+				Body: []byte(`{"model":"client-model","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`),
+				ModelID: "server-selected-model",
+			})
+			if forwardErr == nil {
+				t.Fatal("expected response-header timeout")
+			}
+			mapped := ToCoreError(forwardErr)
+			if mapped == nil || mapped.Status != http.StatusGatewayTimeout || mapped.Code != "provider_timeout" {
+				t.Fatalf("mapped error = %+v (raw %T), want provider_timeout/504", mapped, forwardErr)
+			}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("upstream did not receive request before response-header timeout")
+			}
+			if strings.Contains(forwardErr.Error(), server.URL) ||
+				strings.Contains(forwardErr.Error(), "timeout awaiting response headers") {
+				t.Fatalf("transport diagnostics leaked through public error: %q", forwardErr.Error())
+			}
+
+			if tc.path == "/v1/messages" {
+				if result.Status != http.StatusGatewayTimeout || writer.Code != http.StatusGatewayTimeout {
+					t.Fatalf("Anthropic result/writer status = %d/%d, want 504", result.Status, writer.Code)
+				}
+				var payload struct {
+					Type  string `json:"type"`
+					Error struct {
+						Type    string `json:"type"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(writer.Body.Bytes(), &payload); err != nil {
+					t.Fatalf("Anthropic timeout body is not JSON: %v", err)
+				}
+				if payload.Type != "error" || payload.Error.Type != "timeout_error" ||
+					payload.Error.Message != "upstream provider request failed" {
+					t.Fatalf("unexpected Anthropic timeout envelope: %+v", payload)
+				}
+				if strings.Contains(writer.Body.String(), server.URL) || strings.Contains(writer.Body.String(), "timeout awaiting response headers") {
+					t.Fatalf("transport diagnostics leaked through Anthropic response: %q", writer.Body.String())
+				}
+			}
+		})
+	}
+}
+
 func TestOpenAICompatibleTransportErrorMapsDeadlineTo504(t *testing.T) {
 	p := &OpenAICompatibleProvider{id: "test-remote"}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
