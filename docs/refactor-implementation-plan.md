@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #3 的 Actions #145（运行 `39929748367`）与 #146（运行 `39930263577`）均全量通过；每轮 192 次突发加 12,000 次稳态请求，共 12,192 次全部成功且正确落库，稳态均达到 200 req/s。两轮 P95 分别为 5.76 ms 和 7.21 ms，P99 分别为 8.23 ms 和 42.62 ms，审计排空时间分别为 4.359 秒和约 2 毫秒。虽然无丢记录，尾延迟与排空时间仍有波动；测试使用本机 Mock 上游，不代表真实模型推理或生产容量，真实供应商调用仍未执行。
+> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态 HTTP 请求负载、Redis 鉴权/限流及真实 MariaDB 审计联动。PR #3 的 Actions #145（运行 `39929748367`）与 #146（运行 `39930263577`）均全量通过；每轮 192 次突发加 12,000 次稳态请求，共 12,192 次全部成功且正确落库，稳态均达到 200 req/s。两轮 P95 分别为 5.76 ms 和 7.21 ms，P99 分别为 8.23 ms 和 42.62 ms，审计排空时间分别为 4.359 秒和约 2 毫秒。当前新增可控上游延迟与 429/503 故障注入尚待 CI 验收；此前负载使用本机 Mock 上游，不代表真实模型推理或生产容量，真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 98% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #145/#146 两轮 60 秒负载的 12,192 条请求记录均全部落库。仍需更长持续负载、故障恢复与生产观测。 |
+| 阶段 1：日志可靠性 | 进行中 | 98% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #134 验收 MariaDB 积压排空，Actions #145/#146 两轮 60 秒负载的 12,192 条请求记录均全部落库。新增 75ms 上游延迟与 429/503 状态/审计一致性故障注入待 CI 验收；真实故障恢复与生产观测仍待。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 74% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #145/#146 两轮 60 秒 Gateway 稳态负载均无请求失败或审计丢失，报告含 P50/P95/P99、Go 内存、进程 CPU/RSS 和排空数据。仍需更长时段、故障恢复注入和真实 Provider 验证。 |
+| 阶段 5：运行治理与 CI | 进行中 | 74% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力和 MariaDB 审计积压均通过。Actions #145/#146 两轮 60 秒 Gateway 稳态负载均无请求失败或审计丢失，报告含 P50/P95/P99、Go 内存、进程 CPU/RSS 和排空数据。新增可控上游延迟与 429/503 注入，校验错误状态、Retry-After、错误正文脱敏和审计状态一致性，待 CI 验收。 |
 
 ### 已核实的历史 CI 问题
 
@@ -516,3 +516,12 @@ docs/                        中文架构、协议和运维文档
 - [Actions #145](https://github.com/Kasign/llm-gateway/actions/runs/39929748367)。60 秒负载报告 Artifact ID 12491177225（gateway-request-load-ca52af8f034fc89fcabde7ceb3ddba8b8d748ea7），性能基线 Artifact ID 12490664029；保留 30 天，预计于 2026-11-22 过期。
 - Actions #146 的第二轮 60 秒复测也全量通过：突发阶段 192 次、16 并发、664ms、289.3 req/s，P50 21.75ms、P95 388.91ms、P99 406.93ms、失败 0；稳态 12,000 次、59.999s、200.0 req/s，P50 3.96ms、P95 7.21ms、P99 42.62ms、失败 0。MariaDB 再次核对 12,192/12,192 条成功记录且模型字段正确，排空耗时约 2ms。第二轮资源：TotalAlloc 增量 699,113,120 bytes，结束 HeapAlloc 2,593,080 bytes，User CPU 12.29s、System CPU 4.65s、命令墙钟 1:03.48、峰值 RSS 184,768 KiB；负载 Artifact ID 12491686320，性能基线 Artifact ID 12491462016。[Actions #146](https://github.com/Kasign/llm-gateway/actions/runs/39930263577)。
 - 两轮 60 秒稳态均达到 200 req/s、失败为 0，MariaDB 均完整持久化 12,192 条记录；但 P99 从 8.23ms 到 42.62ms，排空时长也从 4.359s 到约 2ms。说明在当前 Runner/Mock 配置下存在尾延迟与审计积压的样本间波动，暂不据此宣称性能改善或设置硬性阈值。该合成压力测试仍不等同真实供应商 E2E、流式 decode 负载或生产线上压测。
+
+
+### Gateway 上游可控延迟与 429/503 故障注入（待 CI 验收）
+
+- 在现有真实 Gateway Handler、Redis 鉴权/限流、OpenAI-compatible Provider 和 MariaDB 审计 fixture 上增加独立故障模式 `GATEWAY_FAULT_TEST=1`。该模式绕过 60 秒常规稳态段，防止单独验证错误语义时重复消耗完整负载时长。
+- 计划并发执行 120 个请求、最大 16 并发，四种场景各 30 次：正常 200、上游固定延迟 75ms、上游 429 并带 `Retry-After: 1`、上游 503。Mock 错误体带有测试专用的敏感诊断短语，客户端响应必须保持状态码且不得回显该短语；429 的 `Retry-After` 头必须透传。
+- 测试将检查延迟场景 P50 不低于 70ms、正常/429/503 请求按预期状态结束、上游总收到 120 次请求；Flush 审计队列后查询 MariaDB，核对 Gateway 状态码和上游状态码均按预期记录为 200/429/503。
+- `.github/workflows/go-ci.yml` 增加独立的 `Gateway 上游延迟与 429/503 故障注入` 步骤，并将完整输出上传为 30 天 Artifact。代码与 workflow 已推到专用 PR 分支；在当前 Actions 结果出炉前，本节只描述预期验收项，不代表已经测试通过。
+- 这是 OpenAI-compatible JSON 路径的本机可控故障测试；不替代公网 DNS/连接异常、超时、真实供应商限流策略或生产级故障恢复演练。
