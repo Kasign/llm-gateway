@@ -144,10 +144,10 @@ docs/                        中文架构、协议和运维文档
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 95% | 分支基线与最近 CI 已核实；仍需补齐 API、配置、数据库兼容清单与可重复性能样本。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 95% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护，以及 Agent 入口拒绝请求审计 URL 前缀恢复（Actions #79 通过）。继续补 API/并发契约覆盖与性能基线。 |
+| 阶段 2：请求边界与路由 | 进行中 | 97% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并补双 Agent 并发 Provider/模型隔离（Actions #90 通过）。性能基线与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 95% | Anthropic Messages 协议头、错误类型、原始错误兼容策略、32 MB 请求体限制、响应头透传及 warm-start 状态边界均已由提交 `b3ec270` 的 Actions #85 完整 CI 验证。真实供应商端到端、DNS/连接故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 45% | CI 已增加 `go test -race ./internal/provider ./internal/server ./internal/core`，提交 `c18c20f` 的 Actions #88 完整通过；当前补充双 Agent 并发模型/Provider 隔离测试，待新 CI 验证。压力测试、延迟/内存基线、真实 Provider 故障注入仍缺。 |
+| 阶段 5：运行治理与 CI | 进行中 | 50% | CI 已增加 `go test -race ./internal/provider ./internal/server ./internal/core`；取消/Finish 并发测试与 400 次双 Agent 并发隔离测试均由 Actions #90（提交 `d41e34eb343439b536009a275969c0c49bfdc842`）验证通过。压力测试、延迟/内存基线、真实 Provider 故障注入仍缺。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. 已补取消/Finish 线性化并发测试及 race detector；本轮增加 400 个并发 Agent 模型解析调用，核对 DeepSeek/OpenAI Provider 与默认模型不串线，待本提交 CI 验证。之后准备可复现的延迟、内存和并发基线。
+2. **并发契约已通过 CI**：取消/Finish 线性化测试与 400 个双 Agent 并发模型解析均通过 Actions #90；同时 `go test -race ./internal/provider ./internal/server ./internal/core` 通过。下一步准备可复现的延迟、内存和并发基线。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 受控重试/故障转移必须确认响应尚未提交；SSE 输出开始后禁止切换上游。
@@ -284,19 +284,26 @@ docs/                        中文架构、协议和运维文档
 - CI #84（运行 `39896121255`）在修正 `safeBody` 编译错误后继续发现新增 Server 测试将嵌入的 `core.Request` 字段写在 `core.State` 顶层。按 `internal/core/types.go` 的真实类型定义改为 `Request: core.Request{...}`；该问题仅在测试编译阶段暴露，下一次 CI 需重新验证全量测试及后续构建步骤。
 
 
-### 并发取消与 Finish 竞态回归（2026-10-23，待 CI）
+### 并发取消与 Finish 竞态回归（2026-10-23，CI 已通过）
 
 - 新增 `TestRunCancelsConcurrentCancelAndFinishAreLinearized`，500 轮并发竞争 Cancel/MarkFinishing，验证线性化不变量：取消被接受则 Finish 必须观察到取消；Finish 先开始则迟到取消不得取消 context。
 - GitHub Actions 新增 `go test -race ./internal/provider ./internal/server ./internal/core`，在既有常规单测之后验证 Provider、请求生命周期和 Pipeline 核心包的数据竞态。
-- 该组以提交前完整 CI #86（文档提交 `7a506f50b0cc90b3ace1afbb8e79f1f506a19394`，运行 `39896367757`，success）为基线。本轮并发与 race 检查需要由新提交 CI 通过后再验收。
+- 基线为完整 CI #86（文档提交 `7a506f50b0cc90b3ace1afbb8e79f1f506a19394`，运行 `39896367757`，success）；后续 race detector 首次发现旧测试回调数据竞态，已修复并在 CI #88（运行 `39896961918`，success）通过复验。CI #90 也重新通过相同 race 检查。
 
 
 - CI #87（运行 `39896716139`）的 race detector 揭示既有 `TestRepeatKeepaliveStopsOnWriteError` 测试回调与测试 goroutine 间对普通变量的无同步读写。提交 `c18c20f2f47885522cec40cf045d72966d3a1f78` 将回调结果改为缓冲 channel；其完整 CI #88（运行 `39896961918`）中 `go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...`、Gateway 构建与前端 bundle 校验全部通过。
 
 
-### 双 Agent 并发路由隔离测试（2026-10-23，待 CI）
+### 双 Agent 并发路由隔离测试（2026-10-23，CI 已通过）
 
 - 新增 `TestConcurrentAgentRoutesKeepProviderAndModelIsolation`，对两组固定路由并发执行共 400 次模型解析。
 - 每个请求的客户端 `model` 故意与路由模型不同；验收条件是每次结果都必须命中该 Agent 固定的 Provider ID、默认模型，且不能修改全局活动 Provider。
 - 此测试只验证路由选择和并发隔离，不触发真实上游网络请求，也不代替供应商端到端测试。
-- 基线：`c18c20f2f47885522cec40cf045d72966d3a1f78` 的 Actions #88（运行 `39896961918`）通过含 race detector 的完整流水线。本项由新提交触发的 CI 验证。
+- 基线：`c18c20f2f47885522cec40cf045d72966d3a1f78` 的 Actions #88（运行 `39896961918`）通过含 race detector 的完整流水线。本项由提交 `d41e34eb343439b536009a275969c0c49bfdc842` 的 Actions #90（运行 `39897322058`）验证通过；普通测试、race、vet、Gateway build 与前端构建/静态检查全部成功。
+
+
+### 契约清单文档验收（2026-10-23）
+
+- `docs/api-config-db-contracts.md` 与 README 链接在提交 `96f25fd29c2eef1e5b2ad061f96926d8877aeeb2` 中完成；对应 Actions #89（运行 `39897166275`）通过。
+- 契约清单明确了 API 分组、Agent 路由固定语义、配置加载与热更新边界、当前六张必需表、缺少版本化迁移账本的风险，以及 Gateway/上游 HTTP 状态和流式提交边界。
+- 此文档为现状索引，不替代 OpenAPI；下一步按优先级补性能基线与远程 Provider 网络故障测试。
