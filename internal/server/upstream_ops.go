@@ -11,9 +11,6 @@ import (
 )
 
 // SwitchProxyUpstream 保存新上游到数据库并立即生效；可选在新后端加载指定模型。
-// 换后端时不沿用另一个后端的模型名（GGUF 名在 Ollama 上无效）。先恢复该后端上次的模型；没有则采用它当前已加载或唯一的模型。
-// SwitchProxyUpstream updates which backend receives /v1 proxy traffic and optionally loads a model there.
-// SwitchProxyUpstream 保存新上游到数据库并立即生效；可选在新后端加载指定模型。
 // 配置更新阶段与模型自动采纳短暂互斥；实际网络加载不持锁，避免加载成功回调死锁。
 // 换后端时不沿用另一个后端的模型名（GGUF 名在 Ollama 上无效）。
 func (s *Server) SwitchProxyUpstream(ctx context.Context, u settings.Upstream, loadModelID string) error {

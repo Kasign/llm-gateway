@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/llama"
-	"gfunc (s *Server) llamacppAdminClient() (*llama.Client, string, error) {
+	"github.com/whl/llm-gateway/internal/settings"
+)
+
+func (s *Server) llamacppAdminClient() (*llama.Client, string, error) {
 	base := strings.TrimSpace(s.baseURLForBackend("llamacpp"))
 	if base == "" {
 		return nil, "", errors.New("未配置 LLAMA_CPP_BASE_URL")
@@ -52,16 +55,14 @@ func (s *Server) maybeUpdateActiveUpstreamModelForSnapshot(ctx context.Context, 
 	if backend == "" || modelName == "" || !strings.EqualFold(strings.TrimSpace(expected.Backend), backend) {
 		return
 	}
+
 	s.upstreamChangeMu.Lock()
 	defer s.upstreamChangeMu.Unlock()
 	current := s.effectiveUpstream()
 	if !sameUpstreamRoute(current, expected) {
 		return
 	}
-	byBackend := make(map[string]string, len(current.ModelsByBackend)+1)
-	for id, name := range current.ModelsByBackend {
-		byBackend[id] = name
-	}
+	byBackend := copyBackendModels(current.ModelsByBackend)
 	byBackend[backend] = modelName
 	current.ModelsByBackend = byBackend
 	current.ModelName = modelName

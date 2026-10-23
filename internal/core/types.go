@@ -37,9 +37,9 @@ type Request struct {
 	RawQuery     string // 原始查询字符串单独保存，避免影响路由匹配与协议判断。
 	Header       map[string][]string
 	Body         []byte
-	ServiceModel      string
-	ServiceProviderID string // 网关内部调用可固定 Provider；外部 HTTP 请求不会设置此字段。
-	Sink              ResponseSink
+	ServiceModel       string
+	ServiceProviderID  string // 网关内部调用可固定 Provider；外部 HTTP 请求不会设置此字段。
+	Sink               ResponseSink
 	Started      time.Time
 	ClientIP     string
 	ClientName   string
