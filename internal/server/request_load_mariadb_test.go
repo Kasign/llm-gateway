@@ -376,7 +376,8 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query persisted audit results: %v", err)
 	}
-	expectedTotalRequests := totalRequests + sustainedRequestCount
+	// expectedTotalRequests 已覆盖突发与稳态两个阶段。
+
 	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests {
 		t.Fatalf("audit rows = %d, successful = %d, correct model = %d; want %d for each", persisted, successful, modelMatched, expectedTotalRequests)
 	}
