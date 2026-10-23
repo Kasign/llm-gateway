@@ -163,13 +163,129 @@ var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 var configEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 func expandConfigEnv(raw string) string {
-	return configEnvRef.ReplaceAllStringFunc(raw, func(m string) string {
-		name := m[2 : len(m)-1]
-		if v, ok := os.LookupEnv(name); ok {
-			return v
+	// 先解析 YAML，再替换字符串标量，最后让 YAML encoder 负责转义引号、反斜杠、冒号和换行。
+	// 不能在原始文本中直接插入 secret，否则含引号/换行的环境变量可能破坏配置结构。
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		// 保留原文，让 Config.Load 的正式解析路径返回带上下文的 YAML 错误。
+		return raw
+	}
+	expandConfigEnvNode(&document)
+	expanded, err := yaml.Marshal(&document)
+	if err != nil {
+		return raw
+	}
+	return string(expanded)
+}
+
+func expandConfigEnvNode(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			expandConfigEnvNode(child)
 		}
-		return m
-	})
+	case yaml.MappingNode:
+		// MappingNode 的 Content 按 key/value 成对排列。只展开 value，配置键名保持固定。
+		for i := 1; i < len(node.Content); i += 2 {
+			expandConfigEnvNode(node.Content[i])
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			expandConfigEnvNode(child)
+		}
+	case yaml.ScalarNode:
+		if node.Tag != "!!str" {
+			return
+		}
+		node.Value = configEnvRef.ReplaceAllStringFunc(node.Value, func(m string) string {
+			name := m[2 : len(m)-1]
+			if value, ok := os.LookupEnv(name); ok {
+				return value
+			}
+			// 保留占位符，后续字段级校验会拒绝仍未解析的必需配置。
+			return m
+		})
+	}
+}
+
+// clearUnresolvedPlaceholder 清除允许回退/可选的字段中的未解析占位符，避免把占位字符串当作真实配置使用。
+func clearUnresolvedPlaceholder(value *string) {
+	if value != nil && strings.Contains(*value, "${") {
+		*value = ""
+	}
+}
+
+// validateResolvedConfigEnv 不打印配置值或密钥，只报告尚未展开的字段路径。
+// 禁用的远程 Provider 不参与运行，可保留其未配置的 URL/Key；启用的 Provider 必须全部解析成功。
+func validateResolvedConfigEnv(c *Config) error {
+	check := func(field, value string) error {
+		if strings.Contains(value, "${") {
+			return fmt.Errorf("config field %s contains an unresolved environment variable placeholder", field)
+		}
+		return nil
+	}
+	checks := []struct {
+		field string
+		value string
+	}{
+		{"server.host", c.Server.Host},
+		{"auth.admin_api_key", c.Auth.AdminAPIKey},
+		{"auth.admin_username", c.Auth.AdminUsername},
+		{"auth.admin_password", c.Auth.AdminPassword},
+		{"auth.admin_password_hash", c.Auth.AdminPasswordHash},
+		{"database.host", c.Database.Host},
+		{"database.name", c.Database.Name},
+		{"database.user", c.Database.User},
+		{"database.password", c.Database.Password},
+		{"database.migration_file", c.Database.MigrationFile},
+		{"redis.addr", c.Redis.Addr},
+		{"redis.password", c.Redis.Password},
+		{"llama.backend", c.Llama.Backend},
+		{"llama.llamacpp_base_url", c.Llama.LlamaCppBaseURL},
+		{"llama.ollama_base_url", c.Llama.OllamaBaseURL},
+		{"llama.upstream_api_key", c.Llama.UpstreamAPIKey},
+		{"llama.warm_start_comment", c.Llama.WarmStartComment},
+		{"storage.models_dir", c.Storage.ModelsDir},
+		{"download.hf_base_url", c.Download.HFBaseURL},
+		{"download.ollama_library_url", c.Download.OllamaLibraryURL},
+		{"download.user_agent", c.Download.UserAgent},
+	}
+	for _, item := range checks {
+		if err := check(item.field, item.value); err != nil {
+			return err
+		}
+	}
+	for i, proxy := range c.Server.TrustedProxies {
+		if err := check(fmt.Sprintf("server.trusted_proxies[%d]", i), proxy); err != nil {
+			return err
+		}
+	}
+	if c.Database.AutoInit {
+		if err := check("database.admin_user", c.Database.AdminUser); err != nil {
+			return err
+		}
+		if err := check("database.admin_password", c.Database.AdminPassword); err != nil {
+			return err
+		}
+	}
+	for i, item := range c.Providers.OpenAICompatible {
+		if !item.Enabled {
+			continue
+		}
+		prefix := fmt.Sprintf("providers.openai_compatible[%d].", i)
+		for _, field := range []struct{ name, value string }{
+			{"id", item.ID}, {"base_url", item.BaseURL}, {"api_key", item.APIKey},
+			{"api_key_header", item.APIKeyHeader}, {"default_model", item.DefaultModel},
+		} {
+			if err := check(prefix+field.name, field.value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Load 读取并校验配置文件，填充默认值；校验失败会直接返回错误，避免带着错误配置启动。
@@ -187,6 +303,15 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	// Web 登录项允许由独立环境变量覆盖；之后清掉可选登录字段里的未解析占位符。
+	applyAuthEnv(&c)
+	clearUnresolvedPlaceholder(&c.Auth.AdminUsername)
+	clearUnresolvedPlaceholder(&c.Auth.AdminPassword)
+	clearUnresolvedPlaceholder(&c.Auth.AdminPasswordHash)
+	// 非活动的本地后端可以不配置。活动后端缺少地址会在下面的 BaseURL 检查中失败。
+	clearUnresolvedPlaceholder(&c.Llama.LlamaCppBaseURL)
+	clearUnresolvedPlaceholder(&c.Llama.OllamaBaseURL)
+
 	if c.Server.Host == "" {
 		c.Server.Host = "127.0.0.1"
 	}
@@ -265,6 +390,9 @@ func Load(path string) (*Config, error) {
 		c.Llama.UpstreamAPIKey = ""
 	}
 	c.Llama.UpstreamAPIKey = strings.TrimSpace(c.Llama.UpstreamAPIKey)
+	if err := validateResolvedConfigEnv(&c); err != nil {
+		return nil, err
+	}
 	if c.Database.Host == "" {
 		return nil, errors.New("database.host is required")
 	}
@@ -289,7 +417,6 @@ func Load(path string) (*Config, error) {
 	if c.Auth.AdminAPIKey == "" || c.Auth.AdminAPIKey == "CHANGE_ME_TO_A_LONG_RANDOM_ADMIN_KEY" {
 		return nil, errors.New("auth.admin_api_key must be changed from the example value")
 	}
-	applyAuthEnv(&c)
 	if err := c.validateProviderConfigs(); err != nil {
 		return nil, err
 	}
