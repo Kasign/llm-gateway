@@ -138,14 +138,14 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a`，GitHub Actions #116（运行 `39906558311`，success）。新增 Anthropic Messages 真实端点 opt-in 用例；默认跳过路径、Go 单测、race、性能基准及 Artifact、vet、Gateway 构建和前端 bundle 检查全部通过。真实供应商调用仍未执行。
+> 最近一次已验收代码功能组：提交 `8f578d9a7b5ec3e426e830533116cd4cf874c518`，GitHub Actions #120（运行 `39918244515`，success）。新增多 Agent Responses API JSON/SSE data-plane 集成测试；Go 单测、race、性能基线与 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过。该集成测试使用本机 Mock Provider，真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
-| 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 JSON/SSE 往返、各自密钥及模型固定。仍需更多协议/真实供应商契约验证。 |
+| 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
 | 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector、请求取消、双 Agent 并发解析与双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 已连续多次成功运行。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过，且 race detector 通过。当前新增 Provider 转发、Agent 模型解析、请求分析三项 `-benchmem` 基线，由 CI artifact 记录 `ns/op`、`B/op`、`allocs/op`；首次测量待本提交 CI。
+2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过，且 race detector 通过。当前新增 Provider 转发、Agent 模型解析、请求分析三项 `-benchmem` 基线，由 CI Artifact 记录 `ns/op`、`B/op`、`allocs/op`；Actions #120 已成功生成最新基线。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
@@ -451,3 +451,12 @@ docs/                        中文架构、协议和运维文档
 - 新增 `TestOpenAIResponsesRealEndpointE2E`，单独用 `LLM_GATEWAY_RESPONSES_E2E=1` 开启，复用 `LLM_GATEWAY_E2E_BASE_URL`、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL` 和可选 API Key Header。默认不联网。
 - 请求真实 `/v1/responses` 路径，发送一次短输入并把输出限制为 8 token、90 秒截止，验证 HTTP 200 及 Responses 的 `object/id/status/output` 封套。密钥和响应正文不写日志。
 - CI 仅验证编译和默认跳过路径；真实 OpenAI/Codex 端点尚未在当前环境调用。
+
+
+### 多 Agent Responses API data-plane 集成（2026-10-23，CI #120 已通过）
+
+- 新增 internal/server/agent_responses_test.go 中的 TestAgentRoutesForwardResponsesJSONAndSSEToConfiguredProviders，通过真实 agentRouteHandler、core.Pipeline、inferenceForwarder 与两个本机 HTTP Mock Provider 验证完整请求往返。
+- 同时覆盖 /deepseek/v1/responses 和 /openai/v1/responses 的 JSON、SSE 成功路径；检查 Agent 前缀去除后转发为 /v1/responses、原始 query 保留、请求体中的客户端 model 被 Agent 固定模型覆盖、stream 标志一致，以及各自上游凭据互不串用。
+- 测试带入调用方 Authorization 与 X-API-Key，确认二者不会作为凭据泄露给远程 Provider；同时确认 Agent 请求不会修改全局活动 Provider。
+- 首次提交 bc07bf2e67c1f2df162232550c67ce8ed74db31a 对应 CI #119 因新增测试文件中存在未使用的 context 导入而在编译阶段失败，没有执行测试。删除该导入后，修复提交 8f578d9a7b5ec3e426e830533116cd4cf874c518 对应 Actions #120（运行 39918244515）全量通过：go test ./...、go test -race ./internal/provider ./internal/server ./internal/core、三项性能基线及 Artifact 上传、go vet ./...、Gateway 构建、管理台源码构建和部署 bundle 校验。
+- Actions #120 完整记录与性能 Artifact：https://github.com/Kasign/llm-gateway/actions/runs/39918244515。该集成使用本机 Mock Provider，不代表真实 OpenAI、DeepSeek、Codex 或其他供应商端点已经通过 E2E；真实端点用例仍为 opt-in，需在用户控制、配置实际凭据的环境中单独执行。
