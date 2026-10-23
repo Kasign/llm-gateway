@@ -140,6 +140,6 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 `internal/provider/openai_compatible_e2e_test.go` 提供显式 opt-in 的真实 Chat Completions 连通/鉴权检查。必须通过本地环境变量开启，CI 默认跳过，密钥不写入仓库。它覆盖真实 HTTPS 端点上的 Provider 请求与响应格式，但不能替代不同供应商型号、账单、限流策略或 Anthropic 原生协议的单独验收。
 
 
-### Responses API 成功路径（待 CI）
+### Responses API 成功路径（CI #114 已通过）
 
-`internal/provider/openai_compatible_test.go` 新增 Mock HTTP 测试，验证 `/v1/responses` JSON/SSE 成功路径、query 与 `OpenAI-Beta` 头、服务端 model 覆盖、Provider key 与调用方凭据隔离、Request-Id 响应头和原始 SSE 字节透明传输。该测试是 Provider adapter 契约测试，并非真实 OpenAI/Codex 服务端到端。
+`internal/provider/openai_compatible_test.go` 新增 Mock HTTP 测试，验证 `/v1/responses` JSON/SSE 成功路径、query 与 `OpenAI-Beta` 头、服务端 model 覆盖、Provider key 与调用方凭据隔离、Request-Id 响应头和原始 SSE 字节透明传输。Actions #114（提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a`）全量 CI 已通过。该测试是 Provider adapter 契约测试，并非真实 OpenAI/Codex 服务端到端。

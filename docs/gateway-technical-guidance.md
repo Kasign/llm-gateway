@@ -623,6 +623,11 @@ go test ./internal/provider -run '^TestOpenAICompatibleProviderRealEndpointE2E$'
 测试只发出一条短 Chat Completions 请求（最多 8 个输出 token，90 秒超时），不打印 API Key、原始上游错误正文或响应内容。不要把真实密钥写入 shell 历史、仓库文件或 CI 日志；未明确开启时测试不产生任何网络请求。当前 CI 未配置真实供应商密钥，所以只能验证该测试编译及默认跳过，真实端点结果仍需在用户控制的环境执行。
 
 
-### Responses API JSON/SSE 成功契约（待 CI）
+### Responses API JSON/SSE 成功契约（CI #114 已通过）
 
-新增 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`，使用 loopback Mock Provider 覆盖成功 JSON 与 SSE。该用例检查客户端 model 由网关选择的模型 ID 覆盖，出站 `OpenAI-Beta` 与 query 透传，Provider 的 Authorization 凭据与调用方 `Authorization`/`X-API-Key` 互相隔离，以及 Response-Id/Request-Id 和原始 SSE 序列。真实 OpenAI Responses/Codex 端点仍需单独验证。
+新增 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`，使用 loopback Mock Provider 覆盖成功 JSON 与 SSE。该用例检查客户端 model 由网关选择的模型 ID 覆盖，出站 `OpenAI-Beta` 与 query 透传，Provider 的 Authorization 凭据与调用方 `Authorization`/`X-API-Key` 互相隔离，以及 Response-Id/Request-Id 和原始 SSE 序列。Actions #114 已通过这两条 Mock HTTP 契约测试；真实 OpenAI Responses/Codex 端点仍需单独验证。
+
+
+### Responses API JSON/SSE 测试验收（CI #114）
+
+提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a` 的 Actions #114（运行 `39906018427`）通过 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`。该测试覆盖成功 JSON 与流式 SSE，验证路径/query、`OpenAI-Beta`、`Accept`、stream 标志、服务端 model 覆盖、Provider Authorization 与调用方凭据隔离、Request-Id 和响应内容透明转发。仍未用真实 OpenAI/Codex 密钥执行真实公网 E2E。

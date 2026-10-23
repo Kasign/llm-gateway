@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`，GitHub Actions #108（运行 `39904722392`，success）。新增 Agent `/v1/models` 完整 HTTP 鉴权/ACL/RPM 集成；完整 Go 单测、race、性能基准与 Artifact、vet、Gateway 构建和前端 bundle 校验通过。
+> 最近一次已验收代码功能组：提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a`，GitHub Actions #114（运行 `39906018427`，success）。新增 Responses API JSON/SSE 成功路径契约，修复并验收默认跳过的真实 Provider E2E 用例；完整 Go 单测、race、性能基准及 Artifact、vet、Gateway 构建和前端 bundle 检查全部通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -409,7 +409,7 @@ docs/                        中文架构、协议和运维文档
 - 新增 `TestOpenAICompatibleProviderRealEndpointE2E`，默认 `t.Skip`，仅当 `LLM_GATEWAY_PROVIDER_E2E=1` 时发起真实网络请求；要求本地配置 HTTPS BaseURL、API Key 与 Model。API Key 不进入代码、日志或测试输出。
 - 请求走实际 `OpenAICompatibleProvider.Forward` 和安全 HTTP Transport，发送极短、无用户数据的 Chat Completions 请求，并检查 HTTP 200 与可解析的 choices。默认请求体最多请求 8 个输出 token，90 秒上下文截止。
 - 环境变量：`LLM_GATEWAY_E2E_BASE_URL`（例如供应商的 HTTPS `/v1` Base URL）、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL`；可选 `LLM_GATEWAY_E2E_API_KEY_HEADER`（留空则采用默认 Authorization 方式）。
-- 本提交未在当前执行环境中配置或调用真实供应商密钥，因此该用例的真实公网 E2E 状态仍是待运行；CI 只验证默认跳过路径与编译，其余 Provider 行为仍由 Mock 测试覆盖。
+- 本提交未在当前执行环境中配置或调用真实供应商密钥，因此该用例的真实公网 E2E 状态仍是待运行；CI #111 已验证默认跳过路径和编译，不会发起真实网络请求。真实供应商响应、计费、权限、限流和端到端 SLA 仍需用户控制的环境单独验收。
 
 
 ### 真实 Provider E2E 用例首轮 CI 复核（2026-10-23）
@@ -418,12 +418,12 @@ docs/                        中文架构、协议和运维文档
 - 已移除错误字段。该失败只说明 E2E 测试夹具无法编译，没有发起真实供应商请求；修复提交会重新跑全量 CI。真实端点验收仍要求用户在本地显式设置 opt-in 环境变量和自己的 API Key。
 
 
-### Responses API 成功 JSON/SSE 数据面契约（2026-10-23，待 CI）
+### Responses API 成功 JSON/SSE 数据面契约（2026-10-23，CI #114 已通过）
 
 - 新增 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`，通过真实 Provider HTTP adapter 与本地 Mock 上游分别走非流式 JSON、流式 SSE 两条成功路径。
 - 验证 `/v1/responses` 路径、原始 query、`OpenAI-Beta` 透传、`Accept` 和 stream 模式匹配、客户端 model 被服务端选择的模型覆盖、Provider Authorization 凭据覆盖调用方凭据、调用方 `X-API-Key` 不透传。
 - JSON 校验 response ID/model/status/output；SSE 校验事件序列和内容逐字节透明转发、`Request-Id` 与 `text/event-stream` 响应头。
-- 当前上游仍是 loopback Mock，不代表真实 OpenAI Responses/Codex 端点 E2E。需由本提交完整 CI 通过后验收。
+- 上游使用 loopback Mock，不代表真实 OpenAI Responses/Codex 端点 E2E。提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a` 对应 Actions #114（运行 `39906018427`）已通过完整 CI：常规测试、race detector、性能基准与 Artifact、`go vet`、Gateway 构建、管理台源码构建和前端 bundle 校验均成功。
 
 
 ### Responses API 测试夹具二次 Review（2026-10-23）
