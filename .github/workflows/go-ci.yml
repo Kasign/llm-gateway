@@ -55,6 +55,19 @@ jobs:
       - name: MariaDB 审计积压集成测试
         run: go test -count=1 -run TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites -v ./internal/audit
 
+      - name: Gateway 并发请求与真实审计负载
+        run: |
+          set -o pipefail
+          /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-request-load.txt
+
+      - name: 保存 Gateway 请求负载产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-request-load-${{ github.sha }}
+          path: /tmp/gateway-request-load.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
