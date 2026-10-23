@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `27e165860efe579101d0594f1e34d5c283a9cce7`，GitHub Actions #123（运行 `39919200540`，success）。多 Agent Responses JSON/SSE 集成与两项观察器热路径基准均已合入；全量 Go 单测、race、性能基线与 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过。供应商请求使用本机 Mock，真实供应商调用仍未执行。
+> 最近一次已验收代码功能组：提交 `79e295f8cbf33226453bb8ad1545d740a2ec4273`，GitHub Actions #128（运行 `39922580011`，success）。新增审计队列满载与实时会话并发压力测试，并将 `audit/live` 纳入 race detector；全量 Go 单测、race、五项性能基线与 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过。真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #123 新增 SSE 解析和并行 onChunk 稳态微基准，首轮数值已入 Artifact，仍需同 Runner 重复采样和真实请求负载压力测试。 |
+| 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；Actions #128 新增审计队列满载与实时会话并发快照压力测试，并将 audit/live 纳入 race detector。仍需真实请求负载压力测试、同 Runner 重复采样和长期趋势观察。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector、请求取消、双 Agent 并发解析与双 Provider Chat Completions/Responses JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入均通过；Actions #123 将性能基准扩展为五项并生成 30 天 Artifact。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
+| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector 已覆盖 provider/server/core/audit/live；请求取消、双 Agent 并发解析与双 Provider Chat Completions/Responses JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入、审计队列满载和实时会话并发快照均通过。Actions #128 保留五项性能基线 Artifact。仍需真实请求负载、同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +158,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过，且 race detector 通过。当前 CI 基线覆盖 OpenAI-compatible Provider 转发、Agent 模型解析、请求分析、SSE 分片解析/事件生成、并行 onChunk 稳态路径五项；Actions #123 已生成测量 Artifact。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
+2. **并发契约与确定性网络故障已通过 CI**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过。Actions #128 已将 audit/live 加入 race detector，并验证审计队列满载、关键容量预留和实时会话快照/事件/正文上限。当前 CI 基线覆盖 Provider 转发、Agent 模型解析、请求分析、SSE 分片解析/事件生成、并行 onChunk 稳态路径五项；Actions #128 已生成测量 Artifact。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
@@ -469,3 +469,12 @@ docs/                        中文架构、协议和运维文档
 - .github/workflows/go-ci.yml 的性能基准名单已纳入这两项，CI 每次推送都会保存可下载的 -benchmem 输出。Actions #123（运行 39919200540，提交 27e165860efe579101d0594f1e34d5c283a9cce7）全量 CI 通过，包含 Go 单测、race detector、五项性能基准、go vet、Gateway build 和前端检查。
 - 首轮样本（Linux amd64，GitHub Actions Runner：AMD EPYC 7763，Go 1.23.12）：SSE parser/event metadata 为 2,888 ns/op、1,104 B/op、26 allocs/op；并行 observer onChunk steady-state 为 5,589 ns/op、1,760 B/op、39 allocs/op。该数值仅作为首轮基线，不可直接理解为性能提升或退化，也不应与不同 Runner 的结果直接比较。
 - [Actions #123 与基准 Artifact](https://github.com/Kasign/llm-gateway/actions/runs/39919200540)（Artifact ID 12486836685，30 天有效）。Actions #122 首轮因 benchmark fixture 把 Stream 放在 core.Request 而编译失败；修复后 #123 全绿。此工作单元只新增测量，不改生产热路径。
+
+
+### 审计队列与实时会话并发压力测试（2026-10-23，CI #128 已通过）
+
+- 新增 `internal/audit/writer_stress_test.go`。测试将单 Worker 的首个任务阻塞，12 个生产协程共尝试入队 6,000 个普通任务；在队列大小 64、普通任务上限 56 时，验证队列保持有界、普通任务丢弃计数准确、8 个预留槽位仍可接收关键任务，队列完全满载后再拒绝一个关键任务，并确认关闭时 65 个已接受任务均完成执行。
+- 新增 `internal/live/session_stress_test.go`。12 个协程共执行 9,000 次 StreamEvent 与标量更新，同时持续读取详情快照和列表摘要；断言并发快照始终不突破事件和正文边界，最终保留事件数不超过 2,000。快照采样限制为每毫秒一次，避免测试自身制造无界的复制/分配压力。
+- 正文留存边界用例向 Session 提交超出上限的数据，验证请求正文与响应正文各自最多保留 8 MiB。
+- `.github/workflows/go-ci.yml` 的 race detector 命令扩展为 `./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live`。Actions #128（运行 `39922580011`，提交 `79e295f8cbf33226453bb8ad1545d740a2ec4273`）全量通过：Go 单测、五项性能基线、Artifact 上传、覆盖上述五个包的 race detector、`go vet`、Gateway 构建和前端 bundle 校验。
+- [Actions #128 与性能 Artifact](https://github.com/Kasign/llm-gateway/actions/runs/39922580011)，Artifact ID `12487543536`，30 天有效。该压力测试验证内存内数据结构和队列治理，不等同真实流量或 MariaDB 写入压力测试；后续仍需真实请求负载和持续性能趋势验证。
