@@ -40,7 +40,7 @@ jobs:
         run: go test ./...
 
       - name: 并发与数据竞态测试
-        run: go test -race ./internal/provider ./internal/server ./internal/core
+        run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
       - name: 性能基线（仅记录，不设阈值）
         run: |
