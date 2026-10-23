@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/config"
