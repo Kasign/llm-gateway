@@ -112,7 +112,7 @@ func TestOpenAICompatibleProviderSupportsAPIKeyHeaderMode(t *testing.T) {
 }
 
 func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
-	const upstreamJSON = \`{"id":"resp_json","object":"response","status":"completed","model":"gpt-4.1","output":[{"type":"message","content":[{"type":"output_text","text":"hello json"}]}]}\`
+	const upstreamJSON = "{\\\"id\\\":\\\"resp_json\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"completed\\\",\\\"model\\\":\\\"gpt-4.1\\\",\\\"output\\\":[{\\\"type\\\":\\\"message\\\",\\\"content\\\":[{\\\"type\\\":\\\"output_text\\\",\\\"text\\\":\\\"hello json\\\"}]}]}"
 	const upstreamSSE = "event: response.created\\ndata: {\\\"type\\\":\\\"response.created\\\",\\\"sequence_number\\\":0,\\\"response\\\":{\\\"id\\\":\\\"resp_stream\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"in_progress\\\",\\\"model\\\":\\\"gpt-4.1\\\"}}\\n\\nevent: response.output_text.delta\\ndata: {\\\"type\\\":\\\"response.output_text.delta\\\",\\\"sequence_number\\\":1,\\\"delta\\\":\\\"hello from Responses\\\"}\\n\\nevent: response.completed\\ndata: {\\\"type\\\":\\\"response.completed\\\",\\\"sequence_number\\\":2,\\\"response\\\":{\\\"id\\\":\\\"resp_stream\\\",\\\"object\\\":\\\"response\\\",\\\"status\\\":\\\"completed\\\",\\\"model\\\":\\\"gpt-4.1\\\"}}\\n\\n"
 
 	type upstreamCapture struct {
@@ -125,29 +125,34 @@ func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
 		authorization string
 		gatewayKey    string
 	}
-	var capture upstreamCapture
+	captures := make(chan upstreamCapture, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capture.path = r.URL.Path
-		capture.query = r.URL.RawQuery
-		capture.accept = r.Header.Get("Accept")
-		capture.openAIBeta = r.Header.Get("OpenAI-Beta")
-		capture.authorization = r.Header.Get("Authorization")
-		capture.gatewayKey = r.Header.Get("X-API-Key")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "cannot read request body", http.StatusBadRequest)
 			return
 		}
-		var payload struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
+		var payload map[string]json.RawMessage
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, "invalid request JSON", http.StatusBadRequest)
 			return
 		}
-		capture.model, capture.stream = payload.Model, payload.Stream
-		if payload.Stream {
+		var modelID string
+		var streaming bool
+		if err := json.Unmarshal(payload["model"], &modelID); err != nil {
+			http.Error(w, "model missing", http.StatusBadRequest)
+			return
+		}
+		if err := json.Unmarshal(payload["stream"], &streaming); err != nil {
+			http.Error(w, "stream missing", http.StatusBadRequest)
+			return
+		}
+		captures <- upstreamCapture{
+			path: r.URL.Path, query: r.URL.RawQuery, model: modelID, stream: streaming,
+			accept: r.Header.Get("Accept"), openAIBeta: r.Header.Get("OpenAI-Beta"),
+			authorization: r.Header.Get("Authorization"), gatewayKey: r.Header.Get("X-API-Key"),
+		}
+		if streaming {
 			w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Request-Id", "req_responses_stream")
@@ -175,11 +180,13 @@ func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
 		{name: "SSE", stream: true, query: "trace_id=responses-stream", wantID: "req_responses_stream", wantAccept: "text/event-stream"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := []byte(`{"model":"client-model-must-be-overridden","stream":STREAM_PLACEHOLDER,"input":"Reply with a brief acknowledgement."}`)
-			if tc.stream {
-				body = bytes.Replace(body, []byte("STREAM_PLACEHOLDER"), []byte("true"), 1)
-			} else {
-				body = bytes.Replace(body, []byte("STREAM_PLACEHOLDER"), []byte("false"), 1)
+			body, err := json.Marshal(map[string]interface{}{
+				"model": "client-model-must-be-overridden",
+				"stream": tc.stream,
+				"input": "Reply with a brief acknowledgement.",
+			})
+			if err != nil {
+				t.Fatalf("marshal request body: %v", err)
 			}
 			request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			request.Header.Set("OpenAI-Beta", "responses=codex-test")
@@ -197,8 +204,9 @@ func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
 			if result.Status != http.StatusOK || writer.Code != http.StatusOK {
 				t.Fatalf("result/writer status = %d/%d, want 200", result.Status, writer.Code)
 			}
+			capture := <-captures
 			if capture.path != "/v1/responses" || capture.query != tc.query {
-				t.Errorf("upstream path/query = %q/%q, want /v1/responses/%q", capture.path, capture.query, tc.query)
+				t.Errorf("upstream path/query = %q/%q, want /v1/responses?%s", capture.path, capture.query, tc.query)
 			}
 			if capture.model != "gpt-4.1" || capture.stream != tc.stream {
 				t.Errorf("upstream model/stream = %q/%v, want gpt-4.1/%v", capture.model, capture.stream, tc.stream)
@@ -221,9 +229,7 @@ func TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE(t *testing.T) {
 					t.Errorf("SSE Content-Type = %q", writer.Header().Get("Content-Type"))
 				}
 				if writer.Body.String() != upstreamSSE {
-					t.Fatalf("Responses SSE bytes changed during passthrough:
- got: %q
-want: %q", writer.Body.String(), upstreamSSE)
+					t.Fatalf("Responses SSE passthrough body mismatch: got %q, want %q", writer.Body.String(), upstreamSSE)
 				}
 				if !strings.Contains(writer.Body.String(), "hello from Responses") ||
 					!strings.Contains(writer.Body.String(), "event: response.completed") {
@@ -235,18 +241,19 @@ want: %q", writer.Body.String(), upstreamSSE)
 			if writer.Body.String() != upstreamJSON {
 				t.Fatalf("Responses JSON body changed: got %q want %q", writer.Body.String(), upstreamJSON)
 			}
-			var response struct {
-				ID     string            `json:"id"`
-				Model  string            `json:"model"`
-				Status string            `json:"status"`
-				Output []json.RawMessage `json:"output"`
-			}
+			var response map[string]json.RawMessage
 			if err := json.Unmarshal(writer.Body.Bytes(), &response); err != nil {
 				t.Fatalf("Responses JSON is invalid: %v", err)
 			}
-			if response.ID != "resp_json" || response.Model != "gpt-4.1" ||
-				response.Status != "completed" || len(response.Output) == 0 {
-				t.Fatalf("unexpected Responses JSON fields: %+v", response)
+			var responseID, responseModel, responseStatus string
+			var output []json.RawMessage
+			_ = json.Unmarshal(response["id"], &responseID)
+			_ = json.Unmarshal(response["model"], &responseModel)
+			_ = json.Unmarshal(response["status"], &responseStatus)
+			_ = json.Unmarshal(response["output"], &output)
+			if responseID != "resp_json" || responseModel != "gpt-4.1" ||
+				responseStatus != "completed" || len(output) == 0 {
+				t.Fatalf("unexpected Responses JSON fields: id=%q model=%q status=%q output_count=%d", responseID, responseModel, responseStatus, len(output))
 			}
 		})
 	}

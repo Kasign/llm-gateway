@@ -424,3 +424,9 @@ docs/                        中文架构、协议和运维文档
 - 验证 `/v1/responses` 路径、原始 query、`OpenAI-Beta` 透传、`Accept` 和 stream 模式匹配、客户端 model 被服务端选择的模型覆盖、Provider Authorization 凭据覆盖调用方凭据、调用方 `X-API-Key` 不透传。
 - JSON 校验 response ID/model/status/output；SSE 校验事件序列和内容逐字节透明转发、`Request-Id` 与 `text/event-stream` 响应头。
 - 当前上游仍是 loopback Mock，不代表真实 OpenAI Responses/Codex 端点 E2E。需由本提交完整 CI 通过后验收。
+
+
+### Responses API 测试夹具二次 Review（2026-10-23）
+
+- 在 Actions #112 运行期间检查新增 Go 测试源码，发现第一版 SSE 字符串转义容易被生成工具重复转义，非流式请求体也使用占位字符串替换。
+- 已改为 `json.Marshal` 生成输入，使用 `json.RawMessage` 解析上游请求和响应，并通过缓冲通道接收 Mock 上游观测值，避免共享捕获变量带来的 race 风险。修复提交会重跑完整 CI；Responses 生产实现未修改。
