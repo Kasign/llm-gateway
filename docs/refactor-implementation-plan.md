@@ -307,3 +307,11 @@ docs/                        中文架构、协议和运维文档
 - `docs/api-config-db-contracts.md` 与 README 链接在提交 `96f25fd29c2eef1e5b2ad061f96926d8877aeeb2` 中完成；对应 Actions #89（运行 `39897166275`）通过。
 - 契约清单明确了 API 分组、Agent 路由固定语义、配置加载与热更新边界、当前六张必需表、缺少版本化迁移账本的风险，以及 Gateway/上游 HTTP 状态和流式提交边界。
 - 此文档为现状索引，不替代 OpenAPI；下一步按优先级补性能基线与远程 Provider 网络故障测试。
+
+
+### DNS 与连接层故障注入（2026-10-23，待 CI）
+
+- 将私有 HTTP 客户端构造拆为默认入口与包内 Resolver 注入入口；生产环境仍使用 `net.DefaultResolver`，没有新增 YAML/HTTP 配置。
+- 新增确定性 DNS 失败测试：NXDOMAIN 应映射为 502，Resolver timeout 应映射为 504；两者检查 Anthropic Messages 错误信封保持有效，并断言不泄露上游主机名或内部 DNS 诊断。
+- 新增真实本机连接拒绝测试，核对 502 与安全错误信封；这些是本地故障注入，不是外部 OpenAI/DeepSeek/Anthropic 服务端到端验证。
+- 需要通过完整 `go test ./...`、`go test -race ./internal/provider ./internal/server ./internal/core`、`go vet ./...` 和构建流水线后再更新验收状态。

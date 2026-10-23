@@ -802,7 +802,19 @@ func isRedirectStatus(status int) bool {
 	return status >= 300 && status < 400
 }
 
+type remoteIPResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
 func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
+	return newRestrictedHTTPClientWithResolver(allowPrivateNetwork, net.DefaultResolver)
+}
+
+// newRestrictedHTTPClientWithResolver 仅用于把 DNS 故障变为可重复测试；正常 Provider 始终使用系统 Resolver。
+func newRestrictedHTTPClientWithResolver(allowPrivateNetwork bool, resolver remoteIPResolver) *http.Client {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	dialer := &net.Dialer{Timeout: remoteDialTimeout, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
 		// 自定义 TLS 配置与 DialContext 后显式启用 HTTP/2，兼容只优先提供 h2 的服务。
@@ -827,7 +839,7 @@ func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 			} else {
 				// DNS 解析单独设置超时；它不能只依赖可能长达一小时的推理请求 Context。
 				lookupCtx, cancel := context.WithTimeout(ctx, remoteDialTimeout)
-				addresses, err = net.DefaultResolver.LookupNetIP(lookupCtx, "ip", host)
+				addresses, err = resolver.LookupNetIP(lookupCtx, "ip", host)
 				cancel()
 				if err != nil {
 					return nil, err

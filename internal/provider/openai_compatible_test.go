@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -467,6 +468,114 @@ func TestOpenAICompatibleProviderBlocksPrivateNetworkByDefault(t *testing.T) {
 	}
 }
  
+type fixedRemoteIPResolver struct {
+	addresses []netip.Addr
+	err       error
+}
+
+func (r fixedRemoteIPResolver) LookupNetIP(_ context.Context, _, _ string) ([]netip.Addr, error) {
+	return append([]netip.Addr(nil), r.addresses...), r.err
+}
+
+func TestOpenAICompatibleProviderMapsAndSanitizesDNSFailures(t *testing.T) {
+	cases := []struct {
+		name       string
+		dnsError   *net.DNSError
+		wantStatus int
+		wantType   string
+	}{
+		{
+			name: "NXDOMAIN",
+			dnsError: &net.DNSError{
+				Err: "NXDOMAIN_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsNotFound: true,
+			},
+			wantStatus: http.StatusBadGateway, wantType: "api_error",
+		},
+		{
+			name: "resolver timeout",
+			dnsError: &net.DNSError{
+				Err: "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsTimeout: true,
+			},
+			wantStatus: http.StatusGatewayTimeout, wantType: "timeout_error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+				ID: "dns-test", BaseURL: "https://provider.example/v1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.client = newRestrictedHTTPClientWithResolver(false, fixedRemoteIPResolver{err: tc.dnsError})
+
+			writer := httptest.NewRecorder()
+			result, forwardErr := p.Forward(context.Background(), InferenceCall{
+				Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
+				Path: "/v1/messages", Body: []byte(`{"model":"client-model","max_tokens":16,"messages":[]}`),
+				ModelID: "server-model",
+			})
+			if forwardErr == nil {
+				t.Fatal("expected DNS transport error")
+			}
+			if result.Status != tc.wantStatus || writer.Code != tc.wantStatus {
+				t.Fatalf("status result/writer = %d/%d, want %d", result.Status, writer.Code, tc.wantStatus)
+			}
+			var payload struct {
+				Type  string `json:"type"`
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if decodeErr := json.Unmarshal(writer.Body.Bytes(), &payload); decodeErr != nil {
+				t.Fatalf("Anthropic error body is not JSON: %v", decodeErr)
+			}
+			if payload.Type != "error" || payload.Error.Type != tc.wantType ||
+				payload.Error.Message != "upstream provider request failed" {
+				t.Fatalf("unexpected sanitized Anthropic error: %+v", payload)
+			}
+			for _, private := range []string{"provider.example", "NXDOMAIN_PRIVATE_DIAGNOSTIC", "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC"} {
+				if strings.Contains(writer.Body.String(), private) || strings.Contains(forwardErr.Error(), private) {
+					t.Fatalf("private DNS diagnostic leaked through response/error for %q", private)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAICompatibleProviderMapsConnectionRefusedTo502(t *testing.T) {
+	probe := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	baseURL := probe.URL + "/v1"
+	probe.Close()
+
+	p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		ID: "connection-test", BaseURL: baseURL,
+		AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := httptest.NewRecorder()
+	result, forwardErr := p.Forward(context.Background(), InferenceCall{
+		Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
+		Path: "/v1/messages", Body: []byte(`{"model":"server-model","max_tokens":16,"messages":[]}`),
+		ModelID: "server-model",
+	})
+	if forwardErr == nil {
+		t.Fatal("expected connection-refused error")
+	}
+	if result.Status != http.StatusBadGateway || writer.Code != http.StatusBadGateway {
+		t.Fatalf("status result/writer = %d/%d, want 502", result.Status, writer.Code)
+	}
+	if strings.Contains(writer.Body.String(), "connection refused") || strings.Contains(writer.Body.String(), "127.0.0.1") {
+		t.Fatalf("raw dial diagnostic leaked to Anthropic client: %q", writer.Body.String())
+	}
+	if !strings.Contains(writer.Body.String(), `"type":"api_error"`) {
+		t.Fatalf("missing safe Anthropic api_error envelope: %q", writer.Body.String())
+	}
+}
+
 func TestOpenAICompatibleTransportErrorMapsDeadlineTo504(t *testing.T) {
 	p := &OpenAICompatibleProvider{id: "test-remote"}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
