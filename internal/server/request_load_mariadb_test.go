@@ -359,9 +359,19 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 		sort.Float64s(delayLatencies)
 		sort.Float64s(normalLatencies)
-		delayP50 := percentile(delayLatencies, 0.50)
-		delayP95 := percentile(delayLatencies, 0.95)
-		normalP50 := percentile(normalLatencies, 0.50)
+		faultPercentile := func(values []float64, p float64) float64 {
+			index := int(math.Ceil(p*float64(len(values)))) - 1
+			if index < 0 {
+				index = 0
+			}
+			if index >= len(values) {
+				index = len(values) - 1
+			}
+			return values[index]
+		}
+		delayP50 := faultPercentile(delayLatencies, 0.50)
+		delayP95 := faultPercentile(delayLatencies, 0.95)
+		normalP50 := faultPercentile(normalLatencies, 0.50)
 		if delayP50 < 70 {
 			t.Fatalf("controlled 75ms upstream delay P50 = %.2fms, expected at least 70ms", delayP50)
 		}
