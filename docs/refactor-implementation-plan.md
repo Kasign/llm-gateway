@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态负载与可控上游故障注入，PR #4 的 Actions #149（运行 `39932315169`）已通过。12,000 次稳态请求达到 200.0 req/s，P50/P95/P99 为 4.36/5.58/7.59 ms，全部 12,192 条请求均成功并正确落库；另有 120 个故障/对照请求全部符合预期，429/503 状态与审计字段一致、错误正文已脱敏。75ms 延迟场景 P50/P95 为 80.69/99.92 ms，故障阶段审计排空为 384ms。所有上游仍是本机 Mock，不代表真实模型推理、生产容量或真实供应商 E2E。
+> 基线 `dev` HEAD 为 `950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。PR #5 的工作分支 `test/gateway-transport-failure-recovery` 已在 Actions #155 与最终文档提交的 Actions #156 全量通过（包括 60 秒负载、429/503 故障注入、TCP 拒绝/同端口恢复、race、性能基线、go vet、Gateway 构建和前端 bundle）；但 PR #5 仍为 Open、尚未合并，因此这些改动尚未进入本基线 `dev`。外部供应商 E2E、DNS 上游状态的 MariaDB 专项断言、收到响应头后断流等边界另列在 [未关闭问题与后续验收台账](known-issues-and-followups.md)。所有 CI 上游仍是本机 Mock，不代表真实模型推理、生产容量或真实供应商 E2E。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成请求/响应留存边界、审计队列满载/排空、60 秒真实 Gateway Handler+Redis+MariaDB 合成负载；Actions #149 另验收了 75ms 上游延迟、429/503 状态透传、Retry-After 透传、错误正文脱敏和数据库状态一致性。仍需真实故障恢复与生产观测。 |
+| 阶段 1：日志可靠性 | 进行中 | 99% | `dev` 已验收审计队列、60 秒合成负载和 75ms/429/503 注入；PR #5 的 TCP 拒绝与同端口恢复、HTTP 状态语义修复已由最终 Head Actions #156 全量验证，但尚未合并进 `dev`。真实公网故障恢复、响应头后断流和生产观测仍待；见问题台账。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 76% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、DNS/连接/响应头超时故障注入、内存压力、MariaDB 积压与 60 秒 Gateway 负载均通过。Actions #149 新增 120 次并发故障/对照请求，核对 200/429/503 客户端与上游状态、Retry-After、错误正文脱敏和审计持久化。仍需真实 Provider 与真实公网故障恢复验证。 |
+| 阶段 5：运行治理与 CI | 进行中 | 76% | 当前 CI 已覆盖 provider/server/core/audit/live race、请求取消、双 Agent JSON/SSE、确定性 DNS/连接/响应头错误映射、内存压力、MariaDB 积压、60 秒负载和 429/503 注入。PR #5 的 TCP 拒绝/恢复已在最终 Head Actions #156 通过，等待合并进 `dev`；Provider 并发限制、审计指标可观测性和保留策略按问题台账继续推进。真实供应商/公网故障验证仍待。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,8 +158,8 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约、数据库积压和确定性网络故障的 CI 验收**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过。Actions #128 已将 audit/live 加入 race detector，并验证内存队列满载和实时会话快照/事件/正文上限。Actions #134 又通过真实 MariaDB 审计积压测试，验证 500 条请求生命周期记录、292 条分析更新、队列满载丢弃计数和 FIFO 排空；五项性能基线继续上传 Artifact。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
-3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
+2. **运行治理的下一项**：开始为远程 OpenAI-compatible Provider 增加配置化并发上限和清晰的过载错误语义；第一期默认值与各 Provider 单独配置均需校验，流式保活已提交时必须返回安全 SSE error，而不是悄悄结束。后续再推进审计队列指标和数据留存策略，完整问题、状态、验收条件见 [未关闭问题与后续验收台账](known-issues-and-followups.md)。
+3. 真实供应商 E2E 仅在有明确授权的 API Key/计费环境中执行；DNS 状态落库、响应头后断流与生产链路恢复等自动化缺口先集中记录，按问题台账排期，不混同于本地 Mock CI。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
 6. 每完成一个有边界的功能组，更新本文并按功能提交；提交后以当前 HEAD 对应 Actions 为验收依据。
@@ -214,6 +214,8 @@ docs/                        中文架构、协议和运维文档
 - 不添加逐行重复代码含义的注释；优先使用清晰命名。
 - 配置键、JSON 字段、HTTP 协议字段和 Go 标识符保持稳定，不为中文化破坏 API 兼容性。
 - 对流式响应已提交后不能修改 HTTP 状态等不直观行为，在对应代码处说明原因。
+
+> 统一未关闭事项、优先级和验收条件维护在 [docs/known-issues-and-followups.md](known-issues-and-followups.md)。改动前先更新台账状态；代码与测试通过本身不能关闭需要真实供应商/部署环境验收的事项。
 
 ## 8. 多 Agent 并行入口（已实现，CI 通过；后续增强待办）
 
