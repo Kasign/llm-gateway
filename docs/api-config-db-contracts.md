@@ -85,8 +85,8 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
-| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go`、配置验证测试和请求级 Provider 选择测试。 | Agent 级独立权限策略、动态重载。 |
-| Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游、DNS NXDOMAIN/timeout、本机连接拒绝、ResponseHeaderTimeout 的 504 与安全错误映射均由 Actions #92/#96 验证通过；三项性能基准和 Artifact 上传由 #94/#96 验证。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
+| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析及两个独立 Mock 远程 Provider 的完整路由/Pipeline/HTTP 往返（Actions #99 通过）。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
+| Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游、DNS NXDOMAIN/timeout、连接拒绝、ResponseHeaderTimeout 错误映射均由 Actions #92/#96 验证；Agent data-plane 对各自上游密钥隔离由 #99 验证；三项性能基准及 Artifact 由 #94/#99 验证。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
 | 前端/API 部署一致性 | CI 从前端源码重建 bundle 并与已提交 `web/static/dist/app.js` 做字节比较。 | 真实 1Panel/OpenResty 反向代理部署验收。 |
