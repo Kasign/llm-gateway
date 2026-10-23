@@ -52,6 +52,65 @@ jobs:
       - name: 单元测试
         run: go test ./...
 
+      - name: MariaDB 审计积压集成测试
+        run: go test -count=1 -run '^TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites
+      - name: 并发与数据竞态测试
+        run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
+
+      - name: 性能基线（仅记录，不设阈值）
+        run: |
+          set -o pipefail
+          go test -run '^$' -bench '^(BenchmarkOpenAICompatibleProviderForwardJSON|BenchmarkResolveInferenceAgentRoute|BenchmarkBuildRequestAnalysis|BenchmarkRequestTraceRecordStreamChunk|BenchmarkInferenceObserverOnChunkParallel)$' -benchmem -benchtime=1s ./internal/provider ./internal/server | tee /tmp/llm-gateway-benchmarks.txt
+
+      - name: 保存性能基线产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-gateway-performance-baseline-${{ github.sha }}
+          path: /tmp/llm-gateway-benchmarks.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 静态检查
+        run: go vet ./...
+
+      - name: 构建 Gateway
+        run: go build -o /tmp/llm-gateway ./cmd/gateway
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装前端依赖
+        working-directory: web
+        run: npm ci
+
+      - name: 构建管理台源码
+        working-directory: web
+        run: npx esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=/tmp/llm-gateway-admin.js
+
+      - name: 校验前端语法与关键功能字段
+        run: |
+          node --check web/static/dist/app.js
+          node --check /tmp/llm-gateway-admin.js
+          # 直接比较 CI 从当前源码生成的 bundle 与已提交部署产物，防止漏提交或提交过期的 dist。
+          if ! cmp -s /tmp/llm-gateway-admin.js web/static/dist/app.js; then
+            echo "::error::web/static/dist/app.js 与当前管理台源码构建结果不一致，请重新生成并提交部署 bundle"
+            diff -u web/static/dist/app.js /tmp/llm-gateway-admin.js | head -120 || true
+            exit 1
+          fi
+          # 调用记录耗时字段必须存在于部署 bundle。
+          grep -q 'upstream_http_status' web/static/dist/app.js
+          grep -q 'time_to_upstream_headers_ms' web/static/dist/app.js
+          grep -q 'time_to_first_byte_ms' web/static/dist/app.js
+          # 远程 Provider 选择逻辑分别检查源文件和实际部署 bundle。
+          grep -q 'available_backends' web/js/app/main.js
+          grep -q 'configured_remote' web/js/app/main.js
+          grep -q 'available_backends' web/static/dist/app.js
+          grep -q 'configured_remote' web/static/dist/app.js
+
+ -v ./internal/audit
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
