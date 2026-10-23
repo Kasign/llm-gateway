@@ -416,3 +416,11 @@ docs/                        中文架构、协议和运维文档
 
 - Actions #110（运行 `39905269876`）在普通 Go 测试阶段发现新增测试使用了不存在的 `OpenAICompatibleConfig.DefaultModel` 字段；模型 ID 实际由每次 `InferenceCall.ModelID` 提供。
 - 已移除错误字段。该失败只说明 E2E 测试夹具无法编译，没有发起真实供应商请求；修复提交会重新跑全量 CI。真实端点验收仍要求用户在本地显式设置 opt-in 环境变量和自己的 API Key。
+
+
+### Responses API 成功 JSON/SSE 数据面契约（2026-10-23，待 CI）
+
+- 新增 `TestOpenAICompatibleProviderForwardsResponsesJSONAndSSE`，通过真实 Provider HTTP adapter 与本地 Mock 上游分别走非流式 JSON、流式 SSE 两条成功路径。
+- 验证 `/v1/responses` 路径、原始 query、`OpenAI-Beta` 透传、`Accept` 和 stream 模式匹配、客户端 model 被服务端选择的模型覆盖、Provider Authorization 凭据覆盖调用方凭据、调用方 `X-API-Key` 不透传。
+- JSON 校验 response ID/model/status/output；SSE 校验事件序列和内容逐字节透明转发、`Request-Id` 与 `text/event-stream` 响应头。
+- 当前上游仍是 loopback Mock，不代表真实 OpenAI Responses/Codex 端点 E2E。需由本提交完整 CI 通过后验收。
