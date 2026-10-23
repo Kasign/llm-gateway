@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,6 +76,186 @@ func TestResolveInferenceUsesAgentRouteWithoutChangingActiveProvider(t *testing.
 	}
 	if s.effectiveUpstream().Backend != "llamacpp" {
 		t.Fatalf("Agent routing mutated active Provider: %q", s.effectiveUpstream().Backend)
+	}
+}
+
+// TestAgentRoutesForwardToDistinctConfiguredProviders 验证 Agent 前缀经过路由归一、Pipeline 和真实 Provider HTTP 适配器后，仍命中各自上游。
+func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
+	type upstreamCapture struct {
+		path          string
+		trace         string
+		model         string
+		providerKey   string
+		authorization string
+		gatewayKey    string
+	}
+	var captureMu sync.Mutex
+	captures := make(map[string]upstreamCapture)
+
+	newUpstream := func(providerID, responseID string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "cannot read request", http.StatusBadRequest)
+				return
+			}
+			var requestPayload struct {
+				Model string `json:"model"`
+			}
+			if err := json.Unmarshal(body, &requestPayload); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			capture := upstreamCapture{
+				path: r.URL.Path, trace: r.URL.Query().Get("trace"),
+				model: requestPayload.Model, providerKey: r.Header.Get("X-Upstream-Key"),
+				authorization: r.Header.Get("Authorization"), gatewayKey: r.Header.Get("X-API-Key"),
+			}
+			captureMu.Lock()
+			captures[providerID] = capture
+			captureMu.Unlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w,
+				`{"id":%q,"object":"chat.completion","model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}]}`,
+				responseID, requestPayload.Model, "response from "+providerID)
+		}))
+	}
+
+	deepseekUpstream := newUpstream("deepseek", "deepseek-result")
+	defer deepseekUpstream.Close()
+	openaiUpstream := newUpstream("openai", "openai-result")
+	defer openaiUpstream.Close()
+
+	cfg := &config.Config{}
+	cfg.Llama.AutoLoadOnProxy = false
+	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
+		{
+			ID: "deepseek", Enabled: true, BaseURL: deepseekUpstream.URL + "/v1",
+			DefaultModel: "deepseek-chat", APIKey: "deepseek-upstream-secret",
+			APIKeyHeader: "x-upstream-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+		},
+		{
+			ID: "openai", Enabled: true, BaseURL: openaiUpstream.URL + "/v1",
+			DefaultModel: "gpt-4.1", APIKey: "openai-upstream-secret",
+			APIKeyHeader: "x-upstream-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+		},
+	}
+	deepseekRoute := config.AgentRouteConfig{
+		ID: "deepseek-agent", Enabled: true, PathPrefix: "/deepseek",
+		ProviderID: "deepseek", DefaultModel: "deepseek-chat",
+	}
+	openaiRoute := config.AgentRouteConfig{
+		ID: "openai-agent", Enabled: true, PathPrefix: "/openai",
+		ProviderID: "openai", DefaultModel: "gpt-4.1",
+	}
+	cfg.Agents = []config.AgentRouteConfig{deepseekRoute, openaiRoute}
+
+	s := &Server{
+		cfg: cfg,
+		upstream: settings.Upstream{
+			Backend: "llamacpp", BaseURL: "http://llama-unused.invalid:8080", ModelName: "local.gguf",
+		},
+		fileUpstream: settings.Upstream{
+			Backend: "llamacpp", BaseURL: "http://llama-unused.invalid:8080", ModelName: "local.gguf",
+		},
+	}
+	s.pipe = s.newInferencePipeline()
+	// 本测试聚焦 data-plane 路由与 Provider 选择，不需要数据库审计观察器；其行为由独立测试覆盖。
+	s.pipe.Observe = nil
+
+	routes := []struct {
+		config       config.AgentRouteConfig
+		providerID   string
+		model        string
+		resultID     string
+	}{
+		{config: deepseekRoute, providerID: "deepseek", model: "deepseek-chat", resultID: "deepseek-result"},
+		{config: openaiRoute, providerID: "openai", model: "gpt-4.1", resultID: "openai-result"},
+	}
+	for _, tc := range routes {
+		t.Run(tc.providerID, func(t *testing.T) {
+			handler := s.agentRouteHandler(tc.config, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				route, ok := agentRouteFromContext(r.Context())
+				if !ok {
+					http.Error(w, "trusted Agent route missing", http.StatusInternalServerError)
+					return
+				}
+				body, readErr := io.ReadAll(r.Body)
+				if readErr != nil {
+					http.Error(w, "request body read failed", http.StatusBadRequest)
+					return
+				}
+				id := r.Header.Get("X-Request-ID")
+				if id == "" {
+					http.Error(w, "request ID missing", http.StatusBadRequest)
+					return
+				}
+				sink := &responseSink{w: w}
+				_, runErr := s.pipe.Run(r.Context(), core.Request{
+					ID: id, Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery,
+					Header: headerMap(r.Header), Body: body,
+					RouteProviderID: route.ProviderID, RouteDefaultModel: route.DefaultModel,
+					Sink: sink, Started: time.Now(), RequestURL: agentRequestPublicURL(r, nil),
+				})
+				s.callDrop(id)
+				if runErr != nil && !sink.HeaderWritten() {
+					status, code, message := core.Unpack(runErr)
+					writeInferenceError(w, r.URL.Path, status, code, message)
+				}
+			}))
+
+			requestBody := `{"model":"caller-model-must-not-win","messages":[{"role":"user","content":"hello"}]}`
+			request := httptest.NewRequest(http.MethodPost,
+				"http://gateway.example"+tc.config.PathPrefix+"/v1/chat/completions?trace="+tc.providerID,
+				strings.NewReader(requestBody))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer gateway-caller-secret")
+			request.Header.Set("X-API-Key", "gateway-caller-secret")
+			request.Header.Set("X-Request-ID", "agent-data-plane-"+tc.providerID)
+			writer := httptest.NewRecorder()
+			handler.ServeHTTP(writer, request)
+			if writer.Code != http.StatusOK {
+				t.Fatalf("gateway status = %d, body=%s", writer.Code, writer.Body.String())
+			}
+
+			var response struct {
+				ID      string `json:"id"`
+				Model   string `json:"model"`
+				Choices []struct {
+					Message struct {
+						Content string `json:"content"`
+					} `json:"message"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal(writer.Body.Bytes(), &response); err != nil {
+				t.Fatalf("gateway response is not JSON: %v", err)
+			}
+			if response.ID != tc.resultID || response.Model != tc.model || len(response.Choices) != 1 ||
+				response.Choices[0].Message.Content != "response from "+tc.providerID {
+				t.Fatalf("response came from the wrong Provider/model: %+v", response)
+			}
+
+			captureMu.Lock()
+			capture := captures[tc.providerID]
+			captureMu.Unlock()
+			if capture.path != "/v1/chat/completions" || capture.trace != tc.providerID {
+				t.Errorf("upstream path/query = %q / %q", capture.path, capture.trace)
+			}
+			if capture.model != tc.model {
+				t.Errorf("upstream model = %q, want Agent default %q", capture.model, tc.model)
+			}
+			wantKey := tc.providerID + "-upstream-secret"
+			if capture.providerKey != wantKey {
+				t.Errorf("upstream provider key = %q, want route-specific key", capture.providerKey)
+			}
+			if capture.authorization != "" || capture.gatewayKey != "" {
+				t.Errorf("Gateway caller credentials leaked upstream: Authorization=%q X-API-Key=%q", capture.authorization, capture.gatewayKey)
+			}
+		})
+	}
+	if got := s.effectiveUpstream().Backend; got != "llamacpp" {
+		t.Fatalf("Agent data-plane requests changed global active Provider to %q", got)
 	}
 }
 

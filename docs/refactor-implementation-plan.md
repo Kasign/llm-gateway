@@ -348,3 +348,11 @@ docs/                        中文架构、协议和运维文档
 - 新增 `TestOpenAICompatibleProviderMapsResponseHeaderTimeoutTo504`，使用本地 Mock 服务接收请求但延迟响应头，缩短测试 Transport 的 `ResponseHeaderTimeout` 来真实触发 HTTP 客户端超时。
 - 覆盖 OpenAI Chat Completions 和 Anthropic Messages 两条协议：内部错误映射必须是 `provider_timeout` / HTTP 504；Anthropic 路径必须返回 `timeout_error` 信封，且不泄露目标 URL/Transport 原始诊断。
 - 提交 `3a9d56021c5eba0066287eccace7b3d7b499bbe8` 对应 Actions #96（运行 `39898522951`）通过完整流水线。该测试验证 Gateway HTTP 适配器与超时分类，不代表真实公网链路或供应商 SLA。
+
+
+### Agent 路由真实 data-plane 集成测试（2026-10-23，待 CI）
+
+- 新增 `TestAgentRoutesForwardToDistinctConfiguredProviders`，不只验证模型解析：通过真实 `agentRouteHandler`、固定 `core.Pipeline`、`inferenceForwarder` 与两个本地 HTTP Mock Provider 完成请求往返。
+- 对 `/deepseek/v1/chat/completions` 与 `/openai/v1/chat/completions` 分别断言上游只收到标准 `/v1/chat/completions` 路径、各自原始 query、Agent 默认模型与对应 Provider 凭据。
+- 客户端故意提交不匹配的 `model`，并带 Gateway `Authorization` 与 `X-API-Key`；断言出站请求不会泄露调用方凭据、不会跨 Agent 使用另一条路由的模型/上游，同时全局活动 Provider 保持 `llamacpp`。
+- 该集成测试仅绕过外层 API Key/Redis 限流与审计观察器（这些已有独立测试），实际执行路由归一、模型固定、Pipeline Mutator/Guard、Provider 选择、HTTP 转发及响应回传。需本提交完整 CI 通过后验收。
