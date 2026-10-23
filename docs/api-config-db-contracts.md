@@ -42,7 +42,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、超时、模型数、warm-start | 全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
-| `providers.openai_compatible[]` | Provider ID、启用状态、Base URL、环境变量 API Key、Key Header、默认模型、HTTP/私网策略、响应体上限 | Provider 静态配置在进程启动时加载；远程 Key 不写入 `gateway_settings` 或管理 API 响应。 |
+| `providers.openai_compatible[]` | Provider ID、启用状态、Base URL、环境变量 API Key、Key Header、默认模型、HTTP/私网策略、响应体上限、`max_concurrent_requests` | Provider 静态配置在进程启动时加载；并发上限按 Provider 独立配置，默认值与上限均为 64；达到上限时 fail-fast 返回 503。远程 Key 不写入 `gateway_settings` 或管理 API 响应。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |
 | `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；生产环境必须明确评估隐私与磁盘代价。 |

@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/whl/llm-gateway/internal/core"
 )
 
 func testRemoteProvider(t *testing.T, server *httptest.Server, opts OpenAICompatibleConfig) *OpenAICompatibleProvider {
@@ -1542,6 +1544,207 @@ func TestOpenAICompatibleProviderConnectionRefusalDoesNotInventUpstreamStatus(t 
 			if result.UpstreamStatus != 0 { t.Fatalf("upstream status = %d, want 0 without an HTTP response", result.UpstreamStatus) }
 			mapped := ToCoreError(forwardErr)
 			if mapped == nil || mapped.Status != http.StatusBadGateway { t.Fatalf("transport error mapping = %+v, want Gateway 502", mapped) }
+		})
+	}
+}
+
+
+func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testing.T) {
+	started := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		if count == 1 {
+			started <- struct{}{}
+			<-releaseFirst
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 1})
+
+	forward := func() (core.Result, error, int) {
+		writer := httptest.NewRecorder()
+		result, err := p.Forward(context.Background(), InferenceCall{
+			Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test"}`), ModelID: "test",
+		})
+		return result, err, writer.Code
+	}
+	type outcome struct {
+		result core.Result
+		err error
+		code int
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		result, err, code := forward()
+		firstDone <- outcome{result: result, err: err, code: code}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first upstream request did not start")
+	}
+	second, secondErr, _ := forward()
+	if secondErr == nil {
+		close(releaseFirst)
+		t.Fatal("concurrent request should be rejected while the only slot is occupied")
+	}
+	status, code, _ := core.Unpack(secondErr)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" {
+		close(releaseFirst)
+		t.Fatalf("overload error = %d/%s, want 503/provider_concurrency_limit", status, code)
+	}
+	if second.Status != http.StatusServiceUnavailable || second.UpstreamStatus != 0 {
+		close(releaseFirst)
+		t.Fatalf("overload result status/upstream = %d/%d, want 503/0", second.Status, second.UpstreamStatus)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("upstream received %d requests while the limit was occupied, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || first.code != http.StatusOK {
+		t.Fatalf("first request did not finish successfully: result=%+v err=%v writer=%d", first.result, first.err, first.code)
+	}
+	third, thirdErr, thirdCode := forward()
+	if thirdErr != nil || third.Status != http.StatusOK || third.UpstreamStatus != http.StatusOK || thirdCode != http.StatusOK {
+		t.Fatalf("slot was not released after the first request: result=%+v err=%v writer=%d", third, thirdErr, thirdCode)
+	}
+	if got := upstreamRequests.Load(); got != 2 {
+		t.Fatalf("upstream request count after slot release = %d, want 2", got)
+	}
+}
+
+func TestOpenAICompatibleProviderWritesSafeSSEErrorWhenLimitReachedAfterCommit(t *testing.T) {
+	started := make(chan struct{}, 1)
+	chunkSeen := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		if count == 1 {
+			_, _ = io.WriteString(w, "data: {\"id\":\"first\"}\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			started <- struct{}{}
+			<-releaseFirst
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 1})
+	firstRecorder := httptest.NewRecorder()
+	type streamOutcome struct {
+		result core.Result
+		err error
+	}
+	firstDone := make(chan streamOutcome, 1)
+	go func() {
+		result, err := p.Forward(context.Background(), InferenceCall{
+			Writer: firstRecorder, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: true,
+			OnChunk: func([]byte) {
+				select {
+				case chunkSeen <- struct{}{}:
+				default:
+				}
+			},
+		})
+		firstDone <- streamOutcome{result: result, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("streaming upstream request did not start")
+	}
+	select {
+	case <-chunkSeen:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("first stream chunk was not observed")
+	}
+
+	// 模拟 Gateway warm-start 已经向客户端提交 200 的情况。
+	committed := newProviderCommittedWriter()
+	_, _ = committed.Write([]byte(": warm start\n\n"))
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: committed, Request: httptest.NewRequest(http.MethodPost, "/v1/responses", nil),
+		Path: "/v1/responses", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: true,
+	})
+	if err == nil {
+		close(releaseFirst)
+		t.Fatal("second stream should be rejected at the configured concurrency limit")
+	}
+	status, code, _ := core.Unpack(err)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" {
+		close(releaseFirst)
+		t.Fatalf("overload error = %d/%s, want 503/provider_concurrency_limit", status, code)
+	}
+	if result.Status != http.StatusServiceUnavailable || result.UpstreamStatus != 0 || committed.recorder.Code != http.StatusOK {
+		close(releaseFirst)
+		t.Fatalf("committed overload statuses result=%d upstream=%d client=%d", result.Status, result.UpstreamStatus, committed.recorder.Code)
+	}
+	body := committed.recorder.Body.String()
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "provider_concurrency_limit") || !strings.Contains(body, "\"sequence_number\":0") {
+		close(releaseFirst)
+		t.Fatalf("missing safe Responses concurrency error event/sequence: %q", body)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("saturated stream reached upstream: requests=%d, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || firstRecorder.Code != http.StatusOK {
+		t.Fatalf("first stream did not finish normally: result=%+v err=%v", first.result, first.err)
+	}
+}
+
+func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
+	for _, limit := range []int{-1, MaxOpenAICompatibleConcurrentRequests + 1} {
+		_, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			ID: "invalid-limit", BaseURL: "https://provider.example/v1", MaxConcurrentRequests: limit,
+		})
+		if err == nil {
+			t.Errorf("MaxConcurrentRequests=%d should be rejected", limit)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		limit, want int
+	}{
+		{name: "default", limit: 0, want: defaultOpenAICompatibleMaxConcurrentRequests},
+		{name: "custom", limit: 2, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+				ID: "valid-limit", BaseURL: "https://provider.example/v1", MaxConcurrentRequests: tc.limit,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cap(p.requestSlots) != tc.want {
+				t.Fatalf("effective concurrency = %d, want %d", cap(p.requestSlots), tc.want)
+			}
 		})
 	}
 }

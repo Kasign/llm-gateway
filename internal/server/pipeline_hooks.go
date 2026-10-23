@@ -40,7 +40,7 @@ func (s *Server) newInferencePipeline() *core.Pipeline {
 			remote, err := provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{
 				ID: cfg.ID, BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, APIKeyHeader: cfg.APIKeyHeader,
 				AllowInsecureHTTP: cfg.AllowInsecureHTTP, AllowPrivateNetwork: cfg.AllowPrivateNetwork,
-				MaxResponseBytes: cfg.MaxResponseBytes,
+				MaxResponseBytes: cfg.MaxResponseBytes, MaxConcurrentRequests: cfg.MaxConcurrentRequests,
 			})
 			if err != nil {
 				// Load 已做配置校验；保留 fail-closed 行为，不能注册一个未通过安全校验的远程目标。
