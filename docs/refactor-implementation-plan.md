@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `d8bcafee44ccbb7a4a5bd459bf363563ccbb1e1a`，GitHub Actions #114（运行 `39906018427`，success）。新增 Responses API JSON/SSE 成功路径契约，修复并验收默认跳过的真实 Provider E2E 用例；完整 Go 单测、race、性能基准及 Artifact、vet、Gateway 构建和前端 bundle 检查全部通过。
+> 最近一次已验收代码功能组：提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a`，GitHub Actions #116（运行 `39906558311`，success）。新增 Anthropic Messages 真实端点 opt-in 用例；默认跳过路径、Go 单测、race、性能基准及 Artifact、vet、Gateway 构建和前端 bundle 检查全部通过。真实供应商调用仍未执行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -409,7 +409,7 @@ docs/                        中文架构、协议和运维文档
 - 新增 `TestOpenAICompatibleProviderRealEndpointE2E`，默认 `t.Skip`，仅当 `LLM_GATEWAY_PROVIDER_E2E=1` 时发起真实网络请求；要求本地配置 HTTPS BaseURL、API Key 与 Model。API Key 不进入代码、日志或测试输出。
 - 请求走实际 `OpenAICompatibleProvider.Forward` 和安全 HTTP Transport，发送极短、无用户数据的 Chat Completions 请求，并检查 HTTP 200 与可解析的 choices。默认请求体最多请求 8 个输出 token，90 秒上下文截止。
 - 环境变量：`LLM_GATEWAY_E2E_BASE_URL`（例如供应商的 HTTPS `/v1` Base URL）、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL`；可选 `LLM_GATEWAY_E2E_API_KEY_HEADER`（留空则采用默认 Authorization 方式）。
-- 本提交未在当前执行环境中配置或调用真实供应商密钥，因此该用例的真实公网 E2E 状态仍是待运行；CI #111 已验证默认跳过路径和编译，不会发起真实网络请求。真实供应商响应、计费、权限、限流和端到端 SLA 仍需用户控制的环境单独验收。
+- OpenAI-compatible 用例在 Actions #111 已验证默认跳过路径和编译，Anthropic Messages 用例在 Actions #116 已验证默认跳过路径和编译；两者均未配置真实供应商 Key，不会发起真实网络请求。真实供应商响应、计费、权限、限流和端到端 SLA 仍需用户控制的环境单独验收。
 
 
 ### 真实 Provider E2E 用例首轮 CI 复核（2026-10-23）
@@ -438,9 +438,9 @@ docs/                        中文架构、协议和运维文档
 - 当前测试源码已把 Go 字符串中的转义恢复为单层，继续使用 JSON Marshal 和通道收集 Mock 观测值。以修复后的新提交全量 CI 为准。
 
 
-### 显式开启的 Anthropic Messages E2E（用例已提供，真实端点未运行）
+### 显式开启的 Anthropic Messages E2E（用例编译与默认跳过路径由 CI #116 验收；真实端点未运行）
 
 - 新增 `TestAnthropicMessagesRealEndpointE2E`，默认跳过，只在 `LLM_GATEWAY_ANTHROPIC_E2E=1` 时发起网络请求；需要 HTTPS BaseURL、Anthropic API Key 和 model 环境变量。
 - 请求使用真实 Provider 安全 Transport，固定 `x-api-key` 与 `Anthropic-Version: 2023-06-01`，发送一条无用户数据的短 Messages 请求，最多请求 12 个输出 token，并在 90 秒后截止。
 - 测试只检查 HTTP 200、assistant message envelope 和至少一个 content block；不打印密钥、上游原始错误或响应内容。默认 CI 不访问外网，不需要 GitHub Secret。
-- 当前未在本执行环境中配置 Anthropic API Key，故真实 Claude/Anthropic 端点仍未验收。
+- 提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a` 的 Actions #116（运行 `39906558311`）通过完整 CI，证明用例可编译并在默认环境跳过；未配置 Anthropic API Key，因此没有调用真实 Claude/Anthropic 端点。真实供应商验收仍待用户在安全环境运行。

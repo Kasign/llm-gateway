@@ -147,4 +147,4 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 
 ### Anthropic Messages 真实端点验收
 
-`internal/provider/anthropic_messages_e2e_test.go`（当前文件名为 `anthropic_messages_e2e_test.go`）提供默认跳过的真实端点探测；只有显式开启环境变量后才使用本机提供的 API Key 调用上游。测试覆盖 HTTPS 配置、`x-api-key`、Anthropic-Version、HTTP 200 和 Messages 响应封套。Mock 测试的 CI 通过不代表真实 Anthropic 供应商端点已验收。
+`internal/provider/anthropic_messages_e2e_test.go` 提供默认跳过的真实端点探测；只有显式开启环境变量后才使用本机提供的 API Key 调用上游。CI #116（提交 `594ef12048e0a9dee52bb6c1ae4d780f1cbfaa3a`）通过完整流水线，验证测试可编译且默认跳过；没有真实 API Key，因此真实 Anthropic 供应商端点仍未验收。测试覆盖 HTTPS 配置、`x-api-key`、Anthropic-Version、HTTP 200 和 Messages 响应封套。
