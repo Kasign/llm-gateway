@@ -37,23 +37,33 @@ func isSecretHeader(key string) bool {
 		}
 	}
 
-	// 一些供应商使用 X-OpenAI-Key、X-Cloud-Key 等没有 api 字样的头；
-	// 只对明确的凭据类前缀做扩展，避免把 Model-Key、Idempotency-Key 一概打码。
-	if strings.HasSuffix(normalized, "_key") {
-		for _, prefix := range []string{
-			"auth", "provider", "openai", "anthropic", "azure", "cloud",
-			"google", "goog", "aws", "amz", "access", "secret", "credential",
-			"private", "bearer",
-		} {
-			if strings.Contains(normalized, prefix) {
-				return true
-			}
-		}
+	// 常见厂商自定义密钥头不一定带 api 字样；保留 Model-Key、Idempotency-Key 等普通字段。
+	if isSensitiveProviderKeyName(normalized) {
+		return true
 	}
 	// 兼容标准 Token/Secret/Signature Header 后缀。
 	return strings.HasSuffix(k, "-token") || strings.HasSuffix(k, "_token") ||
 		strings.HasSuffix(k, "-secret") || strings.HasSuffix(k, "_secret") ||
 		strings.HasSuffix(k, "-signature") || strings.HasSuffix(k, "_signature")
+}
+
+// isSensitiveProviderKeyName 识别带厂商/凭据标识的 *_key 命名；避免把所有 *-key 一概打码。
+func isSensitiveProviderKeyName(normalized string) bool {
+	if !strings.HasSuffix(normalized, "_key") {
+		return false
+	}
+	for _, marker := range []string{
+		"auth", "provider", "openai", "anthropic", "azure", "cloud", "google", "goog",
+		"aws", "amz", "access", "secret", "credential", "private", "bearer",
+		"deepseek", "gemini", "groq", "cohere", "mistral", "xai", "together",
+		"fireworks", "perplexity", "replicate", "huggingface", "moonshot", "zhipu",
+		"minimax", "baidu", "qwen", "doubao", "siliconflow", "bedrock", "session",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func redactHeaderValue(key, value string) string {

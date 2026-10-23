@@ -79,6 +79,14 @@ func TestRedactSensitiveQueryPreservesRawEncodingAndOrder(t *testing.T) {
 	}
 }
 
+func TestRedactSensitiveQueryRedactsProviderSpecificKeyNames(t *testing.T) {
+	got := redactSensitiveQuery("x-deepseek-key=deepsecret&x-gemini-key=gemsecret&model-key=normal-model&trace_id=abc")
+	want := "x-deepseek-key=***&x-gemini-key=***&model-key=normal-model&trace_id=abc"
+	if got != want {
+		t.Fatalf("redactSensitiveQuery() = %q, want %q", got, want)
+	}
+}
+
 func TestRequestPublicURLIgnoresForwardedHeadersFromUntrustedPeer(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/v1/models?token=private", nil)
 	r.RemoteAddr = "198.51.100.40:43210"

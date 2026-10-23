@@ -26,6 +26,8 @@ func TestFlattenHeadersRedactsProviderCredentialHeaders(t *testing.T) {
 		"X-Access-Token":           {"private-token"},
 		"Client-Secret":            {"client-secret"},
 		"X-OpenAI-Key":             {"provider-key-secret"},
+		"X-DeepSeek-Key":           {"deepseek-key-secret"},
+		"X-Gemini-Key":             {"gemini-key-secret"},
 		"X-Provider-Secret-Key":    {"provider-secret-key"},
 		"X-Amz-Credential":         {"AKIA-secret"},
 		"X-Codex-Session":          {"session-123"},
@@ -33,7 +35,7 @@ func TestFlattenHeadersRedactsProviderCredentialHeaders(t *testing.T) {
 		"X-Model-Key":              {"model-key"},
 	}
 	got := flattenHeaders(h)
-	for _, key := range []string{"Proxy-Authorization", "OpenAI-API-Key", "X-Access-Token", "Client-Secret", "X-OpenAI-Key", "X-Provider-Secret-Key", "X-Amz-Credential"} {
+	for _, key := range []string{"Proxy-Authorization", "OpenAI-API-Key", "X-Access-Token", "Client-Secret", "X-OpenAI-Key", "X-DeepSeek-Key", "X-Gemini-Key", "X-Provider-Secret-Key", "X-Amz-Credential"} {
 		if got[key] != "***" {
 			t.Errorf("%s = %q, want redacted value", key, got[key])
 		}

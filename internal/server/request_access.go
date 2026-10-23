@@ -187,11 +187,13 @@ func isSensitiveQueryKey(key string) bool {
 		"x-amz-signature", "x-amz-security-token":
 		return true
 	}
-	return strings.HasSuffix(key, "_token") ||
-		strings.HasSuffix(key, "_secret") ||
-		strings.HasSuffix(key, "_password") ||
-		strings.HasSuffix(key, "_signature") ||
-		strings.HasSuffix(key, "_api_key")
+	normalized := strings.NewReplacer("-", "_", ".", "_").Replace(key)
+	return isSensitiveProviderKeyName(normalized) ||
+		strings.HasSuffix(normalized, "_token") ||
+		strings.HasSuffix(normalized, "_secret") ||
+		strings.HasSuffix(normalized, "_password") ||
+		strings.HasSuffix(normalized, "_signature") ||
+		strings.HasSuffix(normalized, "_api_key")
 }
 
 func forwardedValue(v string) string {
