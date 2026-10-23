@@ -138,7 +138,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `1339f5fb61537c08292aa44cec990c5d930401c9`，GitHub Actions #94（运行 `39898164924`，success）。常规测试、race detector、三项 `-benchmem` 基准、Artifact 上传、`go vet`、Gateway 构建及前端 bundle 校验全部通过。
+> 最近一次已验收代码功能组：提交 `3a9d56021c5eba0066287eccace7b3d7b499bbe8`，GitHub Actions #96（运行 `39898522951`，success）。常规测试、race detector、响应头超时故障注入、三项 `-benchmem` 基准及 Artifact 上传、`go vet`、Gateway 构建和前端 bundle 校验全部通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
@@ -146,8 +146,8 @@ docs/                        中文架构、协议和运维文档
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
 | 阶段 2：请求边界与路由 | 进行中 | 97% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并补双 Agent 并发 Provider/模型隔离（Actions #90 通过）。性能基线与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 90% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；还需通过更多 Provider/协议契约测试检验边界。 |
-| 阶段 4：外部 Provider 与密钥 | 进行中 | 97% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout 与本机连接拒绝由提交 `b6415a3` 的 Actions #92 全量 CI 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 60% | CI 的 race detector、请求取消与双 Agent 并发隔离、DNS/连接故障注入均通过；三项性能基准已由 Actions #94 运行并作为 30 天 Artifact 存档。仍需相同环境的持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
+| 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
+| 阶段 5：运行治理与 CI | 进行中 | 62% | CI 的 race detector、请求取消与双 Agent 并发隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 由 Actions #94/#96 成功运行。仍需相同环境的持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
 ### 已核实的历史 CI 问题
 
@@ -343,8 +343,8 @@ docs/                        中文架构、协议和运维文档
 - 后续应以同一 Go 版本/相近 Runner 进行多次采样后分析趋势；暂不设置单次 benchmark 阈值，以免 Runner 噪声造成误报。
 
 
-### 上游响应头超时故障注入（2026-10-23，待 CI）
+### 上游响应头超时故障注入（2026-10-23，CI #96 已通过）
 
 - 新增 `TestOpenAICompatibleProviderMapsResponseHeaderTimeoutTo504`，使用本地 Mock 服务接收请求但延迟响应头，缩短测试 Transport 的 `ResponseHeaderTimeout` 来真实触发 HTTP 客户端超时。
 - 覆盖 OpenAI Chat Completions 和 Anthropic Messages 两条协议：内部错误映射必须是 `provider_timeout` / HTTP 504；Anthropic 路径必须返回 `timeout_error` 信封，且不泄露目标 URL/Transport 原始诊断。
-- 本测试验证 Gateway HTTP 适配器与超时分类，不代表真实公网链路或供应商 SLA；需由本提交完整 CI 复验。
+- 提交 `3a9d56021c5eba0066287eccace7b3d7b499bbe8` 对应 Actions #96（运行 `39898522951`）通过完整流水线。该测试验证 Gateway HTTP 适配器与超时分类，不代表真实公网链路或供应商 SLA。

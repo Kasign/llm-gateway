@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 验收：提交 `1339f5fb61537c08292aa44cec990c5d930401c9`，GitHub Actions #94（运行 `39898164924`，success）。该运行通过 Go 单测、race detector、三项可重复性能基准、Artifact 上传、`go vet`、Gateway 构建、管理台源码构建和前端 bundle 一致性检查。真实供应商端到端及线上性能仍未验收。
+> 最近一次完整 CI 验收：提交 `3a9d56021c5eba0066287eccace7b3d7b499bbe8`，GitHub Actions #96（运行 `39898522951`，success）。该运行通过 Go 单测、race detector、ResponseHeaderTimeout 故障注入、三项可重复性能基准、Artifact 上传、`go vet`、Gateway 构建、管理台源码构建和前端 bundle 一致性检查。真实供应商端到端及线上性能仍未验收。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -566,3 +566,8 @@ Claude Code 还使用 `x-should-retry`、`retry-after`、`request-id` 和 `anthr
 Actions #94 记录了以下首轮值（Go 1.23.12、linux/amd64、AMD EPYC 7763 Runner）：Provider loopback Mock 转发 90,352 ns/op、15,795 B/op、146 allocs/op；Agent 路由模型解析 342.0 ns/op、0 B/op、0 allocs/op；RequestAnalysis 构建 1,372 ns/op、592 B/op、17 allocs/op。Artifact 保留 30 天：[下载基准数据](https://github.com/Kasign/llm-gateway/actions/runs/39898164924/artifacts/12477692434)。
 
 Provider 测量使用 loopback Mock，不包含真实供应商网络 RTT 和模型推理。单次 CI 数据只建立比较基线，不证明优化效果，也不代替压力测试或生产 SLO。
+
+
+### ResponseHeaderTimeout 回归验收
+
+提交 `3a9d56021c5eba0066287eccace7b3d7b499bbe8` 的 Actions #96（运行 `39898522951`）通过超时回归测试和完整 CI。测试通过本机 Mock 延迟响应头触发 HTTP Transport 的 `ResponseHeaderTimeout`，验证 OpenAI-compatible 请求映射到 504 `provider_timeout`，Anthropic Messages 返回 504 `timeout_error` 信封，并检查对外错误未泄露目标 URL 或原始 Transport 诊断。该测试不代表真实公网供应商端到端 SLA。
