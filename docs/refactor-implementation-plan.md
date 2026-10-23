@@ -242,3 +242,10 @@ docs/                        中文架构、协议和运维文档
 - 配置属于进程启动配置；编辑 `agents` 或 Provider 配置后需按部署流程重启/重新部署网关。当前没有管理台热更新入口。
 - 后续增强仍未包含：同一 Agent 内多模型别名映射、按 Agent 进行不同的 Key/权限策略、配置热更新、Provider 健康探测与响应提交前的受控重试/故障转移。故障转移不得在已经向客户端写入流式内容后执行。
 - 流式上游错误已 review：上游非 2xx 且客户端响应未提交时返回保留 HTTP 状态的脱敏 JSON；状态已提交时追加安全 SSE `event: error`，不能修改已经发送的 HTTP 状态行。当前测试涵盖 JSON 401/429/503、SSE 状态提交前后与 Responses API 的序号字段。
+
+### 多 Agent 入口拒绝请求的审计 URL 一致性复核（2026-10-23）
+
+- 基线已核实：dev HEAD 为 c3f21d11079b476662996edb2b8afec098098b7f；对应 Actions #78（运行 39891435177）通过 Go 单测、静态检查、构建和前端检查。该结果只作为本次修改前的基线。
+- 代码审查发现：Agent 路由通过 http.StripPrefix 将请求路径归一成 /v1/*，推理成功路径已恢复外部 URL，但鉴权失败、限流拒绝及请求体超限路径的 rejectInference 曾直接记录被剥离后的 URL。
+- 处理方式：将拒绝请求日志构建抽成 buildRejectedInferenceLog，与成功路径统一使用 agentRequestPublicURL；增加回归测试验证 /deepseek/v1/... 前缀保留且查询凭据继续脱敏。
+- 验收规则：本次实现必须以包含该改动的 GitHub Actions 完整结果为准，不能用历史基线 CI 代替。

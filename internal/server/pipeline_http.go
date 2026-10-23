@@ -93,18 +93,25 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) rejectInference(w http.ResponseWriter, r *http.Request, id string, start time.Time, key *auth.Key, status int, code, msg string) {
-	s.markCallRecorded(r.Context())
-	end := time.Now()
+// buildRejectedInferenceLog 构建鉴权、限流及请求体校验失败时的审计记录。
+// Agent 路由会剥离 URL 前缀供内部复用；审计必须恢复外部路径，且继续脱敏查询凭据。
+func (s *Server) buildRejectedInferenceLog(r *http.Request, id string, start, end time.Time, key *auth.Key, status int, code, msg string) store.RequestLog {
 	item := store.RequestLog{
 		RequestID: id, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r), UserAgent: r.UserAgent(),
-		Endpoint: r.URL.Path, RequestURL: requestPublicURL(r, s.trustedProxyRanges), Method: r.Method, Status: "error", HTTPStatus: status, StartedAt: start, FinishedAt: &end,
+		Endpoint: r.URL.Path, RequestURL: agentRequestPublicURL(r, s.trustedProxyRanges), Method: r.Method, Status: "error", HTTPStatus: status, StartedAt: start, FinishedAt: &end,
 		LatencyMS: end.Sub(start).Milliseconds(), ErrorCode: code, ErrorMessage: msg,
 	}
 	if key != nil {
 		item.APIKeyID = key.ID
 		item.APIKeyName = key.Name
 	}
+	return item
+}
+func (s *Server) rejectInference(w http.ResponseWriter, r *http.Request, id string, start time.Time, key *auth.Key, status int, code, msg string) {
+	s.markCallRecorded(r.Context())
+	end := time.Now()
+	item := s.buildRejectedInferenceLog(r, id, start, end, key, status, code, msg)
+
 	if s.audit != nil {
 		s.audit.CreateRequest(item)
 		s.audit.FinishRequest(item)

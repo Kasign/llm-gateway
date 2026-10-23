@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/settings"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 func TestAgentRouteHandlerStripsPrefixAndPreservesPublicURL(t *testing.T) {
@@ -70,5 +72,34 @@ func TestResolveInferenceUsesAgentRouteWithoutChangingActiveProvider(t *testing.
 	}
 	if s.effectiveUpstream().Backend != "llamacpp" {
 		t.Fatalf("Agent routing mutated active Provider: %q", s.effectiveUpstream().Backend)
+	}
+}
+
+func TestRejectedInferenceLogPreservesAgentURLAndRedactsQuerySecrets(t *testing.T) {
+	cfg := config.AgentRouteConfig{
+		ID: "deepseek", Enabled: true, PathPrefix: "/deepseek",
+		ProviderID: "deepseek", DefaultModel: "deepseek-chat",
+	}
+	s := &Server{}
+	var logItem store.RequestLog
+	handler := s.agentRouteHandler(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		logItem = s.buildRejectedInferenceLog(r, "rejected-agent-request", now, now, nil,
+			http.StatusUnauthorized, "invalid_api_key", "Invalid API key")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	req := httptest.NewRequest(http.MethodPost,
+		"http://gateway.example/deepseek/v1/chat/completions?token=private&stream=true", strings.NewReader("{}"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", res.Code)
+	}
+	if !strings.Contains(logItem.RequestURL, "/deepseek/v1/chat/completions?token=***&stream=true") {
+		t.Fatalf("rejected Agent request URL lost its public prefix or redaction: %q", logItem.RequestURL)
+	}
+	if strings.Contains(logItem.RequestURL, "token=private") {
+		t.Fatalf("rejected Agent request audit URL leaked query credential: %q", logItem.RequestURL)
 	}
 }
