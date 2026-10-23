@@ -85,6 +85,7 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 		path          string
 		trace         string
 		model         string
+		stream        bool
 		providerKey   string
 		authorization string
 		gatewayKey    string
@@ -100,7 +101,8 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 				return
 			}
 			var requestPayload struct {
-				Model string `json:"model"`
+				Model  string `json:"model"`
+				Stream bool   `json:"stream"`
 			}
 			if err := json.Unmarshal(body, &requestPayload); err != nil {
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -108,13 +110,22 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 			}
 			capture := upstreamCapture{
 				path: r.URL.Path, trace: r.URL.Query().Get("trace"),
-				model: requestPayload.Model, providerKey: r.Header.Get("Api-Key"),
+				model: requestPayload.Model, stream: requestPayload.Stream,
+				providerKey: r.Header.Get("Api-Key"),
 				authorization: r.Header.Get("Authorization"), gatewayKey: r.Header.Get("X-API-Key"),
 			}
 			captureMu.Lock()
 			captures[providerID] = capture
 			captureMu.Unlock()
 
+			if requestPayload.Stream {
+				w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+				_, _ = fmt.Fprintf(w,
+					"data: {\"id\":%q,\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n",
+					responseID, requestPayload.Model, "stream from "+providerID)
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w,
 				`{"id":%q,"object":"chat.completion","model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}]}`,
@@ -205,52 +216,68 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 				}
 			}))
 
-			requestBody := `{"model":"caller-model-must-not-win","messages":[{"role":"user","content":"hello"}]}`
-			request := httptest.NewRequest(http.MethodPost,
-				"http://gateway.example"+tc.config.PathPrefix+"/v1/chat/completions?trace="+tc.providerID,
-				strings.NewReader(requestBody))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Authorization", "Bearer gateway-caller-secret")
-			request.Header.Set("X-API-Key", "gateway-caller-secret")
-			request.Header.Set("X-Request-ID", "agent-data-plane-"+tc.providerID)
-			writer := httptest.NewRecorder()
-			handler.ServeHTTP(writer, request)
-			if writer.Code != http.StatusOK {
-				t.Fatalf("gateway status = %d, body=%s", writer.Code, writer.Body.String())
-			}
+			for _, streaming := range []bool{false, true} {
+				t.Run(fmt.Sprintf("stream_%v", streaming), func(t *testing.T) {
+					requestBody := fmt.Sprintf(`{"model":"caller-model-must-not-win","stream":%t,"messages":[{"role":"user","content":"hello"}]}`, streaming)
+					request := httptest.NewRequest(http.MethodPost,
+						"http://gateway.example"+tc.config.PathPrefix+"/v1/chat/completions?trace="+tc.providerID,
+						strings.NewReader(requestBody))
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Authorization", "Bearer gateway-caller-secret")
+					request.Header.Set("X-API-Key", "gateway-caller-secret")
+					request.Header.Set("X-Request-ID", fmt.Sprintf("agent-data-plane-%s-%v", tc.providerID, streaming))
+					writer := httptest.NewRecorder()
+					handler.ServeHTTP(writer, request)
+					if writer.Code != http.StatusOK {
+						t.Fatalf("gateway status = %d, body=%s", writer.Code, writer.Body.String())
+					}
 
-			var response struct {
-				ID      string `json:"id"`
-				Model   string `json:"model"`
-				Choices []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				} `json:"choices"`
-			}
-			if err := json.Unmarshal(writer.Body.Bytes(), &response); err != nil {
-				t.Fatalf("gateway response is not JSON: %v", err)
-			}
-			if response.ID != tc.resultID || response.Model != tc.model || len(response.Choices) != 1 ||
-				response.Choices[0].Message.Content != "response from "+tc.providerID {
-				t.Fatalf("response came from the wrong Provider/model: %+v", response)
-			}
+					if streaming {
+						body := writer.Body.String()
+						if !strings.HasPrefix(writer.Header().Get("Content-Type"), "text/event-stream") ||
+							!strings.Contains(body, "stream from "+tc.providerID) ||
+							!strings.Contains(body, "data: [DONE]") {
+							t.Fatalf("stream response from wrong Provider or malformed SSE: headers=%v body=%q", writer.Header(), body)
+						}
+					} else {
+						var response struct {
+							ID      string `json:"id"`
+							Model   string `json:"model"`
+							Choices []struct {
+								Message struct {
+									Content string `json:"content"`
+								} `json:"message"`
+							} `json:"choices"`
+						}
+						if err := json.Unmarshal(writer.Body.Bytes(), &response); err != nil {
+							t.Fatalf("gateway response is not JSON: %v", err)
+						}
+						if response.ID != tc.resultID || response.Model != tc.model || len(response.Choices) != 1 ||
+							response.Choices[0].Message.Content != "response from "+tc.providerID {
+							t.Fatalf("response came from the wrong Provider/model: %+v", response)
+						}
+					}
 
-			captureMu.Lock()
-			capture := captures[tc.providerID]
-			captureMu.Unlock()
-			if capture.path != "/v1/chat/completions" || capture.trace != tc.providerID {
-				t.Errorf("upstream path/query = %q / %q", capture.path, capture.trace)
-			}
-			if capture.model != tc.model {
-				t.Errorf("upstream model = %q, want Agent default %q", capture.model, tc.model)
-			}
-			wantKey := tc.providerID + "-upstream-secret"
-			if capture.providerKey != wantKey {
-				t.Errorf("upstream provider key = %q, want route-specific key", capture.providerKey)
-			}
-			if capture.authorization != "" || capture.gatewayKey != "" {
-				t.Errorf("Gateway caller credentials leaked upstream: Authorization=%q X-API-Key=%q", capture.authorization, capture.gatewayKey)
+					captureMu.Lock()
+					capture := captures[tc.providerID]
+					captureMu.Unlock()
+					if capture.path != "/v1/chat/completions" || capture.trace != tc.providerID {
+						t.Errorf("upstream path/query = %q / %q", capture.path, capture.trace)
+					}
+					if capture.model != tc.model {
+						t.Errorf("upstream model = %q, want Agent default %q", capture.model, tc.model)
+					}
+					if capture.stream != streaming {
+						t.Errorf("upstream stream = %v, want %v", capture.stream, streaming)
+					}
+					wantKey := tc.providerID + "-upstream-secret"
+					if capture.providerKey != wantKey {
+						t.Errorf("upstream provider key = %q, want route-specific key", capture.providerKey)
+					}
+					if capture.authorization != "" || capture.gatewayKey != "" {
+						t.Errorf("Gateway caller credentials leaked upstream: Authorization=%q X-API-Key=%q", capture.authorization, capture.gatewayKey)
+					}
+				})
 			}
 		})
 	}

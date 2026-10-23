@@ -362,3 +362,11 @@ docs/                        中文架构、协议和运维文档
 
 - Actions #98（运行 `39899077307`）在 `go test ./...` 阶段失败。日志显示 Provider Registry 依据既有安全配置规则拒绝测试中使用的 `api_key_header: x-upstream-key`，允许的自定义凭据头是 `Authorization`、`api-key` 或 `x-api-key`。
 - 这属于新增 Mock 测试夹具不符合项目配置契约，不是路由实现失败。提交 `4ef97c9` 将服务端上游密钥改为受支持的 `api-key` 头，同时仍发送假的调用方 `Authorization` 与 `X-API-Key`；Actions #99 已通过，验证上游收到 Agent 专用 Provider 密钥，但不会把调用方凭据透传。
+
+
+### Agent 流式 data-plane 契约（2026-10-23，待 CI）
+
+- 在双 Agent、双 Mock Provider data-plane 集成测试中，为 DeepSeek 与 OpenAI 两条路由各执行非流式 JSON 和流式 SSE 请求。
+- 非流式继续检查响应 ID、model、内容和服务端默认模型；流式检查响应的 text/event-stream Content-Type、对应 Provider 的增量内容和 [DONE] 终止事件。
+- 两种模式均检查路径前缀剥离、query 透传、Agent 专用 API Key 与调用方凭据隔离，并校验出站 stream 标志与入站一致。
+- 需由新提交触发的单测、race、性能基准、vet、build 和前端校验全部通过后再验收。
