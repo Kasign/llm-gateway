@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,5 +151,47 @@ func TestRunCancelsFinishObservesEarlierCancellation(t *testing.T) {
 	}
 	if ctx.Err() == nil {
 		t.Fatal("context was not cancelled")
+	}
+}
+
+
+// TestRunCancelsConcurrentCancelAndFinishAreLinearized 验证取消与 Finish 并发竞争时的先后顺序。
+// 如果 Cancel 先赢得锁，Finish 必须观察到 cancelRequested；如果 Finish 先赢，Cancel 必须被拒绝。
+func TestRunCancelsConcurrentCancelAndFinishAreLinearized(t *testing.T) {
+	const iterations = 500
+	for i := 0; i < iterations; i++ {
+		runs := newRunCancels()
+		ctx, cancel := context.WithCancel(context.Background())
+		runs.Register("concurrent-request", cancel)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var cancelAccepted, finishObservedCancel bool
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			cancelAccepted = runs.Cancel("concurrent-request")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			finishObservedCancel = runs.MarkFinishing("concurrent-request")
+		}()
+		close(start)
+		wg.Wait()
+
+		if cancelAccepted != finishObservedCancel {
+			t.Fatalf("iteration %d: Cancel accepted=%v but Finish observed prior cancellation=%v",
+				i, cancelAccepted, finishObservedCancel)
+		}
+		if cancelAccepted && ctx.Err() == nil {
+			t.Fatalf("iteration %d: accepted cancellation did not cancel request context", i)
+		}
+		if !cancelAccepted && ctx.Err() != nil {
+			t.Fatalf("iteration %d: rejected late cancellation still cancelled request context: %v", i, ctx.Err())
+		}
+		runs.Unregister("concurrent-request")
+		cancel()
 	}
 }

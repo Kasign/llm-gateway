@@ -282,3 +282,10 @@ docs/                        中文架构、协议和运维文档
 
 
 - CI #84（运行 `39896121255`）在修正 `safeBody` 编译错误后继续发现新增 Server 测试将嵌入的 `core.Request` 字段写在 `core.State` 顶层。按 `internal/core/types.go` 的真实类型定义改为 `Request: core.Request{...}`；该问题仅在测试编译阶段暴露，下一次 CI 需重新验证全量测试及后续构建步骤。
+
+
+### 并发取消与 Finish 竞态回归（2026-10-23，待 CI）
+
+- 新增 `TestRunCancelsConcurrentCancelAndFinishAreLinearized`，500 轮并发竞争 Cancel/MarkFinishing，验证线性化不变量：取消被接受则 Finish 必须观察到取消；Finish 先开始则迟到取消不得取消 context。
+- GitHub Actions 新增 `go test -race ./internal/provider ./internal/server ./internal/core`，在既有常规单测之后验证 Provider、请求生命周期和 Pipeline 核心包的数据竞态。
+- 该组以提交前完整 CI #86（文档提交 `7a506f50b0cc90b3ace1afbb8e79f1f506a19394`，运行 `39896367757`，success）为基线。本轮并发与 race 检查需要由新提交 CI 通过后再验收。

@@ -39,6 +39,9 @@ jobs:
       - name: 单元测试
         run: go test ./...
 
+      - name: 并发与数据竞态测试
+        run: go test -race ./internal/provider ./internal/server ./internal/core
+
       - name: 静态检查
         run: go vet ./...
 
