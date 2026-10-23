@@ -410,12 +410,12 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, status, code, msg)
 			return
 		}
-		body := agentModelListBody(route, target, key)
+		body, modelCount := agentModelListBody(route, target, key)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 		s.keys.Touch(context.Background(), key.ID)
 		finish(http.StatusOK, "success", "", "", int64(len(body)))
-		applog.Printf("[%s] Agent /%s/v1/models ok: key=%s models=%d latency=%dms", id, route.ID, key.Name, len(data), time.Since(start).Milliseconds())
+		applog.Printf("[%s] Agent /%s/v1/models ok: key=%s models=%d latency=%dms", id, route.ID, key.Name, modelCount, time.Since(start).Milliseconds())
 		return
 	}
 

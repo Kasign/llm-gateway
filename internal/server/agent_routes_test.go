@@ -330,7 +330,11 @@ func TestAgentModelListBodyHonorsModelACLAndExposesOnlyFixedTarget(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := decode(t, agentModelListBody(route, target, tc.key))
+			body, count := agentModelListBody(route, target, tc.key)
+			payload := decode(t, body)
+			if count != len(payload.Data) {
+				t.Fatalf("helper count = %d, response model count = %d", count, len(payload.Data))
+			}
 			if payload.Object != "list" || len(payload.Data) != tc.wantNum {
 				t.Fatalf("model list object/count = %q/%d, want list/%d: %+v", payload.Object, len(payload.Data), tc.wantNum, payload)
 			}

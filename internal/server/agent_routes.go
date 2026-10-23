@@ -49,7 +49,7 @@ func (s *Server) agentRouteHandler(cfg config.AgentRouteConfig, next http.Handle
 
 
 // agentModelListBody 生成 Agent 的 /v1/models 响应，只公开该 Agent 固定的目标模型，并执行调用方 Key 的模型 ACL。
-func agentModelListBody(route agentRoute, target proxyModelTarget, key *auth.Key) []byte {
+func agentModelListBody(route agentRoute, target proxyModelTarget, key *auth.Key) ([]byte, int) {
 	modelID := strings.TrimSpace(target.ModelKey)
 	if target.Model != nil {
 		modelID = strings.TrimSpace(target.Model.ModelKey)
@@ -62,7 +62,7 @@ func agentModelListBody(route agentRoute, target proxyModelTarget, key *auth.Key
 		})
 	}
 	body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
-	return body
+	return body, len(data)
 }
 
 // agentRequestPublicURL 在审计 URL 中恢复 Agent 前缀；普通 /v1 请求沿用原有 URL 与 query 脱敏。

@@ -378,3 +378,10 @@ docs/                        中文架构、协议和运维文档
 - 将 Agent 分支的模型列表组装逻辑提取为纯函数 `agentModelListBody`，供 `GET /<agent-prefix>/v1/models` 复用，避免模型列表行为分散在 HTTP 收尾逻辑内。
 - 新增单元测试覆盖不受限 Key、按公开模型 ID 放行、按上游模型 ID 放行、其他模型被 ACL 拒绝；断言列表只暴露该 Agent 固定的目标模型与 Provider 标识，不把另一个 Agent 或客户端传入的任意模型列出来。
 - 这项测试覆盖模型列表契约与 ACL 过滤，不替代完整外层鉴权、Redis 限流或审计流程集成；需由本提交触发的完整 CI 通过后验收。
+
+
+### Agent /v1/models helper 首轮代码复核（2026-10-23）
+
+- 在 CI #103 运行期间的二次 diff review 发现，抽取 Agent 模型列表生成函数后，日志仍引用原函数内的 `data` 变量，存在编译错误风险。
+- 修复为 `agentModelListBody` 同时返回响应 JSON 和已 ACL 过滤后的模型数量；handler 使用返回数量写审计日志，单元测试也核对返回数量与 JSON 中的 data 数组一致。
+- CI #103 按原提交运行，不将其结果当作修复验收；修复提交会触发新一轮完整 CI。
