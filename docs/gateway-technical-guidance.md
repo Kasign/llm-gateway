@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 成功运行：提交 `5e3be3a0d409b210479672e846336732d84c1afe`，Actions 运行 `39887506150`（Go CI，success）。该运行通过 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及源码构建产物与部署 bundle 的精确比较。
+> 最近一次完整 CI 成功运行：提交 `a6ca7efb59057adc79bfb931f1478354244632e2`，Actions 运行 `39888566042`（Go CI，success）。该运行通过 Go 单测、`go vet`、Gateway 构建、管理台源码构建，以及源码构建产物与部署 bundle 的精确比较。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -445,6 +445,12 @@ HTTP/API 层
 客户端请求头和实际发给上游的请求头在写入实时看板或审计 payload 前必须先做统一脱敏。除了标准的 `Authorization`、`api-key`、`x-api-key`、Cookie 等字段，还需要识别厂商自定义的密钥头，例如 `X-DeepSeek-Key`、`X-Gemini-Key`。不要把所有以 `Key` 结尾的普通字段都打码，否则会失去 `X-Model-Key` 等诊断信息。
 
 请求 URL 的查询参数只用于审计展示时脱敏；实际发给 Provider 的 `RawQuery` 不应被改写。除常见的 `token`、`api_key`、`client_secret` 和签名字段外，厂商定制的 `*-key` 查询字段也应遵循同一凭据命名识别规则。回归测试需要同时验证秘密值被遮盖、参数顺序与普通诊断字段保留、原请求转发不受影响。
+
+### 4.10 JSON 与 SSE 上游错误脱敏一致性
+
+远程 Provider 的非 2xx 响应不得因为 `stream=false` 就直接回传供应商原始错误正文。原始错误 JSON 可能包含内部调试上下文、凭据回显或供应商内部标识。非流式 JSON 与流式 SSE 应遵循同一错误策略：按 HTTP 状态分类，保留上游状态码和白名单响应头（例如 `Retry-After`），返回网关固定的安全错误正文，设置 `Cache-Control: no-store`，并将真实状态与错误分类写入审计记录。
+
+回归测试需覆盖 401、429、5xx，检查上游私密错误字符串不会出现在响应中，同时验证安全错误码、状态码、Retry-After 和响应字节统计保持一致。成功的 2xx JSON 响应仍原样转发。
 
 ## 5. 建议整改路线
 

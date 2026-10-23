@@ -309,6 +309,82 @@ func TestOpenAICompatibleProviderWritesSSEErrorAfterUpstreamReadFailure(t *testi
 
 
 
+func TestOpenAICompatibleProviderSanitizesJSONUpstreamStatus(t *testing.T) {
+	const privateError = "provider credential details must not leak remote-secret"
+	cases := []struct {
+		name       string
+		status     int
+		wantCode   string
+		wantKind   ErrorKind
+		retryAfter string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, wantCode: "provider_authentication", wantKind: ErrorAuthentication},
+		{name: "rate limited", status: http.StatusTooManyRequests, wantCode: "provider_rate_limit", wantKind: ErrorRateLimit, retryAfter: "3"},
+		{name: "upstream unavailable", status: http.StatusServiceUnavailable, wantCode: "provider_upstream", wantKind: ErrorUpstream},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.status)
+				body, _ := json.Marshal(map[string]interface{}{
+					"error": map[string]string{"message": privateError},
+					"debug": map[string]string{"credential": "remote-secret"},
+				})
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: "remote-secret"})
+			writer := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			result, err := p.Forward(context.Background(), InferenceCall{
+				Writer: writer, Request: request, Path: "/v1/chat/completions",
+				Body: []byte("{}"), Stream: false,
+			})
+			if err == nil {
+				t.Fatal("expected classified upstream error")
+			}
+			var providerErr *ProviderError
+			if !errors.As(err, &providerErr) || providerErr.Kind != tc.wantKind {
+				t.Fatalf("error = %#v, want ProviderError kind %q", err, tc.wantKind)
+			}
+			if result.Status != tc.status || writer.Code != tc.status {
+				t.Fatalf("upstream/gateway status = %d/%d, want %d", result.Status, writer.Code, tc.status)
+			}
+			if writer.Header().Get("Content-Type") != "application/json" || writer.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("unsafe error headers: %#v", writer.Header())
+			}
+			if tc.retryAfter != "" && writer.Header().Get("Retry-After") != tc.retryAfter {
+				t.Fatalf("Retry-After = %q, want %q", writer.Header().Get("Retry-After"), tc.retryAfter)
+			}
+			var payload struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+					Code    string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(writer.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("safe error is not JSON: %v; body=%q", err, writer.Body.String())
+			}
+			if payload.Error.Message != "upstream provider request failed" ||
+				payload.Error.Type != "gateway_error" || payload.Error.Code != tc.wantCode {
+				t.Fatalf("unexpected safe error payload: %+v", payload.Error)
+			}
+			if strings.Contains(writer.Body.String(), privateError) || strings.Contains(writer.Body.String(), "remote-secret") {
+				t.Fatalf("raw upstream error details leaked: %q", writer.Body.String())
+			}
+			if result.ResponseBytes != int64(writer.Body.Len()) || string(result.Body) != writer.Body.String() {
+				t.Fatalf("result body metadata mismatch: result=%+v body=%q", result, writer.Body.String())
+			}
+		})
+	}
+}
+
 func TestOpenAICompatibleProviderSanitizesUpstreamStatusBeforeCommit(t *testing.T) {
 	const privateError = "provider credential details must not leak"
 	cases := []struct {

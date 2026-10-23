@@ -254,6 +254,24 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 	if int64(len(body)) > p.maxResponseBytes {
 		return core.Result{Status: resp.StatusCode}, &ProviderError{ProviderID: p.id, Kind: ErrorUpstream, StatusCode: resp.StatusCode, Err: errors.New("provider response exceeds configured size limit")}
 	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		// JSON 与 SSE 错误采用相同的脱敏原则：保留状态码和必要的白名单头，不透传供应商原始错误正文。
+		upstreamErr := NewHTTPError(p.id, resp.StatusCode, errors.New("provider returned a non-success HTTP status"))
+		copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
+		call.Writer.Header().Set("Content-Type", "application/json")
+		call.Writer.Header().Set("Cache-Control", "no-store")
+		safeBody := safeProviderErrorBody(streamErrorCode(upstreamErr))
+		call.Writer.WriteHeader(resp.StatusCode)
+		n, writeErr := call.Writer.Write(safeBody)
+		result := core.Result{Status: resp.StatusCode, ResponseBytes: int64(n), Body: safeBody}
+		if writeErr != nil {
+			return result, writeErr
+		}
+		if n != len(safeBody) {
+			return result, io.ErrShortWrite
+		}
+		return result, upstreamErr
+	}
 	copyRemoteResponseHeaders(call.Writer.Header(), resp.Header)
 	call.Writer.WriteHeader(resp.StatusCode)
 	n, writeErr := call.Writer.Write(body)
