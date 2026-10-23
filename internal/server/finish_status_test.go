@@ -12,7 +12,7 @@ import (
 func TestFinishStatusSeparatesCommittedGatewayAndUpstreamStatus(t *testing.T) {
 	sink := &responseSink{w: httptest.NewRecorder()}
 	_, _ = sink.Write([]byte(": keepalive\n\n"))
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest, UpstreamStatus: http.StatusBadRequest}}, "")
 	if gatewayStatus != http.StatusOK || upstreamStatus != http.StatusBadRequest {
 		t.Fatalf("gateway/upstream = %d/%d, want 200/400", gatewayStatus, upstreamStatus)
 	}
@@ -23,7 +23,7 @@ func TestFinishStatusSeparatesCommittedGatewayAndUpstreamStatus(t *testing.T) {
 
 func TestFinishStatusUsesUpstreamStatusBeforeGatewayCommits(t *testing.T) {
 	sink := &responseSink{w: httptest.NewRecorder()}
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}}, "")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest, UpstreamStatus: http.StatusBadRequest}}, "")
 	if gatewayStatus != http.StatusBadRequest || upstreamStatus != http.StatusBadRequest {
 		t.Fatalf("gateway/upstream = %d/%d, want 400/400", gatewayStatus, upstreamStatus)
 	}
@@ -37,7 +37,7 @@ func TestFinishStatusCancellationKeepsCommittedGatewayStatus(t *testing.T) {
 	_, _ = sink.Write([]byte(": keepalive\n\n"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(ctx, core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusOK}, Err: context.Canceled}, "客户端断开")
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(ctx, core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusOK, UpstreamStatus: http.StatusOK}, Err: context.Canceled}, "客户端断开")
 	if gatewayStatus != http.StatusOK || upstreamStatus != http.StatusOK {
 		t.Fatalf("gateway/upstream = %d/%d, want 200/200", gatewayStatus, upstreamStatus)
 	}
@@ -51,7 +51,7 @@ func TestFinishStatusReadsStatusFromInternalMemorySink(t *testing.T) {
 	sink.WriteHeader(http.StatusBadRequest)
 	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(
 		context.Background(),
-		core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest}},
+		core.Event{State: core.State{Request: core.Request{Sink: sink}, Stream: true}, Result: &core.Result{Status: http.StatusBadRequest, UpstreamStatus: http.StatusBadRequest}},
 		"",
 	)
 	if gatewayStatus != http.StatusBadRequest || upstreamStatus != http.StatusBadRequest {
@@ -59,5 +59,24 @@ func TestFinishStatusReadsStatusFromInternalMemorySink(t *testing.T) {
 	}
 	if state != "error" || code != "upstream_http_error" {
 		t.Fatalf("state/code = %q/%q", state, code)
+	}
+}
+
+
+func TestFinishStatusDoesNotInventUpstreamStatusForTransportFailure(t *testing.T) {
+	sink := &responseSink{w: httptest.NewRecorder()}
+	err := &core.Error{Status: http.StatusBadGateway, Code: "provider_upstream", Message: "upstream connection failed"}
+	result := &core.Result{Status: http.StatusBadGateway}
+
+	gatewayStatus, upstreamStatus, state, code, _ := finishStatus(
+		context.Background(),
+		core.Event{State: core.State{Request: core.Request{Sink: sink}}, Result: result, Err: err},
+		"",
+	)
+	if gatewayStatus != http.StatusBadGateway || upstreamStatus != 0 {
+		t.Fatalf("gateway/upstream = %d/%d, want 502/0 for transport failure", gatewayStatus, upstreamStatus)
+	}
+	if state != "error" || code != "provider_upstream" {
+		t.Fatalf("state/code = %q/%q, want error/provider_upstream", state, code)
 	}
 }

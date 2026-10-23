@@ -91,9 +91,12 @@ type State struct {
 
 // Result 是出网结果。TTFT 只由真实上游数据产生，保活字节不算。
 type Result struct {
-	Status        int
-	ResponseBytes int64
-	Body          []byte
+	// Status 是 Pipeline 返回给上层的最终状态；无上游响应时可由错误映射填充。
+	Status int
+	// UpstreamStatus 只记录 Forwarder 实际收到的上游 HTTP 状态；连接失败等无响应错误保持为 0。
+	UpstreamStatus int
+	ResponseBytes  int64
+	Body           []byte
 	TTFT             *int64 // 首个实际输出（reasoning/content），不是 role 元数据或首字节。
 	FirstByteMS      *int64
 	UpstreamHeadersMS *int64

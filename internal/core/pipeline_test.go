@@ -46,6 +46,8 @@ type recObs struct {
 	warm   int
 	chunks int
 	panic  bool
+	result Result
+	err    error
 }
 
 func (o *recObs) On(_ context.Context, ev Event) {
@@ -53,6 +55,10 @@ func (o *recObs) On(_ context.Context, ev Event) {
 		panic("observer down")
 	}
 	o.stages = append(o.stages, ev.Stage)
+	if ev.Stage == StageFinish && ev.Result != nil {
+		o.result = *ev.Result
+		o.err = ev.Err
+	}
 	if ev.Stage == StageWarmStart {
 		o.warm = ev.State.WarmBytes
 	}
@@ -111,6 +117,9 @@ func TestRunOrderAndIgnoresClientModel(t *testing.T) {
 	}
 	if res.TTFT == nil || *res.TTFT != 40 {
 		t.Fatalf("ttft %+v", res.TTFT)
+	}
+	if res.UpstreamStatus != 200 {
+		t.Fatalf("upstream status = %d, want 200", res.UpstreamStatus)
 	}
 	want := []Stage{StageParsed, StageModelResolved, StagePrepared, StageReady, StageWarmStart, StageUpstreamStart, StageChunk, StageFinish}
 	if len(obs.stages) != len(want) {
@@ -309,3 +318,31 @@ func TestRequestGuardsRunBeforeGlobalGuards(t *testing.T) {
 		t.Fatalf("guard order = %v, want only request guard", order)
 	}
 }
+
+func TestRunKeepsTransportFallbackStatusSeparateFromUpstream(t *testing.T) {
+	obs := &recObs{}
+	p := &Pipeline{
+		Resolve: func(context.Context, State) (ModelChoice, error) {
+			return ModelChoice{UpstreamID: "configured"}, nil
+		},
+		Forward: forwardFunc(func(context.Context, State, ChunkFunc) (Result, error) {
+			return Result{}, &Error{Status: 502, Code: "provider_upstream", Message: "connection refused"}
+		}),
+		Observe: obs,
+	}
+
+	_, err := p.Run(context.Background(), Request{
+		ID: "transport-failure", Method: "POST", Path: "/v1/chat/completions",
+		Body: []byte(`{}`), Started: time.Now(),
+	})
+	if err == nil {
+		t.Fatal("Run error = nil, want transport failure")
+	}
+	if obs.result.Status != 502 || obs.result.UpstreamStatus != 0 {
+		t.Fatalf("finish result status/upstream = %d/%d, want 502/0", obs.result.Status, obs.result.UpstreamStatus)
+	}
+	if obs.err == nil {
+		t.Fatal("finish observer error = nil, want transport failure")
+	}
+}
+
