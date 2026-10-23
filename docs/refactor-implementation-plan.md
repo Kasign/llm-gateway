@@ -410,3 +410,9 @@ docs/                        中文架构、协议和运维文档
 - 请求走实际 `OpenAICompatibleProvider.Forward` 和安全 HTTP Transport，发送极短、无用户数据的 Chat Completions 请求，并检查 HTTP 200 与可解析的 choices。默认请求体最多请求 8 个输出 token，90 秒上下文截止。
 - 环境变量：`LLM_GATEWAY_E2E_BASE_URL`（例如供应商的 HTTPS `/v1` Base URL）、`LLM_GATEWAY_E2E_API_KEY`、`LLM_GATEWAY_E2E_MODEL`；可选 `LLM_GATEWAY_E2E_API_KEY_HEADER`（留空则采用默认 Authorization 方式）。
 - 本提交未在当前执行环境中配置或调用真实供应商密钥，因此该用例的真实公网 E2E 状态仍是待运行；CI 只验证默认跳过路径与编译，其余 Provider 行为仍由 Mock 测试覆盖。
+
+
+### 真实 Provider E2E 用例首轮 CI 复核（2026-10-23）
+
+- Actions #110（运行 `39905269876`）在普通 Go 测试阶段发现新增测试使用了不存在的 `OpenAICompatibleConfig.DefaultModel` 字段；模型 ID 实际由每次 `InferenceCall.ModelID` 提供。
+- 已移除错误字段。该失败只说明 E2E 测试夹具无法编译，没有发起真实供应商请求；修复提交会重新跑全量 CI。真实端点验收仍要求用户在本地显式设置 opt-in 环境变量和自己的 API Key。

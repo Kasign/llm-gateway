@@ -35,7 +35,7 @@ func TestOpenAICompatibleProviderRealEndpointE2E(t *testing.T) {
 
 	remote, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
 		ID: "real-provider-e2e", BaseURL: baseURL, APIKey: apiKey,
-		APIKeyHeader: apiKeyHeader, DefaultModel: modelID,
+		APIKeyHeader: apiKeyHeader,
 	})
 	if err != nil {
 		t.Fatalf("construct real Provider E2E client from environment: %v", err)
