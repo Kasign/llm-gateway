@@ -138,13 +138,13 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。双 Agent 的非流式 JSON 与流式 SSE data-plane 集成、race detector、性能基准和 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过；独立文档提交 #102 的 CI 仍在执行中。
+> 最近一次已验收代码功能组：提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`，GitHub Actions #104（运行 `39900465325`，success）。Agent JSON/SSE 双路数据面、模型发现 ACL、race detector、性能基准与 Artifact、`go vet`、Gateway 构建及前端 bundle 校验全部通过；文档提交 #102 也已成功。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并由 Actions #101 验证两个远程 Agent 的 JSON/SSE data-plane 隔离。持续性能趋势与线上压测仍待。 |
+| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证 Agent `/v1/models` 固定目标与 Key ACL。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 JSON/SSE 往返、各自密钥及模型固定。仍需更多协议/真实供应商契约验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
 | 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector、请求取消、双 Agent 并发解析与双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 已连续多次成功运行。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
@@ -373,15 +373,15 @@ docs/                        中文架构、协议和运维文档
 - Artifact：[`llm-gateway-performance-baseline-4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`](https://github.com/Kasign/llm-gateway/actions/runs/39899727297/artifacts/12478586036)，30 天有效。该测试仍使用本机 Mock 上游，不等同真实公网供应商 E2E。
 
 
-### Agent /v1/models 模型发现与 ACL 契约（2026-10-23，待 CI）
+### Agent /v1/models 模型发现与 ACL 契约（2026-10-23，CI #104 已通过）
 
 - 将 Agent 分支的模型列表组装逻辑提取为纯函数 `agentModelListBody`，供 `GET /<agent-prefix>/v1/models` 复用，避免模型列表行为分散在 HTTP 收尾逻辑内。
 - 新增单元测试覆盖不受限 Key、按公开模型 ID 放行、按上游模型 ID 放行、其他模型被 ACL 拒绝；断言列表只暴露该 Agent 固定的目标模型与 Provider 标识，不把另一个 Agent 或客户端传入的任意模型列出来。
-- 这项测试覆盖模型列表契约与 ACL 过滤，不替代完整外层鉴权、Redis 限流或审计流程集成；需由本提交触发的完整 CI 通过后验收。
+- 测试覆盖模型列表契约与 ACL 过滤，不替代完整外层鉴权、Redis 限流或审计流程集成。提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5` 的 Actions #104（运行 `39900465325`）已通过全量流程：Go 单测、race detector、性能基准与 Artifact、`go vet`、Gateway 构建、管理台源码构建和部署 bundle 校验均成功。
 
 
 ### Agent /v1/models helper 首轮代码复核（2026-10-23）
 
 - 在 CI #103 运行期间的二次 diff review 发现，抽取 Agent 模型列表生成函数后，日志仍引用原函数内的 `data` 变量，存在编译错误风险。
 - 修复为 `agentModelListBody` 同时返回响应 JSON 和已 ACL 过滤后的模型数量；handler 使用返回数量写审计日志，单元测试也核对返回数量与 JSON 中的 data 数组一致。
-- CI #103 按原提交运行，不将其结果当作修复验收；修复提交会触发新一轮完整 CI。
+- CI #103（运行 `39900242374`）确因 `internal/server/server.go:418:107: undefined: data` 编译失败；修复提交 `65d8709` 将 helper 返回的模型数用于日志，CI #104 已通过全部步骤。

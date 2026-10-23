@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 验收：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。该运行通过 Go 单测、race detector、Agent 双远程 Provider 的 JSON/SSE data-plane 集成、ResponseHeaderTimeout 故障注入、三项性能基准、Artifact 上传、`go vet`、Gateway 构建和前端 bundle 检查。真实供应商端到端及线上性能仍未验收。
+> 最近一次完整 CI 验收：提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`，GitHub Actions #104（运行 `39900465325`，success）。该运行通过 Go 单测、race detector、Agent `/v1/models` ACL、双 Provider JSON/SSE data-plane 集成、ResponseHeaderTimeout 故障注入、三项性能基准、Artifact 上传、`go vet`、Gateway 构建及前端 bundle 检查。真实供应商端到端及线上性能仍未验收。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -586,3 +586,8 @@ Actions #99（提交 `4ef97c9d9f748db1fd4aa23312ab728a5a1b49f4`）通过 `TestAg
 ### Agent 模型发现与 ACL
 
 Agent 的 `GET /<agent-prefix>/v1/models` 返回的不是上游任意模型目录，而是该 Agent 配置的固定 Provider/默认目标模型（或由已解析目标给出的模型 ID），并调用同一套 `modelAllowedForKey` 检查调用方 Key 对公开模型 ID、上游模型 ID 或提示名称的 ACL。当前新增纯函数单测覆盖放行与拒绝语义；它不代替外层 API Key/Redis 限流/审计的 HTTP 集成测试。
+
+
+### Agent 模型发现与 ACL 回归验收
+
+Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过 Agent 模型列表 helper 单测，覆盖受限/不受限 Gateway Key、按公开 ID/上游 ID 授权、ACL 不匹配为空列表。Handler 现在调用同一个纯函数产生 list body 与过滤后数量，审计日志不再引用已移入 helper 的局部变量。此测试不替代真实 HTTP Handler 的鉴权、Redis 限流与审计全链路验证。

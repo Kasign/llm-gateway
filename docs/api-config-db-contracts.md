@@ -85,7 +85,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
-| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析、双 Provider 的 JSON/SSE data-plane 往返（Actions #101 通过）；当前补充 Agent `/v1/models` 固定目标与模型 ACL 单元测试。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
+| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析、双 Provider 的 JSON/SSE data-plane 往返（Actions #101）及 Agent `/v1/models` 固定目标/模型 ACL 测试（Actions #104 均通过）。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
 | Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游、DNS NXDOMAIN/timeout、连接拒绝、ResponseHeaderTimeout 错误映射均由 Actions #92/#96 验证；Agent data-plane 对各自上游密钥隔离由 #99 验证；三项性能基准及 Artifact 由 #94/#99 验证。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
@@ -111,3 +111,8 @@ Actions #101（提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`）通过双 Age
 - Agent 默认模型覆盖客户端提交的不同 model；出站 stream 布尔值与入站一致。
 - SSE 返回对应 Provider 的内容和 `[DONE]`；不串用另一 Agent 的模型或 Provider API Key。
 - Provider 服务端凭据会转发，Gateway 调用方 `Authorization` 和 `X-API-Key` 不会作为上游凭据泄漏。
+
+
+### Agent /v1/models ACL（CI #104）
+
+Actions #104（提交 `65d8709ff2fdad3a1c9e59c2b9d300a173f4cac5`）通过模型列表与 ACL 单元测试：不受限 Key 可看到固定目标模型；AllowedModels 可按公开 model ID 或上游 model ID 放行；不匹配时返回空 data 列表。响应 owned_by 取 Agent Provider ID，display_name 为对应上游模型名称，不会列出其他 Provider 的模型。测试覆盖 helper 契约，不声称完整外层 auth/Redis/audit HTTP 集成已经由该用例覆盖。
