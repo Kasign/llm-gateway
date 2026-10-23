@@ -1,6 +1,6 @@
 # LLM Gateway 技术指导与整改路线
 
-> 最近一次完整 CI 验收：提交 `4ef97c9d9f748db1fd4aa23312ab728a5a1b49f4`，GitHub Actions #99（运行 `39899193731`，success）。该运行通过 Go 单测、race detector、Agent 双远程 Provider data-plane 集成、ResponseHeaderTimeout 故障注入、三项性能基准、Artifact 上传、`go vet`、Gateway 构建和前端 bundle 检查。真实供应商端到端及线上性能仍未验收。
+> 最近一次完整 CI 验收：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。该运行通过 Go 单测、race detector、Agent 双远程 Provider 的 JSON/SSE data-plane 集成、ResponseHeaderTimeout 故障注入、三项性能基准、Artifact 上传、`go vet`、Gateway 构建和前端 bundle 检查。真实供应商端到端及线上性能仍未验收。
 
 > CI 执行 `go test ./...`、`go vet ./...`、Gateway 构建、管理台源码构建、bundle 语法与关键字段检查，并已增加源码构建产物与提交 bundle 的精确字节比较。工作流不应自动向 `dev` 推送构建产物；提交管理台源码改动时，应本地重新生成并提交 `web/static/dist/app.js`。真实供应商端到端、负载/竞态压测和线上网络行为不在 CI 覆盖范围内，不能仅凭 CI 通过宣称这些场景已验收。
 
@@ -576,3 +576,8 @@ Provider 测量使用 loopback Mock，不包含真实供应商网络 RTT 和模�
 ### Agent data-plane 集成验收
 
 Actions #99（提交 `4ef97c9d9f748db1fd4aa23312ab728a5a1b49f4`）通过 `TestAgentRoutesForwardToDistinctConfiguredProviders`。它通过真实 Agent 前缀剥离、`core.Pipeline`、Provider Registry 和 HTTP 出站请求，分别走两个 loopback Mock 上游，验证调用方 model 无法覆盖 Agent 默认模型、query 保留、两路 Provider 凭据互不串用，且 Gateway 调用方 `Authorization`/`X-API-Key` 不会作为凭据转发。测试绕过 API Key/Redis 限流与数据库审计观察器；这些是另外的边界，不应把该测试描述为公网/真实供应商 E2E。
+
+
+### Agent SSE data-plane 验收
+
+提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978` 的 Actions #101 通过双 Agent JSON/SSE 往返测试。流式请求通过相同的 Agent 路由层、Pipeline 和 Provider HTTP adapter；测试确认响应 content type 为 `text/event-stream`、事件内容来自对应上游并以 `data: [DONE]` 收尾，服务端模型和 API Key 不串线，调用方 Authorization/X-API-Key 不泄漏。上游为 loopback Mock，不代表真实供应商 E2E。

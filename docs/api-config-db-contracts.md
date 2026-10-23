@@ -85,7 +85,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 
 | 验收项 | 当前证据 | 未覆盖部分 |
 | --- | --- | --- |
-| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析及两个独立 Mock 远程 Provider 的完整路由/Pipeline/HTTP 往返（Actions #99 通过）。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
+| Provider 固定、Agent 路由和原有 `/v1` 入口并存 | `internal/server/agent_routes_test.go` 覆盖配置验证、400 个并发模型解析及 DeepSeek/OpenAI 两个 Mock Provider 的非流式 JSON + 流式 SSE 完整路由/Pipeline/HTTP 往返（Actions #101 通过）。 | Agent 级独立权限策略、动态重载及真实供应商 E2E。 |
 | Provider 请求头、API Key 隔离、响应/流错误 | Mock 上游、DNS NXDOMAIN/timeout、连接拒绝、ResponseHeaderTimeout 错误映射均由 Actions #92/#96 验证；Agent data-plane 对各自上游密钥隔离由 #99 验证；三项性能基准及 Artifact 由 #94/#99 验证。 | 真实 OpenAI/DeepSeek/Anthropic 端到端、真实 DNS 出口异常与跨公网故障注入；持续性能趋势/线上 SLO。 |
 | 请求取消与 Finish 顺序 | `internal/server/cancel_request_test.go` 与新增并发竞争测试。 | 在 CI race detector 通过后才算具备竞态检测证据；仍需线上压测基线。 |
 | 数据库升级 | `internal/db` 迁移与必需表检查测试。 | 多版本升级账本、真实旧数据的升级演练。 |
@@ -102,3 +102,12 @@ Actions #94（提交 `1339f5fb61537c08292aa44cec990c5d930401c9`）在 linux/amd6
 - 请求分析 DTO 生成：1,372 ns/op、592 B/op、17 allocs/op。
 
 这些是首轮可重复比较样本，不是生产请求延迟；Provider Mock 不包含公网网络和真实模型推理。CI Artifact 按 commit SHA 保存 30 天：[性能基线文件](https://github.com/Kasign/llm-gateway/actions/runs/39898164924/artifacts/12477692434)。
+
+
+### Agent Streaming Provider 契约（CI #101）
+
+Actions #101（提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`）通过双 Agent 的非流式 JSON 与流式 SSE 集成测试。测试验证：
+- `/deepseek/v1/chat/completions` 与 `/openai/v1/chat/completions` 各自转发到对应 Mock Provider，出站路径归一为 `/v1/chat/completions`。
+- Agent 默认模型覆盖客户端提交的不同 model；出站 stream 布尔值与入站一致。
+- SSE 返回对应 Provider 的内容和 `[DONE]`；不串用另一 Agent 的模型或 Provider API Key。
+- Provider 服务端凭据会转发，Gateway 调用方 `Authorization` 和 `X-API-Key` 不会作为上游凭据泄漏。

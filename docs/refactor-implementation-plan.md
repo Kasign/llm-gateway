@@ -138,16 +138,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已验收代码功能组：提交 `4ef97c9d9f748db1fd4aa23312ab728a5a1b49f4`，GitHub Actions #99（运行 `39899193731`，success）。除常规单测、race detector、性能基准、`go vet`、Gateway 构建和前端 bundle 检查外，新增 Agent 到双远程 Mock Provider 的完整 data-plane 集成测试也通过。
+> 最近一次已验收代码功能组：提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`，GitHub Actions #101（运行 `39899727297`，success）。双 Agent 的非流式 JSON 与流式 SSE data-plane 集成、race detector、性能基准和 Artifact、`go vet`、Gateway 构建及前端 bundle 检查全部通过。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
 | 阶段 1：日志可靠性 | 进行中 | 95% | 已完成查询凭据/请求头脱敏、流事件留存预算、审计队列生命周期治理、请求/响应大小边界；同步观察器热路径与压力基线仍需继续评估。 |
-| 阶段 2：请求边界与路由 | 进行中 | 98% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并通过 Actions #99 验证 Agent 路由到各自远程 Provider 的真实 Pipeline/HTTP 数据面。性能趋势与线上压测仍待。 |
-| 阶段 3：Provider 抽象 | 进行中 | 92% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证 Registry 选择不同远程 Provider 并使用各自密钥与默认模型。仍需更多协议/真实供应商契约验证。 |
+| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复，并由 Actions #101 验证两个远程 Agent 的 JSON/SSE data-plane 隔离。持续性能趋势与线上压测仍待。 |
+| 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 JSON/SSE 往返、各自密钥及模型固定。仍需更多协议/真实供应商契约验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 65% | CI 的 race detector、请求取消、双 Agent 并发解析、双远程 Provider data-plane 隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 成功运行。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
+| 阶段 5：运行治理与 CI | 进行中 | 67% | CI 的 race detector、请求取消、双 Agent 并发解析与双 Provider JSON/SSE data-plane 隔离、DNS/连接/响应头超时故障注入均通过；三项性能基准和 30 天 Artifact 已连续多次成功运行。仍需同环境持续趋势、压力/线上阈值与真实 Provider 故障注入。 |
 
 ### 已核实的历史 CI 问题
 
@@ -364,9 +364,10 @@ docs/                        中文架构、协议和运维文档
 - 这属于新增 Mock 测试夹具不符合项目配置契约，不是路由实现失败。提交 `4ef97c9` 将服务端上游密钥改为受支持的 `api-key` 头，同时仍发送假的调用方 `Authorization` 与 `X-API-Key`；Actions #99 已通过，验证上游收到 Agent 专用 Provider 密钥，但不会把调用方凭据透传。
 
 
-### Agent 流式 data-plane 契约（2026-10-23，待 CI）
+### Agent 流式 data-plane 契约（2026-10-23，CI #101 已通过）
 
 - 在双 Agent、双 Mock Provider data-plane 集成测试中，为 DeepSeek 与 OpenAI 两条路由各执行非流式 JSON 和流式 SSE 请求。
 - 非流式继续检查响应 ID、model、内容和服务端默认模型；流式检查响应的 text/event-stream Content-Type、对应 Provider 的增量内容和 [DONE] 终止事件。
 - 两种模式均检查路径前缀剥离、query 透传、Agent 专用 API Key 与调用方凭据隔离，并校验出站 stream 标志与入站一致。
-- 需由新提交触发的单测、race、性能基准、vet、build 和前端校验全部通过后再验收。
+- 提交 `4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978` 对应 Actions #101（运行 `39899727297`）已通过全量流程：普通 Go 单测、`go test -race ./internal/provider ./internal/server ./internal/core`、三项性能基准、Artifact 上传、`go vet ./...`、Gateway 构建、管理台源码构建及前端 bundle 校验全部成功。
+- Artifact：[`llm-gateway-performance-baseline-4e7e134a7a19fbe3dc1b2efb05f4383c0bcff978`](https://github.com/Kasign/llm-gateway/actions/runs/39899727297/artifacts/12478586036)，30 天有效。该测试仍使用本机 Mock 上游，不等同真实公网供应商 E2E。
