@@ -135,7 +135,6 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	keyRepo := auth.NewRepo(db)
 	key, rawKey, err := keyRepo.Create(setupCtx, keyName, 10000, nil, nil)
 	if err != nil {
-		_ = upstream.Close()
 		_ = limiter.Close()
 		_ = db.Close()
 		t.Fatalf("create temporary integration API key: %v", err)
