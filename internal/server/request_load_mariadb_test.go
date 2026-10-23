@@ -233,6 +233,11 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	type requestResult struct {
+		elapsed   time.Duration
+		err       string
+		statusCode int
+	}
 	runConcurrentRequests := func(requestCount, concurrency int, request func(int) requestResult) []requestResult {
 		results := make([]requestResult, requestCount)
 		jobs := make(chan int)
@@ -254,11 +259,6 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		return results
 	}
 
-	type requestResult struct {
-		elapsed   time.Duration
-		err       string
-		statusCode int
-	}
 	doRequestExpected := func(index int, fault string, expectedStatus int) requestResult {
 		requestURL := handler.URL + "/loadtest/v1/chat/completions?load_test=1"
 		if fault != "" {
