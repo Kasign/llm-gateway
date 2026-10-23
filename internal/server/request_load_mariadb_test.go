@@ -114,8 +114,29 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 			return
 		}
 		upstreamRequests.Add(1)
-		// A small, fixed delay exercises concurrent forwarding without asserting a noisy latency threshold.
-		time.Sleep(2 * time.Millisecond)
+		switch r.URL.Query().Get("fault") {
+		case "delay":
+			// 受控延迟用于检查故障下的真实端到端等待，而不是模拟真实模型推理。
+			time.Sleep(75 * time.Millisecond)
+		case "rate_limit":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]string{"message": "injected upstream secret details"},
+			})
+			return
+		case "unavailable":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]string{"message": "injected upstream secret details"},
+			})
+			return
+		default:
+			// 正常路径固定延迟 2ms，方便和故障场景对照。
+			time.Sleep(2 * time.Millisecond)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id": "chatcmpl-loadtest", "object": "chat.completion", "model": modelID,
@@ -211,11 +232,16 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	type requestResult struct {
-		elapsed time.Duration
-		err     string
+		elapsed   time.Duration
+		err       string
+		statusCode int
 	}
-	doRequest := func(index int) requestResult {
-		req, buildErr := http.NewRequest(http.MethodPost, handler.URL+"/loadtest/v1/chat/completions?load_test=1", bytes.NewReader(body))
+	doRequestExpected := func(index int, fault string, expectedStatus int) requestResult {
+		requestURL := handler.URL + "/loadtest/v1/chat/completions?load_test=1"
+		if fault != "" {
+			requestURL += "&fault=" + fault
+		}
+		req, buildErr := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(body))
 		if buildErr != nil {
 			return requestResult{err: "build request: " + buildErr.Error()}
 		}
@@ -230,15 +256,143 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 		responseBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		result := requestResult{elapsed: time.Since(requestStart)}
+		result := requestResult{elapsed: time.Since(requestStart), statusCode: resp.StatusCode}
 		if readErr != nil {
 			result.err = "read response: " + readErr.Error()
-		} else if resp.StatusCode != http.StatusOK {
-			result.err = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(responseBody))
-		} else if !bytes.Contains(responseBody, []byte("\"content\":\"ok\"")) {
-			result.err = fmt.Sprintf("unexpected response body: %s", string(responseBody))
+		} else if resp.StatusCode != expectedStatus {
+			result.err = fmt.Sprintf("HTTP %d, want %d: %s", resp.StatusCode, expectedStatus, string(responseBody))
+		} else if expectedStatus == http.StatusOK {
+			if !bytes.Contains(responseBody, []byte("\"content\":\"ok\"")) {
+				result.err = fmt.Sprintf("unexpected success response body: %s", string(responseBody))
+			}
+		} else {
+			// OpenAI-compatible 上游非 2xx 应保留状态码，但错误正文必须脱敏。
+			if !bytes.Contains(responseBody, []byte("\"error\"")) {
+				result.err = fmt.Sprintf("expected safe JSON error envelope: %s", string(responseBody))
+			}
+			if bytes.Contains(responseBody, []byte("injected upstream secret details")) {
+				result.err = "upstream error details leaked into Gateway response"
+			}
+			if fault == "rate_limit" && resp.Header.Get("Retry-After") != "1" {
+				result.err = fmt.Sprintf("Retry-After header = %q, want 1", resp.Header.Get("Retry-After"))
+			}
 		}
 		return result
+	}
+	doRequest := func(index int) requestResult {
+		return doRequestExpected(index, "", http.StatusOK)
+	}
+
+	// 故障注入独立运行，复用相同真实 Handler/Redis/MariaDB/Provider fixture，
+	// 避免每次验证都重复执行 60 秒稳态负载。
+	if strings.TrimSpace(os.Getenv("GATEWAY_FAULT_TEST")) == "1" {
+		const (
+			faultRequestCount = 120
+			faultWorkerCount  = 16
+		)
+		type faultScenario struct {
+			name   string
+			query  string
+			status int
+		}
+		scenarios := []faultScenario{
+			{name: "normal", status: http.StatusOK},
+			{name: "delay", query: "delay", status: http.StatusOK},
+			{name: "429", query: "rate_limit", status: http.StatusTooManyRequests},
+			{name: "503", query: "unavailable", status: http.StatusServiceUnavailable},
+		}
+		results := make([]requestResult, faultRequestCount)
+		jobQueue := make(chan int)
+		var workers sync.WaitGroup
+		workers.Add(faultWorkerCount)
+		for worker := 0; worker < faultWorkerCount; worker++ {
+			go func() {
+				defer workers.Done()
+				for index := range jobQueue {
+					scenario := scenarios[index%len(scenarios)]
+					results[index] = doRequestExpected(index, scenario.query, scenario.status)
+				}
+			}()
+		}
+		faultStart := time.Now()
+		for index := 0; index < faultRequestCount; index++ {
+			jobQueue <- index
+		}
+		close(jobQueue)
+		workers.Wait()
+		faultDuration := time.Since(faultStart)
+
+		var failures int
+		var delayLatencies, normalLatencies []float64
+		var count200, count429, count503 int
+		for index, result := range results {
+			scenario := scenarios[index%len(scenarios)]
+			if result.err != "" {
+				failures++
+				if failures <= 10 {
+					t.Errorf("fault request %d (%s) failed: %s", index, scenario.name, result.err)
+				}
+			}
+			switch result.statusCode {
+			case http.StatusOK:
+				count200++
+			case http.StatusTooManyRequests:
+				count429++
+			case http.StatusServiceUnavailable:
+				count503++
+			}
+			latencyMS := float64(result.elapsed.Microseconds()) / 1000
+			if scenario.name == "delay" {
+				delayLatencies = append(delayLatencies, latencyMS)
+			} else if scenario.name == "normal" {
+				normalLatencies = append(normalLatencies, latencyMS)
+			}
+		}
+		if failures > 0 {
+			t.Fatalf("%d/%d injected fault/control requests failed their HTTP/body contract", failures, faultRequestCount)
+		}
+		if got := upstreamRequests.Load(); got != faultRequestCount {
+			t.Fatalf("fault injection upstream request count = %d, want %d", got, faultRequestCount)
+		}
+		if count200 != 60 || count429 != 30 || count503 != 30 {
+			t.Fatalf("fault injection status counts: 200=%d 429=%d 503=%d; want 60/30/30", count200, count429, count503)
+		}
+		sort.Float64s(delayLatencies)
+		sort.Float64s(normalLatencies)
+		delayP50 := percentile(delayLatencies, 0.50)
+		delayP95 := percentile(delayLatencies, 0.95)
+		normalP50 := percentile(normalLatencies, 0.50)
+		if delayP50 < 70 {
+			t.Fatalf("controlled 75ms upstream delay P50 = %.2fms, expected at least 70ms", delayP50)
+		}
+
+		// 等待所有异步审计真正写入数据库，再断言 Gateway 与上游状态、排空行为。
+		drainStart := time.Now()
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after fault injection: %v", err)
+		}
+		cancelDrain()
+		drainDuration := time.Since(drainStart)
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, client200, client429, upstream429, client503, upstream503 int
+		err := db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=200),0), COALESCE(SUM(http_status=429),0), COALESCE(SUM(upstream_http_status=429),0), COALESCE(SUM(http_status=503),0), COALESCE(SUM(upstream_http_status=503),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &client200, &client429, &upstream429, &client503, &upstream503)
+		if err != nil {
+			t.Fatalf("query persisted fault audit results: %v", err)
+		}
+		if persisted != faultRequestCount || client200 != 60 || client429 != 30 || upstream429 != 30 || client503 != 30 || upstream503 != 30 {
+			t.Fatalf("fault audit rows=%d status counts gateway(200/429/503)=%d/%d/%d upstream(429/503)=%d/%d",
+				persisted, client200, client429, client503, upstream429, upstream503)
+		}
+		t.Logf("Gateway upstream fault injection: requests=%d concurrency=%d duration=%s failures=%d statuses(200/429/503)=%d/%d/%d normal_p50=%.2fms delayed_p50=%.2fms delayed_p95=%.2fms audit_rows=%d drain=%s",
+			faultRequestCount, faultWorkerCount, faultDuration.Round(time.Millisecond), failures,
+			count200, count429, count503, normalP50, delayP50, delayP95, persisted, drainDuration.Round(time.Millisecond))
+		return
 	}
 
 	// 第一阶段：16 并发突发样本，便于和之前的基线对比。
