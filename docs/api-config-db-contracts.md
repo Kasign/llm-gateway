@@ -27,7 +27,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 管理配置 | `/api/admin/bootstrap*`、`/api/admin/backend*`、`/api/admin/inference-params*` | 初始化、后端选择、推理参数。 |
 | 本地运行时 | `/api/admin/runtime*`、`/api/admin/ollama*`、`/api/admin/local-inventory` | 本地模型运行时、Ollama 与文件清单管理。 |
 | 下载与基准测试 | `/api/downloads*`、`/api/benchmark*` | 下载任务、Benchmark 状态和结果。 |
-| 请求审计 | `/api/requests*` | 请求记录筛选与详情。 |
+| 请求审计 | `/api/requests*` | 请求记录筛选与详情。`GET /api/requests` 支持 `provider` 查询参数，对 Provider ID 做不区分大小写的完整 ID 精确匹配；空值不筛选，旧记录没有 Provider ID 时不会匹配具体 Provider。 |
 | API Key 管理 | `/api/admin/keys*` | 创建、修改、禁用、轮换、删除、过期时间、RPM、模型 ACL。 |
 | 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。列表同时返回 RPM 用量、当前 Gateway 进程的并发占用快照，以及该进程自启动以来因并发上限拒绝的新请求累计数；计数通过原有刷新请求更新，不使用额外后台轮询，多副本环境下不代表全局并发总数，进程重启后拒绝累计数归零。
 | Web 登录 | `/api/auth/*` | 管理员网页登录、登出、会话和凭据更新。 |
@@ -66,7 +66,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | --- | --- | --- |
 | `api_keys` | 调用方 API Key、状态、过期/限流及访问策略。 | 不应存储或返回明文调用密钥。 |
 | `models` | 模型清单及运行时元数据。 | `runtime_json` 由增量结构升级补齐。 |
-| `request_logs` | 请求状态、耗时、HTTP 状态、Provider 分析字段。 | 新增可空 `provider_id`，由解析出的实际 Provider 写入；`idx_provider_started` 支持按 Provider 和时间窗口聚合。旧记录保持 NULL/空值，不根据当前活动上游反推历史 Provider。 |
+| `request_logs` | 请求状态、耗时、HTTP 状态、Provider 分析字段。 | 新增可空 `provider_id`，由解析出的实际 Provider 写入；`idx_provider_started` 支持按 Provider 和时间窗口聚合。列表筛选通过规范化后的 `provider_id=?` 精确查询，旧记录保持 NULL/空值，不根据当前活动上游反推历史 Provider。 |
 | `request_payloads` | 可选请求/响应正文及请求/上游 Header。 | 正文可能包含敏感业务内容；由日志存储设置控制。 |
 | `request_stream_events` | SSE 事件序号、时间、类型、字段和可选原始行。 | 原始流事件字段通过 `ensureColumns` 升级。 |
 | `gateway_settings` | 持久化全局活动后端及管理台可调设置。 | 不适合存储远程 Provider 密钥，也不承载 Agent 路由静态配置。 |
@@ -180,3 +180,10 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 ### Provider RPM 超限响应
 
 Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_exceeded`，并设置 `Retry-After` 响应头（秒），提示客户端当前 UTC 固定分钟窗口何时重置。该值按响应生成时的剩余窗口秒数计算；客户端应把它作为最早重试时间参考，并继续遵守自己的退避策略。Redis 不可用导致的 503 不附加此头。
+
+### 调用记录 Provider 筛选契约
+
+- 请求：`GET /api/requests?limit=100&provider=deepseek`。它与现有 `model`、`status`、`key` 条件组合使用，不改变返回体结构；不传 `provider` 或传空白值时不增加 Provider 条件。
+- 匹配：Provider ID 会先去除首尾空白并转成小写，再按完整 ID 相等匹配；`deep` 不会命中 `deepseek`。该参数不是模型名，也不是模糊搜索。
+- 数据层：`Repo.Query` 的旧签名保留用于详情及现有调用方；`QueryWithProvider` 承载可选 Provider 条件，SQL 直接比较规范化的 `provider_id`，以便继续利用 Provider 索引。
+- 实时数据：列表缓存键包含 Provider ID；在途请求先与 LiveRegistry 快照合并，再按最新 Provider ID 过滤，避免模型解析完成后仍留在旧 Provider 的筛选结果中。

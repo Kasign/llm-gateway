@@ -155,3 +155,24 @@ func TestMergeLiveIntoLogPreservesResolvedProviderID(t *testing.T) {
 		t.Fatalf("merged provider_id = %q, want deepseek", got.ProviderID)
 	}
 }
+
+func TestRequestLogMatchesProviderUsesNormalizedExactID(t *testing.T) {
+	row := store.RequestLog{ProviderID: "DeepSeek"}
+	cases := []struct {
+		name      string
+		provider  string
+		wantMatch bool
+	}{
+		{name: "case insensitive", provider: "deepseek", wantMatch: true},
+		{name: "trim spaces", provider: "  DEEPSEEK  ", wantMatch: true},
+		{name: "exact ID only", provider: "deep", wantMatch: false},
+		{name: "empty filter matches all", provider: "", wantMatch: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := requestLogMatchesProvider(row, tc.provider); got != tc.wantMatch {
+				t.Fatalf("requestLogMatchesProvider(%q) = %v, want %v", tc.provider, got, tc.wantMatch)
+			}
+		})
+	}
+}

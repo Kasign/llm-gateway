@@ -464,6 +464,7 @@
     if ($("rqModel").value) q.set("model", $("rqModel").value);
     if ($("rqStatus").value) q.set("status", $("rqStatus").value);
     if ($("rqKey").value) q.set("key", $("rqKey").value);
+    if ($("rqProvider").value.trim()) q.set("provider", $("rqProvider").value.trim());
     try {
       const j = await api("/api/requests?" + q);
       const rows = j.data || [];

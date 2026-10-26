@@ -732,3 +732,12 @@ docs/                        中文架构、协议和运维文档
 
 - 请求列表会合并数据库记录与 LiveRegistry 的运行中快照。补齐 `mergeLiveIntoLog` 对非空 Provider ID 的覆盖，保证已解析的 Agent/服务路由身份不会被较早写入的临时归属覆盖。
 - 增加合并优先级回归测试代码；遵从统一安排未运行测试。
+
+### 调用记录 Provider 维度筛选（2026-10-26）
+
+- 管理台增加自由输入的 Provider ID 筛选框，适配静态配置、环境变量和 Web 管理配置中的自定义 ID，不维护容易过期的硬编码列表。
+- `GET /api/requests` 新增可选 `provider` 参数，与原有模型、状态、Key 筛选相互组合；ID 去空格并规范为小写后做完整相等匹配，不按模型或 Provider ID 子串猜测归属。
+- 存储层增加 `QueryWithProvider`，保留原 `Query` API 作为兼容包装；创建/结束请求时规范化 Provider ID。查询直接比较 `provider_id`，兼顾精确语义和现有索引设计。
+- 列表缓存键包含 Provider ID，防止跨条件污染；实时请求先合并 LiveRegistry 的最新 Provider 身份再过滤，避免请求解析前后 Provider 归属变化造成结果残留。
+- 已同步 `web/js/features/requests.js`、`web/index.html`、`web/static/dist/app.js`、API/数据库契约、技术指导和问题台账。新增 Provider ID 大小写、空白和精确匹配回归测试代码。
+- 遵从用户要求未运行测试、构建、迁移或 GitHub Actions；该功能组为代码和文档已提交状态，不代表运行验收完成。

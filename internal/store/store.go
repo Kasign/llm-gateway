@@ -92,6 +92,7 @@ func nullIfEmpty(s string) interface{} {
 const maxStreamEventsPerRequest = 2000
 
 func (r *Repo) CreateRequest(ctx context.Context, l RequestLog) error {
+	l.ProviderID = strings.ToLower(strings.TrimSpace(l.ProviderID))
 	_, err := r.db.ExecContext(ctx, `INSERT INTO request_logs(request_id,api_key_id,api_key_name,client_ip,client_name,user_agent,endpoint,request_url,provider_id,method,model_requested,model_actual,stream,status,started_at,request_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, l.RequestID, l.APIKeyID, l.APIKeyName, l.ClientIP, l.ClientName, l.UserAgent, l.Endpoint, nullIfEmpty(l.RequestURL), nullIfEmpty(l.ProviderID), l.Method, l.ModelRequested, l.ModelActual, l.Stream, l.Status, l.StartedAt, l.RequestBytes)
 	return err
 }
@@ -139,6 +140,7 @@ func (r *Repo) MarkCancelled(ctx context.Context, id string, finished time.Time,
 // FinishRequest 写入请求最终指标。管理员取消可能并发落库；一旦 status 已变成 cancelled，
  // 本次 Finish 只补充 token/响应等诊断字段，不得把 cancelled 覆盖为 success/error。
 func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
+	l.ProviderID = strings.ToLower(strings.TrimSpace(l.ProviderID))
 	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET
 		api_key_id=COALESCE(NULLIF(?,0),api_key_id),
 		api_key_name=COALESCE(NULLIF(?,''),api_key_name),
@@ -215,9 +217,14 @@ func (r *Repo) Get(ctx context.Context, id string) (*RequestLog, error) {
 	return &rows[0], nil
 }
 func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, status, keyName string) ([]RequestLog, error) {
+	return r.QueryWithProvider(ctx, limit, requestID, modelName, status, keyName, "")
+}
+
+func (r *Repo) QueryWithProvider(ctx context.Context, limit int, requestID, modelName, status, keyName, providerID string) ([]RequestLog, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
 	q := `SELECT request_id,COALESCE(api_key_id,0),COALESCE(api_key_name,''),COALESCE(client_ip,''),COALESCE(client_name,''),COALESCE(user_agent,''),endpoint,COALESCE(request_url,''),COALESCE(provider_id,''),method,COALESCE(model_requested,''),COALESCE(model_actual,''),stream,status,COALESCE(http_status,0),COALESCE(upstream_http_status,0),started_at,finished_at,COALESCE(latency_ms,0),ttft_ms,input_tokens,output_tokens,total_tokens,COALESCE(request_bytes,0),COALESCE(response_bytes,0),COALESCE(error_code,''),COALESCE(error_message,'') FROM request_logs WHERE 1=1`
 	var args []interface{}
 	if requestID != "" {
@@ -236,6 +243,11 @@ func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, statu
 	if keyName != "" {
 		q += " AND api_key_name LIKE ?"
 		args = append(args, "%"+keyName+"%")
+	}
+	// Provider ID 使用规范化后的精确匹配，避免相似 ID 被混入同一来源的排障或统计。
+	if providerID != "" {
+		q += " AND provider_id=?"
+		args = append(args, providerID)
 	}
 	q += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)

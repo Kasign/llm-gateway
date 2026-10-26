@@ -114,3 +114,9 @@
 
 - Web Provider 安全视图包含 `requests_per_minute`，部署 YAML 也正确映射该值，避免管理台无法显示/编辑现存配额。
 - `deploy/config.example.yaml`、`deploy/providers.env.example` 和中文配置说明补充了 RPM 样例。
+
+## 2026-10-26 追加：调用记录按 Provider 筛选
+
+- `GET /api/requests?provider=<id>` 与模型、状态、Key 名筛选组合使用；Provider ID 去除首尾空格并按小写完整匹配，支持自定义 Provider ID。
+- 查询缓存以 Provider 条件隔离；在途请求以 LiveRegistry 最新 Provider 身份完成合并后再过滤。历史空 Provider ID 不会被反推归属。
+- 已添加 Provider ID 匹配回归测试代码并同步前端源码、部署 bundle、API/数据库契约、技术说明和实施计划。按当前统一测试安排未运行测试、构建、迁移或 CI；需要后续验证缓存隔离、MariaDB 索引/查询计划及 Resolver 归属更新场景。

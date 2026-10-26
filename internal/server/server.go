@@ -1147,7 +1147,7 @@ func (s *Server) downloadsAPI(w http.ResponseWriter, r *http.Request) {
 
 // Request logs/system/benchmark
 // requestsAPI 是 /api/requests 接口：管理后台的请求日志列表。
-// GET    → 按条件查询请求日志（支持按 request_id、model、status、key 筛选，默认返回最近 50 条）
+// GET    → 按条件查询请求日志（支持按 request_id、model、status、key、provider 筛选，默认返回最近 50 条）
 // DELETE → 清空所有请求日志（危险操作，需要管理员确认）
 func (s *Server) requestsAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
@@ -1180,8 +1180,8 @@ func (s *Server) requestsAPI(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	// 查询请求日志（合并数据库里的历史记录和内存里的实时请求）
-	// 支持筛选：request_id（具体某次请求）、model（模型名）、status（状态）、key（API Key 名）
-	logs, e := s.queryRequestLogsMerged(r.Context(), limit, r.URL.Query().Get("request_id"), r.URL.Query().Get("model"), r.URL.Query().Get("status"), r.URL.Query().Get("key"))
+	// 支持筛选：request_id（具体某次请求）、model（模型名）、status（状态）、key（API Key 名）、provider（Provider ID 精确匹配）
+	logs, e := s.queryRequestLogsMerged(r.Context(), limit, r.URL.Query().Get("request_id"), r.URL.Query().Get("model"), r.URL.Query().Get("status"), r.URL.Query().Get("key"), r.URL.Query().Get("provider"))
 	if e != nil {
 		applog.Printf("requests list failed: %v", e)
 		jsonError(w, 500, "database_error", e.Error())

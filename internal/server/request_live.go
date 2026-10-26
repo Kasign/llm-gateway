@@ -147,8 +147,9 @@ func fillClientNames(logs []store.RequestLog) {
 	}
 }
 
-func (s *Server) queryRequestLogsMerged(ctx context.Context, limit int, requestID, modelName, status, keyName string) ([]store.RequestLog, error) {
-	logs, err := s.queryRequestLogsCached(ctx, limit, requestID, modelName, status, keyName)
+func (s *Server) queryRequestLogsMerged(ctx context.Context, limit int, requestID, modelName, status, keyName string, providerFilters ...string) ([]store.RequestLog, error) {
+	providerID := normalizedRequestProviderFilter(providerFilters)
+	logs, err := s.queryRequestLogsCached(ctx, limit, requestID, modelName, status, keyName, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +159,7 @@ func (s *Server) queryRequestLogsMerged(ctx context.Context, limit int, requestI
 	}
 	liveRows := s.live.ListSummaries()
 	if len(liveRows) == 0 {
+		logs = filterRequestLogsByProvider(logs, providerID)
 		fillClientNames(logs)
 		return logs, nil
 	}
@@ -181,6 +183,8 @@ func (s *Server) queryRequestLogsMerged(ctx context.Context, limit int, requestI
 			logs = append(logs, row)
 		}
 	}
+	// 先合并实时快照再筛选 Provider，避免请求在解析阶段从候选 Provider 切换到最终 Provider 后仍出现在旧筛选结果中。
+	logs = filterRequestLogsByProvider(logs, providerID)
 	sort.Slice(logs, func(i, j int) bool {
 		ti, tj := logs[i].StartedAt, logs[j].StartedAt
 		if ti.IsZero() && tj.IsZero() {
@@ -202,6 +206,28 @@ func (s *Server) queryRequestLogsMerged(ctx context.Context, limit int, requestI
 	}
 	fillClientNames(logs)
 	return logs, nil
+}
+
+func filterRequestLogsByProvider(logs []store.RequestLog, providerID string) []store.RequestLog {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return logs
+	}
+	filtered := logs[:0]
+	for _, row := range logs {
+		if requestLogMatchesProvider(row, providerID) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+func requestLogMatchesProvider(row store.RequestLog, providerID string) bool {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(row.ProviderID)) == providerID
 }
 
 func logMatchesModelFilter(l store.RequestLog, modelName string) bool {

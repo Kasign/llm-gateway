@@ -663,3 +663,19 @@ go test ./internal/provider -run '^TestOpenAIResponsesRealEndpointE2E$' -count=1
 ```
 
 测试访问 `/v1/responses`，请求限制为 8 输出 token，90 秒超时；仅打印状态与响应字节数，不打印密钥/响应正文。默认 CI 不发起请求。该用例仅适用于支持 Responses API 的真实端点，不应把普通 Chat Completions 兼容性等同于 Responses 能力。
+
+## 调用记录按 Provider 精确筛选
+
+管理台「调用记录」允许输入任意 Provider ID，并与模型、状态和 API Key 名称条件组合筛选。示例：
+
+```text
+GET /api/requests?limit=100&provider=deepseek
+```
+
+筛选不是包含匹配：服务端对输入执行 `TrimSpace + ToLower` 后，将其作为 `request_logs.provider_id = ?` 的参数；`deep` 不会命中 `deepseek`。Provider ID 在创建和结束请求时也会规范化为小写，因此普通查询可以保持对索引列的直接比较，避免对列套用 `LOWER()` 而损失索引使用机会。空值不会附加 Provider 条件；历史上没有来源身份的行仍保留为空，选择具体 Provider 时不会被猜测性归类。
+
+调用列表有三秒短期缓存。缓存键必须同时包含 limit、request ID、模型、状态、Key 名和 Provider ID，否则不同筛选条件可能复用同一组结果。Provider 条件沿 API、缓存层传入持久化查询；旧的 `Repo.Query` 方法保留并委托给不带 Provider 条件的查询，以免影响详情及既有调用方。
+
+列表同时显示数据库历史记录和进程内 LiveRegistry 快照。运行中的请求在 Resolver 完成前可能只有候选 Provider；因此列表先按已有条件合并实时快照，再按最新的 `provider_id` 过滤，并在排序/截断前过滤，避免候选身份更新后旧 Provider 视图残留，也避免不匹配的实时行占用返回条数。该实时修正仅对当前 Gateway 进程中的在途请求有效；重启后不再有 LiveRegistry 快照，最终归属以落库记录为准。
+
+本功能只增加观测与检索能力，不改变路由选择、限流、请求执行和 Provider 权限边界。代码与文档完成后按统一安排未运行测试、构建或 CI；真实 MariaDB 查询计划、筛选与并发更新时的列表一致性需在后续统一验证。
