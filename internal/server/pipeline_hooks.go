@@ -40,7 +40,8 @@ func (s *Server) newInferencePipeline() *core.Pipeline {
 			remote, err := provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{
 				ID: cfg.ID, BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, APIKeyHeader: cfg.APIKeyHeader,
 				AllowInsecureHTTP: cfg.AllowInsecureHTTP, AllowPrivateNetwork: cfg.AllowPrivateNetwork,
-				MaxResponseBytes: cfg.MaxResponseBytes,
+				MaxResponseBytes: cfg.MaxResponseBytes, MaxConcurrentRequests: cfg.MaxConcurrentRequests,
+				RequestTimeoutSeconds: cfg.RequestTimeoutSeconds,
 			})
 			if err != nil {
 				// Load 已做配置校验；保留 fail-closed 行为，不能注册一个未通过安全校验的远程目标。
@@ -74,7 +75,7 @@ func choiceFromTarget(t proxyModelTarget) core.ModelChoice {
 	return core.ModelChoice{ProviderID: t.ProviderID, Hint: t.Hint, ModelKey: key, UpstreamID: t.UpstreamID}
 }
 
-// resolveInference 决定真正使用的模型。客户端 JSON 里的 model（st.ClientModel）只记日志，不参与选择。
+// resolveInference 决定真正使用的模型。远程 Provider 仅接受已配置的公开模型别名；其他客户端 model 值仍回退到网关默认模型。
 func (s *Server) resolveInference(ctx context.Context, st core.State) (core.ModelChoice, error) {
 	active := s.effectiveUpstream()
 	if name := strings.TrimSpace(st.ServiceModel); name != "" {
@@ -96,6 +97,16 @@ func (s *Server) resolveInference(ctx context.Context, st core.State) (core.Mode
 		}
 		s.rememberTarget(st.ID, target)
 		return choiceFromTarget(target), nil
+	}
+	// 远程 Provider 配置了公开别名时，尊重请求中的已知别名；未知值继续沿用网关默认模型，保持旧客户端行为。
+	if requested := strings.TrimSpace(st.ClientModel); requested != "" {
+		if remote, ok := s.remoteProviderConfig(active.Backend); ok {
+			if upstreamID := strings.TrimSpace(remote.ModelMappings[requested]); upstreamID != "" {
+				target := proxyModelTarget{ProviderID: active.Backend, Hint: requested, ModelKey: requested, UpstreamID: upstreamID}
+				s.rememberTarget(st.ID, target)
+				return choiceFromTarget(target), nil
+			}
+		}
 	}
 	t, err := s.resolveProxyModelTargetForUpstream(ctx, active)
 	if err != nil {
@@ -317,12 +328,16 @@ func (o inferenceObserver) On(ctx context.Context, ev core.Event) {
 		o.s.markCallRecorded(ctx)
 		o.onParsed(ev.State)
 	case core.StageModelResolved:
-		// 模型列展示的是实际上游 model，选定后立刻写入，不必等到请求结束。
+		// Resolver 定下的 Provider 与实际上游 model 一起写入运行中记录，避免把 Agent 流量归到全局活动上游。
+		providerID := strings.ToLower(strings.TrimSpace(ev.State.Model.ProviderID))
 		actual := strings.TrimSpace(ev.State.Model.UpstreamID)
-		o.s.livePatch(ctx, ev.State.ID, store.RequestLog{ModelActual: actual})
-		if actual != "" && o.s.audit != nil {
-			o.s.audit.PatchRequestModelActual(ev.State.ID, actual)
-			o.s.invalidateRequestListCache()
+		o.s.livePatch(ctx, ev.State.ID, store.RequestLog{ProviderID: providerID, ModelActual: actual})
+		if o.s.audit != nil {
+			if providerID != "" || actual != "" {
+				// Provider 与上游模型由同一条审计更新持久化，避免并发负载下重复占用关键队列。
+				o.s.audit.PatchRequestResolution(ev.State.ID, providerID, actual)
+				o.s.invalidateRequestListCache()
+			}
 		}
 	case core.StagePrepared:
 		o.s.liveSetReqBody(ev.State.ID, ev.State.Body)
@@ -340,15 +355,15 @@ func (o inferenceObserver) onParsed(st core.State) {
 	cs := o.s.callGet(st.ID)
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
-		Endpoint: st.Path, RequestURL: st.RequestURL, Method: st.Method, ModelRequested: st.ClientModel, Stream: st.Stream,
+		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, Stream: st.Stream,
 		Status: "running", StartedAt: st.Started, RequestBytes: int64(len(st.OriginalBody)),
 	}
 	if cs != nil && cs.key != nil {
 		logItem.APIKeyID = cs.key.ID
 		logItem.APIKeyName = cs.key.Name
 	}
+	// CreateRequest 已写入从请求解析得到的 model_requested 与 stream，无需紧接着重复 UPDATE。
 	o.s.audit.CreateRequest(logItem)
-	o.s.audit.PatchRequestAfterParse(st.ID, st.ClientModel, st.Stream)
 	o.s.liveStart(context.Background(), logItem)
 	// 请求头只在观察者里记。主流程和 Forward 不改。
 	o.s.captureRequestHeaders(st)
@@ -501,7 +516,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	}
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
-		Endpoint: st.Path, RequestURL: st.RequestURL, Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
+		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
 		Stream: st.Stream, Status: state, HTTPStatus: gatewayStatus, UpstreamHTTPStatus: upstreamStatus, FinishedAt: &end, LatencyMS: totalMS,
 		TTFTMS: ttft, InputTokens: inTok, OutputTokens: outTok, TotalTokens: totTok,
 		ResponseBytes: respBytes, ErrorCode: code, ErrorMessage: msg,

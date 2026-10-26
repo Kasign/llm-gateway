@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/store"
@@ -16,16 +17,26 @@ type requestsListCacheEntry struct {
 	logs []store.RequestLog
 }
 
-func (s *Server) requestsListCacheKey(limit int, requestID, modelName, status, keyName string) string {
-	return fmt.Sprintf("%d|%s|%s|%s|%s", limit, requestID, modelName, status, keyName)
+// normalizedRequestProviderFilter 统一 Provider 筛选值；Provider ID 不区分大小写，但按完整 ID 精确匹配。
+func normalizedRequestProviderFilter(filters []string) string {
+	if len(filters) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(filters[0]))
 }
 
-func (s *Server) queryRequestLogsCached(ctx context.Context, limit int, requestID, modelName, status, keyName string) ([]store.RequestLog, error) {
-	// 单条 id 查询不缓存（详情/精确查）。
+func (s *Server) requestsListCacheKey(limit int, requestID, modelName, status, keyName string, providerFilters ...string) string {
+	providerID := normalizedRequestProviderFilter(providerFilters)
+	return fmt.Sprintf("%d|%s|%s|%s|%s|%s", limit, requestID, modelName, status, keyName, providerID)
+}
+
+func (s *Server) queryRequestLogsCached(ctx context.Context, limit int, requestID, modelName, status, keyName string, providerFilters ...string) ([]store.RequestLog, error) {
+	providerID := normalizedRequestProviderFilter(providerFilters)
+	// 单条 ID 查询不缓存（详情/精确查）。
 	if requestID != "" {
-		return s.logs.Query(ctx, limit, requestID, modelName, status, keyName)
+		return s.logs.QueryWithProvider(ctx, limit, requestID, modelName, status, keyName, providerID)
 	}
-	key := s.requestsListCacheKey(limit, requestID, modelName, status, keyName)
+	key := s.requestsListCacheKey(limit, requestID, modelName, status, keyName, providerID)
 	s.reqListCacheMu.Lock()
 	if s.reqListCache != nil {
 		if ent, ok := s.reqListCache[key]; ok && time.Since(ent.at) < requestsListCacheTTL {
@@ -36,7 +47,7 @@ func (s *Server) queryRequestLogsCached(ctx context.Context, limit int, requestI
 	}
 	s.reqListCacheMu.Unlock()
 
-	logs, err := s.logs.Query(ctx, limit, requestID, modelName, status, keyName)
+	logs, err := s.logs.QueryWithProvider(ctx, limit, requestID, modelName, status, keyName, providerID)
 	if err != nil {
 		return nil, err
 	}

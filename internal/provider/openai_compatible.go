@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/core"
@@ -33,7 +34,104 @@ const (
 	remoteMaxIdleConnections      = 100
 	remoteMaxIdleConnectionsPerHost = 16
 	remoteMaxConnectionsPerHost   = 64
+	// MaxOpenAICompatibleConcurrentRequests matches the HTTP transport per-host connection ceiling.
+	MaxOpenAICompatibleConcurrentRequests        = 64
+	defaultOpenAICompatibleMaxConcurrentRequests = 64
+	// MaxOpenAICompatibleRequestTimeoutSeconds 限制可配置的 Provider 整体请求时限（包含完整流式响应）。
+	MaxOpenAICompatibleRequestTimeoutSeconds = 86400
 )
+
+// ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
+// Web 配置热更新会替换 Provider 实例，但仍在执行的请求必须继续占用同一份预算。
+type ConcurrencyLimiter struct {
+	mu       sync.Mutex
+	active   int
+	limit    int
+	rejected int64
+}
+
+// NewConcurrencyLimiter 创建有界的并发许可器；0 表示默认上限。
+func NewConcurrencyLimiter(maxConcurrentRequests int) (*ConcurrencyLimiter, error) {
+	limiter := &ConcurrencyLimiter{}
+	if err := limiter.SetLimit(maxConcurrentRequests); err != nil {
+		return nil, err
+	}
+	return limiter, nil
+}
+
+// SetLimit 更新并发预算。降低上限时不会取消在途请求，只会拒绝新请求，直到活动数降至上限以下。
+func (l *ConcurrencyLimiter) SetLimit(maxConcurrentRequests int) error {
+	if l == nil {
+		return fmt.Errorf("provider concurrency limiter is nil")
+	}
+	if maxConcurrentRequests < 0 || maxConcurrentRequests > MaxOpenAICompatibleConcurrentRequests {
+		return fmt.Errorf("provider max_concurrent_requests must be between 0 and %d", MaxOpenAICompatibleConcurrentRequests)
+	}
+	if maxConcurrentRequests == 0 {
+		maxConcurrentRequests = defaultOpenAICompatibleMaxConcurrentRequests
+	}
+	l.mu.Lock()
+	l.limit = maxConcurrentRequests
+	l.mu.Unlock()
+	return nil
+}
+
+// TryAcquire 使用 fail-fast 策略获得一个并发许可。
+func (l *ConcurrencyLimiter) TryAcquire() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.active >= l.limit {
+		l.rejected++
+		return false
+	}
+	l.active++
+	return true
+}
+
+// Release 释放一个此前取得的并发许可。
+func (l *ConcurrencyLimiter) Release() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	if l.active > 0 {
+		l.active--
+	}
+	l.mu.Unlock()
+}
+
+// Active 返回当前仍占用并发许可的请求数，用于管理面只读观测。
+func (l *ConcurrencyLimiter) Active() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.active
+}
+
+// RejectedRequests 返回进程生命周期内因并发上限拒绝的请求次数。
+func (l *ConcurrencyLimiter) RejectedRequests() int64 {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rejected
+}
+
+// Limit 返回当前有效上限，供诊断和单元测试使用。
+func (l *ConcurrencyLimiter) Limit() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.limit
+}
 
 // OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
 // 私网访问和明文 HTTP 均默认关闭；只有管理员明确配置后才放行。
@@ -45,6 +143,12 @@ type OpenAICompatibleConfig struct {
 	AllowInsecureHTTP   bool
 	AllowPrivateNetwork bool
 	MaxResponseBytes    int64
+	// MaxConcurrentRequests 为此 Provider 的最大并发推理数；0 使用默认值 64。
+	MaxConcurrentRequests int
+	// RequestLimiter 可用于同一 Provider 的热更新实例共享并发预算；nil 时会创建独立许可器。
+	RequestLimiter *ConcurrencyLimiter
+	// RequestTimeoutSeconds 为完整 HTTP 请求时限，包含 JSON/SSE 响应体读取；0 表示不增加 Provider 级总时限。
+	RequestTimeoutSeconds int
 }
 
 // OpenAICompatibleProvider 负责 OpenAI-compatible JSON 与 SSE 传输，不负责 Gateway 鉴权/模型路由。
@@ -55,13 +159,32 @@ type OpenAICompatibleProvider struct {
 	apiKeyHeader        string
 	allowPrivateNetwork bool
 	maxResponseBytes    int64
+	requestLimiter      *ConcurrencyLimiter
 	client              *http.Client
 }
 
 func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleProvider, error) {
+	return NewOpenAICompatibleProviderWithResolver(cfg, net.DefaultResolver)
+}
+
+// RemoteIPResolver 是 Provider 出站连接使用的 DNS 解析边界；生产默认使用系统 Resolver。
+// 注入能力供可重复的 DNS 故障测试与受控运行环境使用，不通过外部配置暴露任意网络访问能力。
+type RemoteIPResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+// NewOpenAICompatibleProviderWithResolver 使用指定 Resolver 构造 Provider。
+// resolver 为 nil 时回退系统 Resolver；所有解析结果仍经过原有 SSRF/特殊网段校验。
+func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolver RemoteIPResolver) (*OpenAICompatibleProvider, error) {
 	id := normalizeID(cfg.ID)
 	if id == "" || len(id) > 64 {
 		return nil, errors.New("provider ID is required and must be at most 64 characters")
+	}
+	if cfg.MaxConcurrentRequests < 0 || cfg.MaxConcurrentRequests > MaxOpenAICompatibleConcurrentRequests {
+		return nil, fmt.Errorf("provider max_concurrent_requests must be between 0 and %d", MaxOpenAICompatibleConcurrentRequests)
+	}
+	if cfg.RequestTimeoutSeconds < 0 || cfg.RequestTimeoutSeconds > MaxOpenAICompatibleRequestTimeoutSeconds {
+		return nil, fmt.Errorf("provider request_timeout_seconds must be between 0 and %d", MaxOpenAICompatibleRequestTimeoutSeconds)
 	}
 	for _, r := range id {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
@@ -105,6 +228,10 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 	if strings.ContainsAny(cfg.APIKey, "\r\n") {
 		return nil, errors.New("provider API key contains invalid characters")
 	}
+	maxConcurrentRequests := cfg.MaxConcurrentRequests
+	if maxConcurrentRequests == 0 {
+		maxConcurrentRequests = defaultOpenAICompatibleMaxConcurrentRequests
+	}
 	maxResponseBytes := cfg.MaxResponseBytes
 	if maxResponseBytes <= 0 {
 		maxResponseBytes = defaultRemoteResponseLimit
@@ -113,6 +240,18 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 	if maxResponseBytes > maxRemoteResponseLimit {
 		return nil, fmt.Errorf("provider max_response_bytes must not exceed %d bytes (512 MiB)", maxRemoteResponseLimit)
 	}
+	client := newRestrictedHTTPClientWithResolver(cfg.AllowPrivateNetwork, resolver)
+	if cfg.RequestTimeoutSeconds > 0 {
+		// http.Client.Timeout 覆盖整个请求生命周期；为 0 时保留既有 Context/响应头超时语义。
+		client.Timeout = time.Duration(cfg.RequestTimeoutSeconds) * time.Second
+	}
+	requestLimiter := cfg.RequestLimiter
+	if requestLimiter == nil {
+		requestLimiter, err = NewConcurrencyLimiter(maxConcurrentRequests)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &OpenAICompatibleProvider{
 		id:                  id,
 		baseURL:             base,
@@ -120,11 +259,20 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 		apiKeyHeader:        apiKeyHeader,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		maxResponseBytes:    maxResponseBytes,
-		client:              newRestrictedHTTPClient(cfg.AllowPrivateNetwork),
+		requestLimiter:      requestLimiter,
+		client:              client,
 	}, nil
 }
 
 func (p *OpenAICompatibleProvider) ID() string { return p.id }
+
+// ConcurrencyLimiter 返回该 Provider 正在使用的共享并发预算。
+func (p *OpenAICompatibleProvider) ConcurrencyLimiter() *ConcurrencyLimiter {
+	if p == nil {
+		return nil
+	}
+	return p.requestLimiter
+}
 
 func (p *OpenAICompatibleProvider) Capabilities() Capabilities {
 	return Capabilities{Protocol: "openai-compatible", ChatCompletions: true, Streaming: true}
@@ -148,6 +296,15 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 			providerErr.StatusCode >= http.StatusBadRequest && providerErr.StatusCode <= 599 {
 			status = providerErr.StatusCode
 			hasProviderStatus = true
+		}
+		var gatewayErr *core.Error
+		if errors.As(retErr, &gatewayErr) && gatewayErr != nil {
+			if gatewayErr.Status >= http.StatusBadRequest && gatewayErr.Status <= 599 {
+				status = gatewayErr.Status
+			}
+			if gatewayErr.Code != "" {
+				code = gatewayErr.Code
+			}
 		}
 		if mapped := ToCoreError(retErr); mapped != nil {
 			if !hasProviderStatus && mapped.Status >= http.StatusBadRequest && mapped.Status <= 599 {
@@ -205,12 +362,94 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 			req.Header.Set("X-API-Key", p.apiKey)
 		}
 	}
+	if err := p.acquireRequestSlot(ctx); err != nil {
+		// 已取消/超时的请求沿用原错误语义；只有资源已满时才是 503 过载。
+		if ctx.Err() != nil {
+			return core.Result{UpstreamStatus: 0}, err
+		}
+		status, _, _ := core.Unpack(err)
+		if status < http.StatusBadRequest || status > 599 {
+			status = http.StatusServiceUnavailable
+		}
+		if call.Stream && call.WriterWritten() {
+			// warm-start 已提交状态行时，不能再返回普通 JSON；必须以 SSE error 结束流。
+			written := int64(0)
+			if isResponsesAPIPath(call.Path) {
+				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit", 0)
+			} else {
+				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit")
+			}
+			return core.Result{Status: status, UpstreamStatus: 0, ResponseBytes: written}, err
+		}
+		return core.Result{Status: status, UpstreamStatus: 0}, err
+	}
+	defer p.releaseRequestSlot()
+
 	if call.Stream {
 		return p.forwardStream(ctx, call, req)
 	}
 	return p.forwardJSON(ctx, call, req)
 }
 
+// acquireRequestSlot 使用 fail-fast 策略，防止 Provider 堆积无界等待中的推理请求。
+func (p *OpenAICompatibleProvider) acquireRequestSlot(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if p == nil || p.requestLimiter == nil || !p.requestLimiter.TryAcquire() {
+		return &core.Error{
+			Status:  http.StatusServiceUnavailable,
+			Code:    "provider_concurrency_limit",
+			Message: "upstream provider concurrency limit reached",
+		}
+	}
+	return nil
+}
+
+// releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放共享许可。
+func (p *OpenAICompatibleProvider) releaseRequestSlot() {
+	if p != nil && p.requestLimiter != nil {
+		p.requestLimiter.Release()
+	}
+}
+
+// TestConnection 通过当前 Provider 的安全 HTTP Client 请求 /v1/models。
+// 调用方应设置短 Context 超时；返回值仅包含模型 ID，不暴露 URL、响应正文或凭据。
+func (p *OpenAICompatibleProvider) TestConnection(ctx context.Context) ([]string, error) {
+	if p == nil || p.client == nil { return nil, errors.New("provider client is unavailable") }
+	endpoint, err := p.endpoint("/v1/models")
+	if err != nil { return nil, errors.New("provider connection test configuration is invalid") }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil { return nil, errors.New("provider connection test request is invalid") }
+	req.Header.Set("Accept", "application/json")
+	if p.apiKey != "" {
+		switch p.apiKeyHeader {
+		case "authorization": req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		case "api-key": req.Header.Set("api-key", p.apiKey)
+		case "x-api-key": req.Header.Set("X-API-Key", p.apiKey)
+		}
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil { return nil, errors.New("provider connection test timed out or was cancelled") }
+		return nil, errors.New("provider connection failed; check URL, DNS, TLS, firewall and credentials")
+	}
+	defer resp.Body.Close()
+	if isRedirectStatus(resp.StatusCode) { return nil, errors.New("provider redirects are disabled for security") }
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices { return nil, fmt.Errorf("provider returned HTTP %d", resp.StatusCode) }
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1_048_577))
+	if err != nil { return nil, errors.New("provider model response could not be read") }
+	if len(body) > 1_048_576 { return nil, errors.New("provider model response exceeds the 1 MiB test limit") }
+	var payload struct { Data []struct { ID string `json:"id"` } `json:"data"` }
+	if err := json.Unmarshal(body, &payload); err != nil { return nil, errors.New("provider returned an invalid /v1/models response") }
+	models := make([]string, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id != "" && len(id) <= 255 && !strings.ContainsAny(id, "\r\n") { models = append(models, id) }
+		if len(models) >= 100 { break }
+	}
+	return models, nil
+}
 func (p *OpenAICompatibleProvider) endpoint(rawPath string) (string, error) {
 	requestURL, err := url.ParseRequestURI(strings.TrimSpace(rawPath))
 	if err != nil || requestURL == nil || requestURL.IsAbs() || requestURL.Host != "" || !strings.HasPrefix(requestURL.Path, "/v1/") {
@@ -499,6 +738,10 @@ func (p *OpenAICompatibleProvider) transportError(ctx context.Context, err error
 func streamErrorCode(err error) string {
 	if mapped := ToCoreError(err); mapped != nil && mapped.Code != "" {
 		return mapped.Code
+	}
+	var gatewayErr *core.Error
+	if errors.As(err, &gatewayErr) && gatewayErr != nil && gatewayErr.Code != "" {
+		return gatewayErr.Code
 	}
 	return "provider_stream_interrupted"
 }
@@ -802,16 +1045,12 @@ func isRedirectStatus(status int) bool {
 	return status >= 300 && status < 400
 }
 
-type remoteIPResolver interface {
-	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
-}
-
 func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 	return newRestrictedHTTPClientWithResolver(allowPrivateNetwork, net.DefaultResolver)
 }
 
 // newRestrictedHTTPClientWithResolver 仅用于把 DNS 故障变为可重复测试；正常 Provider 始终使用系统 Resolver。
-func newRestrictedHTTPClientWithResolver(allowPrivateNetwork bool, resolver remoteIPResolver) *http.Client {
+func newRestrictedHTTPClientWithResolver(allowPrivateNetwork bool, resolver RemoteIPResolver) *http.Client {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}

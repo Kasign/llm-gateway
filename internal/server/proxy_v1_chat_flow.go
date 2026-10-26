@@ -15,7 +15,7 @@ POST /v1/chat/completions（以及同前缀的 /v1/responses 等）
   - 用客户端连接创建 context，再套上网关超时，并按请求 ID 登记取消函数
 
 Run 里各槽位的现实现：
-  - Resolve：忽略客户端 JSON 的 model。有 ServiceModel（仅 benchmark 等进程内调用）才用它，否则用管理台当前推理模型。
+  - Resolve：本地后端仍使用管理台选定模型；远程 Provider 可按已配置的公开 model alias 映射客户端请求，其余请求沿用当前默认模型。ServiceModel 只用于进程内调用。
   - Stamp：把选定的上游 ID 写回 body。
   - Mutate：sanitize、推理参数。Path 不含查询字符串，用于路由匹配；原始 RawQuery 在 Forward 时透传给上游。/v1/responses 的路径和 tools 保持原样，交给上游。
   - Guard：auto_load 时等待模型就绪。chat 失败返回 503；/v1/responses 最多等 20 秒，失败仍转发。

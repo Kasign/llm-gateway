@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -39,6 +40,16 @@ func rateLimitBucketKey(key string, now time.Time) string {
 // Allow 在当前 UTC 分钟桶内递增计数；超过 rpm 返回 false，rpm<=0 表示不限流。
 func (l *Limiter) Allow(ctx context.Context, key string, rpm int) (bool, int64, error) {
 	return l.allowAt(ctx, key, rpm, time.Now())
+}
+
+// AllowProvider 对同一 Provider 的所有调用方与 Agent 共享每分钟预算；rpm<=0 表示禁用。
+// 使用独立 Redis key 前缀，不能与按调用方 API Key 统计的 RPM 互相影响。
+func (l *Limiter) AllowProvider(ctx context.Context, providerID string, rpm int) (bool, int64, error) {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return false, 0, fmt.Errorf("provider ID is required")
+	}
+	return l.Allow(ctx, "provider:"+providerID, rpm)
 }
 
 func (l *Limiter) allowAt(ctx context.Context, key string, rpm int, now time.Time) (bool, int64, error) {
@@ -146,4 +157,46 @@ func (l *Limiter) DeleteSession(ctx context.Context, token string) error {
 		return nil
 	}
 	return l.r.Del(ctx, sessionKey(token)).Err()
+}
+
+
+// ProviderRPMUsage 查询当前 UTC 分钟窗口内各 Provider 已计数的请求数。
+// 只读取 AllowProvider 使用的 key，不递增计数；所有 ID 通过一次 MGET 查询。
+func (l *Limiter) ProviderRPMUsage(ctx context.Context, providerIDs []string, now time.Time) (map[string]int64, error) {
+	usage := make(map[string]int64, len(providerIDs))
+	if len(providerIDs) == 0 {
+		return usage, nil
+	}
+	if l == nil || l.r == nil {
+		return nil, fmt.Errorf("Redis rate limiter is not configured")
+	}
+	ids := make([]string, 0, len(providerIDs))
+	keys := make([]string, 0, len(providerIDs))
+	for _, id := range providerIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		ids = append(ids, id)
+		keys = append(keys, rateLimitBucketKey("provider:"+id, now))
+	}
+	if len(keys) == 0 {
+		return usage, nil
+	}
+	values, err := l.r.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	for i, value := range values {
+		if value == nil {
+			usage[ids[i]] = 0
+			continue
+		}
+		count, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse Provider RPM counter")
+		}
+		usage[ids[i]] = count
+	}
+	return usage, nil
 }

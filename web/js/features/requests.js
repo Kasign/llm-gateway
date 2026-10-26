@@ -11,19 +11,82 @@ export function requestsListHasRows() {
   return !!$('requestsTable')?.querySelector('table td');
 }
 
+function statsFmt(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : '0';
+}
+
+async function loadRequestStats() {
+  const el = $('requestStats');
+  if (!el) return;
+  const q = new URLSearchParams();
+  q.set('range', $('rqStatsRange')?.value || '24h');
+  const provider = $('rqProvider')?.value?.trim();
+  if (provider) q.set('provider', provider);
+  el.innerHTML = '<p class="muted small">正在汇总统计…</p>';
+  try {
+    const s = await api('/api/requests/stats?' + q.toString());
+    const r = s.requests || {};
+    const lat = s.latency || {};
+    const tok = s.tokens || {};
+    const actual = tok.upstream_usage || {};
+    const local = tok.llama_timings || {};
+    const unknown = tok.unknown_source || {};
+    const cards = [
+      ['请求总量', statsFmt(r.total_requests), statsFmt(r.running_requests) + ' 条进行中'],
+      ['成功率', Number(r.success_rate_percent || 0).toFixed(1) + '%', statsFmt(r.success_requests) + ' 成功 / ' + statsFmt(r.completed_requests) + ' 已结束'],
+      ['失败请求', statsFmt(r.error_requests), statsFmt(r.cancelled_requests) + ' 条已取消'],
+      ['平均耗时', lat.average_ms == null ? '—' : statsFmt(lat.average_ms) + ' ms', statsFmt(lat.sample_count) + ' 条延迟样本'],
+      ['上游 usage Token', statsFmt(actual.total_tokens), statsFmt(actual.requests) + ' 条 · 输入 ' + statsFmt(actual.input_tokens) + ' / 输出 ' + statsFmt(actual.output_tokens)],
+      ['llama.cpp timings', statsFmt(local.total_tokens), statsFmt(local.requests) + ' 条 · 输入 ' + statsFmt(local.input_tokens) + ' / 输出 ' + statsFmt(local.output_tokens)],
+      ['来源未知 Token', statsFmt(unknown.total_tokens), statsFmt(unknown.requests) + ' 条 · 不推测计费来源'],
+    ];
+    const tiles = cards.map(([title, value, note]) =>
+      '<div class="card" style="padding:10px;min-width:0"><div class="small muted">' + esc(title) +
+      '</div><div style="font-size:22px;font-weight:650;margin:4px 0;overflow-wrap:anywhere">' + esc(value) +
+      '</div><div class="small muted">' + esc(note) + '</div></div>'
+    ).join('');
+    const buckets = Array.isArray(lat.buckets) ? lat.buckets : [];
+    const maxBucket = Math.max(1, ...buckets.map(x => Number(x.count || 0)));
+    const distribution = buckets.map(x => {
+      const count = Number(x.count || 0);
+      const width = Math.max(0, Math.min(100, count / maxBucket * 100));
+      return '<div style="display:grid;grid-template-columns:76px minmax(50px,1fr) 64px;gap:8px;align-items:center;margin:7px 0">' +
+        '<span class="small">' + esc(x.label || '') + '</span><div style="height:7px;background:var(--border,#ddd);border-radius:4px;overflow:hidden">' +
+        '<div style="height:100%;width:' + width.toFixed(1) + '%;background:var(--accent,#4f83cc)"></div></div>' +
+        '<span class="small" style="text-align:right">' + statsFmt(count) + '</span></div>';
+    }).join('');
+    const from = s.from ? new Date(s.from).toLocaleString() : '—';
+    const to = s.to ? new Date(s.to).toLocaleString() : '—';
+    el.innerHTML =
+      '<div class="small muted">统计区间：' + esc(from) + ' 至 ' + esc(to) +
+      (s.provider_id ? ' · Provider：' + esc(s.provider_id) : ' · 全部 Provider') +
+      '。统计按请求开始时间归属，成功率分母为已结束请求。</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin:10px 0">' + tiles + '</div>' +
+      '<div class="card" style="padding:12px"><div style="font-weight:600;margin-bottom:6px">延迟分布</div>' +
+      '<div class="small muted">仅统计已结束且有延迟值的请求，共 ' + statsFmt(lat.sample_count) + ' 条；横条用于比较各区间数量。</div>' +
+      (distribution || '<span class="muted small">暂无数据</span>') + '</div>' +
+      '<p class="small muted" style="margin:8px 0">Token 口径：上游 usage 是上游响应提供的 usage；llama.cpp timings 是本地引擎计数，不等同于供应商计费数据；来源未知的数据单独展示，不会推断为真实 usage。</p>';
+  } catch (e) {
+    el.innerHTML = '<span class="err">' + esc(e.message || '统计加载失败') + '</span>';
+  }
+}
+
 export async function loadRequests() {
+  loadRequestStats();
   const q = new URLSearchParams();
   q.set('limit', '100');
   if ($('rqModel').value) q.set('model', $('rqModel').value);
   if ($('rqStatus').value) q.set('status', $('rqStatus').value);
   if ($('rqKey').value) q.set('key', $('rqKey').value);
+  if ($('rqProvider').value.trim()) q.set('provider', $('rqProvider').value.trim());
   try {
     const j = await api('/api/requests?' + q);
     const rows = j.data || [];
     $('requestsTable').innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
-          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
+          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>Provider</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
             rows
               .map((x) => {
                 const rid = String(x.request_id || '');
@@ -38,7 +101,7 @@ export async function loadRequests() {
                   x.status === 'running'
                     ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">结束</button>`
                     : '';
-                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
+                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || '—')}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
               })
               .join(''),
         );
@@ -252,6 +315,7 @@ function detailSections(j) {
   if (headerInner) add('headers', 'swap', `<section class="req-section"><h3>请求头</h3>${headerInner}</section>`);
   const p = j.request_params || {};
   const paramRows = [
+    ['Provider ID', log.provider_id || s.provider_id || '—'],
     ['客户端 model', p.model_client || s.model_client || log.model_requested || '—'],
     ['上游 model', p.model_upstream || s.model_upstream || log.model_actual || '—'],
     ['模型说明', p.model_note || ''],

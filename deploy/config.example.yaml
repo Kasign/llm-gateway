@@ -36,7 +36,8 @@ llama:
   llamacpp_base_url: "${LLAMA_CPP_BASE_URL}"
   ollama_base_url: "${OLLAMA_BASE_URL}"
   upstream_api_key: "${LLAMA_UPSTREAM_API_KEY}"
-  request_timeout_seconds: 3600
+  # 本地模型生成可能较慢。0 不设客户端整体请求时限；正整数设置最大秒数（1–604800）。
+  request_timeout_seconds: ${LLAMA_REQUEST_TIMEOUT_SECONDS}
   models_max: 1
   auto_load_on_proxy: true
   # 不写 warm_start 时关闭。Codex 长连接需要开启。
@@ -63,13 +64,19 @@ logging:
   # 流事件默认只保存类型、字段、字节数与时间；以下两项会保留原始内容，应谨慎开启。
   store_stream_raw: false
   store_stream_preview: false
+  # 默认不自动删除历史请求。设为正数后，只清理超期且已结束的请求。
+  retention_days: 0
+  # 每个小事务最多处理的请求数；清理进程每轮最多执行 10 个批次。
+  retention_batch_size: 500
+  # 自动清理间隔，单位秒（60–86400）。
+  retention_interval_seconds: 3600
 
 
 # 远程 OpenAI-compatible Provider（可选）。需要启用时，将 openai_compatible: [] 替换为下面的列表。
 # API Key 从容器环境变量读取，绝不存入 gateway_settings 或 API 响应。
 providers:
   openai_compatible: []
-  # 配置示例（复制时先删除上面的 openai_compatible: [] 行，再取消注释）：
+  # 配置示例（复制时先删除上面的 openai_compatible: [] 行，再取消注释）。也可由 .env 的 LLM_GATEWAY_PROVIDER_<ID>_* 环境变量预置多个只读 Provider；同一 ID 不能同时出现在 YAML 与环境变量中：
   # openai_compatible:
   #   - id: deepseek
   #     enabled: true
@@ -77,6 +84,13 @@ providers:
   #     api_key: "${DEEPSEEK_API_KEY}"
   #     api_key_header: "Authorization"
   #     default_model: "deepseek-chat"
+  #     # 可选：公开模型 ID -> 上游真实模型 ID 映射。
+  #     # model_mappings:
+  #     #   public-chat: deepseek-chat
+  #     #   public-reasoner: deepseek-reasoner
+  #     max_concurrent_requests: 64 # 默认上限；达到后 fail-fast 返回 503
+  #     requests_per_minute: 0 # 0 不限速；正数限制该 Provider 每分钟新请求数
+  #     request_timeout_seconds: 0 # 0 不设 Provider 总时限；1–86400 秒限制完整 JSON/SSE 请求
   #     allow_insecure_http: false
   #     allow_private_network: false
   #   - id: openai
@@ -85,6 +99,9 @@ providers:
   #     api_key: "${OPENAI_API_KEY}"
   #     api_key_header: "Authorization"
   #     default_model: "gpt-4.1"
+  #     max_concurrent_requests: 64
+  #     requests_per_minute: 0
+  #     request_timeout_seconds: 0
   #     allow_insecure_http: false
   #     allow_private_network: false
 

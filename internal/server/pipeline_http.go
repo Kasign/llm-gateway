@@ -34,6 +34,15 @@ func maxInferenceRequestBodyBytesForPath(rawPath string) int64 {
 
 // writeInferenceError 保持 Anthropic Messages 客户端可识别的错误信封；其他入口维持原有统一格式。
 func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code, message string) {
+	// Provider RPM 使用 UTC 固定分钟窗口；告知客户端当前窗口的保守重试时间。
+	// 该响应尚未提交时才会执行此函数，保证可安全设置响应头。
+	if code == "provider_rate_limit_exceeded" {
+		retryAfter := 60 - time.Now().UTC().Second()
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	}
 	if isAnthropicMessagesRequestPath(rawPath) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -109,7 +118,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		ID: id, Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery, Header: headerMap(r.Header), Body: body,
 		RouteProviderID: routeProviderID, RouteDefaultModel: routeDefaultModel,
 		Sink: sink, Started: start, ClientIP: clientIP(r, s.trustedProxyRanges), ClientName: requestClientName(r),
-		UserAgent: r.UserAgent(), RequestURL: agentRequestPublicURL(r, s.trustedProxyRanges), Guards: []core.Guard{s.allowModelsGuard(key)},
+		UserAgent: r.UserAgent(), RequestURL: agentRequestPublicURL(r, s.trustedProxyRanges), Guards: []core.Guard{s.allowModelsGuard(key), s.providerRateLimitGuard()},
 	})
 	// 已经写过响应头（保活或上游数据）时不能再补 JSON 错误，否则会和流内容混在一起。
 	if err != nil && !sink.HeaderWritten() {

@@ -127,11 +127,10 @@ func (s *Server) configuredBackendURLs() map[string]string {
 		"ollama":   s.baseURLForBackend("ollama"),
 	}
 	if s != nil && s.cfg != nil {
-		for _, item := range s.cfg.Providers.OpenAICompatible {
-			if item.Enabled {
-				out[item.ID] = item.BaseURL
-			}
-		}
+		for _, item := range s.cfg.Providers.OpenAICompatible { if item.Enabled { out[item.ID] = item.BaseURL } }
+		s.providerConfigMu.RLock()
+		for id, item := range s.webProviders { if item.Enabled && !item.SourceConflict && !item.SecretUnavailable { out[id] = item.BaseURL } }
+		s.providerConfigMu.RUnlock()
 	}
 	return out
 }

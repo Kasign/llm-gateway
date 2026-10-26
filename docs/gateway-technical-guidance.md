@@ -663,3 +663,106 @@ go test ./internal/provider -run '^TestOpenAIResponsesRealEndpointE2E$' -count=1
 ```
 
 测试访问 `/v1/responses`，请求限制为 8 输出 token，90 秒超时；仅打印状态与响应字节数，不打印密钥/响应正文。默认 CI 不发起请求。该用例仅适用于支持 Responses API 的真实端点，不应把普通 Chat Completions 兼容性等同于 Responses 能力。
+
+## 调用记录按 Provider 精确筛选
+
+管理台「调用记录」允许输入任意 Provider ID，并与模型、状态和 API Key 名称条件组合筛选。示例：
+
+```text
+GET /api/requests?limit=100&provider=deepseek
+```
+
+筛选不是包含匹配：服务端对输入执行 `TrimSpace + ToLower` 后，将其作为 `request_logs.provider_id = ?` 的参数；`deep` 不会命中 `deepseek`。Provider ID 在创建和结束请求时也会规范化为小写，因此普通查询可以保持对索引列的直接比较，避免对列套用 `LOWER()` 而损失索引使用机会。空值不会附加 Provider 条件；历史上没有来源身份的行仍保留为空，选择具体 Provider 时不会被猜测性归类。
+
+调用列表有三秒短期缓存。缓存键必须同时包含 limit、request ID、模型、状态、Key 名和 Provider ID，否则不同筛选条件可能复用同一组结果。Provider 条件沿 API、缓存层传入持久化查询；旧的 `Repo.Query` 方法保留并委托给不带 Provider 条件的查询，以免影响详情及既有调用方。
+
+列表同时显示数据库历史记录和进程内 LiveRegistry 快照。运行中的请求在 Resolver 完成前可能只有候选 Provider；因此列表先按已有条件合并实时快照，再按最新的 `provider_id` 过滤，并在排序/截断前过滤，避免候选身份更新后旧 Provider 视图残留，也避免不匹配的实时行占用返回条数。该实时修正仅对当前 Gateway 进程中的在途请求有效；重启后不再有 LiveRegistry 快照，最终归属以落库记录为准。
+
+本功能只增加观测与检索能力，不改变路由选择、限流、请求执行和 Provider 权限边界。代码与文档完成后按统一安排未运行测试、构建或 CI；真实 MariaDB 查询计划、筛选与并发更新时的列表一致性需在后续统一验证。
+
+## 调用统计的窗口、延迟和 Token 来源
+
+统计 API 为 `GET /api/requests/stats?range=24h&provider=deepseek`，只接受 24 小时、7 天和 30 天的固定窗口。窗口按 `[from,to)` 计算并使用 `started_at` 归属；可选 Provider 条件按规范化的 ID 完整匹配。统计为管理员接口，不返回单条请求、正文、Header、Key 或原始上游错误。
+
+数据库执行一次聚合查询：时间范围先在内层查询过滤，并复用 `idx_started(started_at)`；指定 Provider 时使用 `provider_id` 条件并可利用 `idx_provider_started(provider_id,started_at)`。SQL 汇总状态数量、平均延迟、六档延迟直方图和来源分组 Token 总量，不把窗口内所有请求行拉回 Go 进程。成功率定义为 `success / completed`，已取消请求属于已结束请求分母；延迟只纳入已结束且有耗时值的调用。
+
+Token 来源必须与数值分开判断。网关把 `analysis_json.throughput.source` 为 `usage/upstream_usage` 的记录归到上游 usage；`llama_timings` 代表本地 llama.cpp timings 计数，不应当成供应商计费 usage；未知或旧记录来源归入 `unknown_source`，即使有 Token 数字也不猜测来源。分析 JSON 是异步审计写入的一部分，极短时间内统计结果可能暂时把尚未写入来源标记的记录算入未知来源；之后重新查询即可看到最终分类。Token 汇总使用审计行已经记录的数字，不读取 Payload 重新解析，也不回写历史记录。
+
+管理台调用记录页增加统计窗口和聚合卡片；统计仅受时间范围与 Provider ID 过滤，不继承模型、状态和 Key 名称筛选。横条展示延迟数量区间，不伪称为精确的 p50/p95 分位数。
+
+
+## 机器可读 API 契约与版本边界
+
+当前的 [`docs/openapi.yaml`](openapi.yaml) 是首阶段机器可读契约，针对已稳定的公共推理入口、请求统计与 Web Provider 管理接口。规范标记为 partial，避免客户端误以为尚未纳入的历史管理 API 已经完成字段承诺。
+
+扩展契约时以路由注册、Handler 方法检查、实际 JSON 字段和认证辅助函数为依据；禁止仅根据前端调用或历史说明推断 API 行为。一个路径若支持多种协议（例如 OpenAI Chat、Responses 和 Anthropic Messages），需保留各自请求体与错误信封的边界。流式响应使用 `text/event-stream`；客户端收到响应头后，HTTP 状态已不可逆，契约必须说明 SSE 错误事件而非假定所有失败都能改成 JSON 错误。
+
+OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、推理参数和登录接口的请求/响应模式，再考虑自动检查。只有字段经代码核实且变更同步到规范后，才将相应端点标记为完整；当前不将该文档描述为自动生成或已与所有 Handler 校验一致。
+
+
+## 调用方 API Key 与管理员凭据的隔离
+
+管理台的调用方 Key 管理端点现在进入机器可读契约。设计上有三个独立凭据域：
+
+| 凭据 | 使用位置 | 返回/持久化边界 |
+| --- | --- | --- |
+| 调用方 Gateway API Key（`sk-llm-*`） | `/v1/*` 与 Agent 推理入口 | 数据库只保存 SHA-256 摘要；创建和轮换时明文仅返回一次，元数据列表不含摘要。 |
+| Web 管理会话 Token | `/api/*` 管理接口 | 通过 `Authorization: Bearer` 传递，服务端检查 Redis 会话和登录凭据版本；不是 Cookie。 |
+| `X-Admin-Key` | 管理 API 的部署自动化调用 | 来自部署配置；不能用调用方 Key 或上游 Provider Key 替代。 |
+| 上游 Provider API Key | Gateway 发往远程 Provider | 由服务端 Provider 配置读取；Web Provider 密文不回显，调用方输入的 Key 不作为上游凭据透传。 |
+
+创建/轮换调用方 Key 的返回正文包含明文，管理台应只在此时提示用户安全保存，不能将完整返回写入普通日志、审计详情、分析事件或浏览器持久化存储。机器可读规范将对应字段标记为 `writeOnly`，表示它只适用于响应中的一次性领取，而不是后续读取凭据。
+
+
+## 请求审计与运行时 API 的运维边界
+
+- `GET /api/requests` 合并数据库与当前进程 LiveRegistry；已完成请求的最终字段以持久化记录为准。Provider 筛选在规范化 ID 后完整匹配；不能把历史空 Provider ID 推断归属。
+- `GET /api/requests/{id}` 是高敏感管理端点：启用 payload 存储时，详情可能包含完整 prompt、工具参数、请求头和上游返回内容。应以管理员身份验证和部署网络边界同时保护，而不能因为接口属于只读 GET 就视为无敏感信息。
+- `GET /api/admin/audit/metrics` 仅读取审计队列快照，不访问数据库，返回带 `Cache-Control: no-store` 的数据；它的计数用于发现积压和丢弃，不等于数据库历史行数。
+- `/api/admin/runtime/select` 和 `/unload` 操作的是当前活动的本地推理后端，远程 Provider 不支持本地模型加载/卸载。切换或卸载前端应先核实活动 backend，避免把本地容器生命周期操作误认为供应商操作。
+- Benchmark 接口采用异步任务模型，GET 查询任务与 SSE 事件快照，DELETE 发送停止信号；它与真实调用方请求的持久化审计是不同视图。进程重启会丢失内存中的历史 Benchmark Job。
+
+
+## 慢模型的 Benchmark 超时语义
+
+`llama.request_timeout_seconds` 显式设置为 `0` 表示不添加 Gateway 整体请求 Deadline；旧配置未指定时仍使用兼容默认值。Benchmark 与普通推理必须遵守同一语义，不能将零秒交给 `context.WithTimeout`，因为那会立刻使 Context 进入超时状态。
+
+目前 Benchmark 使用可选时限 Context：正数创建带 Deadline 的 Context，0 创建仅继承父 Context 的可取消 Context。这样长 prefill / 首 Token 等待不会被零秒配置误取消，同时用户发出的停止信号仍然可中断模型加载和推理。该改动不影响 Codex、Cursor 等客户端自身设置的等待时限；客户端断开后父请求链的取消语义仍需要保持。
+
+## 高负载下的请求生命周期审计写入
+
+一次请求创建记录时，`CreateRequest` 已直接写入已解析的 `model_requested`、`stream` 和候选 Provider。不要再对相同字段执行无意义的紧邻 UPDATE。Resolver 确定路由后，Provider ID 与实际上游模型通过一条关键审计更新一起持久化；这样可在在途记录查询中保持来源一致，同时减少单 Worker 队列的 SQL 次数。请求结束时，`FinishRequest` 仍是最终权威状态与指标更新。
+
+审计队列保持有界，非关键分析数据在队列压力下仍可丢弃并计入指标；关键生命周期任务不能因为冗余数据库更新被不必要地放大。Gateway 负载验收必须同时检查 HTTP 响应、持久化行数、终态、Provider ID 和实际模型字段，不能只看吞吐，也不能通过扩大队列或降低断言来掩盖审计丢失。
+
+## 管理统计接口的错误边界与 HTTP 状态码
+
+请求统计接口在 MariaDB 聚合查询失败时，服务端日志保留实际错误用于排障，但 API 只返回稳定的 `database_error` 错误码与通用提示，不直接暴露驱动错误、表/列信息或数据库诊断文本。新增管理 API 时应区分运维日志和调用方错误契约。
+
+Web Provider 管理端点的成功状态也需要与 Handler 一致：`POST /api/admin/providers` 创建成功返回 `201 Created`；`DELETE /api/admin/providers/{id}` 删除成功返回 `204 No Content`，不附带响应正文。OpenAPI 必须反映实际状态码与空正文语义，避免客户端依赖不存在的响应体。
+
+## Provider 并发预算热更新的顺序约束
+
+Provider 更新复用共享 `ConcurrencyLimiter`，因此限额的应用时点影响正在执行的旧实例。降低上限时必须在持久化配置前收紧准入；如果 MariaDB 保存失败，立即将许可器恢复到原上限。若 Registry 替换失败，既要恢复许可器，也要回滚持久化配置。提高上限则只创建待处理动作，必须在 Registry 替换成功后应用，避免失败窗口内短暂放宽预算。
+
+编辑已停用 Provider 时只保存期望配置，不应改写可能仍被旧在途请求共享的运行时许可器；重新启用时，再按降低前置、提高后置的规则应用新预算。相关顺序需要有测试覆盖，不能只测试独立的并发许可器方法而忽略配置持久化与 Registry 操作之间的窗口。
+
+## 管理 API 路由与 OpenAPI 契约覆盖范围
+
+`docs/openapi.yaml` 现扩展覆盖模型目录/下载任务、Hugging Face 文件与搜索、Ollama Library tags、Backend 查看/切换/批量卸载/上游模型列表、Bootstrap 初始化快照、动态推理参数、Ollama Pull 和统一 model-ops 等路由。契约字段以注册路由和实际 Handler 为依据；安装模型和 Ollama Pull 都是异步任务，后续进度统一从 `GET /api/downloads` 查询。
+
+参数表单通过 `GET /api/admin/inference-params/schema` 动态描述，因此 `params`、`policy` 以及不同后端的运行时快照保留扩展 Schema。它们不代表已承诺每个内部字段长期稳定。兼容的逐模型 load/unload 与 Ollama load/unload 路由仍保留，但新管理操作优先走 `POST /api/admin/model-ops`，并注意卸载（仅释放内存）与删除（移除磁盘模型）是不同操作。
+
+当前 OpenAPI 依然标记为 partial：Agent 的完整协议组合、所有历史管理路由的 JSON 字段，以及动态参数与源码逐路由自动差异检查仍需后续完成。任何契约检查失败应按真实 Handler 修正规范，而非仅放宽检查或用通用对象掩盖已知稳定字段。
+
+## 固定 Provider Agent 的协议路径覆盖
+
+Agent 前缀路由复用同一套鉴权、请求限流、Pipeline 与审计，同时使用启动配置中的固定 Provider，不允许请求体自行选择 Provider。OpenAPI 现在覆盖 Agent 的 models、Chat Completions、Completions、Responses、Anthropic Messages 和 Messages count_tokens 路径；不同协议仍保留各自的请求和错误信封边界。
+
+Ollama Library tags 的稳定字段包括 tag、full_name，以及可选的 size/context/input；Backend 查看接口的 available_backends 是对象数组，包含 id、label、kind、base_url、source 和 editable，可选字段包括 default_model、RPM 与 Key 是否已配置。契约优先明确这些稳定字段，只有运行时快照和目录搜索卡片等确实动态的结构才使用扩展对象。
+
+## 路由注册与 OpenAPI 路径对账
+
+CI 执行 `scripts/check_openapi_routes.py`，把 `Server.Handler` 中的字面路由注册与 `docs/openapi.yaml` 的顶层 path keys 对比。对于 Go ServeMux 前缀和 handler 内部 path parsing，脚本维护显式动态路由族映射，包括模型动作、请求详情/取消、Provider 操作、Benchmark 与 API Key 动作；Agent 固定 Provider 路由则按支持的公共推理协议展开。
+
+该脚本的目标是防止新增/删除路由时漏改 OpenAPI 路径集合。它不是 OpenAPI 解析器，也不会声称验证 Handler 所有方法、状态码或 JSON 字段与 Schema 一致；这些仍需按功能修改和 Review 时同步。动态路由模式若变化，必须更新脚本的映射规则，避免用简单忽略规则绕过路径缺口。

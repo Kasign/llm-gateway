@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
   user_agent VARCHAR(512) NULL,
   endpoint VARCHAR(128) NOT NULL,
   request_url VARCHAR(2048) NULL,
+  provider_id VARCHAR(64) NULL,
   method VARCHAR(16) NOT NULL,
   model_requested VARCHAR(255) NULL,
   model_actual VARCHAR(1024) NULL,
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
   error_code VARCHAR(64) NULL,
   error_message TEXT NULL,
   analysis_json LONGTEXT NULL,
-  INDEX idx_req_id (request_id), INDEX idx_started (started_at), INDEX idx_api_key (api_key_id), INDEX idx_model (model_actual), INDEX idx_status (status)
+  INDEX idx_req_id (request_id), INDEX idx_started (started_at), INDEX idx_api_key (api_key_id), INDEX idx_model (model_actual), INDEX idx_provider_started (provider_id, started_at), INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS request_payloads (

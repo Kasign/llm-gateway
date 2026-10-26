@@ -12,6 +12,7 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 func TestRemoteProviderRuntimeResolutionUsesConfiguredURLAndDefaultModel(t *testing.T) {
@@ -119,5 +120,68 @@ func TestInferenceForwarderUsesBadGatewayForUnclassifiedTransportError(t *testin
 	}
 	if result.Status != http.StatusBadGateway {
 		t.Fatalf("result status = %d, want 502", result.Status)
+	}
+}
+
+
+func TestProviderIDForStateFollowsResolverTarget(t *testing.T) {
+	s := &Server{upstream: settings.Upstream{Backend: "llamacpp"}}
+	cases := []struct {
+		name string
+		state core.State
+		want string
+	}{
+		{name: "resolved model wins", state: core.State{
+			Request: core.Request{RouteProviderID: "deepseek"},
+			Model:   core.ModelChoice{ProviderID: "openai"},
+		}, want: "openai"},
+		{name: "trusted agent route before active upstream", state: core.State{
+			Request: core.Request{RouteProviderID: "deepseek"},
+		}, want: "deepseek"},
+		{name: "service provider wins for internal service model", state: core.State{
+			Request: core.Request{ServiceModel: "internal-model", ServiceProviderID: "openai", RouteProviderID: "deepseek"},
+		}, want: "openai"},
+		{name: "service model without provider falls back to active", state: core.State{
+			Request: core.Request{ServiceModel: "internal-model", RouteProviderID: "deepseek"},
+		}, want: "llamacpp"},
+		{name: "active provider fallback", state: core.State{}, want: "llamacpp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.providerIDForState(tc.state); got != tc.want {
+				t.Fatalf("providerIDForState() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+
+func TestMergeLiveIntoLogPreservesResolvedProviderID(t *testing.T) {
+	base := store.RequestLog{RequestID: "req-1", ProviderID: "llamacpp"}
+	live := store.RequestLog{RequestID: "req-1", ProviderID: "deepseek"}
+	got := mergeLiveIntoLog(base, live)
+	if got.ProviderID != "deepseek" {
+		t.Fatalf("merged provider_id = %q, want deepseek", got.ProviderID)
+	}
+}
+
+func TestRequestLogMatchesProviderUsesNormalizedExactID(t *testing.T) {
+	row := store.RequestLog{ProviderID: "DeepSeek"}
+	cases := []struct {
+		name      string
+		provider  string
+		wantMatch bool
+	}{
+		{name: "case insensitive", provider: "deepseek", wantMatch: true},
+		{name: "trim spaces", provider: "  DEEPSEEK  ", wantMatch: true},
+		{name: "exact ID only", provider: "deep", wantMatch: false},
+		{name: "empty filter matches all", provider: "", wantMatch: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := requestLogMatchesProvider(row, tc.provider); got != tc.wantMatch {
+				t.Fatalf("requestLogMatchesProvider(%q) = %v, want %v", tc.provider, got, tc.wantMatch)
+			}
+		})
 	}
 }

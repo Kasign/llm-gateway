@@ -43,6 +43,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 校验路由与 OpenAPI paths
+        run: python3 scripts/check_openapi_routes.py
+
       - name: 配置 Go
         uses: actions/setup-go@v5
         with:
@@ -94,6 +97,45 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Gateway DNS 解析失败与审计状态验证
+        run: |
+          set -o pipefail
+          GATEWAY_DNS_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-dns-failure.txt
+
+      - name: 保存 Gateway DNS 故障产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-dns-failure-${{ github.sha }}
+          path: /tmp/gateway-dns-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Gateway 已提交响应头后的流式正文中断验证
+        run: |
+          set -o pipefail
+          GATEWAY_STREAM_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-stream-failure.txt
+
+      - name: 保存 Gateway 流式中断产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-stream-failure-${{ github.sha }}
+          path: /tmp/gateway-stream-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Provider TLS 握手中断故障验证
+        run: |
+          set -o pipefail
+          go test -count=1 -run TestOpenAICompatibleProviderMapsTLSHandshakeInterruptionWithoutUpstreamStatus -v ./internal/provider 2>&1 | tee /tmp/provider-tls-handshake-failure.txt
+
+      - name: 保存 Provider TLS 握手故障产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-tls-handshake-failure-${{ github.sha }}
+          path: /tmp/provider-tls-handshake-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
@@ -131,6 +173,12 @@ jobs:
 
       - name: 校验前端语法与关键功能字段
         run: |
+          node --check web/js/providers-entry.js
+          node --check web/static/dist/providers-admin.js
+          cmp -s web/js/providers-entry.js web/static/dist/providers-admin.js
+          grep -q 'api_key_ciphertext' internal/server/admin_providers_http.go
+          grep -q 'clear-key' web/js/providers-entry.js
+          grep -q 'model_mappings' web/static/dist/providers-admin.js
           node --check web/static/dist/app.js
           node --check /tmp/llm-gateway-admin.js
           # 直接比较 CI 从当前源码生成的 bundle 与已提交部署产物，防止漏提交或提交过期的 dist。

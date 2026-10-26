@@ -197,6 +197,9 @@ func buildRequestSummary(l *store.RequestLog) map[string]interface{} {
 		"api_key":     l.APIKeyName,
 		"api_key_id":  l.APIKeyID,
 	}
+	if l.ProviderID != "" {
+		s["provider_id"] = l.ProviderID
+	}
 	if l.ModelRequested != "" {
 		s["model_client"] = l.ModelRequested
 	}

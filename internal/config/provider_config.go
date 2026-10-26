@@ -8,6 +8,8 @@ import (
 	gatewayprovider "github.com/whl/llm-gateway/internal/provider"
 )
 
+const MaxProviderRequestsPerMinute = 100000
+
 // OpenAICompatibleProviderConfig 从 deploy/config.yaml 读取，API Key 应通过环境变量注入。
 // 远程凭据不写入 gateway_settings，切换当前后端只保存 Provider ID 与模型 ID。
 type OpenAICompatibleProviderConfig struct {
@@ -16,10 +18,14 @@ type OpenAICompatibleProviderConfig struct {
 	BaseURL             string `yaml:"base_url"`
 	APIKey              string `yaml:"api_key"`
 	APIKeyHeader        string `yaml:"api_key_header"`
-	DefaultModel        string `yaml:"default_model"`
+	DefaultModel        string            `yaml:"default_model"`
+	ModelMappings       map[string]string `yaml:"model_mappings"`
 	AllowInsecureHTTP   bool   `yaml:"allow_insecure_http"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
+	MaxConcurrentRequests int `yaml:"max_concurrent_requests"`
+	RequestsPerMinute      int `yaml:"requests_per_minute"`
+	RequestTimeoutSeconds  int `yaml:"request_timeout_seconds"`
 }
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -33,6 +39,20 @@ func (c *Config) validateProviderConfigs() error {
 		item.APIKey = strings.TrimSpace(item.APIKey)
 		item.APIKeyHeader = strings.TrimSpace(item.APIKeyHeader)
 		item.DefaultModel = strings.TrimSpace(item.DefaultModel)
+		if len(item.ModelMappings) > 128 {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): model_mappings exceeds 128 entries", i, item.ID)
+		}
+		mappings := make(map[string]string, len(item.ModelMappings))
+		for publicID, upstreamID := range item.ModelMappings {
+			publicID = strings.TrimSpace(publicID)
+			upstreamID = strings.TrimSpace(upstreamID)
+			if publicID == "" || upstreamID == "" || len(publicID) > 255 || len(upstreamID) > 255 ||
+				strings.ContainsAny(publicID+upstreamID, "\r\n") {
+				return fmt.Errorf("providers.openai_compatible[%d] (%s): model_mappings contains an invalid model ID", i, item.ID)
+			}
+			mappings[publicID] = upstreamID
+		}
+		item.ModelMappings = mappings
 		if !providerIDPattern.MatchString(item.ID) {
 			return fmt.Errorf("providers.openai_compatible[%d].id is invalid", i)
 		}
@@ -40,6 +60,15 @@ func (c *Config) validateProviderConfigs() error {
 			return fmt.Errorf("providers.openai_compatible[%d] duplicates Provider ID %q", i, item.ID)
 		}
 		seen[item.ID] = true
+		if item.MaxConcurrentRequests < 0 || item.MaxConcurrentRequests > gatewayprovider.MaxOpenAICompatibleConcurrentRequests {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): max_concurrent_requests must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleConcurrentRequests)
+		}
+		if item.RequestTimeoutSeconds < 0 || item.RequestTimeoutSeconds > gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): request_timeout_seconds must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds)
+		}
+		if item.RequestsPerMinute < 0 || item.RequestsPerMinute > MaxProviderRequestsPerMinute {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): requests_per_minute must be between 0 and %d", i, item.ID, MaxProviderRequestsPerMinute)
+		}
 		if !item.Enabled {
 			continue
 		}
@@ -53,6 +82,8 @@ func (c *Config) validateProviderConfigs() error {
 			ID: item.ID, BaseURL: item.BaseURL, APIKey: item.APIKey, APIKeyHeader: item.APIKeyHeader,
 			AllowInsecureHTTP: item.AllowInsecureHTTP, AllowPrivateNetwork: item.AllowPrivateNetwork,
 			MaxResponseBytes: item.MaxResponseBytes,
+			MaxConcurrentRequests: item.MaxConcurrentRequests,
+			RequestTimeoutSeconds: item.RequestTimeoutSeconds,
 		})
 		if err != nil {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): %w", i, item.ID, err)

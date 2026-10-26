@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,6 +28,7 @@ import (
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/live"
 	"github.com/whl/llm-gateway/internal/model"
+	gatewayprovider "github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/ratelimit"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
@@ -35,9 +37,47 @@ import (
 // TestGatewayConcurrentRequestLoadWithMariaDBAudit measures latency/throughput
 // across the real HTTP handler, Redis limiter, Provider adapter, and asynchronous MariaDB audit writer.
 // It is a reproducible integration load sample, not a production-capacity or real-provider benchmark.
+type gatewayDNSFailureResolver struct {
+	err error
+}
+
+func (r gatewayDNSFailureResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, r.err
+}
+
 func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) != "1" {
-		t.Skip("set GATEWAY_LOAD_TEST=1 to run the timed Gateway request-load sample")
+	dnsFailureTest := strings.TrimSpace(os.Getenv("GATEWAY_DNS_FAILURE_TEST")) == "1"
+	streamFailureTest := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_FAILURE_TEST")) == "1"
+	loadTest := strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) == "1"
+	if !dnsFailureTest && !streamFailureTest && !loadTest {
+		t.Skip("set GATEWAY_LOAD_TEST=1, GATEWAY_DNS_FAILURE_TEST=1, or GATEWAY_STREAM_FAILURE_TEST=1 to run the Gateway integration test")
+	}
+
+	dnsFailureCases := []struct {
+		providerID  string
+		pathPrefix  string
+		diagnostic  string
+		wantStatus  int
+		resolverErr *net.DNSError
+	}{
+		{
+			providerID: "dns-nxdomain",
+			pathPrefix: "/dns-nxdomain",
+			diagnostic: "NXDOMAIN_PRIVATE_DIAGNOSTIC",
+			wantStatus: http.StatusBadGateway,
+			resolverErr: &net.DNSError{
+				Err: "NXDOMAIN_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsNotFound: true,
+			},
+		},
+		{
+			providerID: "dns-timeout",
+			pathPrefix: "/dns-timeout",
+			diagnostic: "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC",
+			wantStatus: http.StatusGatewayTimeout,
+			resolverErr: &net.DNSError{
+				Err: "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsTimeout: true,
+			},
+		},
 	}
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
 	redisAddr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
@@ -116,6 +156,37 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 		upstreamRequests.Add(1)
 		switch r.URL.Query().Get("fault") {
+		case "stream_reset":
+			// 先提交 200 响应头与部分 SSE 数据，再以 TCP RST 中断 Content-Length 正文。
+			// 这模拟上游已经开始正常返回流、随后连接被异常终止的情况。
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "upstream does not support hijacking", http.StatusInternalServerError)
+				return
+			}
+			conn, buffered, hijackErr := hijacker.Hijack()
+			if hijackErr != nil {
+				return
+			}
+			partial := "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: 4096\r\nConnection: keep-alive\r\n\r\n" +
+				"data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial-stream-fragment\"},\"finish_reason\":null}]}\n\n"
+			if _, writeErr := buffered.WriteString(partial); writeErr == nil {
+				writeErr = buffered.Flush()
+				if writeErr != nil {
+					_ = conn.Close()
+					return
+				}
+			} else {
+				_ = conn.Close()
+				return
+			}
+			// 给 HTTP 客户端留出接收响应头和部分数据的窗口，避免依赖线程调度时序。
+			time.Sleep(50 * time.Millisecond)
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				_ = tcpConn.SetLinger(0)
+			}
+			_ = conn.Close()
+			return
 		case "delay":
 			// 受控延迟用于检查故障下的真实端到端等待，而不是模拟真实模型推理。
 			time.Sleep(75 * time.Millisecond)
@@ -172,22 +243,52 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	cfg.Llama.RequestTimeout = 60
 	loggingDisabled := false
 	cfg.Logging.Enabled = &loggingDisabled
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "loadtest", Enabled: true, BaseURL: upstream.URL + "/v1",
-		DefaultModel: "integration-model", APIKey: "test-upstream-key",
-		APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
-	}}
-	cfg.Agents = []config.AgentRouteConfig{{
-		ID: "loadtest-agent", Enabled: true, PathPrefix: "/loadtest",
-		ProviderID: "loadtest", DefaultModel: "integration-model",
-	}}
+	var injectedProviders *gatewayprovider.Registry
+	if dnsFailureTest {
+		for _, tc := range dnsFailureCases {
+			cfg.Providers.OpenAICompatible = append(cfg.Providers.OpenAICompatible, config.OpenAICompatibleProviderConfig{
+				ID: tc.providerID, Enabled: true, BaseURL: "https://provider.example/v1",
+				DefaultModel: "integration-model", APIKey: "private-provider-secret", APIKeyHeader: "api-key",
+			})
+			cfg.Agents = append(cfg.Agents, config.AgentRouteConfig{
+				ID: tc.providerID + "-agent", Enabled: true, PathPrefix: tc.pathPrefix,
+				ProviderID: tc.providerID, DefaultModel: "integration-model",
+			})
+		}
+		injectedProviders = gatewayprovider.NewRegistry()
+		for _, tc := range dnsFailureCases {
+			remote, createErr := gatewayprovider.NewOpenAICompatibleProviderWithResolver(gatewayprovider.OpenAICompatibleConfig{
+				ID: tc.providerID, BaseURL: "https://provider.example/v1",
+				APIKey: "private-provider-secret", APIKeyHeader: "api-key",
+			}, gatewayDNSFailureResolver{err: tc.resolverErr})
+			if createErr != nil {
+				t.Fatalf("construct controlled DNS Provider %s: %v", tc.providerID, createErr)
+			}
+			providerInstance := remote
+			if registerErr := injectedProviders.Register(tc.providerID, func() gatewayprovider.Provider {
+				return providerInstance
+			}); registerErr != nil {
+				t.Fatalf("register controlled DNS Provider %s: %v", tc.providerID, registerErr)
+			}
+		}
+	} else {
+		cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+			ID: "loadtest", Enabled: true, BaseURL: upstream.URL + "/v1",
+			DefaultModel: "integration-model", APIKey: "test-upstream-key",
+			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+		}}
+		cfg.Agents = []config.AgentRouteConfig{{
+			ID: "loadtest-agent", Enabled: true, PathPrefix: "/loadtest",
+			ProviderID: "loadtest", DefaultModel: "integration-model",
+		}}
+	}
 
 	logRepo := store.NewRepo(db)
 	srv := &Server{
 		cfg: cfg, db: db, keys: keyRepo, models: model.NewRepo(db),
 		logs: logRepo, audit: audit.NewWriter(logRepo, 16384), settings: settings.NewRepo(db),
 		limiter: limiter, live: live.NewRegistry(), runs: newRunCancels(),
-		localClients: make(map[string]localClientEntry),
+		providers: injectedProviders, localClients: make(map[string]localClientEntry),
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 		fileUpstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 	}
@@ -304,6 +405,216 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	}
 	doRequest := func(index int) requestResult {
 		return doRequestExpected(index, "", http.StatusOK)
+	}
+
+	// 真实 Gateway Handler + Redis + MariaDB 的 DNS 故障验收；只使用注入 Resolver，不访问公网 DNS。
+	if dnsFailureTest {
+		for index, tc := range dnsFailureCases {
+			requestURL := handler.URL + tc.pathPrefix + "/v1/chat/completions?dns_test=1"
+			req, buildErr := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(body))
+			if buildErr != nil {
+				t.Fatalf("build DNS-failure request %d: %v", index, buildErr)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-API-Key", rawKey)
+			req.Header.Set("X-Request-ID", fmt.Sprintf("gateway-dns-%s-%04d", suffix, index))
+
+			resp, requestErr := client.Do(req)
+			if requestErr != nil {
+				t.Fatalf("Gateway DNS-failure request %s: %v", tc.providerID, requestErr)
+			}
+			responseBody, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				t.Fatalf("read DNS-failure response %s: %v", tc.providerID, readErr)
+			}
+			if resp.StatusCode != tc.wantStatus {
+				t.Errorf("DNS-failure response %s status=%d, want %d; body=%s", tc.providerID, resp.StatusCode, tc.wantStatus, responseBody)
+			}
+			if !bytes.Contains(responseBody, []byte("\"error\"")) {
+				t.Errorf("DNS-failure response %s lacks safe error envelope: %s", tc.providerID, responseBody)
+			}
+			for _, private := range []string{"provider.example", tc.diagnostic, "NXDOMAIN_PRIVATE_DIAGNOSTIC", "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", "private-provider-secret"} {
+				if bytes.Contains(responseBody, []byte(private)) {
+					t.Errorf("private DNS/credential detail %q leaked in Gateway response for %s", private, tc.providerID)
+				}
+			}
+		}
+		if got := upstreamRequests.Load(); got != 0 {
+			t.Fatalf("DNS-failure cases unexpectedly reached the unrelated Mock upstream %d times", got)
+		}
+
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after DNS-failure integration test: %v", err)
+		}
+		cancelDrain()
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, gateway502, gateway504, absentUpstreamStatus int
+		err = db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=502),0), COALESCE(SUM(http_status=504),0), COALESCE(SUM(upstream_http_status IS NULL),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &gateway502, &gateway504, &absentUpstreamStatus)
+		if err != nil {
+			t.Fatalf("query DNS-failure audit summary: %v", err)
+		}
+		if persisted != len(dnsFailureCases) || gateway502 != 1 || gateway504 != 1 || absentUpstreamStatus != len(dnsFailureCases) {
+			t.Fatalf("DNS-failure audit: rows=%d gateway502=%d gateway504=%d missing_upstream_status=%d; want 2/1/1/2",
+				persisted, gateway502, gateway504, absentUpstreamStatus)
+		}
+
+		rows, queryErr := db.QueryContext(verifyCtx,
+			"SELECT http_status, upstream_http_status, COALESCE(error_code,''), COALESCE(error_message,'') FROM request_logs WHERE api_key_name=?",
+			keyName)
+		if queryErr != nil {
+			t.Fatalf("query DNS-failure audit details: %v", queryErr)
+		}
+		seen := 0
+		for rows.Next() {
+			var gatewayStatus, upstreamStatus sql.NullInt64
+			var errorCode, errorMessage string
+			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &errorCode, &errorMessage); scanErr != nil {
+				_ = rows.Close()
+				t.Fatalf("scan DNS-failure audit detail: %v", scanErr)
+			}
+			seen++
+			if !gatewayStatus.Valid || (gatewayStatus.Int64 != http.StatusBadGateway && gatewayStatus.Int64 != http.StatusGatewayTimeout) {
+				t.Errorf("DNS audit gateway status is invalid: %+v", gatewayStatus)
+			}
+			if upstreamStatus.Valid {
+				t.Errorf("DNS audit unexpectedly contains upstream HTTP status %d", upstreamStatus.Int64)
+			}
+			for _, private := range []string{"provider.example", "NXDOMAIN_PRIVATE_DIAGNOSTIC", "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", "private-provider-secret"} {
+				if strings.Contains(errorCode, private) || strings.Contains(errorMessage, private) {
+					t.Errorf("private DNS/credential detail %q leaked into MariaDB audit metadata", private)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatalf("iterate DNS-failure audit details: %v", err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close DNS-failure audit rows: %v", err)
+		}
+		if seen != len(dnsFailureCases) {
+			t.Fatalf("DNS-failure audit detail rows=%d, want %d", seen, len(dnsFailureCases))
+		}
+		t.Logf("Gateway DNS failure integration: NXDOMAIN=502, resolver timeout=504, upstream_http_status NULL for %d/%d rows; DNS diagnostics and credential leakage absent",
+			absentUpstreamStatus, persisted)
+		return
+	}
+
+	// 上游已返回 200 响应头/部分 SSE 后异常 RST：Gateway 状态不可回退，但请求与审计必须标记失败。
+	if streamFailureTest {
+		streamBody, marshalErr := json.Marshal(map[string]interface{}{
+			"model": "client-model-must-not-win",
+			"stream": true,
+			"messages": []interface{}{map[string]string{"role": "user", "content": "stream reset integration test"}},
+		})
+		if marshalErr != nil {
+			t.Fatalf("marshal stream-reset request: %v", marshalErr)
+		}
+		req, buildErr := http.NewRequest(http.MethodPost,
+			handler.URL+"/loadtest/v1/chat/completions?fault=stream_reset", bytes.NewReader(streamBody))
+		if buildErr != nil {
+			t.Fatalf("build stream-reset request: %v", buildErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("X-API-Key", rawKey)
+		req.Header.Set("X-Request-ID", "gateway-stream-reset-"+suffix)
+
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			t.Fatalf("Gateway stream-reset request: %v", requestErr)
+		}
+		responseBody, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			t.Errorf("read Gateway stream-reset response: %v", readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Gateway stream-reset HTTP status=%d, want 200 because headers were already committed; body=%s", resp.StatusCode, responseBody)
+		}
+		if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+			t.Errorf("Gateway stream-reset Content-Type=%q, want text/event-stream", resp.Header.Get("Content-Type"))
+		}
+		if !bytes.Contains(responseBody, []byte("partial-stream-fragment")) || !bytes.Contains(responseBody, []byte("event: error")) {
+			t.Errorf("Gateway must retain partial data and append a safe SSE error event after upstream reset; body=%s", responseBody)
+		}
+		for _, private := range []string{"private-provider-secret", "provider.example", "unexpected EOF", "connection reset by peer"} {
+			if bytes.Contains(responseBody, []byte(private)) {
+				t.Errorf("private upstream failure detail %q leaked in streamed response", private)
+			}
+		}
+		if got := upstreamRequests.Load(); got != 1 {
+			t.Fatalf("stream-reset upstream request count=%d, want 1", got)
+		}
+
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after stream-reset integration test: %v", err)
+		}
+		cancelDrain()
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, gateway200, upstream200, errorState, providerUpstreamError int
+		err = db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=200),0), COALESCE(SUM(upstream_http_status=200),0), COALESCE(SUM(status='error'),0), COALESCE(SUM(error_code='provider_upstream'),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &gateway200, &upstream200, &errorState, &providerUpstreamError)
+		if err != nil {
+			t.Fatalf("query stream-reset audit summary: %v", err)
+		}
+		if persisted != 1 || gateway200 != 1 || upstream200 != 1 || errorState != 1 || providerUpstreamError != 1 {
+			t.Fatalf("stream-reset audit summary: rows=%d gateway200=%d upstream200=%d error_state=%d provider_upstream_error=%d; want 1/1/1/1/1",
+				persisted, gateway200, upstream200, errorState, providerUpstreamError)
+		}
+
+		rows, queryErr := db.QueryContext(verifyCtx,
+			"SELECT http_status, upstream_http_status, status, error_code, COALESCE(error_message,'') FROM request_logs WHERE api_key_name=?",
+			keyName)
+		if queryErr != nil {
+			t.Fatalf("query stream-reset audit details: %v", queryErr)
+		}
+		seen := 0
+		for rows.Next() {
+			var gatewayStatus, upstreamStatus sql.NullInt64
+			var state, errorCode, errorMessage string
+			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &state, &errorCode, &errorMessage); scanErr != nil {
+				_ = rows.Close()
+				t.Fatalf("scan stream-reset audit detail: %v", scanErr)
+			}
+			seen++
+			if !gatewayStatus.Valid || gatewayStatus.Int64 != http.StatusOK ||
+				!upstreamStatus.Valid || upstreamStatus.Int64 != http.StatusOK {
+				t.Errorf("committed stream status must preserve Gateway/upstream 200/200; got %v/%v", gatewayStatus, upstreamStatus)
+			}
+			if state != "error" || errorCode != "provider_upstream" {
+				t.Errorf("interrupted stream state/code=%q/%q, want error/provider_upstream", state, errorCode)
+			}
+			for _, private := range []string{"private-provider-secret", "provider.example", "unexpected EOF", "connection reset by peer"} {
+				if strings.Contains(errorMessage, private) {
+					t.Errorf("private stream failure detail %q leaked into MariaDB audit message", private)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatalf("iterate stream-reset audit details: %v", err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close stream-reset audit rows: %v", err)
+		}
+		if seen != 1 {
+			t.Fatalf("stream-reset audit detail rows=%d, want 1", seen)
+		}
+		t.Logf("Gateway stream reset integration: client HTTP=200 (committed), upstream HTTP=200, request state=error/provider_upstream, partial SSE retained and error event appended")
+		return
 	}
 
 	// 连接拒绝故障独立运行：先证明 TCP 不可达时返回安全 502 并记录无上游 HTTP 状态，
@@ -626,18 +937,19 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 
 	verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancelVerify()
-	var persisted, successful, modelMatched int
+	var persisted, successful, modelMatched, providerMatched int
 	err = db.QueryRowContext(verifyCtx,
-		"SELECT COUNT(*), COALESCE(SUM(status='success'),0), COALESCE(SUM(model_actual='integration-model'),0) FROM request_logs WHERE api_key_name=?",
-		keyName).Scan(&persisted, &successful, &modelMatched)
+		"SELECT COUNT(*), COALESCE(SUM(status='success'),0), COALESCE(SUM(model_actual='integration-model'),0), COALESCE(SUM(provider_id='loadtest'),0) FROM request_logs WHERE api_key_name=?",
+		keyName).Scan(&persisted, &successful, &modelMatched, &providerMatched)
 	if err != nil {
 		t.Fatalf("query persisted audit results: %v", err)
 	}
 	// expectedTotalRequests 已覆盖突发与稳态两个阶段。
 
-	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests {
-		t.Fatalf("audit rows = %d, successful = %d, correct model = %d; want %d for each", persisted, successful, modelMatched, expectedTotalRequests)
+	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests || providerMatched != expectedTotalRequests {
+		t.Fatalf("audit rows = %d, successful = %d, correct model = %d, correct provider = %d; want %d for each",
+			persisted, successful, modelMatched, providerMatched, expectedTotalRequests)
 	}
-	t.Logf("MariaDB audit drain after burst + sustained load: persisted=%d/%d successful=%d model_matched=%d drain_duration=%s",
-		persisted, expectedTotalRequests, successful, modelMatched, drainDuration.Round(time.Millisecond))
+	t.Logf("MariaDB audit drain after burst + sustained load: persisted=%d/%d successful=%d model_matched=%d provider_matched=%d drain_duration=%s",
+		persisted, expectedTotalRequests, successful, modelMatched, providerMatched, drainDuration.Round(time.Millisecond))
 }

@@ -2,7 +2,7 @@
 
 > 目标分支：`dev`
 > 初始计划基线：`e9e55286a4d3d2cba4d76df212280b8547065267`
-> 状态：阶段 0——计划与基线核验
+> 状态：阶段 1 日志可靠性与阶段 4 Provider 扩展并行推进；新增 Web 多 Provider 配置能力已登记为后续功能组。
 
 ## 1. 重构目标
 
@@ -101,12 +101,16 @@ docs/                        中文架构、协议和运维文档
 验收：本地后端通过同一套契约测试；添加新 Provider 不需要修改核心 Pipeline；没有为远程 Provider 强加本地管理空操作。
 
 ### 阶段 4：外部 Provider 与凭据管理
-状态：进行中。
+状态：进行中（YAML/环境变量/数据库 Web Provider 配置与管理台已经在 PR #7 实现；当前继续治理 Provider 热更新期间的并发许可生命周期、配置回滚与并发预算生效顺序）。
 
-已完成：远程 Provider 静态配置、独立 API Key、模型 ID 覆盖、默认阻止私网及特殊用途 IP、禁止重定向、响应体上限与安全错误响应已接入；CI 基线通过。真实供应商端到端与故障注入测试仍待执行。
+已完成：远程 Provider 静态配置、独立 API Key、模型 ID 覆盖、默认阻止私网及特殊用途 IP、禁止重定向、响应体上限、安全错误响应、Web 多 Provider 管理、`.env` 多 Provider 预置与每 Provider 整体请求时限均已实现。真实供应商端到端与公网故障注入仍待执行；本轮按用户要求不等待 CI，后续统一测试。
 
 任务：
 - 增加 Provider、远程模型映射和凭据引用的安全配置/存储。
+- Web 管理台新增多 Provider 管理页：列表/新增/编辑/启用/停用/删除、测试连接、查看已配置模型与模型 ID 映射；配置变更必须经过后端校验，不允许前端绕过 URL/SSRF 和协议限制。
+- 允许从 `.env` 预置一个或多个远程 Provider，适用于部署时注入 Base URL、模型名、超时和密钥；密钥使用环境变量引用或仅写入，不通过读取 API 回传明文。
+- 在实现前明确环境预置配置与 Web/数据库配置的合并规则：如何识别配置来源、同 ID 冲突时的优先级、是否允许 Web 修改环境托管项、删除/停用的实际语义、何时生效及重启后如何恢复。兼容现有“数据库中已保存的活动上游设置优先于文件默认项”的行为，避免部署升级后意外切换正在使用的上游。
+- 对 Web 创建的 Provider，定义密钥的持久化保护、掩码展示、修改时留空表示保留、显式清除、审计与导出脱敏策略。
 - 首先接入一个 OpenAI-compatible 服务，验证 Base URL、模型 ID、API Key、超时、流式和错误映射。
 - 再用 DeepSeek 等第二家兼容服务验证抽象，而不是复制整套转发代码。
 - 不同协议（例如 Responses 或 Anthropic Messages）使用独立协议适配器，不假设所有 API 完全一致。
@@ -114,12 +118,25 @@ docs/                        中文架构、协议和运维文档
 - 只在客户端尚未收到响应内容时按策略重试；流式开始后不自动切换以免重复输出。
 - 成本统计保存 usage 来源与定价版本。
 
+### 本功能组配置来源、优先级与生效边界（实施方案）
+
+为同时支持部署预置和 Web 动态管理，配置来源必须可识别，不做静默的字段级覆盖：
+
+1. **兼容现有 YAML 配置。** 保留 `providers.openai_compatible[]` 与现有 `${ENV_NAME}` 展开逻辑；原有部署无需迁移。该来源标记为“部署配置”，由 YAML/部署环境维护。
+2. **支持直接用 `.env` 预置完整 Provider。** 新增统一前缀 `LLM_GATEWAY_PROVIDER_<ID>_`，至少支持 `ENABLED`、`BASE_URL`、`DEFAULT_MODEL`、`API_KEY`，并支持 `API_KEY_HEADER`、`REQUEST_TIMEOUT_SECONDS`、`MAX_CONCURRENT_REQUESTS`、`MAX_RESPONSE_BYTES`、`ALLOW_INSECURE_HTTP`、`ALLOW_PRIVATE_NETWORK` 及模型映射配置。`REQUEST_TIMEOUT_SECONDS=0` 不增加 Provider 级总时限，`1–86400` 秒限制完整 JSON/SSE 请求。环境变量 ID 段转为小写后作为 Provider ID；变量值必须走与 YAML 相同的规范化、URL/SSRF、安全和范围校验。真实 Key 仅放在部署环境，不提交到 Git。
+3. **Provider ID 跨来源冲突一律失败关闭。** YAML、前缀环境变量和数据库中 Web 创建的 Provider 合并成可用目录；同一 ID 在多个来源出现时给出不含密钥值的启动/保存错误，不按“谁优先”覆盖整份配置。这样不会因增加环境变量而意外替换正在使用的 Provider。原有 `gateway_settings.llm_upstream` 仍只代表全局活动 Provider/模型选择，不覆盖某个 Provider 自身的地址、模型或凭据。
+4. **部署管理项只读，Web 管理项动态生效。** YAML/环境变量来源在 Web 列表中显示来源并禁止直接编辑、删除；变更需修改部署配置并重启。Web 新建项保存在专用 Provider 配置存储，更新时先完整校验并持久化，再以不可见中间态的方式切换运行时 Registry；请求已拿到旧 Provider 实例时允许其完成，不中断在途 SSE。关闭或删除当前活动 Provider 前必须先切换到其他 Provider。
+5. **Web 密钥不明文持久化或回显。** Web 管理创建的 Provider Key 需要使用 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY` 提供的独立 32 字节密钥做 AEAD 加密后再落库；密钥缺失/格式不合法时，不允许保存带 Key 的 Web Provider。API 只返回 `api_key_configured` 与掩码状态，永远不返回明文。编辑表单留空表示保留原 Key；单独的显式清除动作需要二次确认。日志、错误、测试产物和导出均不得包含 Key。
+6. **连通性测试不调用计费推理。** 使用短超时请求测试 Provider 的模型列表端点，禁止重定向，复用正式 Provider 的 URL/SSRF 与 Header 校验；区分 DNS/TLS/连接失败、HTTP 鉴权错误和不支持模型列表端点等情况，向 UI 展示脱敏结果，不保存上游原始错误正文。
+7. **模型映射和全局活动选择分离。** Provider 编辑支持默认模型与公开模型 ID 到上游模型 ID 的映射；`/v1/models` 只发布当前活动 Provider 对外可用的模型。添加 Provider 不自动改变全局活动 Provider；现存数据库里的活动选择继续优先生效。
+8. **按功能层验收。** 先完善环境变量解析、来源标记、冲突检查和存储加密；再实现后端 CRUD/测试连接/原子运行时更新；最后实现 UI 与部署 bundle。覆盖部署预置、Web 新建、同 ID 冲突、Key 保留/轮换/清除、运行时切换、活动 Provider 删除保护、重启恢复及多 Provider 隔离。
+
 验收：本地与远程模型可统一路由；密钥不出现在日志和客户端响应；429、超时、鉴权失败等错误有稳定映射；流式中断不产生重复生成。
 
 ### 阶段 5：运行治理与可维护性
 状态：进行中（早期阶段）。
 
-任务：修复 Redis 限流计数与 TTL 的原子性；增加 Provider 并发限制、延迟/成功率/429/5xx/Token 指标、日志队列积压和丢弃指标；为管理台轮询增加分页、缓存和频率限制；加入 `go test ./...`、`go vet ./...`、构建与集成测试流水线；补齐中文运维文档。
+任务：修复 Redis 限流计数与 TTL 的原子性；增加 Provider 并发限制、延迟/成功率/429/5xx/Token 指标；审计队列深度、成功/失败、按原因丢弃与排队时延的只读 API 已实现并由 Actions #162 全量通过；DNS 故障审计语义由 #163、响应已提交后的 SSE 中断语义由 #164 验收通过。继续覆盖陈旧 Keep-Alive 连接恢复、日志保留策略和管理台轮询负载；TLS 握手中断已有 Actions #166 验收。保留策略默认不主动删除历史数据，只有显式启用后才按批次清理；保持 `go test ./...`、`go test -race`、`go vet ./...`、构建与集成测试为每个功能组的验收门槛。
 
 验收：能够定位延迟、上游错误和日志丢失；管理台轮询不会明显拖慢推理；关键行为有自动化测试。
 
@@ -138,16 +155,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：Gateway 60 秒稳态负载与可控上游 429/503 故障注入（PR #4，Actions #149/#150 均通过）。12,000 次稳态请求达到约 200 req/s，全部 12,192 条请求均成功并正确落库；另有 120 个故障/对照请求验证状态码、Retry-After、错误正文脱敏与审计一致性。当前新增的 TCP 连接拒绝与恢复集成测试尚待 CI 验收：预期验证故障时 502、上游状态为空，恢复同一端口后请求成功并正确记录。所有上游仍是本机 Mock，不代表真实模型推理、生产容量或真实供应商 E2E。
+> 最新已通过完整 CI 的代码 Head：`0647b6aeef8c01f68d2a783989369c36e511293e`（[Actions #166](https://github.com/Kasign/llm-gateway/actions/runs/40259993963)，32/32 步骤成功）。Gateway + loopback Mock + Redis/MariaDB 验收覆盖 DNS NXDOMAIN=502、解析超时=504、TCP 拒绝/恢复、429/503、HTTP 200 已提交后的 SSE 中断与审计一致性；新增的本地 TLS 握手中断用例也通过。真实供应商 E2E 和公网反向代理链路仍未验收。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成请求/响应留存边界、审计队列满载/排空、60 秒 Gateway Handler+Redis+MariaDB 合成负载，以及 75ms 上游延迟与 429/503 注入。新增实际 TCP 连接拒绝与同端口恢复测试，要求 MariaDB 将 30 条 502/无上游状态与恢复后 30 条 200 正确区分；当前待 CI 验收。真实公网故障恢复与生产观测仍待。 |
+| 阶段 1：日志可靠性 | 进行中 | 99% | 审计队列与只读指标、60 秒 Gateway Handler+Redis+MariaDB 负载、429/503 注入、TCP 拒绝/恢复（#162）、DNS NXDOMAIN/timeout 审计（#163）、HTTP 200 已提交后 SSE 正文 TCP RST 与 MariaDB 审计一致性（#164），以及 TLS 握手前 TCP 中断的 Provider 回归测试（#166）均全量通过。真实供应商 E2E 与生产环境故障恢复观测仍待。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 76% | CI race detector 覆盖 provider/server/core/audit/live；请求取消、双 Agent JSON/SSE 隔离、确定性 DNS/连接/响应头错误映射、内存压力、MariaDB 积压、60 秒负载和 429/503 故障注入均已验收。当前增加实际 TCP 连接拒绝与恢复集成场景，等待 CI 核对错误边界和状态恢复；真实供应商/公网故障验证仍待。 |
+| 阶段 5：运行治理与 CI | 进行中 | 83% | 代码 Head `0647b6ae` 的 Actions #166 完整 CI 已通过，包含并发限制、审计指标、MariaDB 积压、持续负载、429/503、TCP、DNS、已提交 SSE 中断、TLS 握手中断、race、性能、go vet、Gateway 构建与前端 bundle。PR #5/#7 仍未合并；下一步按独立功能组推进 Web 多 Provider 管理，并继续处理连接池陈旧连接与 Payload 保留策略。 |
 
 ### 已核实的历史 CI 问题
 
@@ -158,7 +175,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **并发契约、数据库积压和确定性网络故障的 CI 验收**：取消/Finish 线性化和 400 个双 Agent 并发模型解析由 Actions #90 通过；DNS NXDOMAIN/timeout 与本机连接拒绝由 Actions #92 通过。Actions #128 已将 audit/live 加入 race detector，并验证内存队列满载和实时会话快照/事件/正文上限。Actions #134 又通过真实 MariaDB 审计积压测试，验证 500 条请求生命周期记录、292 条分析更新、队列满载丢弃计数和 FIFO 排空；五项性能基线继续上传 Artifact。后续需在相同 Go 版本与相近 Runner 上持续采样和比较，暂不以单次结果设硬阈值。
+2. **运行治理当前功能组**：远程 Provider 并发限制、审计队列只读指标、DNS 故障审计语义、响应已提交后的 SSE 中断和本地 TLS 握手中断均已由代码 Head `0647b6ae` 的 Actions #166 完整验收。PR #5/#7 仍未合并；PR #5 合并后，将 PR #7 base 切回最新 `dev` 并重新验收。下一项按独立功能组推进 Web 多 Provider 管理；连接池陈旧连接、Payload 保留策略及真实供应商验收仍在问题台账中。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
@@ -561,3 +578,295 @@ docs/                        中文架构、协议和运维文档
 - TCP 拒绝/恢复测试在同一进程内关闭并重绑 Mock listener；未覆盖公网 DNS 传播、跨网络路由恢复、连接池长时间陈旧、TLS 握手中断、已收到响应头后上游断流、进程重启后的恢复。
 - 现有 DNS 错误测试验证安全错误映射/脱敏；新增长的 `UpstreamStatus=0` 断言直接覆盖 JSON/SSE TCP 拒绝路径，没有单独对 DNS 测试重复断言 upstream 字段为空。DNS/连接错误的运行路径都是未取得 HTTP response 时返回 Provider 传输错误，但 DNS 状态持久化仍应作为后续可补充的专项测试。
 - 60 秒压力覆盖真实 Gateway Handler、Redis、MariaDB 审计与 Mock Provider，但不等价生产推理吞吐、长周期内存稳定性或生产容量认证；性能基准不设门槛，跨 Runner 的尾延迟不可直接横向比较。
+
+
+### 远程 Provider 并发上限验收（2026-10-23，Actions #158 已通过）
+
+- [Actions #158](https://github.com/Kasign/llm-gateway/actions/runs/39943828510) 对 PR #7 最终功能提交 `dd54cf576ba4a80e7c5d1f2dd0bb3be95a776b4b` 的结论为 `success`，26 个步骤成功、0 个失败。单测、MariaDB 审计积压、60 秒 Gateway 负载、429/503 故障注入、TCP 拒绝与恢复、race detector、性能基线、`go vet`、Gateway 构建及前端 bundle 检查全部通过。
+- 并发配置：`providers.openai_compatible[].max_concurrent_requests`，默认值 64，上限 64，0 采用默认值。达到上限时 fail-fast 返回 `503/provider_concurrency_limit`，不会向上游发送额外请求；由于没有发生上游 HTTP 交互，`UpstreamStatus=0`。如果流式响应已提交，则追加安全 SSE error；Responses API 错误事件序号从 0 开始。
+- 测试覆盖 JSON 请求达到上限、释放许可后恢复、配置范围拒绝，以及流式响应已提交时保持 Gateway 已提交状态并输出安全错误；全部包含在完整 CI 中。
+- 60 秒负载：突发 192 次请求、16 并发、446ms、430.2 req/s、P50/P95/P99 为 29.09/64.42/112.34ms、失败 0；稳态 12,000 次请求、200.0 req/s、持续 60.001s、P50/P95/P99 为 4.46/5.90/9.82ms、失败 0。突发与稳态共 12,192 次上游请求，MariaDB 持久化 12,192/12,192 条成功记录且模型字段全匹配，审计队列排空 7.338s。/usr/bin/time 报告 Go test 最大 RSS 184,968 KiB；这是测试进程数据，不代表独立生产 Gateway RSS。负载 Artifact ID `12497481860`。
+- 故障注入：120 次、16 并发、失败 0，Gateway 状态 200/429/503 = 60/30/30；MariaDB 上游 429/503 统计均为 30 条。正常请求 P50 为 11.74ms，受控 75ms 延迟场景 P50/P95 为 85.76/104.05ms，审计排空 393ms。Artifact ID `12496729363`。
+- TCP 拒绝与恢复：30 条连接拒绝均返回 Gateway 502 且上游状态为空；同一端口恢复后 30 条返回 Gateway 200 / upstream 200；60 条审计全部写入。Artifact ID `12497103104`。
+- 性能基线（不设阈值）：ForwardJSON 90,663 ns/op、15,798 B/op、146 allocs/op；路由解析 330.9 ns/op、0 B/op、0 allocs/op；请求分析 1,354 ns/op、592 B/op、17 allocs/op；流式追踪 3,006 ns/op、1,104 B/op、26 allocs/op；并发观察器 4,361 ns/op、1,760 B/op、39 allocs/op。Artifact ID `12497447132`。
+
+### 首轮并发 PR 基线依赖错误与修复记录
+
+- PR #6 的 Actions #157 在编译阶段失败，日志指出新代码引用了 `core.Result.UpstreamStatus`，但该分支从尚未合并 PR #5 的旧 `dev` 分支切出，类型字段不存在。
+- 没有删除测试断言或移除上游状态语义；关闭了未合并 PR #6，并从 PR #5 已通过的 Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232` 建立堆叠分支 `feat/provider-concurrency-limits-stacked`。PR #7 的 Actions #158 已基于含有该类型契约的完整代码全量通过。
+- PR #5 与 PR #7 当前仍均为 Open/未合并。PR #7 在 PR #5 合并前不应独立合并；PR #5 合并后需将 PR #7 base 调整为最新 `dev` 并复核差异及再次执行 CI。
+- 真实供应商 E2E 未执行。此轮所有 HTTP 故障注入和负载均使用本机 loopback Mock 上游及 CI Redis/MariaDB，不代表公网故障恢复或生产容量验收。
+
+
+### 2026-10-26 执行记录：审计指标与多 Provider Web 配置规划
+
+- 审计指标 `internal/audit/metrics.go`、`GET /api/admin/audit/metrics` 已在 Head `dfbc2955` 的 [Actions #162](https://github.com/Kasign/llm-gateway/actions/runs/40256844693) 全量通过，包括单元测试、MariaDB 队列测试、Gateway 故障注入、race、go vet、Go 构建和前端 bundle 校验。
+- 新功能计划 `GW-PROV-UI-001`：管理台允许新增/编辑/启用/停用/删除/测试远程 Provider，同时支持通过 `.env` 在部署时预置服务。实现前先定义环境变量与数据库配置的优先级、配置来源标识、热更新/重启行为、密钥不回显与持久化保护、连接测试与 URL 安全校验；此功能目前尚未实施。
+- `GW-REL-001` 已在 Head `fd720204` 的 [Actions #163](https://github.com/Kasign/llm-gateway/actions/runs/40257657819) 全量通过：NXDOMAIN→502、Resolver timeout→504，两条审计记录 `upstream_http_status IS NULL`，敏感 DNS 诊断/凭据均未泄漏。
+- 本次推进 `GW-REL-002`：上游提交 HTTP 200 + 部分 SSE 后，测试服务器触发 TCP RST；应验证客户端仍是已提交的 HTTP 200、收到部分 SSE 与 `event: error`，MariaDB 记录 `http_status=200`、`upstream_http_status=200`，但 `status=error/error_code=provider_upstream`。新 Head CI 待验收。
+- PR #5 和 PR #7 继续保持未合并；并发上限分支依赖 PR #5。不能把 Mock/受控 Resolver 测试说成真实供应商 E2E。
+
+
+## 2026-10-26 最新基线与接下来的执行顺序
+
+- 重新核实的远程 `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`；工作分支已推进，当前 Head 及 Actions 状态以文末最新核验记录为准。
+- PR #5（TCP 故障恢复）和 PR #7（Provider 并发上限）均为 Open、未合并。PR #7 仍基于 PR #5 的契约；#5 合并之前不单独合并 #7。
+- 最新 [Actions #167](https://github.com/Kasign/llm-gateway/actions/runs/40260312832) 在 HEAD `9cd736b` 成功；Actions #166 的 32 步 CI 还验证了 race、性能、go vet、Go build、前端 bundle 与 TLS 握手中断。所有结果均为 CI/Mock 层，不等于真实供应商 E2E。
+- 可靠性收尾顺序：陈旧 Keep-Alive 连接关闭后的自动重拨专项（本轮新增测试，待新 CI 证明）；补充日志/Payload 保留策略的安全设计（默认禁用破坏性清理）；建立管理台轮询与 DB/CPU/延迟影响的可复现基准。公网代理/跨网络路由仍需部署环境验收。
+- `GW-PROV-UI-001` 的首轮实现已提交：部署 YAML 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 预置项只读；Web 项持久化并动态生效；跨来源同 ID 拒绝覆盖；Key 使用独立 AES-GCM 密钥加密存储、API 永不回显；保留/清除 Key 分开操作；模型别名映射接入路由和 `/v1/models`；保留旧 YAML 行为。添加 Provider 不自动切换活动上游。当前继续补齐活动 Provider 清 Key 与编辑禁用的边界保护。
+- 不强推、不改写历史；按完整功能组提交。每一组须在 CI 中跑完 Go 单测、race、go vet、构建与前端 bundle，失败查看日志后修复，不削弱断言。
+
+
+## 2026-10-26 Provider 多来源管理执行更新
+
+- 后端与前端首轮功能已实现：Registry 更新、Web Provider 持久化、AES-256-GCM 密钥加密、部署来源冲突保护、多 Provider 环境预置、可选 `model_mappings`、连接测试接口与 CRUD 部署 bundle。
+- 当前 393b14b 的 Actions `40262917490` 全量 CI 已通过，覆盖后端测试、负载/故障注入、race、go vet、构建和前端 bundle。发现活动 Provider 清 Key/编辑禁用保护遗漏，修复后必须重新跑完整 CI；真实供应商 E2E 未执行，不得声明通过。
+
+
+- 模型路由补充：远程 Provider 只有明确配置的公开别名才覆盖客户端 model；未知 model 仍回退管理台默认值，保留既有兼容。创建新 Provider 若活动上游仍指向同 ID 则拒绝，避免残留上游设置造成创建后隐式激活。
+
+## 2026-10-26 最新基线与安全收敛
+
+- `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。当前工作分支提交：`393b14b45a0483e4ab0452acf4c8d283b2567ae5`。PR #5/#7 均 Open、未合并；PR #7 继续依赖 PR #5，不得先合并。
+- 当前基线 Actions `40262917490` 已全量通过，包括单测、MariaDB 审计积压、Gateway 负载、429/503、TCP、DNS、SSE、TLS、race、性能、go vet、Go 构建和前端 bundle。下一次提交会触发新验收，不能沿用基线成功标记。
+- 安全保护要覆盖所有会使活动 Provider 不可用的操作：删除、停用、显式清 Key，以及编辑保存为 `enabled=false`。必须先检查活动上游并返回 409，且发生在数据库持久化和 Registry 更新之前。
+- 已有测试覆盖来源冲突、活动 Provider 的删除/停用、空 Key 保留、密钥加解密及 API 不回显；本轮将扩展活动 Provider 回归矩阵到清 Key 和编辑禁用。
+- `.env` 和 Compose 已提供 DeepSeek/OpenAI 默认模型、并发参数和 `MODEL_MAPPINGS_JSON` 显式透传；YAML + `${ENV}` 保持兼容。真实供应商 E2E、公网反代与生产部署验收仍未完成。
+
+### 本地模型长时推理超时（2026-10-26）
+
+- 本地 llama.cpp / Ollama 的整体请求超时通过 `LLAMA_REQUEST_TIMEOUT_SECONDS` 与 `llama.request_timeout_seconds` 配置。显式 `0` 表示不由客户端整体时限主动截断生成；调用方取消或断开仍会通过请求 Context 取消上游请求。
+- 兼容旧配置：旧 `config.yaml` 若未提供此字段，仍采用 3600 秒默认值。新示例配置默认使用 `0`，避免慢速本地模型在固定一小时后被网关客户端主动终止。有限时限允许配置 1–604800 秒。
+- `warm_start` 的 SSE 注释保活可以帮助长时间等待首个 Token 的流式请求维持连接，但不会改变客户端或反向代理的超时；OpenResty、客户端和调用方自己的请求期限仍需分别确认。
+- 本轮已补充配置解析的边界测试代码，遵从统一测试安排未运行测试；不得将代码变更视为已通过运行验证。
+
+
+### 请求历史自动保留策略（2026-10-26）
+
+- 新增 `logging.retention_days`，默认 0（禁用自动清理），避免升级或首次部署意外删除现有请求历史。
+- 显式启用后按 `started_at` 保留期限筛选，只清理已结束请求；仍为 `running` 的请求始终跳过。
+- 每批默认 500 条、每轮最多 10 批、每小时运行一次；每个批次使用独立事务，先删 `request_stream_events` 与 `request_payloads`，再删 `request_logs`，降低锁占用与长事务风险。
+- 后台任务停止时等待当前批次退出；数据库失败会写错误日志。已新增配置边界和 MariaDB opt-in 集成测试代码但未运行；仍待统一测试清理边界、并发写入、取消与执行耗时。
+
+
+### 任意 ID 的部署 Provider 环境文件（2026-10-26）
+
+- 主 `deploy/.env` 继续显式向 Gateway 传递现有 DeepSeek/OpenAI 示例项，兼容旧配置。
+- 新增可选 `deploy/providers.env`，由 Compose 单独注入，可以配置任意 `LLM_GATEWAY_PROVIDER_<ID>_*` 变量；默认示例全是注释，不会自动创建 Provider。
+- 这个专用文件不会将主 `.env` 中的数据库管理员密码、Redis 密码等无关凭据传进 Gateway 容器。旧部署缺少文件也不影响启动。相关部署与契约文档已同步；按统一安排未执行 Compose/测试验证。
+
+
+### Provider 响应大小配置透传与本地超时文档（2026-10-26）
+
+- DeepSeek/OpenAI 部署示例与 Compose 环境透传已补齐 `MAX_RESPONSE_BYTES`，可通过 0 使用默认响应体上限，避免环境解析器支持但部署层无法设置。
+- 部署配置指南已同步本地模型超时语义：当前示例默认 0 不设置客户端整体时限，旧配置未指定时保留 3600 秒默认；同时明确反向代理与调用方的超时仍需单独设置。
+- 按用户统一测试安排未运行 Compose、测试或 CI。
+
+
+### Provider 级 RPM 限流（2026-10-26）
+
+- 新增 `requests_per_minute`，0 默认禁用，正数按 Redis UTC 固定分钟窗口限制同一个远程 Provider 的新请求数；多个调用方 API Key 和多个 Agent 共用该 Provider 预算，与调用方 Key 自身的 RPM 分离。
+- 超限在请求级 ACL 后、WarmStart 和上游转发前拒绝，返回 429 `provider_rate_limit_exceeded`；启用预算时 Redis 不可用采用 fail-closed，返回 503 `provider_rate_limit_unavailable`。
+- 该策略只对远程 Provider 生效，不应用到本地 llama.cpp/Ollama，不会中断已经开始的生成。Token 预算与排队继续单独设计，不纳入本次改动。
+- 已补充 Redis 隔离和环境变量解析测试代码、管理台配置、部署示例与 API 契约说明；按用户要求未运行测试或 CI。
+
+
+### Provider RPM 展示和配置样例补齐（2026-10-26）
+
+- Web 管理 API 对部署托管与 Web 托管 Provider 都返回 `requests_per_minute`，保证编辑已有 Web Provider 时会保留其配额；YAML、自定义 `providers.env` 和部署说明均给出 RPM 示例。
+- 这是上一项 Provider 级 RPM 的配置链路补齐，不运行测试。
+
+
+### Provider RPM 用量显示（2026-10-26）
+
+- 管理台 Provider 列表现在显示当前分钟已计数请求数、剩余额度及窗口重置倒计时；按原有“刷新”按钮获取最新快照，不额外增加后台定时轮询。
+- 后端采用单次 Redis MGET 读取限流计数，不改变预算、不接触 MariaDB。Redis 查询失败或超时不会阻断 Provider 管理，只将用量显示为暂不可用。
+- 已补充 Redis 只读用量测试代码；遵从统一安排没有运行测试。
+
+
+### Provider RPM 的客户端退避提示（2026-10-26）
+
+- 对未提交响应的 Provider RPM 429 增加标准 `Retry-After` 秒数响应头，指向当前 UTC 固定分钟窗口预计重置时间。
+- Chat Completions、Responses 和 Anthropic Messages 共享错误处理函数；不改变状态码、错误 envelope 或 SSE 已提交后的不可逆行为。
+- 本次仅完成实现与契约说明，未运行测试。
+
+
+
+### OpenResty 长时 SSE 与 Docker 网络部署示例（2026-10-26）
+
+- 修正并明确 OpenResty 反代目标的部署拓扑：宿主机进程使用 `127.0.0.1:8088`；Docker/1Panel 容器必须与 Gateway 共享用户定义网络，使用 `llm-gateway:8088`，容器内不应把 `127.0.0.1` 当成 Gateway。
+- 两份样例均关闭 SSE 缓冲、缓存、gzip 及上游自动重试，设置 24 小时读写空闲间隔，明确这些 Nginx timeout 不是整个请求的总时限；请求体大小与 Gateway 默认 64 MiB 对齐。
+- 同步 1Panel 部署说明，列明本地模型客户端整体时限为 0 时只取消 Gateway 客户端整体 deadline，不能覆盖 OpenResty 或 Codex/Cursor 客户端期限；同时提示只有在确认真实代理来源后才应设置 `server.trusted_proxies`。
+- 本功能组仅修改部署样例和文档；按用户要求未运行测试、Compose 检查或 CI。需要在实际 1Panel/OpenResty 容器网络中部署确认 DNS 解析与 SSE 流式行为。
+- 提交前远程基线：`6962c7f84d8d30444424734ec510e89aa9c59dad`；PR #5/#7 均为 Open、未合并，PR #7 继续依赖 PR #5。
+
+
+### Provider 并发实时占用展示（2026-10-26）
+
+- Provider 管理列表复用现有手动刷新请求，增加并发许可使用数、有效上限与剩余槽位；不另起轮询，也不将只读统计用于限流判定。
+- 观测计数来自同一进程内共享的 `ConcurrencyLimiter`。Web Provider 即使在热更新或停用后仍有旧请求在途，也优先读取原有共享 limiter；部署来源从 Registry 获取当前运行时 limiter。若运行实例不可用，UI 显示为不可用而不是伪报 0。
+- API 契约明确计数是当前 Gateway 进程的瞬时快照，多副本部署下不代表全局并发；RPM 仍通过 Redis 单独计算，二者不会混用。
+- 新增并发快照回归测试代码；同步管理台源码与 `web/static/dist/providers-admin.js`、表头、列数和契约文档。按用户要求未运行测试或构建；需要统一验证 Go 测试、前端 bundle 字节一致性以及热更新/并发请求场景。
+- 提交前远程基线：`808fd9f8b399b8ac87885d6e876a935107740a5d`；PR #5/#7 仍 Open、未合并。
+
+
+### Provider 并发拒绝累计指标（2026-10-26）
+
+- 并发许可器在达到上限并拒绝新请求时累加进程内计数；管理台沿用原有 Provider 列表刷新，展示“并发拒绝（累计）”，不添加定时轮询，不影响请求准入。
+- 计数覆盖当前 Gateway 进程生命周期，进程重启后归零；多副本部署按进程分别统计。该值仅代表并发限制触发次数，不代表所有 503、上游 429 或客户端重试次数。
+- 自动 CI 日志此前多次失败于 `TestProviderRPMUsageReadsWithoutIncrementing`：测试使用了带大写字母的 Provider ID，写入路径直接拼接原始测试名，读取 API 则按 Provider 契约转小写。调整测试夹具使 ID 在写入前规范化，不改生产限流逻辑，也不放宽断言。
+- 更新 Provider 列表 API 契约、管理台源码及部署 bundle；提交前源码和 bundle 完全一致。按用户要求未运行测试、构建或 CI。
+- 本次提交前 HEAD：`f09d044bebf285f562bc16c29eb30189da58afd3`；PR #5/#7 仍 Open、未合并。
+
+
+### 调用审计 Provider 身份字段（2026-10-26）
+
+- `request_logs.provider_id` 记录每条调用的 Provider ID，与 `model_requested`、`model_actual` 分开保存，避免不同供应商使用同名模型时无法按来源统计延迟、成功率和 Token 用量。
+- 请求创建时先记可信路由/活动上游的候选 ID；`StageModelResolved` 收到 Resolver 的实际选择后以最终 Provider ID 覆盖，并更新实时看板；请求结束时再次补全。Agent 固定 Provider、内部 ServiceModel、全局活动 Provider 按 Resolver 优先级区分，不能只读取全局活动 Provider。
+- 新库在 `request_logs` 创建 `provider_id` 及 `idx_provider_started(provider_id, started_at)`；旧库通过 `ensureColumns` 增量添加，重复列/索引错误按 MariaDB 契约忽略。既有历史记录不伪造来源，保持空值。
+- 调用记录列表与详情新增 Provider ID 展示；同步前端源码和 `web/static/dist/app.js`。新增 Provider ID 选择优先级测试代码，但按用户要求未运行测试、迁移或构建。
+- 实施前核实 HEAD：`f981d38e66f3d2c0c4eb3906432f13432a867798`；PR #5/#7 均 Open、未合并。
+
+
+### 实时请求列表 Provider ID 合并修正（2026-10-26）
+
+- 请求列表会合并数据库记录与 LiveRegistry 的运行中快照。补齐 `mergeLiveIntoLog` 对非空 Provider ID 的覆盖，保证已解析的 Agent/服务路由身份不会被较早写入的临时归属覆盖。
+- 增加合并优先级回归测试代码；遵从统一安排未运行测试。
+
+### 调用记录 Provider 维度筛选（2026-10-26）
+
+- 管理台增加自由输入的 Provider ID 筛选框，适配静态配置、环境变量和 Web 管理配置中的自定义 ID，不维护容易过期的硬编码列表。
+- `GET /api/requests` 新增可选 `provider` 参数，与原有模型、状态、Key 筛选相互组合；ID 去空格并规范为小写后做完整相等匹配，不按模型或 Provider ID 子串猜测归属。
+- 存储层增加 `QueryWithProvider`，保留原 `Query` API 作为兼容包装；创建/结束请求时规范化 Provider ID。查询直接比较 `provider_id`，兼顾精确语义和现有索引设计。
+- 列表缓存键包含 Provider ID，防止跨条件污染；实时请求先合并 LiveRegistry 的最新 Provider 身份再过滤，避免请求解析前后 Provider 归属变化造成结果残留。
+- 已同步 `web/js/features/requests.js`、`web/index.html`、`web/static/dist/app.js`、API/数据库契约、技术指导和问题台账。新增 Provider ID 大小写、空白和精确匹配回归测试代码。
+- 遵从用户要求未运行测试、构建、迁移或 GitHub Actions；该功能组为代码和文档已提交状态，不代表运行验收完成。
+
+### 调用统计与 Token 来源拆分（2026-10-26）
+
+- 新增管理员接口 `GET /api/requests/stats`，仅允许 24h、7d、30d 窗口，并可选按 Provider ID 精确过滤。
+- Store 层使用 MariaDB 聚合查询计算请求总量、已结束/成功/错误/取消/进行中、成功率、平均耗时和六档延迟分布，不将整个时间窗口的明细行加载到进程内存。
+- Token 统计按 `analysis_json.throughput.source` 拆分上游 usage、llama.cpp timings 与来源未知；旧记录和缺失来源不推测为供应商实际 usage。注意分析 JSON 异步落库时会存在短暂的未知来源过渡态。
+- 调用记录 UI 增加统计时间窗口、汇总卡片和延迟分布；统计窗口只按 Provider 过滤，不套用模型/状态/Key 明细筛选，避免界面范围含混。
+- 新增时间范围参数回归测试代码；已更新 API 契约、技术指导、实施计划和问题台账。按用户要求未运行测试、构建或 CI；MariaDB JSON 函数兼容性、聚合查询性能和 Token 来源数值仍待统一验证。
+
+
+## 2026-10-26 执行增量：机器可读 API 契约首版
+
+- 新增 `docs/openapi.yaml`（OpenAPI 3.1.0），首批描述健康检查、公共推理协议入口、已配置 Agent 前缀入口、调用统计和 Web Provider 管理 API。
+- 规范显式标记为 partial；暂不为未逐项核对的历史管理 API 编造 Schema，也未加入会误导使用者的 Swagger UI 或“自动生成”声明。
+- README、API/配置/数据库契约及技术指导已增加入口和维护边界。当前仅同步文档，没有运行测试、构建或重新触发 CI。
+- 后续功能组：逐步补齐 API Key、模型下载/运行时、Benchmark、推理参数、登录/会话接口的字段与认证契约；所有路径盘点完成后，再增加 OpenAPI 差异检查。该工作项仍未完全关闭。
+
+
+## 2026-10-26 执行增量：OpenAPI 管理凭据与 API Key 契约
+
+- `docs/openapi.yaml` 扩展覆盖 `/api/admin/keys` 列表/创建、单 Key 更新/删除、启用/禁用/轮换，以及 `/api/auth/login`、`logout`、`me`、`credentials`。
+- 新增 `AdminSessionBearer` 与 `X-Admin-Key` 安全方案，并与推理入口的 Gateway Key、供应商上游 Key 明确区分；创建/轮换明文 Key 被标记为 writeOnly 并注明只显示一次。
+- 本次仍按已有代码核实端点，不宣称规范已覆盖全部管理 API；模型、下载、运行时、Benchmark 和推理参数接口仍是后续分阶段工作。未手动运行测试或重跑 Actions。
+
+
+## 2026-10-26 执行增量：请求审计与运行时 API 契约
+
+- OpenAPI 新增请求日志列表/清理、单条请求详情、审计队列指标、模型列表、运行时概览/预览/选择/卸载和异步 Benchmark 创建/轮询。
+- 对含敏感 payload 的请求详情、会清理历史数据的 DELETE、内存态审计指标与进程内 Benchmark job 均记录边界；运行时 schema 保持宽松，避免把多后端异构字段误写成稳定契约。
+- 顺手纠正 OpenAPI 一次性返回的 Key 和登录 Token Schema 方向：它们是服务端输出字段，应标记为 `readOnly`；输入密码和 Provider Key 仍使用 `writeOnly`。本轮没有运行测试或重跑 Actions。
+- 仍未覆盖：模型安装/下载、HuggingFace 搜索、Ollama 管理、完整上游/Bootstrap、推理参数及配置 API；待按 Handler 逐组补齐，并后续讨论自动契约差异检查。
+
+
+## 2026-10-26 修正：Benchmark 的零时限语义
+
+- 代码核实发现普通推理配置允许 `request_timeout_seconds: 0` 禁用整体时限，但 Benchmark 后台任务仍无条件执行 `context.WithTimeout(..., 0)`，使任务立即到期。
+- 新增共享的可选时限 Context helper；正数才创建 Deadline，0 改为可取消但不设 Deadline 的 Context。用户取消任务仍经父 Context 传播。
+- 补充了零值、正值和父 Context 取消的回归测试代码；遵从统一测试安排，本次未运行测试、构建或重跑 Actions。
+
+## 9. 最新执行状态与回归闸门（2026-10-26）
+
+> 本节作为当前进度的权威更新；前文中标注为“最新通过”的旧 Head 和 CI 记录均为历史结果，不代表当前工作分支已通过回归。
+
+### 当前基线
+
+- 开发基线 `dev`：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
+- PR #7 工作分支 `feat/provider-concurrency-limits-stacked` 当前 Head（修复前）：`bd41c549511c700df2b3ba44cb64ca9ef5f1b4f8`。
+- PR #5 TCP 恢复测试仍为 Open / 未合并；PR #7 依赖 PR #5 提供的 `core.Result.UpstreamStatus` 契约，不应提前合并。
+- 当前 Head 的 [Actions #208](https://github.com/Kasign/llm-gateway/actions/runs/40286112907) 在单元测试阶段失败，后续集成和构建步骤被跳过。本轮没有手动运行测试。
+
+### 先完成当前 CI 阻塞
+
+1. 在 `provider_runtime_test.go` 的 `core.State` 测试构造中，把路由和服务模型字段放入嵌入的 `core.Request`；不修改生产结构体以迁就测试。
+2. 修正 MariaDB 审计测试夹具：新表直接定义 `provider_id`，同时对复用的旧测试表进行字段存在性检查并仅在缺失时补列；不降低请求行数与队列排空断言。
+3. 在同一个逻辑提交中更新问题台账和本计划。按用户统一回归的安排，不手动运行本地测试；提交触发的新 Actions 将负责全量测试、MariaDB、并发/故障、race、性能、静态检查、Go 构建与前端 bundle 检查。新运行完成前状态保持“待验收”。
+
+### 当前功能组之后的顺序
+
+1. 收口 Provider 管理与运行时预算：验证 Registry 更新失败的配置回滚、活动 Provider 禁用/清 Key 保护，以及热更新期间共享并发许可器的预算语义；保留配置来源边界和密钥不回显。
+2. 收口请求观测与 API 契约：核对统计与 Token 来源口径、请求日志 Provider 筛选、审计队列指标，以及 OpenAPI 已覆盖/未覆盖端点；后续增加契约差异检查前先完成端点清单。
+3. 功能冻结后进行一次整体代码审查，重点检查请求取消/结束顺序、SSE 状态已提交后的错误语义、超时传播、密钥脱敏、MariaDB 迁移和前端源码/bundle 同步。此阶段只登记与修复实质问题，不为了形式重复跑局部测试。
+4. 分支整合采用两次完整回归闸门：A）当前完整功能组提交后，以对应 Head 的 Actions 为准；B）PR #5 合入最新 `dev`、PR #7 与目标基线的最终差异确认后，再完整回归一次。PR #7 未通过最终回归前不合并。
+5. 清理已合并的旧分支前，逐个比对内容是否已进入目标分支；旧 PR #6 对应的 `feat/provider-concurrency-limits` 先确认所有独有提交已被 PR #7 覆盖。保留 `main` 和 `dev`，默认分支策略另外决策。
+
+### 进度口径
+
+本轮仅修改两个测试夹具及同步文档，没有手动执行测试或构建。新 CI 完成前，不将这些修复记为已验收；真实供应商 E2E、公网反向代理链路和生产容量验证仍属于部署环境验收，不由 loopback Mock CI 替代。
+
+## 10. 最新执行增量：Provider 管理台语法修复
+
+- Actions #209（Head `b36451e612d7e6a4bdf68535d33e9794604f0690`）验证了此前 CI 阻塞已解除：Go 单测、MariaDB 审计负载、Gateway 故障注入、TCP/DNS/SSE/TLS、race、性能、go vet、Go build 均通过。
+- 最终前端契约检查仍失败：`web/js/providers-entry.js:60` 表格 HTML 拼接字符串少了结尾引号，导致 Node.js 语法检查失败。
+- 本功能组仅修正这一处语法并同步 `web/static/dist/providers-admin.js`，其余功能不随意扩展；部署 bundle 必须与源码字节一致。
+- 未手动运行本地测试/构建。新 Head 的完整 Actions 是本次验收闸门；成功后才进入 Provider 管理功能收口和整体 review。
+- 分支纪律不变：当前不清理旧分支；PR #5 先于 PR #7 合入。PR #5 合并后核对 PR #7 与最新 `dev` 的差异，完成第二次完整回归后再讨论 PR #7 合并。
+
+## 11. 最新执行增量：减少请求审计重复写入
+
+- Actions #210 的业务请求全部成功，但 12,192 个请求只写入 9,146 行，日志显示 Writer 在持续压测过程中大量丢弃排队任务，证明当前测试不仅是语法问题，还暴露审计写放大。
+- 本次通过结构性合并降低关键队列压力：移除对 `CreateRequest` 已包含的 `model_requested/stream` 再做一次更新；在 Resolver 阶段把 Provider ID 与实际上游模型合并为一个持久化任务。每个推理请求由五个关键生命周期写任务减为三个，避免仅通过扩大队列来掩盖写入能力问题。
+- 新增负载验收 Provider 归属计数，原有请求总数、成功状态、实际模型字段的严格断言全部保留；前端语法修复与部署 Bundle 已在当前基线前完成。
+- 当前提交将包含代码、回归断言、中文技术说明与问题台账更新。按用户的统一测试安排，不手动运行测试；以新 Head 完整 Actions 的结果作为验收依据。
+- 下一功能批次继续检查 Provider 更新/回滚、活动 Provider 清 Key/禁用保护与并发许可器预算；在当前负载验收转绿前不扩展新的运行时行为，不调整 PR #5/#7 的依赖顺序。
+
+## 12. 最新执行增量：主管理台 Bundle 同步
+
+- Actions #211 已证明上一批审计写放大修复有效：Gateway 负载与请求审计、MariaDB、错误注入、race、静态检查和 Gateway 构建阶段均通过；失败仅发生在最终 `app.js` 与当前源码构建结果的字节比较。
+- 本次按 CI 差异同步 `web/static/dist/app.js` 中的请求统计 UI 编译产物。保留真实源码和既有 Bundle 校验，不使用“跳过 cmp”或 CI 自动覆盖工作树的方式掩盖不同步。
+- 当前功能组提交后重新运行完整 Actions；新的结果完成前不宣称整体回归通过，不再叠加其它功能提交。
+
+## 13. 下一功能批次：管理 API 错误边界与 OpenAPI 精确性
+
+- 将请求统计 MariaDB 聚合失败时的底层错误保留在服务端日志，不回显给管理员 API 客户端；用单测验证通用错误响应的状态码、错误码和诊断文本隔离。
+- 将 Provider 创建/删除的 OpenAPI 成功响应修正为与 Handler 一致的 `201 Created` 和 `204 No Content`，并明确删除没有响应正文。
+- 本批独立于审计吞吐与前端 Bundle 修复；先完成当前 Head 的完整 Actions，再推送此功能组。新 Head 若失败，只围绕实际失败日志修复，不改变已有负载断言或关闭契约检查。
+
+## 14. Provider 并发热更新顺序修正
+
+- 当前 Review 确认：限制下降发生在配置持久化之后，会留下一个很短的旧限额准入窗口；编辑已停用 Provider 时，下降分支也可能意外修改共享运行时 limiter。
+- 调整顺序为：先准备并立即应用下降，再持久化；若 MariaDB 持久化失败则回滚 limiter；Registry 更新失败仍同时回滚 limiter 与持久化配置。提高限额必须等 Registry 更新成功后才生效。
+- 编辑已停用 Provider 不改变当前 limiter，即使保存了较低的新配置；重新启用时才将新配置应用到运行时。新增边界测试验证 disabled edit 不上调、也不下调在途请求可能共享的许可器。
+- 本功能组与统计 API 错误脱敏、OpenAPI 状态码校准合成同一轮整合回归；只有当前 Head 的完整 Actions 通过后才更新工作分支。
+
+## 15. 管理端点 OpenAPI 覆盖扩展
+
+- 已按实际 `Server.Handler` 注册与 Handler 请求/响应实现，补入此前缺失的 HF 文件/搜索、模型安装和兼容操作、下载任务清理、Bootstrap、Backend 查看/切换、批量卸载、上游模型列表、目录搜索/Ollama tags、推理参数动态 Schema、Ollama Pull/模型动作、本地库存与统一 model-ops 等契约。
+- 补充可复用 Schema，描述稳定字段和异步任务边界；运行时、目录搜索卡片、推理参数和上游透传 JSON 保留扩展字段，避免过度承诺实现没有固定保证的属性。
+- 保持 `x-contract-status: partial`。后续需要把所有 `/api/*` 注册路径和 OpenAPI path 建立自动差异清单，再按 handler/schema 逐项收口；当前仍不声称契约已全覆盖或自动生成。
+- 当前批次更新 OpenAPI 与技术指导、问题台账、实施计划。按统一回归规则，不手动运行测试；提交后观察新 Head 的 GitHub Actions。
+
+## 16. OpenAPI 第二轮精确性与高风险路径 Review
+
+- 补齐 Agent 固定 Provider 的所有已支持协议路径：models、Chat Completions、Completions、Responses、Anthropic Messages 和 Messages count_tokens。Agent 使用固定 Provider，不等于可由请求体任意切换后端。
+- 将 Ollama Library tag 与可用 Backend 的已知 JSON 字段从泛型对象升级为显式属性；运行时快照/目录卡片/动态推理参数仍允许扩展字段。
+- 第二轮高风险 Review 覆盖请求取消与 Finish 竞态、SSE 响应已提交后错误处理、审计 FIFO/排队丢弃指标、管理员认证与 Provider 共享并发许可器。当前未发现需在此批引入新的运行时代码改动的问题；仍须靠当前完整 CI 验收。
+- 当前 OpenAPI 仍为 partial。后续重点是建立 Handler 路由与 OpenAPI path 自动对账，避免新增管理端点时只靠人工台账；此项先在回归通过后按独立功能规划。
+
+## 17. OpenAPI 路径集合自动对账
+
+- 将 `POST /api/requests/{id}/cancel` 的实际 Handler 契约补齐到 OpenAPI，明确取消在途请求、收口遗留运行记录及 409 竞争状态。
+- 新增 Python 标准库脚本读取 Go 路由注册和 OpenAPI 顶层 paths，并用明确、可审查的映射展开动态 Go 前缀路由；把该检查放到 Actions 的前置步骤，尽早发现路由漏文档。
+- 对账采用双向集合比较，同时发现漏写 path 和已删除路由留下的旧 path。动态路由系列不使用通配忽略，而用显式路径清单映射。
+- 该门禁只证明路径键对应，不等于 JSON Schema/HTTP method/response code 自动验证；OpenAPI 继续保持 partial。先待 Actions #215 对 `dba3892` 的完整回归结束，再推送该批候选提交。
+
+## 18. 处理 PR #7 未解决的测试清理 Review
+
+- 自动 Review 指出 Provider 并发测试首请求等待启动超时后直接 Fatal，mock handler 可能仍阻塞在 `releaseFirst`，使 `httptest.Server.Close` 一直等待。
+- 在该 timeout 分支先释放 mock handler，再结束测试；错误路径不再依赖请求恰好没到达 handler 的调度假设。成功路径和并发/上游请求数量断言保持不变。
+- 该变更属于测试基础设施可靠性的小修复，和生产并发逻辑无关。先等待当前 Head 的完整 Actions，再将修复和中文问题台账作为一个逻辑提交推送。

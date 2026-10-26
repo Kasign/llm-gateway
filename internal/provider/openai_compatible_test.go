@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/whl/llm-gateway/internal/core"
 )
 
 func testRemoteProvider(t *testing.T, server *httptest.Server, opts OpenAICompatibleConfig) *OpenAICompatibleProvider {
@@ -790,13 +793,12 @@ func TestOpenAICompatibleProviderMapsAndSanitizesDNSFailures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			p, err := NewOpenAICompatibleProviderWithResolver(OpenAICompatibleConfig{
 				ID: "dns-test", BaseURL: "https://provider.example/v1",
-			})
+			}, fixedRemoteIPResolver{err: tc.dnsError})
 			if err != nil {
 				t.Fatal(err)
 			}
-			p.client = newRestrictedHTTPClientWithResolver(false, fixedRemoteIPResolver{err: tc.dnsError})
 
 			writer := httptest.NewRecorder()
 			result, forwardErr := p.Forward(context.Background(), InferenceCall{
@@ -1543,5 +1545,408 @@ func TestOpenAICompatibleProviderConnectionRefusalDoesNotInventUpstreamStatus(t 
 			mapped := ToCoreError(forwardErr)
 			if mapped == nil || mapped.Status != http.StatusBadGateway { t.Fatalf("transport error mapping = %+v, want Gateway 502", mapped) }
 		})
+	}
+}
+
+
+func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testing.T) {
+	started := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		if count == 1 {
+			started <- struct{}{}
+			<-releaseFirst
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 1})
+
+	forward := func() (core.Result, error, int) {
+		writer := httptest.NewRecorder()
+		result, err := p.Forward(context.Background(), InferenceCall{
+			Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test"}`), ModelID: "test",
+		})
+		return result, err, writer.Code
+	}
+	type outcome struct {
+		result core.Result
+		err error
+		code int
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		result, err, code := forward()
+		firstDone <- outcome{result: result, err: err, code: code}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		// 若 handler 已开始等待 releaseFirst，先放行它再触发 Fatal；
+		// 否则 defer server.Close 会一直等这个仍被测试卡住的 handler。
+		close(releaseFirst)
+		t.Fatal("first upstream request did not start")
+	}
+	second, secondErr, _ := forward()
+	if secondErr == nil {
+		close(releaseFirst)
+		t.Fatal("concurrent request should be rejected while the only slot is occupied")
+	}
+	status, code, _ := core.Unpack(secondErr)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" {
+		close(releaseFirst)
+		t.Fatalf("overload error = %d/%s, want 503/provider_concurrency_limit", status, code)
+	}
+	if second.Status != http.StatusServiceUnavailable || second.UpstreamStatus != 0 {
+		close(releaseFirst)
+		t.Fatalf("overload result status/upstream = %d/%d, want 503/0", second.Status, second.UpstreamStatus)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("upstream received %d requests while the limit was occupied, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || first.code != http.StatusOK {
+		t.Fatalf("first request did not finish successfully: result=%+v err=%v writer=%d", first.result, first.err, first.code)
+	}
+	third, thirdErr, thirdCode := forward()
+	if thirdErr != nil || third.Status != http.StatusOK || third.UpstreamStatus != http.StatusOK || thirdCode != http.StatusOK {
+		t.Fatalf("slot was not released after the first request: result=%+v err=%v writer=%d", third, thirdErr, thirdCode)
+	}
+	if got := upstreamRequests.Load(); got != 2 {
+		t.Fatalf("upstream request count after slot release = %d, want 2", got)
+	}
+}
+
+
+func TestOpenAICompatibleProviderSharesConcurrencyLimitAcrossReplacement(t *testing.T) {
+	started := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		if count == 1 {
+			started <- struct{}{}
+			<-releaseFirst
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	defer server.Close()
+
+	oldProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 2})
+	sharedLimiter := oldProvider.ConcurrencyLimiter()
+	newProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{
+		MaxConcurrentRequests: 1,
+		RequestLimiter:        sharedLimiter,
+	})
+	forward := func(target *OpenAICompatibleProvider) (core.Result, error, int) {
+		writer := httptest.NewRecorder()
+		result, err := target.Forward(context.Background(), InferenceCall{
+			Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test"}`), ModelID: "test",
+		})
+		return result, err, writer.Code
+	}
+	type outcome struct {
+		result core.Result
+		err    error
+		code   int
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		result, err, code := forward(oldProvider)
+		firstDone <- outcome{result: result, err: err, code: code}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("first request did not reach the upstream")
+	}
+	// 模拟管理台在旧请求已占用许可时降低 Provider 并发上限。
+	if err := sharedLimiter.SetLimit(1); err != nil {
+		close(releaseFirst)
+		t.Fatal(err)
+	}
+
+	second, secondErr, _ := forward(newProvider)
+	if secondErr == nil {
+		close(releaseFirst)
+		t.Fatal("replacement Provider must share the occupied concurrency budget")
+	}
+	status, code, _ := core.Unpack(secondErr)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" ||
+		second.Status != http.StatusServiceUnavailable || second.UpstreamStatus != 0 {
+		close(releaseFirst)
+		t.Fatalf("replacement overload result=%+v error=%d/%s, want 503/0 provider concurrency limit", second, status, code)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("overloaded replacement reached upstream: %d requests, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || first.code != http.StatusOK {
+		t.Fatalf("old in-flight request did not finish normally: result=%+v err=%v writer=%d", first.result, first.err, first.code)
+	}
+	third, thirdErr, thirdCode := forward(newProvider)
+	if thirdErr != nil || third.Status != http.StatusOK || third.UpstreamStatus != http.StatusOK || thirdCode != http.StatusOK {
+		t.Fatalf("replacement Provider did not acquire released budget: result=%+v err=%v writer=%d", third, thirdErr, thirdCode)
+	}
+	if got := upstreamRequests.Load(); got != 2 {
+		t.Fatalf("upstream received %d requests after release, want 2", got)
+	}
+}
+
+func TestOpenAICompatibleProviderWritesSafeSSEErrorWhenLimitReachedAfterCommit(t *testing.T) {
+	started := make(chan struct{}, 1)
+	chunkSeen := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		if count == 1 {
+			_, _ = io.WriteString(w, "data: {\"id\":\"first\"}\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			started <- struct{}{}
+			<-releaseFirst
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 1})
+	firstRecorder := httptest.NewRecorder()
+	type streamOutcome struct {
+		result core.Result
+		err error
+	}
+	firstDone := make(chan streamOutcome, 1)
+	go func() {
+		result, err := p.Forward(context.Background(), InferenceCall{
+			Writer: firstRecorder, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: true,
+			OnChunk: func([]byte) {
+				select {
+				case chunkSeen <- struct{}{}:
+				default:
+				}
+			},
+		})
+		firstDone <- streamOutcome{result: result, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("streaming upstream request did not start")
+	}
+	select {
+	case <-chunkSeen:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("first stream chunk was not observed")
+	}
+
+	// 模拟 Gateway warm-start 已经向客户端提交 200 的情况。
+	committed := newProviderCommittedWriter()
+	_, _ = committed.Write([]byte(": warm start\n\n"))
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: committed, Request: httptest.NewRequest(http.MethodPost, "/v1/responses", nil),
+		Path: "/v1/responses", Body: []byte(`{"model":"test","stream":true}`), ModelID: "test", Stream: true,
+	})
+	if err == nil {
+		close(releaseFirst)
+		t.Fatal("second stream should be rejected at the configured concurrency limit")
+	}
+	status, code, _ := core.Unpack(err)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" {
+		close(releaseFirst)
+		t.Fatalf("overload error = %d/%s, want 503/provider_concurrency_limit", status, code)
+	}
+	if result.Status != http.StatusServiceUnavailable || result.UpstreamStatus != 0 || committed.recorder.Code != http.StatusOK {
+		close(releaseFirst)
+		t.Fatalf("committed overload statuses result=%d upstream=%d client=%d", result.Status, result.UpstreamStatus, committed.recorder.Code)
+	}
+	body := committed.recorder.Body.String()
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "provider_concurrency_limit") || !strings.Contains(body, "\"sequence_number\":0") {
+		close(releaseFirst)
+		t.Fatalf("missing safe Responses concurrency error event/sequence: %q", body)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("saturated stream reached upstream: requests=%d, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || firstRecorder.Code != http.StatusOK {
+		t.Fatalf("first stream did not finish normally: result=%+v err=%v", first.result, first.err)
+	}
+}
+
+func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
+	for _, limit := range []int{-1, MaxOpenAICompatibleConcurrentRequests + 1} {
+		_, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			ID: "invalid-limit", BaseURL: "https://provider.example/v1", MaxConcurrentRequests: limit,
+		})
+		if err == nil {
+			t.Errorf("MaxConcurrentRequests=%d should be rejected", limit)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		limit, want int
+	}{
+		{name: "default", limit: 0, want: defaultOpenAICompatibleMaxConcurrentRequests},
+		{name: "custom", limit: 2, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+				ID: "valid-limit", BaseURL: "https://provider.example/v1", MaxConcurrentRequests: tc.limit,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.requestLimiter.Limit() != tc.want {
+				t.Fatalf("effective concurrency = %d, want %d", p.requestLimiter.Limit(), tc.want)
+			}
+		})
+	}
+}
+
+func TestNewOpenAICompatibleProviderAppliesRequestTimeout(t *testing.T) {
+	for _, seconds := range []int{-1, MaxOpenAICompatibleRequestTimeoutSeconds + 1} {
+		_, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			ID: "timeout-limit", BaseURL: "https://provider.example/v1", RequestTimeoutSeconds: seconds,
+		})
+		if err == nil {
+			t.Errorf("RequestTimeoutSeconds=%d should be rejected", seconds)
+		}
+	}
+	p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		ID: "timeout-enabled", BaseURL: "https://provider.example/v1", RequestTimeoutSeconds: 120,
+	})
+	if err != nil { t.Fatal(err) }
+	if p.client.Timeout != 120*time.Second { t.Fatalf("client timeout = %s, want 2m", p.client.Timeout) }
+	unlimited, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{ID:"timeout-default",BaseURL:"https://provider.example/v1"})
+	if err != nil { t.Fatal(err) }
+	if unlimited.client.Timeout != 0 { t.Fatalf("default client timeout = %s, want no additional overall timeout", unlimited.client.Timeout) }
+}
+
+
+// TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证服务端关闭空闲 Keep-Alive 连接后，
+// Provider 的 HTTP Transport 能从陈旧连接恢复，而不是让后续请求永久卡住或污染响应。
+// TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证陈旧空闲连接不会导致后续推理永久失去连接。
+func TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection(t *testing.T) {
+	var requests atomic.Int32
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	send := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		result, err := p.Forward(ctx, InferenceCall{
+			Writer: recorder,
+			Request: request,
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"ping"}]}`),
+			ModelID: "test-model",
+		})
+		if err != nil {
+			return err
+		}
+		if result.Status != http.StatusOK || !strings.Contains(recorder.Body.String(), `"id":"ok"`) {
+			return fmt.Errorf("unexpected response status/body: %d %q", result.Status, recorder.Body.String())
+		}
+		return nil
+	}
+	if err := send(); err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+
+	// 模拟 NAT、反向代理或上游清理空闲连接。POST 推理请求不能盲目自动重试，
+	// 因为上游可能已经执行；若复用陈旧连接失败，应由后续新请求建立新连接恢复。
+	server.CloseClientConnections()
+	if err := send(); err != nil {
+		mapped := ToCoreError(err)
+		if mapped == nil || mapped.Status != http.StatusBadGateway {
+			t.Fatalf("stale idle connection error = %v, want a classified 502 without blind retry", err)
+		}
+	}
+	if err := send(); err != nil {
+		t.Fatalf("fresh request did not recover after stale keep-alive connection: %v", err)
+	}
+	if got := requests.Load(); got < 2 || got > 3 {
+		t.Fatalf("upstream requests = %d, want 2 (or 3 if the stale request reached the server)", got)
+	}
+	if got := connections.Load(); got < 2 {
+		t.Fatalf("accepted TCP connections = %d, want a replacement connection", got)
+	}
+}
+
+
+func TestOpenAICompatibleProviderTestConnectionUsesCredentialAndSanitizesFailures(t *testing.T) {
+	const secret = "provider-test-secret"
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"model-a"},{"id":"model-b"}]}`)
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: secret})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	models, err := p.TestConnection(ctx)
+	if err != nil { t.Fatal(err) }
+	if gotAuth != "Bearer "+secret || strings.Join(models, ",") != "model-a,model-b" {
+		t.Fatalf("auth/models = %q/%v", gotAuth, models)
+	}
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"private upstream body"}`)
+	}))
+	defer failure.Close()
+	failedProvider := testRemoteProvider(t, failure, OpenAICompatibleConfig{APIKey: secret})
+	_, err = failedProvider.TestConnection(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "401") { t.Fatalf("expected sanitized HTTP status, got %v", err) }
+	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "private upstream body") || strings.Contains(err.Error(), failure.URL) {
+		t.Fatalf("connection test leaked sensitive details: %v", err)
 	}
 }

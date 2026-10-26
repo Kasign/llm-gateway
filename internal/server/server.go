@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,10 @@ type Server struct {
 	upstreamChangeMu sync.Mutex   // 串行化管理员切换与请求触发的模型自动采纳。
 	localClientsMu   sync.Mutex   // 保护各本地 Provider 的稳定 HTTP 客户端缓存。
 	localClients     map[string]localClientEntry
+	providerConfigMu sync.RWMutex
+	webProviders map[string]managedProvider
+	providerEncryptionKey []byte
+	providerEncryptionKeyErr error
 	// —— 上游配置 ——
 	upstream     settings.Upstream // 当前生效的上游配置（管理员在后台改的，优先级高）
 	fileUpstream settings.Upstream // 配置文件里的默认上游配置（管理员没改时用这个）
@@ -94,6 +99,8 @@ type Server struct {
 	webLogin   webLoginSnapshot // 当前网页登录快照（谁登录了、登录态是否有效）
 	pipe       *core.Pipeline   // 固化的推理主流程
 	runs       *runCancels      // 进行中推理的取消函数
+	requestRetentionCancel context.CancelFunc
+	requestRetentionWG     sync.WaitGroup
 	calls      sync.Map         // request id -> *callState
 }
 
@@ -136,22 +143,39 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 6. 从数据库加载管理员在后台保存的上游设置（如果有的话，覆盖配置文件的默认值）
 	srv.pipe = srv.newInferencePipeline()
 	srv.runs = newRunCancels()
+	srv.loadWebProviders(context.Background())
 	srv.initUpstreamFromDB(context.Background())
 	// 7. 加载网页登录状态（从数据库恢复上次的登录会话）
 	srv.loadWebLoginState(context.Background())
+	// 9. 按显式保留策略启动低频、分批次的历史请求清理；默认禁用。
+	srv.startRequestRetention()
 	// 8. 打一条启动日志，记录关键配置（方便排查问题）
-	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout=%ds auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
+	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout_seconds=%d (0=unlimited) auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
 	return srv
 }
 
 // ShutdownAudit 优雅退出前排空审计写队列（应在 HTTP Shutdown 之后调用）。
 // 作用：程序关闭前，把还在内存里没写完的日志全部刷到数据库，避免丢失请求记录。
 func (s *Server) ShutdownAudit(ctx context.Context) error {
-	// 如果审计写入器还没创建（极端情况），直接返回
+	// 先停止保留策略后台任务，避免它与数据库/进程关闭同时运行。
+	if s.requestRetentionCancel != nil {
+		s.requestRetentionCancel()
+		done := make(chan struct{})
+		go func() {
+			s.requestRetentionWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	// 如果审计写入器还没创建（极端情况），直接返回。
 	if s.audit == nil {
 		return nil
 	}
-	// 等待审计队列排空（ctx 控制最长等多久）
+	// 等待审计队列排空（ctx 控制最长等多久）。
 	return s.audit.Shutdown(ctx)
 }
 
@@ -236,14 +260,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/inference-params/schema", s.inferenceParamsSchemaAPI) // 获取推理参数的配置表单结构
 	mux.HandleFunc("/api/admin/inference-params/reset", s.inferenceParamsResetAPI)   // 重置推理参数为默认
 	mux.HandleFunc("/api/admin/inference-params", s.inferenceParamsAPI)              // 读取/保存推理参数
+	mux.HandleFunc("/api/admin/audit/metrics", s.auditMetricsAPI)                     // 查看审计队列的只读聚合指标
 
 	// —— 管理 API：下载任务 ——
 	mux.HandleFunc("/api/downloads", s.downloadsAPI)                // 查看下载中的任务列表
 	mux.HandleFunc("/api/downloads/dismiss", s.downloadsDismissAPI) // 清除已完成/失败的下载记录
 
 	// —— 管理 API：请求日志 ——
-	mux.HandleFunc("/api/requests", s.requestsAPI)       // 查看请求日志列表（支持筛选）
-	mux.HandleFunc("/api/requests/", s.requestDetailAPI) // 查看单次请求的详细信息
+	mux.HandleFunc("/api/requests", s.requestsAPI)            // 查看请求日志列表（支持筛选）
+	mux.HandleFunc("/api/requests/stats", s.requestsStatsAPI) // 按时间窗口汇总调用与 Token 数据
+	mux.HandleFunc("/api/requests/", s.requestDetailAPI)      // 查看单次请求的详细信息
 
 	// —— 管理 API：系统引导/后端管理 ——
 	mux.HandleFunc("/api/admin/bootstrap/lite", s.bootstrapLiteAPI)           // 轻量引导（首次启动的快速配置）
@@ -251,6 +277,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/backend/unload-all", s.backendUnloadAllAPI)    // 卸载所有已加载模型
 	mux.HandleFunc("/api/admin/backend/upstream-models", s.upstreamModelsAPI) // 查看上游有哪些模型
 	mux.HandleFunc("/api/admin/backend", s.backendAPI)                        // 读取/修改上游后端配置
+	mux.HandleFunc("/api/admin/providers", s.adminProvidersAPI)
+	mux.HandleFunc("/api/admin/providers/", s.adminProviderActionAPI)
 
 	// —— 管理 API：运行时管理（控制 llama.cpp 加载哪个模型）——
 	mux.HandleFunc("/api/admin/runtime/preview", s.runtimePreviewAPI) // 预览运行时状态
@@ -419,23 +447,41 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, remote := s.remoteProviderConfig(s.effectiveUpstream().Backend); remote {
+	if remote, ok := s.remoteProviderConfig(s.effectiveUpstream().Backend); ok {
 		target, err := s.resolveProxyModelTarget(r.Context())
 		if err != nil {
 			finish(503, "error", "no_proxy_model", err.Error(), 0)
 			jsonError(w, 503, "no_proxy_model", err.Error())
 			return
 		}
-		data := make([]map[string]interface{}, 0, 1)
-		modelID := strings.TrimSpace(target.ModelKey)
-		if target.Model != nil {
-			modelID = target.Model.ModelKey
+		type exposedModel struct { publicID string; upstreamID string }
+		models := make([]exposedModel, 0, len(remote.ModelMappings)+1)
+		seenModels := make(map[string]bool)
+		addModel := func(publicID, upstreamID string) {
+			publicID, upstreamID = strings.TrimSpace(publicID), strings.TrimSpace(upstreamID)
+			if publicID == "" || upstreamID == "" || seenModels[publicID] { return }
+			seenModels[publicID] = true
+			models = append(models, exposedModel{publicID: publicID, upstreamID: upstreamID})
 		}
-		// 远程 Provider 的 /v1 实际只路由到其当前配置模型，且仍执行每个 Gateway Key 的模型 ACL。
-		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+		if len(remote.ModelMappings) > 0 {
+			aliases := make([]string, 0, len(remote.ModelMappings))
+			for alias := range remote.ModelMappings { aliases = append(aliases, alias) }
+			sort.Strings(aliases)
+			for _, alias := range aliases { addModel(alias, remote.ModelMappings[alias]) }
+			defaultID := strings.TrimSpace(remote.DefaultModel)
+			if defaultID != "" {
+				if mapped := strings.TrimSpace(remote.ModelMappings[defaultID]); mapped != "" { addModel(defaultID, mapped) } else { addModel(defaultID, defaultID) }
+			}
+		}
+		activeID := strings.TrimSpace(target.ModelKey)
+		if target.Model != nil { activeID = strings.TrimSpace(target.Model.ModelKey) }
+		addModel(activeID, target.UpstreamID)
+		data := make([]map[string]interface{}, 0, len(models))
+		for _, item := range models {
+			if !modelAllowedForKey(key, item.publicID, item.upstreamID, item.publicID) { continue }
 			data = append(data, map[string]interface{}{
-				"id": modelID, "object": "model", "created": time.Now().Unix(),
-				"owned_by": s.effectiveUpstream().Backend, "display_name": target.UpstreamID,
+				"id": item.publicID, "object": "model", "created": time.Now().Unix(),
+				"owned_by": s.effectiveUpstream().Backend, "display_name": item.upstreamID,
 			})
 		}
 		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
@@ -1102,7 +1148,7 @@ func (s *Server) downloadsAPI(w http.ResponseWriter, r *http.Request) {
 
 // Request logs/system/benchmark
 // requestsAPI 是 /api/requests 接口：管理后台的请求日志列表。
-// GET    → 按条件查询请求日志（支持按 request_id、model、status、key 筛选，默认返回最近 50 条）
+// GET    → 按条件查询请求日志（支持按 request_id、model、status、key、provider 筛选，默认返回最近 50 条）
 // DELETE → 清空所有请求日志（危险操作，需要管理员确认）
 func (s *Server) requestsAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
@@ -1135,8 +1181,8 @@ func (s *Server) requestsAPI(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	// 查询请求日志（合并数据库里的历史记录和内存里的实时请求）
-	// 支持筛选：request_id（具体某次请求）、model（模型名）、status（状态）、key（API Key 名）
-	logs, e := s.queryRequestLogsMerged(r.Context(), limit, r.URL.Query().Get("request_id"), r.URL.Query().Get("model"), r.URL.Query().Get("status"), r.URL.Query().Get("key"))
+	// 支持筛选：request_id（具体某次请求）、model（模型名）、status（状态）、key（API Key 名）、provider（Provider ID 精确匹配）
+	logs, e := s.queryRequestLogsMerged(r.Context(), limit, r.URL.Query().Get("request_id"), r.URL.Query().Get("model"), r.URL.Query().Get("status"), r.URL.Query().Get("key"), r.URL.Query().Get("provider"))
 	if e != nil {
 		applog.Printf("requests list failed: %v", e)
 		jsonError(w, 500, "database_error", e.Error())

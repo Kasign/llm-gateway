@@ -140,12 +140,19 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE request_logs ADD COLUMN ttft_ms BIGINT UNSIGNED NULL`,
 		`ALTER TABLE request_logs ADD COLUMN analysis_json LONGTEXT NULL`,
 		`ALTER TABLE request_logs ADD COLUMN request_url VARCHAR(2048) NULL`,
+		`ALTER TABLE request_logs ADD COLUMN provider_id VARCHAR(64) NULL`,
+		`ALTER TABLE request_logs ADD INDEX idx_provider_started (provider_id, started_at)`,
 		`ALTER TABLE request_logs ADD COLUMN upstream_http_status SMALLINT UNSIGNED NULL`,
 		`ALTER TABLE request_payloads ADD COLUMN request_headers_json LONGTEXT NULL`,
 		`ALTER TABLE request_payloads ADD COLUMN upstream_headers_json LONGTEXT NULL`,
 	}
 	for _, sqlText := range alters {
-		if _, err := db.ExecContext(ctx, sqlText); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		if _, err := db.ExecContext(ctx, sqlText); err != nil {
+			lowerErr := strings.ToLower(err.Error())
+			// MariaDB 对已存在列和已存在索引分别返回 duplicate column / duplicate key name。
+			if strings.Contains(lowerErr, "duplicate column") || strings.Contains(lowerErr, "duplicate key name") {
+				continue
+			}
 			return fmt.Errorf("schema upgrade failed: %w", err)
 		}
 	}
