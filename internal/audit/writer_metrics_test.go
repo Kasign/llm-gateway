@@ -40,7 +40,8 @@ func TestWriterStatsTrackQueuePressureAndDrain(t *testing.T) {
 	w.enqueue(noop)
 	w.enqueue(noop)
 	w.enqueue(noop) // 普通事件不能占用关键任务预留空间。
-	w.enqueueCritical(noop) // 填满队列后，关键任务也只能有界丢弃。
+	w.enqueueCritical(noop) // 使用预留槽位，直到队列真正填满。
+	w.enqueueCritical(noop) // 队列已满时，关键任务也只能有界丢弃。
 	before := w.Stats()
 	if before.QueueDepth != 4 || before.QueueCapacity != 4 || before.NormalLimit != 3 {
 		t.Fatalf("queue snapshot = depth/capacity/normal_limit %d/%d/%d, want 4/4/3", before.QueueDepth, before.QueueCapacity, before.NormalLimit)
