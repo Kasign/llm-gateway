@@ -615,3 +615,9 @@ docs/                        中文架构、协议和运维文档
 - 可靠性收尾顺序：陈旧 Keep-Alive 连接关闭后的自动重拨专项（本轮新增测试，待新 CI 证明）；补充日志/Payload 保留策略的安全设计（默认禁用破坏性清理）；建立管理台轮询与 DB/CPU/延迟影响的可复现基准。公网代理/跨网络路由仍需部署环境验收。
 - 随后按一个完整功能组实施 `GW-PROV-UI-001`：部署 YAML 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 预置项只读；Web 项持久化并动态生效；跨来源同 ID 拒绝覆盖；Key 使用独立 AES-GCM 密钥加密存储、API 永不回显；保留/清除 Key 分开操作；模型别名映射接入路由和 `/v1/models`；保留旧 YAML 行为。添加 Provider 不自动切换活动上游。
 - 不强推、不改写历史；按完整功能组提交。每一组须在 CI 中跑完 Go 单测、race、go vet、构建与前端 bundle，失败查看日志后修复，不削弱断言。
+
+
+## 2026-10-26 Provider 多来源管理执行更新
+
+- 后端已有基础实现：Registry 原子替换/注销、Web Provider 持久化、AES-256-GCM 密钥加密、部署来源冲突保护、多 Provider 环境预置、可选 `model_mappings` 与连接测试接口。
+- 当前仍需完成的验收：后端所有 CI 项目确认通过、Web Provider 管理界面与独立部署 bundle、env 示例及 Compose 显式变量透传、完整安全与 API 测试。真实供应商 E2E 未执行，不得声明通过。

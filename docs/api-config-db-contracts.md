@@ -29,6 +29,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 下载与基准测试 | `/api/downloads*`、`/api/benchmark*` | 下载任务、Benchmark 状态和结果。 |
 | 请求审计 | `/api/requests*` | 请求记录筛选与详情。 |
 | API Key 管理 | `/api/admin/keys*` | 创建、修改、禁用、轮换、删除、过期时间、RPM、模型 ACL。 |
+| 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。
 | Web 登录 | `/api/auth/*` | 管理员网页登录、登出、会话和凭据更新。 |
 
 路由注册层只统一包裹 Request ID、调用记录和 Panic Recovery；管理 API 的具体鉴权由各 Handler/认证辅助逻辑执行，审查新的管理路由时需要单独确认认证与 CSRF 边界，不要把“已注册在 `/api/admin` 下”误当成自动获得统一授权。
@@ -42,7 +43,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、超时、模型数、warm-start | 全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
-| `providers.openai_compatible[]` | Provider ID、启用状态、Base URL、环境变量 API Key、Key Header、默认模型、HTTP/私网策略、响应体上限、`max_concurrent_requests` | Provider 静态配置在进程启动时加载；并发上限按 Provider 独立配置，默认值与上限均为 64；达到上限时 fail-fast 返回 503。远程 Key 不写入 `gateway_settings` 或管理 API 响应。 |
+| `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限与并发上限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID，旧 YAML 不写此字段仍保持原行为。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |
 | `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；生产环境必须明确评估隐私与磁盘代价。 |
@@ -54,7 +55,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 建议约束：
 - 真实 Provider Key、数据库密码与 Admin API Key 只放在部署环境或受控 Secret 中；不要提交到 `deploy/config.yaml` 或示例文件。
 - `allow_insecure_http` 和 `allow_private_network` 是显式的安全例外，只能在确认目标来源可信后启用。
-- `providers.openai_compatible` 与 `agents` 当前不由管理台动态创建/修改；这类变更需更新 YAML 并重启。
+- `providers.openai_compatible` 与 `LLM_GATEWAY_PROVIDER_<ID>_*` 是只读部署配置；Web 只修改 `source=web` 项。Web 项持久化后动态更新 Registry；同 ID 跨来源冲突拒绝覆盖。Compose 只显式传递示例中的 DeepSeek/OpenAI 字段；使用其他 Provider ID 时，需要在 Compose 的 environment 中显式透传对应字段，避免把含数据库管理员口令的整个 `.env` 暴露给 Gateway 容器。
 - `/v1` 全局入口的活动 Provider 可由管理台选择；Agent 入口不读取这个活动指针，使用自己的固定 Provider/默认模型。
 
 ## 3. 数据库与迁移契约
@@ -153,3 +154,12 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 ### 可选 Responses API 真实端点探测
 
 `TestOpenAIResponsesRealEndpointE2E` 独立 opt-in，复用 OpenAI-compatible E2E 的环境变量并使用 `LLM_GATEWAY_RESPONSES_E2E=1` 开启。用例通过真实 HTTPS Provider 发起一次短 `/v1/responses` JSON 请求，检查 `object=response`、ID、completed 状态与非空 output。它默认不运行、不消耗真实模型调用；CI 成功仅表示测试可编译和默认跳过，不代表真实 Codex/OpenAI 端点已验收。
+
+
+### Web 多 Provider 存储与运行时契约（2026-10-26）
+
+- 新增/编辑/启用/停用/删除前校验 Provider 配置与安全策略；先保存到 `gateway_settings.remote_providers:web:v1`，再更新 Registry。Registry 替换只改变新请求解析到的 Provider 工厂；已解析的请求与 SSE 保留旧实例，不被主动取消。
+- Web Provider API Key 使用 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`（base64 编码的 32 字节随机值）进行 AES-256-GCM 加密；数据库只保存版本化密文。列表/详情 API 只返回 `api_key_configured` 和通用掩码，不返回 `api_key` 或 `api_key_ciphertext`。编辑时空 Key 保留旧值，显式清除走独立 `clear-key` 动作。
+- YAML 与 `.env` 预置项只读。部署 ID（含禁用项）仍占用该 ID；Web 创建/编辑遇到冲突拒绝覆盖。停用/删除当前活动 Provider 返回 409；新增 Provider 不改变活动上游。
+- `model_mappings` 为公开 ID -> 上游真实 ID。`/v1/models` 仅返回活动 Provider 的可用别名并执行现有模型 ACL；推理转发使用映射后的上游 ID。未配置映射时，旧 YAML 的默认模型行为不变。
+- 连接测试复用生产 Provider 构造器和现有 SSRF/HTTPS/禁止重定向策略，4 秒超时、最多读取 1 MiB，只返回模型 ID 与脱敏错误。
