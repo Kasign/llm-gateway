@@ -28,6 +28,8 @@ services:
     # config.yaml 支持 ${ENV_NAME} 环境变量展开。
     environment:
       CONFIG_FILE: /etc/llm-gateway/config.yaml
+      LLM_GATEWAY_DB_HOST: ${LLM_GATEWAY_DB_HOST:-Mariadb}
+      LLM_GATEWAY_REDIS_ADDR: ${LLM_GATEWAY_REDIS_ADDR:-Redis:6379}
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
       LLM_GATEWAY_DB_PASSWORD: ${LLM_GATEWAY_DB_PASSWORD}
       LLM_GATEWAY_ADMIN_API_KEY: ${LLM_GATEWAY_ADMIN_API_KEY}

@@ -906,8 +906,8 @@ docs/                        中文架构、协议和运维文档
 
 ## 2026-10-26 配置治理第一批：模板对账与环境变量契约门禁
 
-- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；保留当前部署所需的数据库、Redis 服务名差异，不改变旧配置省略时的 Go 兼容默认值。
+- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；下一增量将把 DB/Redis 服务地址也移入 .env，消除最后两处静态差异，同时通过 Compose fallback 兼容旧 .env。
 - 新增 scripts/check_config_contract.go，使用现有 yaml.v3 依赖反射检查 YAML 字段是否存在于 Go 配置结构，比较两份 YAML 的有效字段路径与静态默认值，校验 YAML 环境变量在 .env.example 声明并由 Compose 白名单注入，同时对账 Provider 环境变量解析器、示例文件与 DeepSeek/OpenAI Compose 字段。
 - 将配置契约检查加入 GitHub Actions；新增 docs/configuration-matrix.md 作为配置主维护入口清单，并更新中文配置说明、README、问题台账与本计划。
 - 按本轮约定没有手动运行测试或重放负载。提交后需查看新 Head 对应 Actions；真实部署兼容、Provider 跨来源冲突、慢模型超时和审计负载仍留在统一回归清单中。
-- 剩余工作：继续核对所有配置字段与管理台/数据库运行态边界，确认 Web Provider 的冲突与热更新行为，Review 通过后再考虑是否迁移 config.yaml 的仓库跟踪策略；当前不删除该文件，以免给现有部署升级带来缺失挂载风险。
+- 本批后续增量：将数据库与 Redis 服务地址改为环境变量引用并提供 Compose 兼容 fallback，使两份 YAML 的静态值完全一致；随后继续核对 Web Provider 的冲突/热更新和剩余运行治理功能。当前不删除 config.yaml，以免给现有部署升级带来缺失挂载风险。

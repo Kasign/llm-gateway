@@ -9,8 +9,8 @@
 | server.host、server.port | deploy/config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
 | server.trusted_proxies | deploy/config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
 | 管理认证和密码哈希 | deploy/.env 提供值，YAML 负责引用 | 高 | 重启 | 管理 API Key、Web 登录与调用方 sk-llm-* Key 是不同凭据域 |
-| database.* | 连接目标在 deploy/config.yaml；密码由 .env 注入 | 高 | 重启 | root 凭据用于自动初始化，日常使用 Gateway 专用数据库账号 |
-| redis.* | 地址在 deploy/config.yaml；密码由 .env 注入 | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |
+| database.* | 容器地址由 LLM_GATEWAY_DB_HOST 注入；其余非敏感设置在 YAML，密码由 .env 注入 | 高 | 重启 | root 凭据用于自动初始化，日常使用 Gateway 专用数据库账号 |
+| redis.* | 地址由 LLM_GATEWAY_REDIS_ADDR 注入；DB 与密码在 YAML/.env 分层配置 | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |
 | 本地后端类型、Base URL、上游 Key | .env 提供值，YAML 负责引用 | 高（Key） | 重启；活动选择可被数据库覆盖 | LLM_BACKEND 仅作为数据库无活动选择时的初始默认 |
 | llama.request_timeout_seconds | LLAMA_REQUEST_TIMEOUT_SECONDS 经 Compose 注入 | 低 | 重启 | 0 不设 Gateway 整体时限；调用方取消仍然有效 |
 | 模型加载与输出上限 | deploy/config.yaml | 低 | 重启 | 不代替 OpenResty/客户端超时 |
@@ -37,7 +37,7 @@ Provider 环境字段以 internal/config/provider_env.go 中的解析器清单�
 
 go run ./scripts/check_config_contract.go 会检查：
 1. 两份 YAML 是否包含 Go 配置结构认可的字段。
-2. 两份 YAML 的有效字段路径是否相同，静态默认值是否一致；database.host 与 redis.addr 是唯一登记的部署覆盖。
+2. 两份 YAML 的有效字段路径和静态值是否完全一致；部署差异统一走环境变量，不允许维护例外值。
 3. YAML 变量是否同时在 .env.example 声明并由 Compose 显式注入。
 4. Compose 中没有默认值的插值变量是否在 .env.example 声明。
 5. Provider 解析器字段是否出现在两个环境示例和 DeepSeek/OpenAI Compose 白名单。

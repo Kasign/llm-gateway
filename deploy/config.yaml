@@ -15,7 +15,7 @@ auth:
 
 database:
   # 连接现有 MariaDB。建议使用同一 Docker network 内的容器服务名（注意与 compose 里服务名大小写一致）。
-  host: "Mariadb"
+  host: "${LLM_GATEWAY_DB_HOST}"
   port: 3306
 
   name: "llm_gateway"
@@ -29,7 +29,7 @@ database:
   migration_file: /app/migrations/001_init.sql
 
 redis:
-  addr: "Redis:6379"
+  addr: "${LLM_GATEWAY_REDIS_ADDR}"
   password: "${REDIS_ROOT_PASSWORD}"
   db: 0
 

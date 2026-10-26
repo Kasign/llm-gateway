@@ -15,7 +15,7 @@ auth:
   session_ttl_hours: 168
 
 database:
-  host: "mariadb"
+  host: "${LLM_GATEWAY_DB_HOST}"
   port: 3306
   name: "llm_gateway"
   user: "llm_gateway"
@@ -26,7 +26,7 @@ database:
   migration_file: /app/migrations/001_init.sql
 
 redis:
-  addr: "redis:6379"
+  addr: "${LLM_GATEWAY_REDIS_ADDR}"
   password: "${REDIS_ROOT_PASSWORD}"
   db: 0
 

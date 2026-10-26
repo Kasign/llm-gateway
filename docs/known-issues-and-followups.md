@@ -227,7 +227,7 @@
 
 ## 2026-10-26 配置治理第一批：模板与环境变量契约
 
-- 当前 deploy/config.yaml 与 config.example.yaml 存在明确漂移：实际配置缺少 logging.retention_days、retention_batch_size、retention_interval_seconds 和 agents，且本地请求时限固定写为 3600，绕过 .env 中的 LLAMA_REQUEST_TIMEOUT_SECONDS。
+- 本批已补齐 logging.retention_days、retention_batch_size、retention_interval_seconds 和 agents，并使本地请求时限引用 LLAMA_REQUEST_TIMEOUT_SECONDS。下一增量将移除 database.host 与 redis.addr 最后的静态差异，统一通过 .env + Compose 兼容默认值注入。
 - 本批对齐配置路径和超时来源，仅保留数据库、Redis 服务名作为已登记部署差异；新建静态契约检查，校验 Go YAML 字段、两个配置文件的字段路径/默认值、YAML 环境变量与 Compose 白名单，以及 Provider 环境变量支持字段与示例。
 - 新 CI 检查只验证静态配置结构与注入链路，不代表实际 YAML 启动、真实凭据、远程 Provider 连通性或数据库运行时已验收。按用户约定不手动跑测试；以本批提交后的 GitHub Actions 为准。
 - 继续事项：更完整地核对 Web/数据库 Provider 的热更新、跨来源冲突和默认值兼容，并在统一回归前不改变当前 config.yaml 跟踪策略。
