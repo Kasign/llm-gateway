@@ -1752,6 +1752,7 @@ func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
 
 // TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证服务端关闭空闲 Keep-Alive 连接后，
 // Provider 的 HTTP Transport 能从陈旧连接恢复，而不是让后续请求永久卡住或污染响应。
+// TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证陈旧空闲连接不会导致后续推理永久失去连接。
 func TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection(t *testing.T) {
 	var requests atomic.Int32
 	var connections atomic.Int32
@@ -1794,13 +1795,20 @@ func TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection(t *testing.T) 
 		t.Fatalf("first request failed: %v", err)
 	}
 
-	// 关闭服务端已转为空闲状态的连接，模拟 NAT、反向代理或上游清理空闲连接。
+	// 模拟 NAT、反向代理或上游清理空闲连接。POST 推理请求不能盲目自动重试，
+	// 因为上游可能已经执行；若复用陈旧连接失败，应由后续新请求建立新连接恢复。
 	server.CloseClientConnections()
 	if err := send(); err != nil {
-		t.Fatalf("request did not recover after stale keep-alive connection: %v", err)
+		mapped := ToCoreError(err)
+		if mapped == nil || mapped.Status != http.StatusBadGateway {
+			t.Fatalf("stale idle connection error = %v, want a classified 502 without blind retry", err)
+		}
 	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("upstream requests = %d, want exactly 2", got)
+	if err := send(); err != nil {
+		t.Fatalf("fresh request did not recover after stale keep-alive connection: %v", err)
+	}
+	if got := requests.Load(); got < 2 || got > 3 {
+		t.Fatalf("upstream requests = %d, want 2 (or 3 if the stale request reached the server)", got)
 	}
 	if got := connections.Load(); got < 2 {
 		t.Fatalf("accepted TCP connections = %d, want a replacement connection", got)
