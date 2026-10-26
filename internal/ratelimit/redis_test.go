@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func TestProviderRPMUsageReadsWithoutIncrementing(t *testing.T) {
 	limiter := newRedisTestLimiter(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	providerID := "usage-" + t.Name()
+	providerID := strings.ToLower("usage-" + t.Name())
 	for i := 0; i < 3; i++ {
 		if _, _, err := limiter.allowAt(ctx, "provider:"+providerID, 10, now); err != nil {
 			t.Fatalf("allowAt: %v", err)

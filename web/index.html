@@ -111,7 +111,7 @@
             <div class="mm-toolbar"><button type="button" class="btn sm ghost" id="providerRefresh">刷新</button><button type="button" class="btn sm" id="providerCreate">新增 Provider</button></div>
           </div>
           <div id="providerStatus" class="msg muted" role="status">尚未加载 Provider 列表。</div>
-          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>Provider RPM</th><th>并发占用（本进程）</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="8" class="muted">加载中…</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>Provider RPM</th><th>并发占用（本进程）</th><th>并发拒绝（累计）</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="9" class="muted">加载中…</td></tr></tbody></table></div>
         </div>
         <div class="card" id="providerEditorCard" hidden>
           <div class="card-head"><div><h2 id="providerEditorTitle">新增 Provider</h2><p>Key 留空表示保留原值；要删除已保存的 Key，请使用单独的“清除 Key”操作。</p></div><button type="button" class="btn sm ghost" id="providerCancel">取消</button></div>

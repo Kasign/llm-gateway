@@ -44,9 +44,10 @@ const (
 // ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
 // Web 配置热更新会替换 Provider 实例，但仍在执行的请求必须继续占用同一份预算。
 type ConcurrencyLimiter struct {
-	mu     sync.Mutex
-	active int
-	limit  int
+	mu       sync.Mutex
+	active   int
+	limit    int
+	rejected int64
 }
 
 // NewConcurrencyLimiter 创建有界的并发许可器；0 表示默认上限。
@@ -83,6 +84,7 @@ func (l *ConcurrencyLimiter) TryAcquire() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.active >= l.limit {
+		l.rejected++
 		return false
 	}
 	l.active++
@@ -109,6 +111,16 @@ func (l *ConcurrencyLimiter) Active() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.active
+}
+
+// RejectedRequests 返回进程生命周期内因并发上限拒绝的请求次数。
+func (l *ConcurrencyLimiter) RejectedRequests() int64 {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rejected
 }
 
 // Limit 返回当前有效上限，供诊断和单元测试使用。
