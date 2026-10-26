@@ -136,7 +136,7 @@ docs/                        中文架构、协议和运维文档
 ### 阶段 5：运行治理与可维护性
 状态：进行中（早期阶段）。
 
-任务：修复 Redis 限流计数与 TTL 的原子性；增加 Provider 并发限制、延迟/成功率/429/5xx/Token 指标；审计队列深度、成功/失败、按原因丢弃与排队时延的只读 API 已实现并由 Actions #162 全量通过；DNS 故障审计语义由 #163、响应已提交后的 SSE 中断语义由 #164 验收通过。继续覆盖 TLS 握手中断、日志保留策略和管理台轮询负载；保持 `go test ./...`、`go test -race`、`go vet ./...`、构建与集成测试为每个功能组的验收门槛。
+任务：修复 Redis 限流计数与 TTL 的原子性；增加 Provider 并发限制、延迟/成功率/429/5xx/Token 指标；审计队列深度、成功/失败、按原因丢弃与排队时延的只读 API 已实现并由 Actions #162 全量通过；DNS 故障审计语义由 #163、响应已提交后的 SSE 中断语义由 #164 验收通过。继续覆盖陈旧 Keep-Alive 连接恢复、日志保留策略和管理台轮询负载；TLS 握手中断已有 Actions #166 验收。保留策略默认不主动删除历史数据，只有显式启用后才按批次清理；保持 `go test ./...`、`go test -race`、`go vet ./...`、构建与集成测试为每个功能组的验收门槛。
 
 验收：能够定位延迟、上游错误和日志丢失；管理台轮询不会明显拖慢推理；关键行为有自动化测试。
 
@@ -605,3 +605,13 @@ docs/                        中文架构、协议和运维文档
 - `GW-REL-001` 已在 Head `fd720204` 的 [Actions #163](https://github.com/Kasign/llm-gateway/actions/runs/40257657819) 全量通过：NXDOMAIN→502、Resolver timeout→504，两条审计记录 `upstream_http_status IS NULL`，敏感 DNS 诊断/凭据均未泄漏。
 - 本次推进 `GW-REL-002`：上游提交 HTTP 200 + 部分 SSE 后，测试服务器触发 TCP RST；应验证客户端仍是已提交的 HTTP 200、收到部分 SSE 与 `event: error`，MariaDB 记录 `http_status=200`、`upstream_http_status=200`，但 `status=error/error_code=provider_upstream`。新 Head CI 待验收。
 - PR #5 和 PR #7 继续保持未合并；并发上限分支依赖 PR #5。不能把 Mock/受控 Resolver 测试说成真实供应商 E2E。
+
+
+## 2026-10-26 最新基线与接下来的执行顺序
+
+- 重新核实的工作分支 HEAD：`9cd736b8b377822dcefebf15b2752fa97d4ba190`；远程 `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
+- PR #5（TCP 故障恢复）和 PR #7（Provider 并发上限）均为 Open、未合并。PR #7 仍基于 PR #5 的契约；#5 合并之前不单独合并 #7。
+- 最新 [Actions #167](https://github.com/Kasign/llm-gateway/actions/runs/40260312832) 在 HEAD `9cd736b` 成功；Actions #166 的 32 步 CI 还验证了 race、性能、go vet、Go build、前端 bundle 与 TLS 握手中断。所有结果均为 CI/Mock 层，不等于真实供应商 E2E。
+- 可靠性收尾顺序：陈旧 Keep-Alive 连接关闭后的自动重拨专项（本轮新增测试，待新 CI 证明）；补充日志/Payload 保留策略的安全设计（默认禁用破坏性清理）；建立管理台轮询与 DB/CPU/延迟影响的可复现基准。公网代理/跨网络路由仍需部署环境验收。
+- 随后按一个完整功能组实施 `GW-PROV-UI-001`：部署 YAML 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 预置项只读；Web 项持久化并动态生效；跨来源同 ID 拒绝覆盖；Key 使用独立 AES-GCM 密钥加密存储、API 永不回显；保留/清除 Key 分开操作；模型别名映射接入路由和 `/v1/models`；保留旧 YAML 行为。添加 Provider 不自动切换活动上游。
+- 不强推、不改写历史；按完整功能组提交。每一组须在 CI 中跑完 Go 单测、race、go vet、构建与前端 bundle，失败查看日志后修复，不削弱断言。

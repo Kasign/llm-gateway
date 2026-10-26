@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"errors"\n\t"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1745,5 +1745,63 @@ func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
 				t.Fatalf("effective concurrency = %d, want %d", cap(p.requestSlots), tc.want)
 			}
 		})
+	}
+}
+
+
+// TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证服务端关闭空闲 Keep-Alive 连接后，
+// Provider 的 HTTP Transport 能从陈旧连接恢复，而不是让后续请求永久卡住或污染响应。
+func TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection(t *testing.T) {
+	var requests atomic.Int32
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	send := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		result, err := p.Forward(ctx, InferenceCall{
+			Writer: recorder,
+			Request: request,
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"ping"}]}`),
+			ModelID: "test-model",
+		})
+		if err != nil {
+			return err
+		}
+		if result.Status != http.StatusOK || !strings.Contains(recorder.Body.String(), `"id":"ok"`) {
+			return fmt.Errorf("unexpected response status/body: %d %q", result.Status, recorder.Body.String())
+		}
+		return nil
+	}
+	if err := send(); err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+
+	// 关闭服务端已转为空闲状态的连接，模拟 NAT、反向代理或上游清理空闲连接。
+	server.CloseClientConnections()
+	if err := send(); err != nil {
+		t.Fatalf("request did not recover after stale keep-alive connection: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("upstream requests = %d, want exactly 2", got)
+	}
+	if got := connections.Load(); got < 2 {
+		t.Fatalf("accepted TCP connections = %d, want a replacement connection", got)
 	}
 }
