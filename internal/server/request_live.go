@@ -89,6 +89,9 @@ func (s *Server) liveSession(id string) *live.Session {
 
 func mergeLiveIntoLog(base store.RequestLog, live store.RequestLog) store.RequestLog {
 	out := base
+	if live.ProviderID != "" {
+		out.ProviderID = live.ProviderID
+	}
 	if live.APIKeyName != "" {
 		out.APIKeyName = live.APIKeyName
 	}

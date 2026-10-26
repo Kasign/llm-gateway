@@ -12,6 +12,7 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 func TestRemoteProviderRuntimeResolutionUsesConfiguredURLAndDefaultModel(t *testing.T) {
@@ -142,5 +143,15 @@ func TestProviderIDForStateFollowsResolverTarget(t *testing.T) {
 				t.Fatalf("providerIDForState() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+
+func TestMergeLiveIntoLogPreservesResolvedProviderID(t *testing.T) {
+	base := store.RequestLog{RequestID: "req-1", ProviderID: "llamacpp"}
+	live := store.RequestLog{RequestID: "req-1", ProviderID: "deepseek"}
+	got := mergeLiveIntoLog(base, live)
+	if got.ProviderID != "deepseek" {
+		t.Fatalf("merged provider_id = %q, want deepseek", got.ProviderID)
 	}
 }

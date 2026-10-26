@@ -726,3 +726,9 @@ docs/                        中文架构、协议和运维文档
 - 新库在 `request_logs` 创建 `provider_id` 及 `idx_provider_started(provider_id, started_at)`；旧库通过 `ensureColumns` 增量添加，重复列/索引错误按 MariaDB 契约忽略。既有历史记录不伪造来源，保持空值。
 - 调用记录列表与详情新增 Provider ID 展示；同步前端源码和 `web/static/dist/app.js`。新增 Provider ID 选择优先级测试代码，但按用户要求未运行测试、迁移或构建。
 - 实施前核实 HEAD：`f981d38e66f3d2c0c4eb3906432f13432a867798`；PR #5/#7 均 Open、未合并。
+
+
+### 实时请求列表 Provider ID 合并修正（2026-10-26）
+
+- 请求列表会合并数据库记录与 LiveRegistry 的运行中快照。补齐 `mergeLiveIntoLog` 对非空 Provider ID 的覆盖，保证已解析的 Agent/服务路由身份不会被较早写入的临时归属覆盖。
+- 增加合并优先级回归测试代码；遵从统一安排未运行测试。
