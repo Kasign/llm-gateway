@@ -32,7 +32,7 @@ func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit/metrics", nil)
-	req.Header.Set("Authorization", "Bearer test-admin-key")
+	req.Header.Set("X-Admin-Key", "test-admin-key")
 	recorder := httptest.NewRecorder()
 	s.auditMetricsAPI(recorder, req)
 	if recorder.Code != http.StatusOK {
@@ -60,7 +60,7 @@ func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
 	}
 
 	post := httptest.NewRequest(http.MethodPost, "/api/admin/audit/metrics", nil)
-	post.Header.Set("Authorization", "Bearer test-admin-key")
+	post.Header.Set("X-Admin-Key", "test-admin-key")
 	methodRecorder := httptest.NewRecorder()
 	s.auditMetricsAPI(methodRecorder, post)
 	if methodRecorder.Code != http.StatusMethodNotAllowed {
