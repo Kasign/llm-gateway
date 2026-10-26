@@ -89,6 +89,7 @@ providers:
   #     #   public-chat: deepseek-chat
   #     #   public-reasoner: deepseek-reasoner
   #     max_concurrent_requests: 64 # 默认上限；达到后 fail-fast 返回 503
+  #     requests_per_minute: 0 # 0 不限速；正数限制该 Provider 每分钟新请求数
   #     request_timeout_seconds: 0 # 0 不设 Provider 总时限；1–86400 秒限制完整 JSON/SSE 请求
   #     allow_insecure_http: false
   #     allow_private_network: false
@@ -99,6 +100,7 @@ providers:
   #     api_key_header: "Authorization"
   #     default_model: "gpt-4.1"
   #     max_concurrent_requests: 64
+  #     requests_per_minute: 0
   #     request_timeout_seconds: 0
   #     allow_insecure_http: false
   #     allow_private_network: false

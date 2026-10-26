@@ -213,7 +213,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 
 func (s *Server) safeProviderView(row managedProvider,source string,editable bool) map[string]interface{} {
 	configured:=row.APIKey!=""||row.APIKeyCiphertext!=""
-	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"request_timeout_seconds":row.RequestTimeoutSeconds,"source":source,"editable":editable}
+	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"requests_per_minute":row.RequestsPerMinute,"request_timeout_seconds":row.RequestTimeoutSeconds,"source":source,"editable":editable}
 	if configured{v["api_key_masked"]="••••••••"}
 	if row.SourceConflict{v["source_conflict"]=true;v["enabled"]=false;v["warning"]="ID 与部署配置冲突，已拒绝覆盖"}
 	if row.SecretUnavailable{v["secret_unavailable"]=true;v["warning"]="密文无法解密；请重新填写 API Key 或显式清除"}
@@ -223,7 +223,7 @@ func (s *Server) listManagedProviderViews() []map[string]interface{} {
 	out:=make([]map[string]interface{},0)
 	if s!=nil&&s.cfg!=nil {
 		for _,r:=range s.cfg.Providers.OpenAICompatible {
-			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
+			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,RequestsPerMinute:r.RequestsPerMinute,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
 			out=append(out,s.safeProviderView(row,"deployment",false))
 		}
 	}

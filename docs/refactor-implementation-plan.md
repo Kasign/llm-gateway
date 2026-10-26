@@ -669,3 +669,9 @@ docs/                        中文架构、协议和运维文档
 - 超限在请求级 ACL 后、WarmStart 和上游转发前拒绝，返回 429 `provider_rate_limit_exceeded`；启用预算时 Redis 不可用采用 fail-closed，返回 503 `provider_rate_limit_unavailable`。
 - 该策略只对远程 Provider 生效，不应用到本地 llama.cpp/Ollama，不会中断已经开始的生成。Token 预算与排队继续单独设计，不纳入本次改动。
 - 已补充 Redis 隔离和环境变量解析测试代码、管理台配置、部署示例与 API 契约说明；按用户要求未运行测试或 CI。
+
+
+### Provider RPM 展示和配置样例补齐（2026-10-26）
+
+- Web 管理 API 对部署托管与 Web 托管 Provider 都返回 `requests_per_minute`，保证编辑已有 Web Provider 时会保留其配额；YAML、自定义 `providers.env` 和部署说明均给出 RPM 示例。
+- 这是上一项 Provider 级 RPM 的配置链路补齐，不运行测试。

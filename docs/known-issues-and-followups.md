@@ -108,3 +108,9 @@
 - 完成远程 Provider 独立 `requests_per_minute` 配置，支持 YAML、`LLM_GATEWAY_PROVIDER_<ID>_REQUESTS_PER_MINUTE` 与 Web 管理台；0 禁用、最大 100000。
 - 仅限制新请求，按 Provider 跨 API Key/Agent 共享 Redis 预算；Redis 故障时 fail-closed。不会对本地慢速模型加 RPM，也不会中断在途生成或设置整体生成超时。
 - 已新增自动化测试代码但未运行。Token 预算和等待队列未在本次顺带引入。
+
+
+## 2026-10-26 追加：Provider RPM 视图配置补齐
+
+- Web Provider 安全视图包含 `requests_per_minute`，部署 YAML 也正确映射该值，避免管理台无法显示/编辑现存配额。
+- `deploy/config.example.yaml`、`deploy/providers.env.example` 和中文配置说明补充了 RPM 样例。
