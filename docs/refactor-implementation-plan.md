@@ -689,3 +689,13 @@ docs/                        中文架构、协议和运维文档
 - 对未提交响应的 Provider RPM 429 增加标准 `Retry-After` 秒数响应头，指向当前 UTC 固定分钟窗口预计重置时间。
 - Chat Completions、Responses 和 Anthropic Messages 共享错误处理函数；不改变状态码、错误 envelope 或 SSE 已提交后的不可逆行为。
 - 本次仅完成实现与契约说明，未运行测试。
+
+
+
+### OpenResty 长时 SSE 与 Docker 网络部署示例（2026-10-26）
+
+- 修正并明确 OpenResty 反代目标的部署拓扑：宿主机进程使用 `127.0.0.1:8088`；Docker/1Panel 容器必须与 Gateway 共享用户定义网络，使用 `llm-gateway:8088`，容器内不应把 `127.0.0.1` 当成 Gateway。
+- 两份样例均关闭 SSE 缓冲、缓存、gzip 及上游自动重试，设置 24 小时读写空闲间隔，明确这些 Nginx timeout 不是整个请求的总时限；请求体大小与 Gateway 默认 64 MiB 对齐。
+- 同步 1Panel 部署说明，列明本地模型客户端整体时限为 0 时只取消 Gateway 客户端整体 deadline，不能覆盖 OpenResty 或 Codex/Cursor 客户端期限；同时提示只有在确认真实代理来源后才应设置 `server.trusted_proxies`。
+- 本功能组仅修改部署样例和文档；按用户要求未运行测试、Compose 检查或 CI。需要在实际 1Panel/OpenResty 容器网络中部署确认 DNS 解析与 SSE 流式行为。
+- 提交前远程基线：`6962c7f84d8d30444424734ec510e89aa9c59dad`；PR #5/#7 均为 Open、未合并，PR #7 继续依赖 PR #5。

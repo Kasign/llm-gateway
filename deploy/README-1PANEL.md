@@ -50,7 +50,18 @@ sudo docker exec llm-gateway wget -qO- http://Llama-cpp:8080/models
 sudo docker exec llm-gateway wget -qO- http://ollama:11434/api/tags
 ```
 
-Gateway 只监听 `127.0.0.1:8088`。OpenResty 反代到这个地址，SSE 需要 `proxy_buffering off` 和较长的 `proxy_read_timeout`。关闭 Gateway 客户端整体超时不代表反向代理和 Codex 自身也没有读取期限；本地模型首 Token 可能较慢时，这几层都要分别确认。
+### OpenResty 反向代理（尤其是慢速本地模型）
+
+Gateway 容器内监听 `0.0.0.0:8088`，宿主机发布端口限定为 `127.0.0.1:8088`。反代地址要按 OpenResty 的运行位置选择：
+
+- OpenResty 运行在**宿主机进程**中：使用 [`openresty-ai.conf.example`](./openresty-ai.conf.example)，上游地址是 `http://127.0.0.1:8088`。
+- OpenResty 运行在 **1Panel/Docker 容器**中（常见部署）：使用 [`openresty-ai-container.conf.example`](./openresty-ai-container.conf.example)，并确保 OpenResty 容器与 Gateway 加入同一个用户定义 Docker 网络（通常就是 `.env` 中的 `EXISTING_DOCKER_NETWORK`）。容器内的 `127.0.0.1` 指向 OpenResty 自己，不是宿主机或 Gateway；同网络下应使用 `http://llm-gateway:8088`。不需要为了容器互访把 8088 发布到公网。
+
+两个样例都关闭 SSE 缓冲、缓存和 gzip，设置较长的读写超时，并关闭 Nginx 对上游请求的自动重试，避免推理 POST 被代理层意外重放。示例将代理读写空闲间隔设为 24 小时；`proxy_read_timeout` 是**相邻两次读取之间的空闲期限**，不是整个请求的总时限。样例还把 `client_max_body_size` 设为与 Gateway 默认 64 MiB 请求体上限一致。
+
+慢速本地模型建议让 `LLAMA_REQUEST_TIMEOUT_SECONDS=0`（或 `llama.request_timeout_seconds: 0`）取消 Gateway 客户端整体时限；兼容旧配置仍保留未填写时的 3600 秒默认值。Gateway 的时限、OpenResty 的空闲超时，以及 Codex/Cursor 等客户端自己的请求期限彼此独立，仍需分别检查。配置里的 `warm_start` SSE 注释保活可帮助等待首 Token 时维持反代连接，但不能解除客户端自身的超时。
+
+如果需要让审计记录获取真实客户端 IP，`server.trusted_proxies` 必须配置为实际 OpenResty 来源的固定 IP 或受控 CIDR；不要不加区分地信任所有转发头。
 
 ## 切换上游
 

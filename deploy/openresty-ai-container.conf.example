@@ -1,0 +1,41 @@
+# 适用于 1Panel/OpenResty 运行在 Docker 容器中的部署。
+# 前提：OpenResty 容器与 llm-gateway 容器加入同一个用户定义 Docker 网络。
+# 此处使用 Gateway 的容器 DNS 名，而不是 127.0.0.1 或宿主机发布端口。
+server {
+    listen 8443 ssl;
+    server_name ai.example.com;
+
+    # 填入你在 1Panel 配好的证书
+    ssl_certificate     /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    # 与 Gateway 默认的 64 MiB 请求体上限对齐
+    client_max_body_size 64m;
+
+    location / {
+        proxy_pass http://llm-gateway:8088;
+        proxy_http_version 1.1;
+
+        # Coding Agent 的 SSE 必须关闭缓冲/缓存/压缩，避免 Token 延迟积攒。
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering no always;
+
+        # 长时本地推理。以下是空闲间隔限制，不是整个请求的总时限。
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        send_timeout 86400s;
+
+        # 推理请求不可由反代层自动重放，避免意外重复生成或重复计费。
+        proxy_next_upstream off;
+        proxy_ignore_client_abort off;
+
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
