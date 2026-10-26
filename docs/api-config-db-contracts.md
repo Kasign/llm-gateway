@@ -216,3 +216,14 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 - 管理会话由 `POST /api/auth/login` 建立，Token 在后续请求通过 `Authorization: Bearer` 发送，不是浏览器 Cookie。登录按客户端 IP 进行限流；Web 会话的服务端有效性还依赖 Redis 会话记录及登录凭据版本。
 - `PUT /api/auth/credentials` 需要当前密码；新用户名或密码留空表示保留当前值。修改后会更新凭据版本并更新当前会话版本，其他旧版本会话不再有效。
 - 规范对以上接口记录了实际响应结构与状态码，但管理端点的错误详情仍共用宽泛的安全错误 Schema。下一步需逐个梳理模型、下载、运行时、Benchmark 和推理参数管理 API，再考虑自动契约差异检查。
+
+
+## 8. 请求审计、运行时与 Benchmark 契约
+
+机器可读契约新增 `/api/requests` 列表/清理、`/api/requests/{id}` 详情、`/api/admin/audit/metrics`、`/api/models`、活动运行时概览/预览/选择/卸载，以及异步 `/api/benchmark` 创建与查询。
+
+- 请求列表支持 `limit`、`request_id`、`model`、`status`、`key`、`provider` 筛选；删除请求会清空请求历史和实时看板记录，是破坏性操作。
+- 请求详情可能返回保存的 prompt、请求/响应正文、请求头、响应头及 SSE 事件。是否完整留存受 `logging.store_payload` 与审计记录是否成功等条件影响，管理接口不应暴露给非可信使用者。
+- 审计队列指标是内存快照，不查询数据库；运行时模型管理接口只对本地 llama.cpp/Ollama 执行 load/unload。远程 Provider 的模型生命周期由供应商管理。
+- Benchmark 创建任务后立即返回 job ID 和 poll URL；任务状态表在进程内，重启后不承诺恢复。模型生成较慢时，客户端应轮询状态接口，不应把异步 Benchmark 当同步 HTTP 推理请求。
+- 本批响应中动态变化的运行时与详情对象采用宽松 Schema，并未伪造所有字段的静态保证；剩余下载、HuggingFace 搜索、Ollama 专属操作、配置引导与推理参数路由仍待逐项覆盖。

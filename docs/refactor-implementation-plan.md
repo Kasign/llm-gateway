@@ -764,3 +764,11 @@ docs/                        中文架构、协议和运维文档
 - `docs/openapi.yaml` 扩展覆盖 `/api/admin/keys` 列表/创建、单 Key 更新/删除、启用/禁用/轮换，以及 `/api/auth/login`、`logout`、`me`、`credentials`。
 - 新增 `AdminSessionBearer` 与 `X-Admin-Key` 安全方案，并与推理入口的 Gateway Key、供应商上游 Key 明确区分；创建/轮换明文 Key 被标记为 writeOnly 并注明只显示一次。
 - 本次仍按已有代码核实端点，不宣称规范已覆盖全部管理 API；模型、下载、运行时、Benchmark 和推理参数接口仍是后续分阶段工作。未手动运行测试或重跑 Actions。
+
+
+## 2026-10-26 执行增量：请求审计与运行时 API 契约
+
+- OpenAPI 新增请求日志列表/清理、单条请求详情、审计队列指标、模型列表、运行时概览/预览/选择/卸载和异步 Benchmark 创建/轮询。
+- 对含敏感 payload 的请求详情、会清理历史数据的 DELETE、内存态审计指标与进程内 Benchmark job 均记录边界；运行时 schema 保持宽松，避免把多后端异构字段误写成稳定契约。
+- 顺手纠正 OpenAPI 一次性返回的 Key 和登录 Token Schema 方向：它们是服务端输出字段，应标记为 `readOnly`；输入密码和 Provider Key 仍使用 `writeOnly`。本轮没有运行测试或重跑 Actions。
+- 仍未覆盖：模型安装/下载、HuggingFace 搜索、Ollama 管理、完整上游/Bootstrap、推理参数及配置 API；待按 Handler 逐组补齐，并后续讨论自动契约差异检查。

@@ -631,6 +631,321 @@ paths:
         "503":
           $ref: "#/components/responses/AdminError"
 
+
+  /api/models:
+    get:
+      tags: [Admin]
+      summary: 列出 Gateway 管理的模型元数据
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 模型元数据列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/audit/metrics:
+    get:
+      tags: [Admin]
+      summary: 读取审计队列内存指标
+      description: 此接口只读取进程内审计队列快照，不查询数据库，不返回请求正文或凭据。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 审计队列统计快照
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditMetricsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AdminError"
+  /api/requests:
+    get:
+      tags: [Admin]
+      summary: 查询请求记录列表
+      description: 列表合并数据库历史记录与当前 Gateway 进程的实时请求；provider 按规范化 Provider ID 完整匹配。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 返回条数，默认 50。
+          schema: { type: integer, minimum: 1, default: 50 }
+        - name: request_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: model
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [running, success, error, cancelled] }
+        - name: key
+          in: query
+          required: false
+          description: 调用方 API Key 名称筛选。
+          schema: { type: string }
+        - name: provider
+          in: query
+          required: false
+          description: Provider ID 精确匹配，忽略大小写及首尾空格。
+          schema: { type: string }
+      responses:
+        "200":
+          description: 请求日志列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+    delete:
+      tags: [Admin]
+      summary: 清空请求日志
+      description: 危险操作，会清除请求历史记录与实时看板记录。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 已删除记录数量
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, deleted]
+                properties:
+                  success: { type: boolean, const: true }
+                  deleted: { type: integer, minimum: 0 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Gateway 请求 ID。
+        schema: { type: string, minLength: 1 }
+    get:
+      tags: [Admin]
+      summary: 获取单条请求详情
+      description: 详情可能包含已保存的 prompt、请求/响应正文、请求头和 SSE 事件；这些字段受 logging.store_payload 等配置影响，应仅对可信管理员开放。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 请求详情、时序和诊断信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestDetail"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/runtime:
+    get:
+      tags: [Admin]
+      summary: 获取活动后端的运行时概览
+      description: 本地后端返回已加载模型和目录；远程 Provider 不会伪装成本地运行时模型。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 运行时快照；字段依活动后端变化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeSnapshot"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/runtime/preview:
+    get:
+      tags: [Admin]
+      summary: 预览指定本地运行时的模型清单
+      parameters:
+        - name: backend
+          in: query
+          required: true
+          schema: { type: string, enum: [llamacpp, ollama] }
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 本地运行时预览
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeSnapshot"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/runtime/select:
+    post:
+      tags: [Admin]
+      summary: 加载或选择本地模型
+      description: 只支持本地 llama.cpp/Ollama 后端；model_id 或 model_key 至少提供一个。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeModelRequest"
+      responses:
+        "200":
+          description: 选择后的模型及运行时快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/runtime/unload:
+    post:
+      tags: [Admin]
+      summary: 卸载当前本地模型
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeModelRequest"
+      responses:
+        "200":
+          description: 卸载操作结果
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/benchmark:
+    post:
+      tags: [Admin]
+      summary: 启动异步模型 Benchmark
+      description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BenchmarkCreateRequest"
+      responses:
+        "200":
+          description: 已创建 Benchmark 任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkStartResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+  /api/benchmark/{job_id}:
+    parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      tags: [Admin]
+      summary: 查询 Benchmark 任务状态和输出
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: Benchmark 任务与流式输出快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+    delete:
+      tags: [Admin]
+      summary: 请求停止 Benchmark 任务
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 停止信号状态
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+
 components:
   securitySchemes:
     GatewayBearer:
@@ -1058,7 +1373,7 @@ components:
       properties:
         key:
           type: string
-          writeOnly: true
+          readOnly: true
           description: 仅本次创建响应返回的明文 Key，请立即安全保存。
         api_key:
           $ref: "#/components/schemas/APIKeyMetadata"
@@ -1068,7 +1383,7 @@ components:
       properties:
         key:
           type: string
-          writeOnly: true
+          readOnly: true
           description: 新明文 Key，仅在轮换响应中出现一次。
     APIKeyStatusResult:
       type: object
@@ -1090,7 +1405,7 @@ components:
       properties:
         token:
           type: string
-          writeOnly: true
+          readOnly: true
           description: 管理会话 Token，后续使用 Authorization: Bearer 传递。
         user:
           type: object
@@ -1132,6 +1447,127 @@ components:
           writeOnly: true
           description: 留空表示不修改密码。
       additionalProperties: false
+
+    RequestList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            description: 请求列表记录；字段随当前数据版本扩展。
+            additionalProperties: true
+    RequestDetail:
+      type: object
+      required: [log, summary, timing, diagnosis]
+      description: 详情可能包含正文、请求头、响应头和流式事件；只有启用相应审计配置或事件已捕获时才会出现。
+      properties:
+        log:
+          type: object
+          additionalProperties: true
+        summary:
+          type: object
+          additionalProperties: true
+        timing:
+          type: object
+          additionalProperties: true
+        diagnosis:
+          type: array
+          items: { type: string }
+        analysis:
+          type: object
+          additionalProperties: true
+        payload:
+          type: object
+          additionalProperties: { type: string }
+        stream_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    AuditMetricsEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          description: 审计队列深度、容量、完成/失败、排队耗时和丢弃计数等内存快照。
+          additionalProperties: true
+    RuntimeSnapshot:
+      type: object
+      description: 字段依据本地 llama.cpp、Ollama 或远程 Provider 运行时而变化。
+      additionalProperties: true
+    RuntimeModelRequest:
+      type: object
+      properties:
+        model_id: { type: string }
+        model_key: { type: string }
+      additionalProperties: false
+    RuntimeActionResult:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, const: true }
+        active_model: { type: string }
+        runtime:
+          $ref: "#/components/schemas/RuntimeSnapshot"
+      additionalProperties: true
+    BenchmarkCreateRequest:
+      type: object
+      properties:
+        model_key: { type: string }
+        model_id: { type: string }
+        model: { type: string, description: model_id 的兼容别名。 }
+        prompt: { type: string }
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 4000
+        use_active: { type: boolean }
+        temperature: { type: number }
+        top_p: { type: number }
+        top_k: { type: integer }
+        min_p: { type: number }
+        frequency_penalty: { type: number }
+        presence_penalty: { type: number }
+        repeat_penalty: { type: number }
+        seed: { type: integer, format: int64 }
+        enable_thinking: { type: boolean }
+        stop:
+          type: array
+          items: { type: string }
+      additionalProperties: false
+    BenchmarkStartResult:
+      type: object
+      required: [job_id, request_id, status, poll, request_log, message]
+      properties:
+        job_id: { type: string }
+        request_id: { type: string }
+        status: { type: string, const: running }
+        poll: { type: string }
+        request_log: { type: string }
+        message: { type: string }
+    BenchmarkStatus:
+      type: object
+      required: [job, stream_events, request_id, request_log]
+      properties:
+        job:
+          type: object
+          additionalProperties: true
+        stream_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        request_id: { type: string }
+        request_log: { type: string }
+        analysis:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
 
   parameters:
     APIKeyID:

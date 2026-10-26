@@ -712,3 +712,12 @@ OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、�
 | 上游 Provider API Key | Gateway 发往远程 Provider | 由服务端 Provider 配置读取；Web Provider 密文不回显，调用方输入的 Key 不作为上游凭据透传。 |
 
 创建/轮换调用方 Key 的返回正文包含明文，管理台应只在此时提示用户安全保存，不能将完整返回写入普通日志、审计详情、分析事件或浏览器持久化存储。机器可读规范将对应字段标记为 `writeOnly`，表示它只适用于响应中的一次性领取，而不是后续读取凭据。
+
+
+## 请求审计与运行时 API 的运维边界
+
+- `GET /api/requests` 合并数据库与当前进程 LiveRegistry；已完成请求的最终字段以持久化记录为准。Provider 筛选在规范化 ID 后完整匹配；不能把历史空 Provider ID 推断归属。
+- `GET /api/requests/{id}` 是高敏感管理端点：启用 payload 存储时，详情可能包含完整 prompt、工具参数、请求头和上游返回内容。应以管理员身份验证和部署网络边界同时保护，而不能因为接口属于只读 GET 就视为无敏感信息。
+- `GET /api/admin/audit/metrics` 仅读取审计队列快照，不访问数据库，返回带 `Cache-Control: no-store` 的数据；它的计数用于发现积压和丢弃，不等于数据库历史行数。
+- `/api/admin/runtime/select` 和 `/unload` 操作的是当前活动的本地推理后端，远程 Provider 不支持本地模型加载/卸载。切换或卸载前端应先核实活动 backend，避免把本地容器生命周期操作误认为供应商操作。
+- Benchmark 接口采用异步任务模型，GET 查询任务与 SSE 事件快照，DELETE 发送停止信号；它与真实调用方请求的持久化审计是不同视图。进程重启会丢失内存中的历史 Benchmark Job。
