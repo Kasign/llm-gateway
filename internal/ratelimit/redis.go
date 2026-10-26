@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -156,4 +157,46 @@ func (l *Limiter) DeleteSession(ctx context.Context, token string) error {
 		return nil
 	}
 	return l.r.Del(ctx, sessionKey(token)).Err()
+}
+
+
+// ProviderRPMUsage 查询当前 UTC 分钟窗口内各 Provider 已计数的请求数。
+// 只读取 AllowProvider 使用的 key，不递增计数；所有 ID 通过一次 MGET 查询。
+func (l *Limiter) ProviderRPMUsage(ctx context.Context, providerIDs []string, now time.Time) (map[string]int64, error) {
+	usage := make(map[string]int64, len(providerIDs))
+	if len(providerIDs) == 0 {
+		return usage, nil
+	}
+	if l == nil || l.r == nil {
+		return nil, fmt.Errorf("Redis rate limiter is not configured")
+	}
+	ids := make([]string, 0, len(providerIDs))
+	keys := make([]string, 0, len(providerIDs))
+	for _, id := range providerIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		ids = append(ids, id)
+		keys = append(keys, rateLimitBucketKey("provider:"+id, now))
+	}
+	if len(keys) == 0 {
+		return usage, nil
+	}
+	values, err := l.r.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	for i, value := range values {
+		if value == nil {
+			usage[ids[i]] = 0
+			continue
+		}
+		count, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse Provider RPM counter")
+		}
+		usage[ids[i]] = count
+	}
+	return usage, nil
 }

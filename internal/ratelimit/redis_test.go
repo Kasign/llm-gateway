@@ -97,3 +97,30 @@ func TestAllowProviderHasIndependentRPMBucket(t *testing.T) {
 		t.Fatalf("caller API Key allowed/count=%v/%d, want true/1", allowed, count)
 	}
 }
+
+
+func TestProviderRPMUsageReadsWithoutIncrementing(t *testing.T) {
+	limiter := newRedisTestLimiter(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	providerID := "usage-" + t.Name()
+	for i := 0; i < 3; i++ {
+		if _, _, err := limiter.allowAt(ctx, "provider:"+providerID, 10, now); err != nil {
+			t.Fatalf("allowAt: %v", err)
+		}
+	}
+	usage, err := limiter.ProviderRPMUsage(ctx, []string{providerID}, now)
+	if err != nil {
+		t.Fatalf("ProviderRPMUsage: %v", err)
+	}
+	if usage[providerID] != 3 {
+		t.Fatalf("usage=%d, want 3", usage[providerID])
+	}
+	usage, err = limiter.ProviderRPMUsage(ctx, []string{providerID}, now)
+	if err != nil {
+		t.Fatalf("second ProviderRPMUsage: %v", err)
+	}
+	if usage[providerID] != 3 {
+		t.Fatalf("read unexpectedly incremented counter: usage=%d", usage[providerID])
+	}
+}

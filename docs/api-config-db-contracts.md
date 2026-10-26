@@ -170,3 +170,8 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 ### 请求历史保留配置
 
 `logging.retention_days` 默认为 `0`，表示完全禁用自动清理，兼容旧部署并保护历史记录。设为正数后，以请求开始时间计算保留期限，只删除已结束请求；在途状态 `running` 不删除。每批默认处理 500 条，每轮最多 10 批，每小时运行一次；每批单独事务删除 `request_stream_events`、`request_payloads` 和 `request_logs`。允许的配置范围为保留天数 0–36500、批次 1–5000、周期 60–86400 秒。清理工作由后台任务执行，日志会记录失败和实际删除数量；自动清理不承诺能替代数据库备份。
+
+
+### Provider RPM 实时用量
+
+`GET /api/admin/providers` 在原有安全视图外附加当前 UTC 分钟窗口的用量字段：`requests_per_minute_used`、`requests_per_minute_remaining`、`requests_per_minute_reset_seconds`、`requests_per_minute_usage_available`。用量读取只对 Redis 做批量 `MGET`，不递增计数、不查询 MariaDB；Redis 查询失败时 Provider 列表依旧返回配置数据，只将用量标记为不可用。计数可能包含超额后被拒绝的新请求尝试，因此在突发限流时已用计数可能大于限额，剩余额度会归零。

@@ -237,13 +237,13 @@ func (s *Server) adminProvidersAPI(w http.ResponseWriter,r *http.Request) {
 	if !s.adminAuthorized(r.Context(),r){jsonError(w,401,"unauthorized","需要管理员登录");return}
 	switch r.Method {
 	case http.MethodGet:
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViews(),"encryption_available":s.encryptionAvailable()})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViewsWithRPMUsage(r.Context()),"encryption_available":s.encryptionAvailable()})
 	case http.MethodPost:
 		var in providerMutationRequest
 		if err:=decodeProviderMutation(r,&in);err!=nil{writeProviderManagementError(w,err);return}
 		if strings.TrimSpace(in.ID)==""{jsonError(w,400,"invalid_provider_id","Provider ID 为必填项");return}
 		if err:=s.changeWebProvider(r.Context(),in.ID,&in,"save");err!=nil{writeProviderManagementError(w,err);return}
-		w.WriteHeader(http.StatusCreated);_ = json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViews()})
+		w.WriteHeader(http.StatusCreated);_ = json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViewsWithRPMUsage(r.Context())})
 	default:jsonError(w,405,"method_not_allowed","仅支持 GET 或 POST")
 	}
 }
@@ -265,7 +265,7 @@ func (s *Server) adminProviderActionAPI(w http.ResponseWriter,r *http.Request) {
 	if r.Method==http.MethodPut&&action=="" {
 		var in providerMutationRequest;if err:=decodeProviderMutation(r,&in);err!=nil{writeProviderManagementError(w,err);return}
 		if err:=s.changeWebProvider(r.Context(),id,&in,"save");err!=nil{writeProviderManagementError(w,err);return}
-		_=json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViews()});return
+		_=json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViewsWithRPMUsage(r.Context())});return
 	}
 	if r.Method==http.MethodDelete&&action=="" {
 		if err:=s.changeWebProvider(r.Context(),id,nil,"delete");err!=nil{writeProviderManagementError(w,err);return}
@@ -275,7 +275,7 @@ func (s *Server) adminProviderActionAPI(w http.ResponseWriter,r *http.Request) {
 		switch action {
 		case "enable","disable","clear-key":
 			if err:=s.changeWebProvider(r.Context(),id,nil,action);err!=nil{writeProviderManagementError(w,err);return}
-			_=json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViews()});return
+			_=json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViewsWithRPMUsage(r.Context())});return
 		default:jsonError(w,404,"not_found","接口不存在");return
 		}
 	}

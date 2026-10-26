@@ -675,3 +675,10 @@ docs/                        中文架构、协议和运维文档
 
 - Web 管理 API 对部署托管与 Web 托管 Provider 都返回 `requests_per_minute`，保证编辑已有 Web Provider 时会保留其配额；YAML、自定义 `providers.env` 和部署说明均给出 RPM 示例。
 - 这是上一项 Provider 级 RPM 的配置链路补齐，不运行测试。
+
+
+### Provider RPM 用量显示（2026-10-26）
+
+- 管理台 Provider 列表现在显示当前分钟已计数请求数、剩余额度及窗口重置倒计时；按原有“刷新”按钮获取最新快照，不额外增加后台定时轮询。
+- 后端采用单次 Redis MGET 读取限流计数，不改变预算、不接触 MariaDB。Redis 查询失败或超时不会阻断 Provider 管理，只将用量显示为暂不可用。
+- 已补充 Redis 只读用量测试代码；遵从统一安排没有运行测试。
