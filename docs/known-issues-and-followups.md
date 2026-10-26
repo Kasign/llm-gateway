@@ -178,3 +178,9 @@
 - 根因是一次已解析请求被多次重复写审计：`CreateRequest` 已写入 `model_requested` 和 `stream`，随后仍重复 `PatchRequestAfterParse`；Resolver 又将 Provider ID 与实际模型拆为两条关键 UPDATE。持续负载下这些重复任务放大了单 Worker 的数据库写入压力并压满有界队列。
 - 本次改为：创建请求时一次写入解析字段；Resolver 实际 Provider 与上游模型合并为一条关键 UPDATE。生命周期仍保留 Create、Resolver 更新和 Finish 三个顺序边界；Finish 继续写入最终 Provider/model/状态与耗时，LiveRegistry 仍立即更新在途请求视图。负载测试新增 Provider 精确归属断言，不降低原有 12,192 行、成功状态与模型匹配断言。
 - 当前修复待最新 Head 的自动 Actions 验收。未手动运行 Go 测试或本地负载测试；不会以调大队列、减少请求量或放宽断言作为修复。
+
+## 2026-10-26 追加：Actions #211 暴露的主管理台 Bundle 陈旧
+
+- [Actions #211](https://github.com/Kasign/llm-gateway/actions/runs/40289139466) 的 Go 单测、MariaDB 审计积压、Gateway 负载与审计持久化、429/503、TCP/DNS/SSE/TLS 故障注入、race、性能基线、go vet、Go 构建以及 Provider 独立 Bundle 语法/一致性检查均通过。
+- 最终契约步骤仍失败，原因是 `web/static/dist/app.js` 与 CI 用当前 `web/js/entry.js` 构建出的 `/tmp/llm-gateway-admin.js` 内容不一致；差异定位在请求统计 UI 模块，属于主管理台部署产物未随源文件同步，而不是语法错误。
+- 保留 CI 中的字节级 `cmp` 检查。根据该次 CI 输出的实际单一差异块同步 `app.js`，不跳过检查、不缩减功能，也不改负载断言。该产物修正后的最新 Head 仍需完整 Actions 验收。
