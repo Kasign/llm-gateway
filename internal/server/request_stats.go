@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -40,7 +41,7 @@ func (s *Server) requestsStatsAPI(w http.ResponseWriter, r *http.Request) {
 	providerID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
 	stats, err := s.logs.AggregateRequestStats(r.Context(), from, to, providerID)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "database_error", err.Error())
+		writeRequestStatsDatabaseError(w, err)
 		return
 	}
 	stats.Range = rangeName
@@ -49,4 +50,10 @@ func (s *Server) requestsStatsAPI(w http.ResponseWriter, r *http.Request) {
 		stats.Tokens.Note = store.RequestStatsTokens{}.Note
 	}
 	writeJSON(w, stats)
+}
+
+// writeRequestStatsDatabaseError 保留服务端诊断信息，但不把数据库结构/驱动错误直接返回给 API 调用方。
+func writeRequestStatsDatabaseError(w http.ResponseWriter, err error) {
+	applog.Printf("request statistics query failed: %v", err)
+	jsonError(w, http.StatusInternalServerError, "database_error", "查询请求统计失败")
 }

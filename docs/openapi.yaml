@@ -290,8 +290,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ProviderMutation"
       responses:
-        "200":
-          description: 操作完成并返回当前 Provider 列表
+        "201":
+          description: Provider 创建成功
           content:
             application/json:
               schema:
@@ -356,12 +356,8 @@ paths:
         - valid admin web session
         - configured administrator credential
       responses:
-        "200":
-          description: 操作完成并返回当前 Provider 列表
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProviderList"
+        "204":
+          description: Provider 已删除；响应正文为空。
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":

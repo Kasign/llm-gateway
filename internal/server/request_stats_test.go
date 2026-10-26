@@ -1,6 +1,10 @@
 package server
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,5 +37,23 @@ func TestRequestStatsRange(t *testing.T) {
 				t.Fatalf("requestStatsRange(%q) = (%q, %v), want (%q, %v)", tc.input, name, got, tc.name, tc.want)
 			}
 		})
+	}
+}
+
+func TestWriteRequestStatsDatabaseErrorHidesInternalDetails(t *testing.T) {
+	internalErr := errors.New("unknown column provider_id in query")
+	recorder := httptest.NewRecorder()
+
+	writeRequestStatsDatabaseError(recorder, internalErr)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, internalErr.Error()) || strings.Contains(body, "unknown column") {
+		t.Fatalf("database diagnostic leaked to API response: %s", body)
+	}
+	if !strings.Contains(body, "查询请求统计失败") || !strings.Contains(body, "database_error") {
+		t.Fatalf("unexpected sanitized error response: %s", body)
 	}
 }

@@ -184,3 +184,9 @@
 - [Actions #211](https://github.com/Kasign/llm-gateway/actions/runs/40289139466) 的 Go 单测、MariaDB 审计积压、Gateway 负载与审计持久化、429/503、TCP/DNS/SSE/TLS 故障注入、race、性能基线、go vet、Go 构建以及 Provider 独立 Bundle 语法/一致性检查均通过。
 - 最终契约步骤仍失败，原因是 `web/static/dist/app.js` 与 CI 用当前 `web/js/entry.js` 构建出的 `/tmp/llm-gateway-admin.js` 内容不一致；差异定位在请求统计 UI 模块，属于主管理台部署产物未随源文件同步，而不是语法错误。
 - 保留 CI 中的字节级 `cmp` 检查。根据该次 CI 输出的实际单一差异块同步 `app.js`，不跳过检查、不缩减功能，也不改负载断言。该产物修正后的最新 Head 仍需完整 Actions 验收。
+
+## 2026-10-26 追加：统计 API 错误脱敏与 Provider OpenAPI 状态码
+
+- 统计聚合查询失败时原实现把底层数据库错误直接放入 HTTP 500 的 `message`，可能泄漏表/列名或数据库驱动细节。本批改为服务端记录具体错误、对调用方返回稳定的 `database_error` 和通用中文提示，并增加回归测试确认诊断文本不进入响应正文。
+- 核对实际 Handler 后修正 `docs/openapi.yaml`：`POST /api/admin/providers` 的成功状态为 201；`DELETE /api/admin/providers/{id}` 为 204 且无响应正文。没有更改业务状态码，也没有更改 Key 或 Provider 管理权限。
+- 该批为 API 错误边界与契约同步，待当前 Head 的完整 Actions 完成后再推送，避免与当前回归重叠。

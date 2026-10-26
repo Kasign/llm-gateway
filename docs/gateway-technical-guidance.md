@@ -734,3 +734,9 @@ OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、�
 一次请求创建记录时，`CreateRequest` 已直接写入已解析的 `model_requested`、`stream` 和候选 Provider。不要再对相同字段执行无意义的紧邻 UPDATE。Resolver 确定路由后，Provider ID 与实际上游模型通过一条关键审计更新一起持久化；这样可在在途记录查询中保持来源一致，同时减少单 Worker 队列的 SQL 次数。请求结束时，`FinishRequest` 仍是最终权威状态与指标更新。
 
 审计队列保持有界，非关键分析数据在队列压力下仍可丢弃并计入指标；关键生命周期任务不能因为冗余数据库更新被不必要地放大。Gateway 负载验收必须同时检查 HTTP 响应、持久化行数、终态、Provider ID 和实际模型字段，不能只看吞吐，也不能通过扩大队列或降低断言来掩盖审计丢失。
+
+## 管理统计接口的错误边界与 HTTP 状态码
+
+请求统计接口在 MariaDB 聚合查询失败时，服务端日志保留实际错误用于排障，但 API 只返回稳定的 `database_error` 错误码与通用提示，不直接暴露驱动错误、表/列信息或数据库诊断文本。新增管理 API 时应区分运维日志和调用方错误契约。
+
+Web Provider 管理端点的成功状态也需要与 Handler 一致：`POST /api/admin/providers` 创建成功返回 `201 Created`；`DELETE /api/admin/providers/{id}` 删除成功返回 `204 No Content`，不附带响应正文。OpenAPI 必须反映实际状态码与空正文语义，避免客户端依赖不存在的响应体。
