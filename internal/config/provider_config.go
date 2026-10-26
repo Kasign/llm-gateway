@@ -16,7 +16,8 @@ type OpenAICompatibleProviderConfig struct {
 	BaseURL             string `yaml:"base_url"`
 	APIKey              string `yaml:"api_key"`
 	APIKeyHeader        string `yaml:"api_key_header"`
-	DefaultModel        string `yaml:"default_model"`
+	DefaultModel        string            `yaml:"default_model"`
+	ModelMappings       map[string]string `yaml:"model_mappings"`
 	AllowInsecureHTTP   bool   `yaml:"allow_insecure_http"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
@@ -34,6 +35,20 @@ func (c *Config) validateProviderConfigs() error {
 		item.APIKey = strings.TrimSpace(item.APIKey)
 		item.APIKeyHeader = strings.TrimSpace(item.APIKeyHeader)
 		item.DefaultModel = strings.TrimSpace(item.DefaultModel)
+		if len(item.ModelMappings) > 128 {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): model_mappings exceeds 128 entries", i, item.ID)
+		}
+		mappings := make(map[string]string, len(item.ModelMappings))
+		for publicID, upstreamID := range item.ModelMappings {
+			publicID = strings.TrimSpace(publicID)
+			upstreamID = strings.TrimSpace(upstreamID)
+			if publicID == "" || upstreamID == "" || len(publicID) > 255 || len(upstreamID) > 255 ||
+				strings.ContainsAny(publicID+upstreamID, "\r\n") {
+				return fmt.Errorf("providers.openai_compatible[%d] (%s): model_mappings contains an invalid model ID", i, item.ID)
+			}
+			mappings[publicID] = upstreamID
+		}
+		item.ModelMappings = mappings
 		if !providerIDPattern.MatchString(item.ID) {
 			return fmt.Errorf("providers.openai_compatible[%d].id is invalid", i)
 		}

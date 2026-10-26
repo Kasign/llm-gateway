@@ -332,8 +332,11 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	// Web 登录项允许由独立环境变量覆盖；之后清掉可选登录字段里的未解析占位符。
+	// Web 登录与多 Provider 预置项由环境变量覆盖或补充。
 	applyAuthEnv(&c)
+	if err := applyProviderEnvironment(&c); err != nil {
+		return nil, err
+	}
 	clearUnresolvedPlaceholder(&c.Auth.AdminUsername)
 	clearUnresolvedPlaceholder(&c.Auth.AdminPassword)
 	clearUnresolvedPlaceholder(&c.Auth.AdminPasswordHash)
