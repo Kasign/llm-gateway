@@ -757,3 +757,10 @@ docs/                        中文架构、协议和运维文档
 - 规范显式标记为 partial；暂不为未逐项核对的历史管理 API 编造 Schema，也未加入会误导使用者的 Swagger UI 或“自动生成”声明。
 - README、API/配置/数据库契约及技术指导已增加入口和维护边界。当前仅同步文档，没有运行测试、构建或重新触发 CI。
 - 后续功能组：逐步补齐 API Key、模型下载/运行时、Benchmark、推理参数、登录/会话接口的字段与认证契约；所有路径盘点完成后，再增加 OpenAPI 差异检查。该工作项仍未完全关闭。
+
+
+## 2026-10-26 执行增量：OpenAPI 管理凭据与 API Key 契约
+
+- `docs/openapi.yaml` 扩展覆盖 `/api/admin/keys` 列表/创建、单 Key 更新/删除、启用/禁用/轮换，以及 `/api/auth/login`、`logout`、`me`、`credentials`。
+- 新增 `AdminSessionBearer` 与 `X-Admin-Key` 安全方案，并与推理入口的 Gateway Key、供应商上游 Key 明确区分；创建/轮换明文 Key 被标记为 writeOnly 并注明只显示一次。
+- 本次仍按已有代码核实端点，不宣称规范已覆盖全部管理 API；模型、下载、运行时、Benchmark 和推理参数接口仍是后续分阶段工作。未手动运行测试或重跑 Actions。

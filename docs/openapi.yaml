@@ -16,6 +16,10 @@ tags:
     description: 对 OpenAI-compatible 与 Anthropic Messages 入口的转发
   - name: Admin
     description: 管理员会话保护的只读统计和 Provider 管理
+  - name: APIKeys
+    description: 生成与治理调用方 Gateway API Key；明文只在创建或轮换时返回一次。
+  - name: Authentication
+    description: 控制台登录、会话注销和凭据更新。
 paths:
   /health:
     get:
@@ -209,6 +213,9 @@ paths:
   /api/requests/stats:
     get:
       tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
       summary: 查询请求、延迟和 Token 来源聚合统计
       description: |
         仅管理员可访问。range 仅接受 24h、7d、30d；窗口按 started_at 使用 [from,to) 计算。
@@ -249,6 +256,9 @@ paths:
   /api/admin/providers:
     get:
       tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
       summary: 列出部署托管与 Web 管理的 Provider
       description: 返回 Key 是否已配置和掩码，不返回明文或密文；部署配置 Provider 为只读。
       x-authentication-requirements:
@@ -265,6 +275,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
       summary: 创建 Web 管理的 Provider
       description: API Key 仅接受写入；响应不会回显密钥。ID 与部署配置冲突时拒绝覆盖。
       x-authentication-requirements:
@@ -303,6 +316,9 @@ paths:
           maxLength: 64
     put:
       tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
       summary: 更新 Web 管理的 Provider
       description: 编辑时 api_key 留空表示保留既有 Key；清除 Key 必须使用单独的 clear-key 操作。
       x-authentication-requirements:
@@ -331,6 +347,9 @@ paths:
           $ref: "#/components/responses/AdminError"
     delete:
       tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
       summary: 删除 Web 管理的 Provider
       description: 当前活动 Provider 不可删除；必须先切换活动上游。
       x-authentication-requirements:
@@ -359,6 +378,259 @@ paths:
     $ref: "#/components/pathItems/ProviderClearKey"
   /api/admin/providers/{id}/test:
     $ref: "#/components/pathItems/ProviderTest"
+
+  /api/admin/keys:
+    get:
+      tags: [APIKeys]
+      summary: 列出调用方 API Key 元数据
+      description: 不返回明文 Key 或存储哈希。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: Key 元数据列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+    post:
+      tags: [APIKeys]
+      summary: 创建调用方 API Key
+      description: 明文 Key 只在创建响应中返回一次；服务端持久化哈希，不提供再次查询明文的接口。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyMutation"
+      responses:
+        "200":
+          description: 创建成功，包含只显示一次的明文 Key 与元数据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyCreated"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/keys/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: 调用方 API Key 的数据库 ID。
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    put:
+      tags: [APIKeys]
+      summary: 更新调用方 API Key 的元数据与权限
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyMutation"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: { type: boolean, const: true }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+    delete:
+      tags: [APIKeys]
+      summary: 删除调用方 API Key
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "204":
+          description: 删除请求已执行，无响应正文
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/keys/{id}/disable:
+    parameters:
+      - $ref: "#/components/parameters/APIKeyID"
+    post:
+      tags: [APIKeys]
+      summary: 禁用调用方 API Key
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyStatusResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/keys/{id}/enable:
+    parameters:
+      - $ref: "#/components/parameters/APIKeyID"
+    post:
+      tags: [APIKeys]
+      summary: 启用调用方 API Key
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyStatusResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/keys/{id}/rotate:
+    parameters:
+      - $ref: "#/components/parameters/APIKeyID"
+    post:
+      tags: [APIKeys]
+      summary: 轮换调用方 API Key
+      description: 旧 Key 立即失效；新明文只在本次响应中返回一次。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 新 Key 明文（仅显示一次）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyRotated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: 使用用户名和密码创建管理会话
+      description: 登录请求按客户端 IP 限流；成功返回的会话 Token 通过后续请求的 Authorization Bearer 头传递，不使用 Cookie。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/AdminError"
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: 注销当前管理会话
+      description: 请求附带有效的管理会话 Bearer Token 时会撤销该 Token；接口保持幂等并始终返回 204。
+      security:
+        - AdminSessionBearer: []
+      responses:
+        "204":
+          description: 注销请求完成，无响应正文
+  /api/auth/me:
+    get:
+      tags: [Authentication]
+      summary: 查询当前管理会话用户
+      security:
+        - AdminSessionBearer: []
+      responses:
+        "200":
+          description: 当前会话用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/auth/credentials:
+    get:
+      tags: [Authentication]
+      summary: 查询控制台登录配置概要
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 当前用户名及配置存储位置概要
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialsView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AdminError"
+    put:
+      tags: [Authentication]
+      summary: 修改控制台登录用户名或密码
+      description: 必须使用 Web 登录会话，且提供当前密码；修改后会更新会话版本。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialsMutation"
+      responses:
+        "200":
+          description: 更新后的用户信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
+
 components:
   securitySchemes:
     GatewayBearer:
@@ -370,6 +642,15 @@ components:
       in: header
       name: X-API-Key
       description: 与 Authorization: Bearer 等价，适用于推理入口。
+    AdminSessionBearer:
+      type: http
+      scheme: bearer
+      description: 由 POST /api/auth/login 返回的管理会话 Token；与调用方推理 Key、上游 Provider Key 分离。
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: 部署配置的管理员凭据，供管理 API 自动化调用；不是调用方推理 Key。
   parameters:
     AgentPrefix:
       name: agentPrefix
@@ -432,6 +713,9 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
         summary: 启用 Web Provider
         x-authentication-requirements:
           - valid admin web session
@@ -454,6 +738,9 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
         summary: 停用 Web Provider
         description: 当前活动 Provider 不可停用。
         x-authentication-requirements:
@@ -477,6 +764,9 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
         summary: 显式清除 Web Provider 的 API Key
         description: 当前活动 Provider 不可清除 Key；调用前应先切换活动 Provider。
         x-authentication-requirements:
@@ -500,6 +790,9 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
         summary: 测试 Provider 连接
         description: 使用模型列表端点进行轻量测试，不发起计费推理；结果应为脱敏诊断信息。
         x-authentication-requirements:
@@ -701,7 +994,155 @@ components:
             $ref: "#/components/schemas/ProviderView"
         encryption_available:
           type: boolean
+    APIKeyMetadata:
+      type: object
+      required: [id, name, prefix, status, rpm, allowed_models]
+      description: 不包含明文 Key 与哈希的调用方 Key 元数据。
+      properties:
+        id: { type: integer, format: int64, minimum: 1 }
+        name: { type: string }
+        prefix: { type: string }
+        status:
+          type: string
+          enum: [active, disabled, expired]
+        rpm:
+          type: integer
+          minimum: 0
+          description: 服务端将非正值规范化为默认值 60。
+        allowed_models:
+          type: array
+          items: { type: string }
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+      additionalProperties: false
+    APIKeyList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIKeyMetadata"
+    APIKeyMutation:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        rpm:
+          type: integer
+          minimum: 0
+          description: 非正值使用默认值 60。
+        allowed_models:
+          type: array
+          items: { type: string }
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: null 表示不设置过期时间。
+      additionalProperties: false
+    APIKeyCreated:
+      type: object
+      required: [key, api_key]
+      properties:
+        key:
+          type: string
+          writeOnly: true
+          description: 仅本次创建响应返回的明文 Key，请立即安全保存。
+        api_key:
+          $ref: "#/components/schemas/APIKeyMetadata"
+    APIKeyRotated:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+          writeOnly: true
+          description: 新明文 Key，仅在轮换响应中出现一次。
+    APIKeyStatusResult:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, disabled]
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password, writeOnly: true }
+      additionalProperties: false
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          writeOnly: true
+          description: 管理会话 Token，后续使用 Authorization: Bearer 传递。
+        user:
+          type: object
+          required: [username]
+          properties:
+            username: { type: string }
+    SessionUser:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: object
+          required: [username]
+          properties:
+            username: { type: string }
+    CredentialsView:
+      type: object
+      required: [username, stored_in_db, can_change_via]
+      properties:
+        username: { type: string }
+        stored_in_db: { type: boolean }
+        can_change_via:
+          type: string
+          const: web
+    CredentialsMutation:
+      type: object
+      required: [current_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+          writeOnly: true
+        new_username:
+          type: string
+          description: 留空表示不修改用户名。
+        new_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: 留空表示不修改密码。
+      additionalProperties: false
+
   parameters:
+    APIKeyID:
+      name: id
+      in: path
+      required: true
+      description: 调用方 API Key 数据库 ID。
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
     ProviderID:
       name: id
       in: path

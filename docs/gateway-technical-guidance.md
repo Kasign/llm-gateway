@@ -698,3 +698,17 @@ Token 来源必须与数值分开判断。网关把 `analysis_json.throughput.so
 扩展契约时以路由注册、Handler 方法检查、实际 JSON 字段和认证辅助函数为依据；禁止仅根据前端调用或历史说明推断 API 行为。一个路径若支持多种协议（例如 OpenAI Chat、Responses 和 Anthropic Messages），需保留各自请求体与错误信封的边界。流式响应使用 `text/event-stream`；客户端收到响应头后，HTTP 状态已不可逆，契约必须说明 SSE 错误事件而非假定所有失败都能改成 JSON 错误。
 
 OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、推理参数和登录接口的请求/响应模式，再考虑自动检查。只有字段经代码核实且变更同步到规范后，才将相应端点标记为完整；当前不将该文档描述为自动生成或已与所有 Handler 校验一致。
+
+
+## 调用方 API Key 与管理员凭据的隔离
+
+管理台的调用方 Key 管理端点现在进入机器可读契约。设计上有三个独立凭据域：
+
+| 凭据 | 使用位置 | 返回/持久化边界 |
+| --- | --- | --- |
+| 调用方 Gateway API Key（`sk-llm-*`） | `/v1/*` 与 Agent 推理入口 | 数据库只保存 SHA-256 摘要；创建和轮换时明文仅返回一次，元数据列表不含摘要。 |
+| Web 管理会话 Token | `/api/*` 管理接口 | 通过 `Authorization: Bearer` 传递，服务端检查 Redis 会话和登录凭据版本；不是 Cookie。 |
+| `X-Admin-Key` | 管理 API 的部署自动化调用 | 来自部署配置；不能用调用方 Key 或上游 Provider Key 替代。 |
+| 上游 Provider API Key | Gateway 发往远程 Provider | 由服务端 Provider 配置读取；Web Provider 密文不回显，调用方输入的 Key 不作为上游凭据透传。 |
+
+创建/轮换调用方 Key 的返回正文包含明文，管理台应只在此时提示用户安全保存，不能将完整返回写入普通日志、审计详情、分析事件或浏览器持久化存储。机器可读规范将对应字段标记为 `writeOnly`，表示它只适用于响应中的一次性领取，而不是后续读取凭据。

@@ -205,3 +205,14 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 推理端点使用调用方 Gateway API Key（`Authorization: Bearer` 或 `X-API-Key`）；管理端点要求有效的管理员网页登录态或部署配置的管理员凭据。不要把调用方 API Key、远程 Provider Key 与管理员凭据混为一谈。Provider 管理 API 的返回对象只包含 Key 是否已配置及掩码，不返回明文或密文。
 
 本地慢模型还受多个独立超时层控制：`llama.request_timeout_seconds: 0` 关闭 Gateway 本地 HTTP Client 的整体请求期限；`warm_start` 在请求等待首 Token 时发送 SSE 保活；OpenResty 的 `proxy_read_timeout` / `proxy_send_timeout` 与 Codex、Cursor 等客户端期限需独立配置。关闭 Gateway 整体时限不会屏蔽客户端断连或管理端取消。
+
+
+## 7. API Key 与管理会话契约
+
+`docs/openapi.yaml` 已增加调用方 API Key CRUD、启用/禁用/轮换，以及控制台登录、会话查询、注销与凭据更新端点。
+
+- 调用方 Gateway Key 用于访问 `/v1/*`；它与管理员会话 Token、`X-Admin-Key` 和远程 Provider 的供应商 Key 不同。管理员请求支持 Bearer 管理会话或 `X-Admin-Key`；修改控制台用户名/密码只允许 Web 登录会话。
+- `POST /api/admin/keys` 和 `POST /api/admin/keys/{id}/rotate` 会返回一次明文调用方 Key。数据库仅保存摘要，列表和元数据响应不含明文或哈希；轮换后旧 Key 立即失效。
+- 管理会话由 `POST /api/auth/login` 建立，Token 在后续请求通过 `Authorization: Bearer` 发送，不是浏览器 Cookie。登录按客户端 IP 进行限流；Web 会话的服务端有效性还依赖 Redis 会话记录及登录凭据版本。
+- `PUT /api/auth/credentials` 需要当前密码；新用户名或密码留空表示保留当前值。修改后会更新凭据版本并更新当前会话版本，其他旧版本会话不再有效。
+- 规范对以上接口记录了实际响应结构与状态码，但管理端点的错误详情仍共用宽泛的安全错误 Schema。下一步需逐个梳理模型、下载、运行时、Benchmark 和推理参数管理 API，再考虑自动契约差异检查。

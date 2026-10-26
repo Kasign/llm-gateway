@@ -40,7 +40,7 @@
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 活动 Provider 的删除、停用、清 Key 与保存时将 `enabled` 改为 false 均有后端保护代码；现有回归测试覆盖保护函数，但最新 PR Head 的 Actions 在单元测试阶段失败，尚未视为验收通过。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | `docs/openapi.yaml` 首版已覆盖健康检查、推理入口、请求统计与 Web Provider 管理；范围明确为 partial，历史管理 API 与自动差异检查仍缺失。 | 按功能层逐步补齐模型/下载/运行时、API Key、Benchmark、推理参数、登录/会话接口；每个端点依照 Handler 和实际响应核对，不猜字段。 | OpenAPI 覆盖全部公开/管理 API，认证与错误模式核实完成，且有自动差异检查或契约检查。 |
+| GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | `docs/openapi.yaml` 已覆盖健康检查、推理入口、调用方 API Key、登录会话、请求统计和 Web Provider 管理；仍明确标记 partial，尚缺模型/下载/运行时、Benchmark、推理参数等历史端点与自动差异检查。 | 按功能层继续补齐未覆盖端点；每个端点依照 Handler、权限与实际响应核对，不猜字段。 | OpenAPI 覆盖全部公开/管理 API，认证与错误模式核实完成，且有自动差异或契约检查。 |
 
 ## 本轮实施规则
 
@@ -134,3 +134,10 @@
 - PR #7 当前 Head 对应自动 Actions 运行 [#40284057729](https://github.com/Kasign/llm-gateway/actions/runs/40284057729) 在单元测试步骤失败，之后的集成、race、静态检查、构建和前端 bundle 步骤被跳过。该状态不是本轮重新运行测试产生的；后续统一测试时需要一起复核。
 - 本轮未触发额外测试、构建或 Actions 重跑。已核对的慢模型配置能力已有实现：本地 `request_timeout_seconds=0` 不设 Client 整体期限，`warm_start` 提供 SSE 保活，OpenResty 示例将代理读写空闲超时设为 86400 秒；客户端自身期限仍由调用方控制。
 - 新增 `docs/openapi.yaml` 首版。其覆盖范围是有意限定的，不意味着所有管理端点都已有机器可读契约。Web Provider 的活动项禁用/清 Key 保护已能在当前源码中看到；在最新完整 CI 通过前继续将它列为待验收项。
+
+
+## 2026-10-26 追加：OpenAPI 管理凭据与调用方 Key 扩展
+
+- OpenAPI 新增 API Key 列表/创建/编辑/删除/启用/禁用/轮换，以及管理登录、登出、当前会话查询和凭据更新。
+- 文档明确创建/轮换时明文调用方 Key 只显示一次，后续列表只有元数据；管理会话 Token、`X-Admin-Key`、调用方 Gateway Key 与上游 Provider Key 是不同凭据域。
+- 以上是当前源码契约盘点，不等于自动 schema 差异校验。尚未补齐模型下载、运行时、Benchmark、推理参数等路由；未手动运行测试或重跑 CI。

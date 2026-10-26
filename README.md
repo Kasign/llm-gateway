@@ -12,7 +12,7 @@
 - Web：Dashboard、模型下载/管理、API Key、请求查询/详情、Benchmark、系统状态。
 - 管理台全局状态（单容器 AdminState、bootstrap/lite）：见 **[docs/admin-state.md](docs/admin-state.md)**。
 - API、Provider/Agent 配置、数据库迁移与关键响应契约：见 **[docs/api-config-db-contracts.md](docs/api-config-db-contracts.md)**。
-- 机器可读 API 契约（首版覆盖推理入口、请求统计和 Web Provider 管理，尚非全量）：见 **[docs/openapi.yaml](docs/openapi.yaml)**。
+- 机器可读 API 契约（覆盖推理入口、调用方 API Key、登录会话、请求统计和 Web Provider 管理，仍为分阶段覆盖）：见 **[docs/openapi.yaml](docs/openapi.yaml)**。
 - Redis：RPM 限流、下载进度、瞬态状态。
 - MariaDB：模型、API Key、请求日志、可选 payload 持久化。
 
