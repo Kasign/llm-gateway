@@ -7,7 +7,7 @@
 - `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
 - PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，状态 Open / 未合并。
 - PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限](https://github.com/Kasign/llm-gateway/pull/7)）当前分支基线 `6b82d47ddeb4c7ff19a430749caa530eb95a5cab`，最新已通过 [Actions #159](https://github.com/Kasign/llm-gateway/actions/runs/39944573967)；PR 仍依赖 PR #5，尚未合并。
+- PR #7（[远程 Provider 并发上限](https://github.com/Kasign/llm-gateway/pull/7)）当前 Head `8858da0e2833d7ed7e2ae1293e24e561e141578f`，最新完整 CI 为 [Actions #164](https://github.com/Kasign/llm-gateway/actions/runs/40258215101)，29 个步骤全部成功；PR 仍依赖 PR #5，尚未合并。
 - #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
 
 ## P1：可靠性与可观测性
@@ -15,12 +15,12 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-REL-001 | DNS NXDOMAIN/解析超时此前只覆盖 Provider 层错误映射；现已补齐 Gateway Handler + Redis + MariaDB 专项集成测试。 | Actions #163 全量验收通过 | 使用注入 Resolver 返回确定性 NXDOMAIN/timeout，验证 Gateway 安全响应与审计行的 Gateway 状态/NULL 上游状态；不依赖公网 DNS。 | NXDOMAIN=502、Resolver timeout=504；两条审计记录 `upstream_http_status IS NULL`（2/2）；不泄漏主机名、Resolver 诊断或凭据；Actions #163 全量 CI 通过。 |
-| GW-REL-002 | 上游已提交 HTTP 200 和部分 SSE 后发生 TCP RST 的行为，原先缺少完整 MariaDB 集成测试。 | 已实现，待新 Head CI 验收 | 在真实 Gateway Handler + Redis + MariaDB 中发送未完成 Content-Length 的部分 SSE 后触发 TCP RST；检验已提交状态不可回退、错误事件和审计记录的一致性。 | 客户端 HTTP=200、保留部分 SSE 并追加 `event: error`；审计 `http_status=200`、`upstream_http_status=200`、`status=error`、`error_code=provider_upstream`；错误消息不泄漏凭据/底层网络诊断；race 与完整 CI 通过。 |
+| GW-REL-002 | 上游已提交 HTTP 200 和部分 SSE 后发生 TCP RST 的行为，原先缺少完整 MariaDB 集成测试。 | Actions #164 全量验收通过 | 在 Gateway Handler + Redis + MariaDB 集成测试中，上游发送 200 与部分 SSE 后触发 TCP RST；验证已提交状态不可逆及审计一致性。 | 客户端 HTTP=200、保留部分 SSE 并追加安全 `event: error`；审计 `http_status=200`、`upstream_http_status=200`、`status=error`、`error_code=provider_upstream`；无凭据/底层网络诊断泄漏；Actions #164 全量 CI 通过。真实供应商 E2E 仍未覆盖。 |
 | GW-REL-003 | TCP 拒绝后同端口恢复已在 PR #5 Actions #155/#156 通过，但改动尚未合入 `dev`。 | 等待 PR #5 合并 | 保持 PR #5 独立；不要重复实现或与无关功能混合。 | PR #5 合并后确认 `dev` 包含该提交，且后续 `dev` 完整 CI 通过。 |
 | GW-OBS-001 | 审计队列已有有界容量、关键任务预留及 dropped 计数。 | 实现完成；Actions #162（Head `dfbc2955`）全量通过 | 原子计数与低成本快照暴露队列深度、容量、成功/失败、按原因丢弃、累计排队时延/最大排队时延和累计 drop rate；管理员 GET API 不查询数据库，不返回正文、Key 或原始错误。 | Actions #162：单测、MariaDB 审计积压、Gateway 负载/故障注入/TCP 恢复、race、性能基线、go vet、Go 构建与前端 bundle 均通过。 |
 | GW-OBS-002 | 请求日志 / Payload 的数据库保留期限、自动清理策略和清理任务运行指标还需要明确。 | 待设计 | 先盘点当前迁移、Payload 开关与部署数据存储，再定 retention 配置、清理批次、索引及避免长事务的策略；不得未授权删除现有数据。 | 明确默认保留期、配置兼容、清理边界和可恢复性；覆盖到期/未到期、分页批次与并发写入测试。 |
 | GW-OBS-003 | 管理台轮询对 DB/CPU/推理热路径的影响仍需实测；短期缓存不等于完整负载证明。 | 待基准 | 对照无轮询、常态轮询和高频轮询，测量 DB 查询量、延迟分位数、CPU 与缓存命中率。 | 同一 Go 版本和相近 Runner 下重复采样；定义预算与刷新频率；不凭单次抖动设置阈值。 |
-| GW-NET-001 | TLS 握手中断、连接池长时间陈旧、跨网络 DNS/路由恢复和公网代理链路没有 CI 等价覆盖。 | 依赖专项环境 | 先写确定性本地 TLS/RST 测试，再规划用户控制的公网验收；不把 loopback 测试命名为供应商 E2E。 | 每种网络故障类型有独立测试定义和结果；公网项附环境、时间与安全脱敏日志。 |
+| GW-NET-001 | TLS 握手中断、连接池长时间陈旧、跨网络 DNS/路由恢复和公网代理链路没有 CI 等价覆盖。 | 下一项：确定性本地 TLS 握手中断测试；其余依赖专项环境 | 先补本地 TLS 握手阶段的中断测试，再测连接池陈旧连接和重连；公网反代/路由由用户可控环境单独验收，不把 loopback 测试称作供应商 E2E。 | 本地 TLS 中断被稳定映射成安全 Gateway 错误，且未收到 HTTP 响应时上游状态为空；其余网络类型有独立结果；公网项附环境、时间与脱敏日志。 |
 
 ## P1：运行治理
 
@@ -36,13 +36,13 @@
 |---|---|---|---|---|
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
-| GW-PROV-UI-001 | Web 管理台尚不能完整新增/编辑多个远程上游 Provider，且无法通过 `.env` 统一预置多家服务配置。 | 已纳入计划，尚未实施 | 管理页支持新增、编辑、启用/停用、删除、连通性测试与模型映射；支持 `.env` 预置；定义环境配置、数据库持久化和 Web 修改之间的优先级/重启语义；密钥写入后只返回掩码与配置状态，不回显明文。 | 配置优先级、密钥保护、URL/SSRF 校验、连通性测试、启停与删除、配置重载/回滚和多 Provider 隔离均有自动化测试；UI/后端契约及完整 CI 通过。 |
+| GW-PROV-UI-001 | Web 管理台尚不能完整新增/编辑多个远程上游 Provider，且无法通过 `.env` 统一预置多家服务配置。 | 已纳入阶段 4 计划，设计已细化，尚未实施 | 环境预置同时兼容现有 YAML + `${ENV}` 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 前缀变量；环境项只读、Web 项入库并动态生效；来源冲突拒绝覆盖；Web Key 加密持久化且 API 永不回显明文。UI 支持增删改/启停/测试连接/默认模型及映射。 | 配置来源、重复 ID、AES-GCM Key 存储、掩码/保留/清除、URL/SSRF、模型列表测试、活动 Provider 删除保护、动态 Registry 更新/回滚、重启恢复及多 Provider 隔离都有自动化测试；UI/后端契约、bundle 和完整 CI 通过。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
 | GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | 待规划 | 先定稳定的公开/管理 API、鉴权、请求/响应及错误模式，再逐模块维护契约。 | OpenAPI 与 Handler、前端客户端及 CI 契约测试一致。 |
 
 ## 本轮实施规则
 
-1. `GW-OBS-001` 已由 Actions #162、`GW-REL-001` 已由 Actions #163 验收通过；当前推进 `GW-REL-002`（响应已提交后上游断流与审计语义），随后优先处理真实供应商 E2E 的配置前置条件，再将 `GW-PROV-UI-001` 作为独立功能组实现。
+1. `GW-OBS-001`（Actions #162）、`GW-REL-001`（Actions #163）、`GW-REL-002`（Actions #164）均已验收。下一项先补 `GW-NET-001` 的确定性本地 TLS 握手中断测试；之后将 `GW-PROV-UI-001` 作为独立功能组实现。真实供应商 E2E 需等安全凭据与预算条件明确后再做。
 2. 每次开发前核实 HEAD、PR 和 CI；不要依据过期会话状态修改远程代码。
 3. 按完整功能组提交中文 Conventional Commit；CI 失败必须查看日志并修复，不降低断言。
 4. 真实 E2E 仅在供应商凭据与预算明确可用时执行；Mock CI 不能替代真实端点验收。
@@ -53,8 +53,8 @@
 
 - PR #6（基于旧 `dev` 的第一版）由 Actions #157 暴露编译依赖：旧 Core 没有 `UpstreamStatus` 字段。PR #6 已关闭、未合并；没有删除断言。
 - 当前 PR #7 基于 PR #5 的已通过 Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232` 堆叠，最终功能 Head `dd54cf576ba4a80e7c5d1f2dd0bb3be95a776b4b` 在 [Actions #158](https://github.com/Kasign/llm-gateway/actions/runs/39943828510) 全量通过。
-- 2026-10-26 基线复核：PR #5、PR #7 仍为 Open/未合并；PR #7 最新完整 CI 是 Actions #162（Head `dfbc2955`，success）。本次新增 DNS 专项后需以新 Head 重新验收。
+- 2026-10-26 基线复核：PR #5、PR #7 仍为 Open/未合并；PR #7 当前 Head `8858da0e2833d7ed7e2ae1293e24e561e141578f` 的 Actions #164（运行 ID `40258215101`）完整通过，涵盖 DNS、TLS 以外的 TCP 故障恢复、已提交 SSE 中断、审计积压、负载、race、静态检查、Go 构建与前端 bundle。
 - `GW-OBS-001` 已经 Actions #162 全量通过：审计快照与管理员只读 API、MariaDB 审计积压、race、go vet、Go build、前端 bundle 检查均成功。
 - `GW-REL-001` 已由 Actions #163 全量验收：NXDOMAIN 返回 502、解析超时返回 504，MariaDB 两条记录的 `upstream_http_status` 均为 NULL，响应与审计元数据均未泄漏主机名/诊断/凭据。
-- `GW-REL-002` 当前新增真实 Gateway 流式中断测试：上游发出 200 和部分 SSE 后 TCP RST，断言客户端 HTTP 200 + `event: error`，审计为 `http_status=200/upstream_http_status=200/status=error/error_code=provider_upstream`；等待新 Head CI。
+- `GW-REL-002` 由 Actions #164 全量验收通过：上游发出 200 和部分 SSE 后 TCP RST，客户端保留 HTTP 200 并追加安全 `event: error`，MariaDB 审计为 `http_status=200/upstream_http_status=200/status=error/error_code=provider_upstream`。
 - `GW-PROV-UI-001` 已纳入计划但尚未实施：Web 多 Provider 增删改/启停/连通性测试/模型映射和 `.env` 预置，需先定义配置优先级、热更新/重启语义与凭据不回显规则。
