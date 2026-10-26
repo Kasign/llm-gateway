@@ -275,6 +275,7 @@ func (s *Server) changeWebProvider(ctx context.Context,id string,input *provider
 	old,exists:=s.webProviders[id]
 	if !exists&&action!="save"{return providerErr(404,"provider_not_found","Web Provider 不存在")}
 	active:=strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
+	if action=="save" && !exists && active==id { return providerErr(409,"provider_would_activate","当前上游配置仍指向该 ID；请先切换到其他后端，再创建同 ID Provider，避免新建即激活") }
 	if (action=="delete"||action=="disable")&&active==id{return providerErr(409,"active_provider","请先切换到其他活动 Provider，再停用或删除当前 Provider")}
 	previous:=cloneManagedProviderMap(s.webProviders);next:=cloneManagedProviderMap(s.webProviders);var row managedProvider
 	switch action {

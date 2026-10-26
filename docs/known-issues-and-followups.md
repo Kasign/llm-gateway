@@ -68,3 +68,5 @@
 - 已增加 Web Provider 管理 API 与 AES-GCM 密文持久化，不回显 Key；配置来源冲突拒绝覆盖；编辑空 Key 保留旧值，显式清除为单独动作；停用/删除活动 Provider 返回 409。
 - 已加入多 Provider 环境前缀配置、模型 ID 映射和安全连接测试；`/v1/models` 返回活动 Provider 别名，实际推理走映射后的上游 ID。
 - 尚未关闭：新增安全/管理 API 测试、前端 CRUD 页面、独立部署 bundle、Compose 环境透传、最新 CI 全量通过与配置回滚/并发边界测试。
+
+- 边界补充：创建 Provider 时若当前活动上游仍指向该 ID，将返回 409；模型别名仅对显式映射项生效，未知模型保持原默认上游行为。环境变量示例提供可选 `MODEL_MAPPINGS_JSON`，Compose 对 DeepSeek/OpenAI 显式透传。

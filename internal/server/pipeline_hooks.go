@@ -74,7 +74,7 @@ func choiceFromTarget(t proxyModelTarget) core.ModelChoice {
 	return core.ModelChoice{ProviderID: t.ProviderID, Hint: t.Hint, ModelKey: key, UpstreamID: t.UpstreamID}
 }
 
-// resolveInference 决定真正使用的模型。客户端 JSON 里的 model（st.ClientModel）只记日志，不参与选择。
+// resolveInference 决定真正使用的模型。远程 Provider 仅接受已配置的公开模型别名；其他客户端 model 值仍回退到网关默认模型。
 func (s *Server) resolveInference(ctx context.Context, st core.State) (core.ModelChoice, error) {
 	active := s.effectiveUpstream()
 	if name := strings.TrimSpace(st.ServiceModel); name != "" {

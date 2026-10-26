@@ -621,3 +621,6 @@ docs/                        中文架构、协议和运维文档
 
 - 后端已有基础实现：Registry 原子替换/注销、Web Provider 持久化、AES-256-GCM 密钥加密、部署来源冲突保护、多 Provider 环境预置、可选 `model_mappings` 与连接测试接口。
 - 当前仍需完成的验收：后端所有 CI 项目确认通过、Web Provider 管理界面与独立部署 bundle、env 示例及 Compose 显式变量透传、完整安全与 API 测试。真实供应商 E2E 未执行，不得声明通过。
+
+
+- 模型路由补充：远程 Provider 只有明确配置的公开别名才覆盖客户端 model；未知 model 仍回退管理台默认值，保留既有兼容。创建新 Provider 若活动上游仍指向同 ID 则拒绝，避免残留上游设置造成创建后隐式激活。
