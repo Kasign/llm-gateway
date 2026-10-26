@@ -65,6 +65,18 @@ type OpenAICompatibleProvider struct {
 }
 
 func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleProvider, error) {
+	return NewOpenAICompatibleProviderWithResolver(cfg, net.DefaultResolver)
+}
+
+// RemoteIPResolver 是 Provider 出站连接使用的 DNS 解析边界；生产默认使用系统 Resolver。
+// 注入能力供可重复的 DNS 故障测试与受控运行环境使用，不通过外部配置暴露任意网络访问能力。
+type RemoteIPResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+// NewOpenAICompatibleProviderWithResolver 使用指定 Resolver 构造 Provider。
+// resolver 为 nil 时回退系统 Resolver；所有解析结果仍经过原有 SSRF/特殊网段校验。
+func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolver RemoteIPResolver) (*OpenAICompatibleProvider, error) {
 	id := normalizeID(cfg.ID)
 	if id == "" || len(id) > 64 {
 		return nil, errors.New("provider ID is required and must be at most 64 characters")
@@ -134,7 +146,7 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) (*OpenAICompatibleP
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		maxResponseBytes:    maxResponseBytes,
 		requestSlots:        make(chan struct{}, maxConcurrentRequests),
-		client:              newRestrictedHTTPClient(cfg.AllowPrivateNetwork),
+		client:              newRestrictedHTTPClientWithResolver(cfg.AllowPrivateNetwork, resolver),
 	}, nil
 }
 
@@ -874,16 +886,12 @@ func isRedirectStatus(status int) bool {
 	return status >= 300 && status < 400
 }
 
-type remoteIPResolver interface {
-	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
-}
-
 func newRestrictedHTTPClient(allowPrivateNetwork bool) *http.Client {
 	return newRestrictedHTTPClientWithResolver(allowPrivateNetwork, net.DefaultResolver)
 }
 
 // newRestrictedHTTPClientWithResolver 仅用于把 DNS 故障变为可重复测试；正常 Provider 始终使用系统 Resolver。
-func newRestrictedHTTPClientWithResolver(allowPrivateNetwork bool, resolver remoteIPResolver) *http.Client {
+func newRestrictedHTTPClientWithResolver(allowPrivateNetwork bool, resolver RemoteIPResolver) *http.Client {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}

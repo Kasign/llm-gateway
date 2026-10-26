@@ -792,13 +792,12 @@ func TestOpenAICompatibleProviderMapsAndSanitizesDNSFailures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			p, err := NewOpenAICompatibleProviderWithResolver(OpenAICompatibleConfig{
 				ID: "dns-test", BaseURL: "https://provider.example/v1",
-			})
+			}, fixedRemoteIPResolver{err: tc.dnsError})
 			if err != nil {
 				t.Fatal(err)
 			}
-			p.client = newRestrictedHTTPClientWithResolver(false, fixedRemoteIPResolver{err: tc.dnsError})
 
 			writer := httptest.NewRecorder()
 			result, forwardErr := p.Forward(context.Background(), InferenceCall{

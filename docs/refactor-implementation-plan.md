@@ -142,12 +142,12 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最近一次已通过完整 CI 的功能组：PR #7 远程 Provider 并发上限（Actions #159，26 个步骤成功）。上一次验收使用本机 loopback Mock、CI Redis/MariaDB，并非真实供应商 E2E。当前继续增加审计队列只读聚合指标；该提交的最新 Head 必须重新运行 race、go vet 与完整 CI。
+> 最近一次已通过完整 CI 的功能组：审计队列只读聚合指标（Head `dfbc2955`，Actions #162 全量通过）。该流水线覆盖 Gateway + loopback Mock + Redis/MariaDB 的综合负载、429/503、TCP 拒绝与恢复、race、go vet、构建和前端 bundle。真实供应商 E2E 仍未执行。本次追加可控 DNS 失败与审计 NULL 状态集成测试，待新 Head CI 验收。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成请求/响应留存边界、审计队列满载/排空、60 秒 Gateway Handler+Redis+MariaDB 合成负载，以及 75ms 上游延迟与 429/503 注入。新增实际 TCP 连接拒绝与同端口恢复测试，要求 MariaDB 将 30 条 502/无上游状态与恢复后 30 条 200 正确区分；当前待 CI 验收。真实公网故障恢复与生产观测仍待。 |
+| 阶段 1：日志可靠性 | 进行中 | 99% | 已完成审计队列满载/排空、60 秒 Gateway Handler+Redis+MariaDB 合成负载、429/503 注入和 TCP 拒绝/同端口恢复；Actions #162 全量通过，审计的 Gateway/上游状态区分得到验证。本次加入 DNS NXDOMAIN=502、解析超时=504 且 `upstream_http_status IS NULL` 的 Handler+MariaDB 集成测试，待新 Head CI 验收。真实公网故障恢复与生产观测仍待。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
@@ -587,6 +587,7 @@ docs/                        中文架构、协议和运维文档
 
 ### 2026-10-26 执行记录：审计指标与多 Provider Web 配置规划
 
-- 审计指标实现范围：`internal/audit/writer.go` 增加低成本原子计数，`internal/audit/metrics.go` 提供内存快照；管理端 `GET /api/admin/audit/metrics` 沿用现有管理员鉴权，仅返回聚合数值且不查数据库。是否验收通过以新提交 Head 的 GitHub Actions 为准。
-- 新功能计划 `GW-PROV-UI-001`：管理台允许新增/编辑/启用/停用/删除/测试远程 Provider，同时支持通过 `.env` 在部署时预置服务。实现前先定义环境变量与数据库配置的优先级、配置来源标识、热更新/重启行为、密钥不回显与持久化保护、连接测试与 URL 安全校验。
-- PR #5 和 PR #7 继续保持未合并；并发上限分支依赖 PR #5。不能把本次基于 Mock 的 CI 说成真实供应商 E2E。
+- 审计指标 `internal/audit/metrics.go`、`GET /api/admin/audit/metrics` 已在 Head `dfbc2955` 的 [Actions #162](https://github.com/Kasign/llm-gateway/actions/runs/40256844693) 全量通过，包括单元测试、MariaDB 队列测试、Gateway 故障注入、race、go vet、Go 构建和前端 bundle 校验。
+- 新功能计划 `GW-PROV-UI-001`：管理台允许新增/编辑/启用/停用/删除/测试远程 Provider，同时支持通过 `.env` 在部署时预置服务。实现前先定义环境变量与数据库配置的优先级、配置来源标识、热更新/重启行为、密钥不回显与持久化保护、连接测试与 URL 安全校验；此功能目前尚未实施。
+- 本次继续 `GW-REL-001`：通过注入 Resolver 在真实 Gateway Handler + Redis + MariaDB 里覆盖 NXDOMAIN/解析超时，精确断言 Gateway 502/504、上游状态列保持 NULL、响应与审计元数据不泄漏 DNS 诊断/凭据。新 Head 的 CI 结果尚待执行。
+- PR #5 和 PR #7 继续保持未合并；并发上限分支依赖 PR #5。不能把 Mock/受控 Resolver 测试说成真实供应商 E2E。

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,6 +28,7 @@ import (
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/live"
 	"github.com/whl/llm-gateway/internal/model"
+	gatewayprovider "github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/ratelimit"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
@@ -35,9 +37,46 @@ import (
 // TestGatewayConcurrentRequestLoadWithMariaDBAudit measures latency/throughput
 // across the real HTTP handler, Redis limiter, Provider adapter, and asynchronous MariaDB audit writer.
 // It is a reproducible integration load sample, not a production-capacity or real-provider benchmark.
+type gatewayDNSFailureResolver struct {
+	err error
+}
+
+func (r gatewayDNSFailureResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, r.err
+}
+
 func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) != "1" {
-		t.Skip("set GATEWAY_LOAD_TEST=1 to run the timed Gateway request-load sample")
+	dnsFailureTest := strings.TrimSpace(os.Getenv("GATEWAY_DNS_FAILURE_TEST")) == "1"
+	loadTest := strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) == "1"
+	if !dnsFailureTest && !loadTest {
+		t.Skip("set GATEWAY_LOAD_TEST=1 or GATEWAY_DNS_FAILURE_TEST=1 to run the Gateway integration test")
+	}
+
+	dnsFailureCases := []struct {
+		providerID  string
+		pathPrefix  string
+		diagnostic  string
+		wantStatus  int
+		resolverErr *net.DNSError
+	}{
+		{
+			providerID: "dns-nxdomain",
+			pathPrefix: "/dns-nxdomain",
+			diagnostic: "NXDOMAIN_PRIVATE_DIAGNOSTIC",
+			wantStatus: http.StatusBadGateway,
+			resolverErr: &net.DNSError{
+				Err: "NXDOMAIN_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsNotFound: true,
+			},
+		},
+		{
+			providerID: "dns-timeout",
+			pathPrefix: "/dns-timeout",
+			diagnostic: "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC",
+			wantStatus: http.StatusGatewayTimeout,
+			resolverErr: &net.DNSError{
+				Err: "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", Name: "provider.example", IsTimeout: true,
+			},
+		},
 	}
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
 	redisAddr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
@@ -172,22 +211,52 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	cfg.Llama.RequestTimeout = 60
 	loggingDisabled := false
 	cfg.Logging.Enabled = &loggingDisabled
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "loadtest", Enabled: true, BaseURL: upstream.URL + "/v1",
-		DefaultModel: "integration-model", APIKey: "test-upstream-key",
-		APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
-	}}
-	cfg.Agents = []config.AgentRouteConfig{{
-		ID: "loadtest-agent", Enabled: true, PathPrefix: "/loadtest",
-		ProviderID: "loadtest", DefaultModel: "integration-model",
-	}}
+	var injectedProviders *gatewayprovider.Registry
+	if dnsFailureTest {
+		for _, tc := range dnsFailureCases {
+			cfg.Providers.OpenAICompatible = append(cfg.Providers.OpenAICompatible, config.OpenAICompatibleProviderConfig{
+				ID: tc.providerID, Enabled: true, BaseURL: "https://provider.example/v1",
+				DefaultModel: "integration-model", APIKey: "private-provider-secret", APIKeyHeader: "api-key",
+			})
+			cfg.Agents = append(cfg.Agents, config.AgentRouteConfig{
+				ID: tc.providerID + "-agent", Enabled: true, PathPrefix: tc.pathPrefix,
+				ProviderID: tc.providerID, DefaultModel: "integration-model",
+			})
+		}
+		injectedProviders = gatewayprovider.NewRegistry()
+		for _, tc := range dnsFailureCases {
+			remote, createErr := gatewayprovider.NewOpenAICompatibleProviderWithResolver(gatewayprovider.OpenAICompatibleConfig{
+				ID: tc.providerID, BaseURL: "https://provider.example/v1",
+				APIKey: "private-provider-secret", APIKeyHeader: "api-key",
+			}, gatewayDNSFailureResolver{err: tc.resolverErr})
+			if createErr != nil {
+				t.Fatalf("construct controlled DNS Provider %s: %v", tc.providerID, createErr)
+			}
+			providerInstance := remote
+			if registerErr := injectedProviders.Register(tc.providerID, func() gatewayprovider.Provider {
+				return providerInstance
+			}); registerErr != nil {
+				t.Fatalf("register controlled DNS Provider %s: %v", tc.providerID, registerErr)
+			}
+		}
+	} else {
+		cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+			ID: "loadtest", Enabled: true, BaseURL: upstream.URL + "/v1",
+			DefaultModel: "integration-model", APIKey: "test-upstream-key",
+			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+		}}
+		cfg.Agents = []config.AgentRouteConfig{{
+			ID: "loadtest-agent", Enabled: true, PathPrefix: "/loadtest",
+			ProviderID: "loadtest", DefaultModel: "integration-model",
+		}}
+	}
 
 	logRepo := store.NewRepo(db)
 	srv := &Server{
 		cfg: cfg, db: db, keys: keyRepo, models: model.NewRepo(db),
 		logs: logRepo, audit: audit.NewWriter(logRepo, 16384), settings: settings.NewRepo(db),
 		limiter: limiter, live: live.NewRegistry(), runs: newRunCancels(),
-		localClients: make(map[string]localClientEntry),
+		providers: injectedProviders, localClients: make(map[string]localClientEntry),
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 		fileUpstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 	}
@@ -304,6 +373,106 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	}
 	doRequest := func(index int) requestResult {
 		return doRequestExpected(index, "", http.StatusOK)
+	}
+
+	// 真实 Gateway Handler + Redis + MariaDB 的 DNS 故障验收；只使用注入 Resolver，不访问公网 DNS。
+	if dnsFailureTest {
+		for index, tc := range dnsFailureCases {
+			requestURL := handler.URL + tc.pathPrefix + "/v1/chat/completions?dns_test=1"
+			req, buildErr := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(body))
+			if buildErr != nil {
+				t.Fatalf("build DNS-failure request %d: %v", index, buildErr)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-API-Key", rawKey)
+			req.Header.Set("X-Request-ID", fmt.Sprintf("gateway-dns-%s-%04d", suffix, index))
+
+			resp, requestErr := client.Do(req)
+			if requestErr != nil {
+				t.Fatalf("Gateway DNS-failure request %s: %v", tc.providerID, requestErr)
+			}
+			responseBody, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				t.Fatalf("read DNS-failure response %s: %v", tc.providerID, readErr)
+			}
+			if resp.StatusCode != tc.wantStatus {
+				t.Errorf("DNS-failure response %s status=%d, want %d; body=%s", tc.providerID, resp.StatusCode, tc.wantStatus, responseBody)
+			}
+			if !bytes.Contains(responseBody, []byte("\"error\"")) {
+				t.Errorf("DNS-failure response %s lacks safe error envelope: %s", tc.providerID, responseBody)
+			}
+			for _, private := range []string{"provider.example", tc.diagnostic, "NXDOMAIN_PRIVATE_DIAGNOSTIC", "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", "private-provider-secret"} {
+				if bytes.Contains(responseBody, []byte(private)) {
+					t.Errorf("private DNS/credential detail %q leaked in Gateway response for %s", private, tc.providerID)
+				}
+			}
+		}
+		if got := upstreamRequests.Load(); got != 0 {
+			t.Fatalf("DNS-failure cases unexpectedly reached the unrelated Mock upstream %d times", got)
+		}
+
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after DNS-failure integration test: %v", err)
+		}
+		cancelDrain()
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, gateway502, gateway504, absentUpstreamStatus int
+		err = db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=502),0), COALESCE(SUM(http_status=504),0), COALESCE(SUM(upstream_http_status IS NULL),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &gateway502, &gateway504, &absentUpstreamStatus)
+		if err != nil {
+			t.Fatalf("query DNS-failure audit summary: %v", err)
+		}
+		if persisted != len(dnsFailureCases) || gateway502 != 1 || gateway504 != 1 || absentUpstreamStatus != len(dnsFailureCases) {
+			t.Fatalf("DNS-failure audit: rows=%d gateway502=%d gateway504=%d missing_upstream_status=%d; want 2/1/1/2",
+				persisted, gateway502, gateway504, absentUpstreamStatus)
+		}
+
+		rows, queryErr := db.QueryContext(verifyCtx,
+			"SELECT http_status, upstream_http_status, COALESCE(error_code,''), COALESCE(error_message,'') FROM request_logs WHERE api_key_name=?",
+			keyName)
+		if queryErr != nil {
+			t.Fatalf("query DNS-failure audit details: %v", queryErr)
+		}
+		seen := 0
+		for rows.Next() {
+			var gatewayStatus, upstreamStatus sql.NullInt64
+			var errorCode, errorMessage string
+			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &errorCode, &errorMessage); scanErr != nil {
+				_ = rows.Close()
+				t.Fatalf("scan DNS-failure audit detail: %v", scanErr)
+			}
+			seen++
+			if !gatewayStatus.Valid || (gatewayStatus.Int64 != http.StatusBadGateway && gatewayStatus.Int64 != http.StatusGatewayTimeout) {
+				t.Errorf("DNS audit gateway status is invalid: %+v", gatewayStatus)
+			}
+			if upstreamStatus.Valid {
+				t.Errorf("DNS audit unexpectedly contains upstream HTTP status %d", upstreamStatus.Int64)
+			}
+			for _, private := range []string{"provider.example", "NXDOMAIN_PRIVATE_DIAGNOSTIC", "DNS_TIMEOUT_PRIVATE_DIAGNOSTIC", "private-provider-secret"} {
+				if strings.Contains(errorCode, private) || strings.Contains(errorMessage, private) {
+					t.Errorf("private DNS/credential detail %q leaked into MariaDB audit metadata", private)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatalf("iterate DNS-failure audit details: %v", err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close DNS-failure audit rows: %v", err)
+		}
+		if seen != len(dnsFailureCases) {
+			t.Fatalf("DNS-failure audit detail rows=%d, want %d", seen, len(dnsFailureCases))
+		}
+		t.Logf("Gateway DNS failure integration: NXDOMAIN=502, resolver timeout=504, upstream_http_status NULL for %d/%d rows; DNS diagnostics and credential leakage absent",
+			absentUpstreamStatus, persisted)
+		return
 	}
 
 	// 连接拒绝故障独立运行：先证明 TCP 不可达时返回安全 502 并记录无上游 HTTP 状态，
