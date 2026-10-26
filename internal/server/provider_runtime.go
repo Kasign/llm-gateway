@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 )
@@ -52,6 +53,7 @@ func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProvide
 		AllowInsecureHTTP:item.AllowInsecureHTTP, AllowPrivateNetwork:item.AllowPrivateNetwork,
 		MaxResponseBytes:item.MaxResponseBytes, MaxConcurrentRequests:item.MaxConcurrentRequests,
 		RequestTimeoutSeconds:item.RequestTimeoutSeconds,
+		RequestsPerMinute:item.RequestsPerMinute,
 	}, true
 }
 
@@ -110,7 +112,7 @@ func (s *Server) availableBackends() []map[string]interface{} {
 	if s == nil || s.cfg == nil { return out }
 	for _, item := range s.cfg.Providers.OpenAICompatible {
 		if !item.Enabled { continue }
-		out = append(out, map[string]interface{}{"id":item.ID,"label":item.ID,"kind":"remote","base_url":item.BaseURL,"default_model":item.DefaultModel,"api_key_configured":item.APIKey!="","source":"deployment","editable":false})
+		out = append(out, map[string]interface{}{"id":item.ID,"label":item.ID,"kind":"remote","base_url":item.BaseURL,"default_model":item.DefaultModel,"requests_per_minute":item.RequestsPerMinute,"api_key_configured":item.APIKey!="","source":"deployment","editable":false})
 	}
 	s.providerConfigMu.RLock()
 	rows := make([]managedProvider,0,len(s.webProviders))
@@ -118,7 +120,55 @@ func (s *Server) availableBackends() []map[string]interface{} {
 	s.providerConfigMu.RUnlock()
 	for _, row := range rows {
 		if !row.Enabled || row.SourceConflict || row.SecretUnavailable { continue }
-		out = append(out,map[string]interface{}{"id":row.ID,"label":row.ID,"kind":"remote","base_url":row.BaseURL,"default_model":row.DefaultModel,"api_key_configured":row.APIKeyCiphertext!=""||row.APIKey!="","source":"web","editable":true})
+		out = append(out,map[string]interface{}{"id":row.ID,"label":row.ID,"kind":"remote","base_url":row.BaseURL,"default_model":row.DefaultModel,"requests_per_minute":row.RequestsPerMinute,"api_key_configured":row.APIKeyCiphertext!=""||row.APIKey!="","source":"web","editable":true})
 	}
 	return out
+}
+
+ 
+// providerRequestsPerMinute 返回指定远程 Provider 的独立 RPM。0 表示不额外限制。
+func (s *Server) providerRequestsPerMinute(id string) int {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" || isLocalInferenceBackend(id) || s == nil {
+		return 0
+	}
+	if s.cfg != nil {
+		for _, item := range s.cfg.Providers.OpenAICompatible {
+			if strings.EqualFold(item.ID, id) {
+				return item.RequestsPerMinute
+			}
+		}
+	}
+	s.providerConfigMu.RLock()
+	row, ok := s.webProviders[id]
+	s.providerConfigMu.RUnlock()
+	if !ok || !row.Enabled || row.SourceConflict || row.SecretUnavailable {
+		return 0
+	}
+	return row.RequestsPerMinute
+}
+
+// providerRateLimitGuard 在请求级 ACL 之后、保活与上游调用之前执行。
+// 同一 Provider 的全局入口和多个 Agent 共用 Redis 预算；不限制本地后端，也不影响已开始的生成。
+func (s *Server) providerRateLimitGuard() core.Guard {
+	return func(ctx context.Context, st core.State) error {
+		providerID := s.providerIDForState(st)
+		rpm := s.providerRequestsPerMinute(providerID)
+		if rpm <= 0 {
+			return nil
+		}
+		if s.limiter == nil {
+			return &core.Error{Status: 503, Code: "provider_rate_limit_unavailable", Message: "Provider rate limit is temporarily unavailable"}
+		}
+		allowed, count, err := s.limiter.AllowProvider(ctx, providerID, rpm)
+		if err != nil {
+			applog.Printf("[%s] Provider rate limiter unavailable: provider=%s error=%v", st.ID, providerID, err)
+			return &core.Error{Status: 503, Code: "provider_rate_limit_unavailable", Message: "Provider rate limit is temporarily unavailable"}
+		}
+		if !allowed {
+			applog.Printf("[%s] Provider rate limit exceeded: provider=%s count=%d limit=%d", st.ID, providerID, count, rpm)
+			return &core.Error{Status: 429, Code: "provider_rate_limit_exceeded", Message: "Provider request rate limit exceeded"}
+		}
+		return nil
+	}
 }

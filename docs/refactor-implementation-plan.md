@@ -661,3 +661,11 @@ docs/                        中文架构、协议和运维文档
 - DeepSeek/OpenAI 部署示例与 Compose 环境透传已补齐 `MAX_RESPONSE_BYTES`，可通过 0 使用默认响应体上限，避免环境解析器支持但部署层无法设置。
 - 部署配置指南已同步本地模型超时语义：当前示例默认 0 不设置客户端整体时限，旧配置未指定时保留 3600 秒默认；同时明确反向代理与调用方的超时仍需单独设置。
 - 按用户统一测试安排未运行 Compose、测试或 CI。
+
+
+### Provider 级 RPM 限流（2026-10-26）
+
+- 新增 `requests_per_minute`，0 默认禁用，正数按 Redis UTC 固定分钟窗口限制同一个远程 Provider 的新请求数；多个调用方 API Key 和多个 Agent 共用该 Provider 预算，与调用方 Key 自身的 RPM 分离。
+- 超限在请求级 ACL 后、WarmStart 和上游转发前拒绝，返回 429 `provider_rate_limit_exceeded`；启用预算时 Redis 不可用采用 fail-closed，返回 503 `provider_rate_limit_unavailable`。
+- 该策略只对远程 Provider 生效，不应用到本地 llama.cpp/Ollama，不会中断已经开始的生成。Token 预算与排队继续单独设计，不纳入本次改动。
+- 已补充 Redis 隔离和环境变量解析测试代码、管理台配置、部署示例与 API 契约说明；按用户要求未运行测试或 CI。

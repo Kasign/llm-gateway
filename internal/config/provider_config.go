@@ -8,6 +8,8 @@ import (
 	gatewayprovider "github.com/whl/llm-gateway/internal/provider"
 )
 
+const MaxProviderRequestsPerMinute = 100000
+
 // OpenAICompatibleProviderConfig 从 deploy/config.yaml 读取，API Key 应通过环境变量注入。
 // 远程凭据不写入 gateway_settings，切换当前后端只保存 Provider ID 与模型 ID。
 type OpenAICompatibleProviderConfig struct {
@@ -21,8 +23,9 @@ type OpenAICompatibleProviderConfig struct {
 	AllowInsecureHTTP   bool   `yaml:"allow_insecure_http"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
-	MaxConcurrentRequests int  `yaml:"max_concurrent_requests"`
-	RequestTimeoutSeconds int `yaml:"request_timeout_seconds"`
+	MaxConcurrentRequests int `yaml:"max_concurrent_requests"`
+	RequestsPerMinute      int `yaml:"requests_per_minute"`
+	RequestTimeoutSeconds  int `yaml:"request_timeout_seconds"`
 }
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -62,6 +65,9 @@ func (c *Config) validateProviderConfigs() error {
 		}
 		if item.RequestTimeoutSeconds < 0 || item.RequestTimeoutSeconds > gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): request_timeout_seconds must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds)
+		}
+		if item.RequestsPerMinute < 0 || item.RequestsPerMinute > MaxProviderRequestsPerMinute {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): requests_per_minute must be between 0 and %d", i, item.ID, MaxProviderRequestsPerMinute)
 		}
 		if !item.Enabled {
 			continue

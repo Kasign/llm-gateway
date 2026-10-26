@@ -41,6 +41,16 @@ func (l *Limiter) Allow(ctx context.Context, key string, rpm int) (bool, int64, 
 	return l.allowAt(ctx, key, rpm, time.Now())
 }
 
+// AllowProvider 对同一 Provider 的所有调用方与 Agent 共享每分钟预算；rpm<=0 表示禁用。
+// 使用独立 Redis key 前缀，不能与按调用方 API Key 统计的 RPM 互相影响。
+func (l *Limiter) AllowProvider(ctx context.Context, providerID string, rpm int) (bool, int64, error) {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return false, 0, fmt.Errorf("provider ID is required")
+	}
+	return l.Allow(ctx, "provider:"+providerID, rpm)
+}
+
 func (l *Limiter) allowAt(ctx context.Context, key string, rpm int, now time.Time) (bool, int64, error) {
 	if rpm <= 0 {
 		return true, 0, nil

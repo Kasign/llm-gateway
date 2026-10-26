@@ -29,7 +29,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | 限流、fail-fast 503、JSON/SSE 与配置范围已由 PR #7 CI 验证；等待 PR #5 合并后重定向 base 复验 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 同实例与替换实例共享并发预算；降低上限时不接受超过新预算的新请求；旧请求结束后许可正常释放；完整 CI/race 通过。PR #5 合并且 PR #7 base 回到最新 `dev` 后再次完整 CI 通过。 |
-| GW-GOV-002 | 当前 RPM 主要按调用方 Key 进行固定窗口计数，尚未提供远程 Provider 独立的并发/速率组合或 Token 预算。 | 待设计 | 在 GW-GOV-001 完成后，依据真实需求决定是否增加 Provider RPM、令牌预算和排队策略；不要与调用方 Key RPM 混为一谈。 | 有明确优先级、失败策略、Redis 不可用行为与多 Agent 隔离测试。 |
+| GW-GOV-002 | Provider 级 RPM、Token 预算与排队策略尚未全部齐全。 | Provider RPM 已实现，待统一测试；Token 预算与排队仍待设计 | `requests_per_minute=0` 默认禁用；正数在请求级 ACL 之后、WarmStart/上游前按 Provider ID 使用 Redis UTC 固定分钟窗口计数。多个 API Key 和 Agent 共享 Provider 额度；超过上限返回 429，Redis 不可用时 fail-closed 返回 503。本地 llama.cpp/Ollama 不受该远程 Provider 限额影响。 | 统一测试 Redis 计数隔离、429/503 审计、动态 Web 配置更新与多 Agent 共用额度；Token 预算与排队另行评审。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -101,3 +101,10 @@
 
 - DeepSeek/OpenAI `.env` 示例和 Compose 容器环境均已传递 `MAX_RESPONSE_BYTES`，补齐部署变量与 Provider 环境解析器之间的配置链路。
 - 尚未执行运行验证，后续统一测试时再检查 Compose 渲染结果与实际容器环境。
+
+
+## 2026-10-26 追加：Provider 级请求速率限制
+
+- 完成远程 Provider 独立 `requests_per_minute` 配置，支持 YAML、`LLM_GATEWAY_PROVIDER_<ID>_REQUESTS_PER_MINUTE` 与 Web 管理台；0 禁用、最大 100000。
+- 仅限制新请求，按 Provider 跨 API Key/Agent 共享 Redis 预算；Redis 故障时 fail-closed。不会对本地慢速模型加 RPM，也不会中断在途生成或设置整体生成超时。
+- 已新增自动化测试代码但未运行。Token 预算和等待队列未在本次顺带引入。

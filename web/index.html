@@ -111,7 +111,7 @@
             <div class="mm-toolbar"><button type="button" class="btn sm ghost" id="providerRefresh">刷新</button><button type="button" class="btn sm" id="providerCreate">新增 Provider</button></div>
           </div>
           <div id="providerStatus" class="msg muted" role="status">尚未加载 Provider 列表。</div>
-          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>Provider RPM</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody></table></div>
         </div>
         <div class="card" id="providerEditorCard" hidden>
           <div class="card-head"><div><h2 id="providerEditorTitle">新增 Provider</h2><p>Key 留空表示保留原值；要删除已保存的 Key，请使用单独的“清除 Key”操作。</p></div><button type="button" class="btn sm ghost" id="providerCancel">取消</button></div>
@@ -123,6 +123,7 @@
               <div class="field"><label for="providerApiKey">API Key</label><input id="providerApiKey" name="api_key" type="password" autocomplete="new-password" placeholder="新增时填写；编辑留空保留旧 Key"><small id="providerKeyHelp">Key 仅发送到服务端一次加密保存，API 不回传密钥内容。</small></div>
               <div class="field"><label for="providerApiKeyHeader">API Key Header</label><select id="providerApiKeyHeader" name="api_key_header"><option value="authorization">Authorization: Bearer</option><option value="api-key">api-key</option><option value="x-api-key">x-api-key</option></select></div>
               <div class="field"><label for="providerConcurrency">最大并发请求数（0 使用默认值）</label><input id="providerConcurrency" name="max_concurrent_requests" type="number" min="0" max="64" value="64" required></div>
+              <div class="field"><label for="providerRPM">每分钟最大请求数（0 不限制）</label><input id="providerRPM" name="requests_per_minute" type="number" min="0" max="100000" step="1" value="0" required><small>按 UTC 固定分钟窗口统计，同一 Provider 的所有调用方和 Agent 共用额度；只限制新请求，不会中断在途生成。</small></div>
               <div class="field"><label for="providerMaxResponse">最大响应体字节数（0 使用默认值）</label><input id="providerMaxResponse" name="max_response_bytes" type="number" min="0" step="1" value="0" required></div>
               <div class="field"><label for="providerRequestTimeout">整体请求超时（秒，0 不额外限制）</label><input id="providerRequestTimeout" name="request_timeout_seconds" type="number" min="0" max="86400" step="1" value="0" required><small>启用后限制完整 JSON/SSE 请求时长，包含流式生成；范围 1–86400 秒，0 沿用现有请求上下文及响应头超时。</small></div>
               <div class="field"><label for="providerEnabled">启用状态</label><select id="providerEnabled" name="enabled"><option value="true">启用</option><option value="false">停用</option></select></div>

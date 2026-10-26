@@ -17,7 +17,7 @@ var providerEnvironmentIDPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,63}
 func applyProviderEnvironment(c *Config) error {
 	if c == nil { return fmt.Errorf("config is required") }
 	const prefix = "LLM_GATEWAY_PROVIDER_"
-	fields := []string{"MODEL_MAPPINGS_JSON", "MAX_CONCURRENT_REQUESTS", "REQUEST_TIMEOUT_SECONDS", "ALLOW_PRIVATE_NETWORK", "ALLOW_INSECURE_HTTP", "MAX_RESPONSE_BYTES", "API_KEY_HEADER", "DEFAULT_MODEL", "BASE_URL", "API_KEY", "ENABLED"}
+	fields := []string{"MODEL_MAPPINGS_JSON", "MAX_CONCURRENT_REQUESTS", "REQUESTS_PER_MINUTE", "REQUEST_TIMEOUT_SECONDS", "ALLOW_PRIVATE_NETWORK", "ALLOW_INSECURE_HTTP", "MAX_RESPONSE_BYTES", "API_KEY_HEADER", "DEFAULT_MODEL", "BASE_URL", "API_KEY", "ENABLED"}
 	values := make(map[string]map[string]string)
 	for _, entry := range os.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
@@ -59,6 +59,9 @@ func applyProviderEnvironment(c *Config) error {
 		}
 		if raw, ok := v["MAX_CONCURRENT_REQUESTS"]; ok && strings.TrimSpace(raw) != "" {
 			value, err := strconv.Atoi(strings.TrimSpace(raw)); if err != nil { return fmt.Errorf("environment Provider %s MAX_CONCURRENT_REQUESTS must be an integer", item.ID) }; item.MaxConcurrentRequests = value
+		}
+		if raw, ok := v["REQUESTS_PER_MINUTE"]; ok && strings.TrimSpace(raw) != "" {
+			value, err := strconv.Atoi(strings.TrimSpace(raw)); if err != nil { return fmt.Errorf("environment Provider %s REQUESTS_PER_MINUTE must be an integer", item.ID) }; item.RequestsPerMinute = value
 		}
 		if raw, ok := v["REQUEST_TIMEOUT_SECONDS"]; ok && strings.TrimSpace(raw) != "" {
 			value, err := strconv.Atoi(strings.TrimSpace(raw)); if err != nil { return fmt.Errorf("environment Provider %s REQUEST_TIMEOUT_SECONDS must be an integer", item.ID) }; item.RequestTimeoutSeconds = value

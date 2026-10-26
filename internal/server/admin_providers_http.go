@@ -37,6 +37,7 @@ type managedProvider struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
+	RequestsPerMinute int `json:"requests_per_minute"`
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
 	ConcurrencyLimiter *provider.ConcurrencyLimiter `json:"-"`
 	APIKey string `json:"-"`
@@ -56,6 +57,7 @@ type providerMutationRequest struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests"`
+	RequestsPerMinute int `json:"requests_per_minute"`
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
 }
 
@@ -184,7 +186,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 	id:=strings.ToLower(strings.TrimSpace(in.ID));if id==""{id=strings.ToLower(strings.TrimSpace(routeID))}
 	if !managedProviderIDPattern.MatchString(id)||id=="llamacpp"||id=="ollama" {return managedProvider{},providerErr(400,"invalid_provider_id","Provider ID 格式无效或与内置 Provider 冲突")}
 	if routeID!=""&&id!=strings.ToLower(strings.TrimSpace(routeID)){return managedProvider{},providerErr(400,"provider_id_immutable","Provider ID 不允许通过编辑修改")}
-	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests,RequestTimeoutSeconds:in.RequestTimeoutSeconds}
+	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests,RequestsPerMinute:in.RequestsPerMinute,RequestTimeoutSeconds:in.RequestTimeoutSeconds}
 	if row.APIKeyHeader==""{row.APIKeyHeader="authorization"}
 	if row.APIKeyHeader!="authorization"&&row.APIKeyHeader!="api-key"&&row.APIKeyHeader!="x-api-key" {return managedProvider{},providerErr(400,"invalid_api_key_header","API Key Header 仅支持 Authorization、api-key 或 x-api-key")}
 	if row.DefaultModel==""||len(row.DefaultModel)>255||strings.ContainsAny(row.DefaultModel,"\r\n"){return managedProvider{},providerErr(400,"invalid_default_model","默认模型 ID 必须是非空单行字符串")}
@@ -196,7 +198,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 		mappings[alias]=target
 	}
 	row.ModelMappings=mappings
-	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
+	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.RequestsPerMinute<0||row.RequestsPerMinute>config.MaxProviderRequestsPerMinute{return managedProvider{},providerErr(400,"invalid_provider_rate_limit","Provider 每分钟请求数必须在 0 到 100000 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
 	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable;row.ConcurrencyLimiter=old.ConcurrencyLimiter}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))

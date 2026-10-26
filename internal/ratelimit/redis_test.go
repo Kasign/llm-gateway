@@ -68,3 +68,32 @@ func TestAllowHonorsRPMWithinMinuteBucket(t *testing.T) {
 		}
 	}
 }
+
+ 
+func TestAllowProviderHasIndependentRPMBucket(t *testing.T) {
+	limiter := newRedisTestLimiter(t)
+	ctx := context.Background()
+	providerID := "provider-rpm-" + t.Name()
+
+	allowed, count, err := limiter.AllowProvider(ctx, providerID, 1)
+	if err != nil {
+		t.Fatalf("first Provider request: %v", err)
+	}
+	if !allowed || count != 1 {
+		t.Fatalf("first Provider request allowed/count=%v/%d, want true/1", allowed, count)
+	}
+	allowed, count, err = limiter.AllowProvider(ctx, providerID, 1)
+	if err != nil {
+		t.Fatalf("second Provider request: %v", err)
+	}
+	if allowed || count != 2 {
+		t.Fatalf("second Provider request allowed/count=%v/%d, want false/2", allowed, count)
+	}
+	allowed, count, err = limiter.Allow(ctx, "caller-"+providerID, 1)
+	if err != nil {
+		t.Fatalf("caller API Key request: %v", err)
+	}
+	if !allowed || count != 1 {
+		t.Fatalf("caller API Key allowed/count=%v/%d, want true/1", allowed, count)
+	}
+}

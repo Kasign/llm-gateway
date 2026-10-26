@@ -38,7 +38,7 @@
     const target = $('providerRows');
     if (!target) return;
     if (!state.rows.length) {
-      target.innerHTML = '<tr><td colspan="6" class="muted">当前没有远程 Provider。可新增 Web 托管项，或在部署 .env / YAML 中预置。</td></tr>';
+      target.innerHTML = '<tr><td colspan="7" class="muted">当前没有远程 Provider。可新增 Web 托管项，或在部署 .env / YAML 中预置。</td></tr>';
       return;
     }
     target.innerHTML = state.rows.map((row) => {
@@ -57,7 +57,7 @@
         if (row.api_key_configured) actions += ' <button class="btn sm ghost" data-action="clear-key" data-id="' + esc(row.id) + '">清除 Key</button>';
         actions += ' <button class="btn sm danger" data-action="delete" data-id="' + esc(row.id) + '">删除</button>';
       }
-      return '<tr><td><code>' + esc(row.id) + '</code></td><td>' + esc(source) + '</td><td><span class="provider-state ' + statusClass + '">' + esc(status) + '</span></td><td><code>' + esc(row.default_model || '—') + '</code></td><td>' + (row.api_key_configured ? '<span class="provider-key-set">已配置</span>' : '<span class="muted">未配置</span>') + '</td><td class="provider-row-actions">' + actions + '</td></tr>';
+      return '<tr><td><code>' + esc(row.id) + '</code></td><td>' + esc(source) + '</td><td><span class="provider-state ' + statusClass + '">' + esc(status) + '</span></td><td><code>' + esc(row.default_model || '—') + '</code></td><td>' + (Number(row.requests_per_minute) > 0 ? esc(row.requests_per_minute) : '不限') + '</td><td>' + (row.api_key_configured ? '<span class="provider-key-set">已配置</span>' : '<span class="muted">未配置</span>') + '</td><td class="provider-row-actions">' + actions + '</td></tr>;
     }).join('');
   }
   async function loadProviders() {
@@ -87,6 +87,7 @@
     $('providerApiKey').value = '';
     $('providerApiKeyHeader').value = row?.api_key_header || 'authorization';
     $('providerConcurrency').value = row?.max_concurrent_requests ?? 64;
+    $('providerRPM').value = row?.requests_per_minute ?? 0;
     $('providerMaxResponse').value = row?.max_response_bytes ?? 0;
     $('providerRequestTimeout').value = row?.request_timeout_seconds ?? 0;
     $('providerEnabled').value = String(row?.enabled ?? true);
@@ -124,6 +125,7 @@
       allow_private_network: $('providerAllowPrivate').checked,
       max_response_bytes: Number($('providerMaxResponse').value || 0),
       max_concurrent_requests: Number($('providerConcurrency').value || 0),
+      requests_per_minute: Number($('providerRPM').value || 0),
       request_timeout_seconds: Number($('providerRequestTimeout').value || 0),
     };
   }
