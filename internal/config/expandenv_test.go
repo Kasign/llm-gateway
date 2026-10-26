@@ -255,3 +255,32 @@ func TestRemoteProviderRejectsUnresolvedEnvironmentPlaceholder(t *testing.T) {
 		t.Fatal("enabled Provider with unresolved API Key placeholder must fail configuration validation")
 	}
 }
+
+func TestExpandConfigEnvPreservesPlainScalarTypes(t *testing.T) {
+	t.Setenv("LLM_GATEWAY_TEST_TIMEOUT_ZERO", "0")
+	t.Setenv("LLM_GATEWAY_TEST_BOOLEAN", "false")
+	t.Setenv("LLM_GATEWAY_TEST_NUMERIC_STRING", "0")
+
+	raw := `request_timeout_seconds: ${LLM_GATEWAY_TEST_TIMEOUT_ZERO}
+  enabled: ${LLM_GATEWAY_TEST_BOOLEAN}
+  api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
+`
+	expanded := expandConfigEnv(raw)
+	var decoded struct {
+		RequestTimeoutSeconds int    `yaml:"request_timeout_seconds"`
+		Enabled               bool   `yaml:"enabled"`
+		APIKey                string `yaml:"api_key"`
+	}
+	if err := yaml.Unmarshal([]byte(expanded), &decoded); err != nil {
+		t.Fatalf("expanded plain environment scalars should preserve native YAML types: %v\n%s", err, expanded)
+	}
+	if decoded.RequestTimeoutSeconds != 0 {
+		t.Fatalf("request_timeout_seconds = %d, want 0", decoded.RequestTimeoutSeconds)
+	}
+	if decoded.Enabled {
+		t.Fatal("enabled = true, want false from unquoted environment value")
+	}
+	if decoded.APIKey != "0" {
+		t.Fatalf("quoted numeric API key = %q, want string 0", decoded.APIKey)
+	}
+}

@@ -23,10 +23,10 @@ var (
 type tree struct { root *yaml.Node; paths map[string]bool; values map[string]string }
 func main(){if e:=run();e!=nil{fmt.Fprintln(os.Stderr,"配置契约检查失败：",e);os.Exit(1)}}
 func run()error{
- actual,e:=readTree("deploy/config.yaml");if e!=nil{return e};example,e:=readTree("deploy/config.example.yaml");if e!=nil{return e}
- typ:=reflect.TypeOf(cfg.Config{});if e=knownFields(actual.root,typ,"");e!=nil{return fmt.Errorf("deploy/config.yaml: %w",e)};if e=knownFields(example.root,typ,"");e!=nil{return fmt.Errorf("deploy/config.example.yaml: %w",e)}
+ actual,e:=readTree("config.yaml");if e!=nil{return e};example,e:=readTree("config.example.yaml");if e!=nil{return e}
+ typ:=reflect.TypeOf(cfg.Config{});if e=knownFields(actual.root,typ,"");e!=nil{return fmt.Errorf("config.yaml: %w",e)};if e=knownFields(example.root,typ,"");e!=nil{return fmt.Errorf("config.example.yaml: %w",e)}
  if e=compareTrees(actual,example);e!=nil{return e}
- envData,e:=os.ReadFile("deploy/.env.example");if e!=nil{return e};providerData,e:=os.ReadFile("deploy/providers.env.example");if e!=nil{return e};composeData,e:=os.ReadFile("deploy/docker-compose.yml");if e!=nil{return e};parserData,e:=os.ReadFile("internal/config/provider_env.go");if e!=nil{return e}
+ envData,e:=os.ReadFile(".env.example");if e!=nil{return e};providerData,e:=os.ReadFile("providers.env.example");if e!=nil{return e};composeData,e:=os.ReadFile("docker-compose.yml");if e!=nil{return e};parserData,e:=os.ReadFile("internal/config/provider_env.go");if e!=nil{return e}
  envs:=parseAssignments(string(envData));passed:=composeEnvironment(string(composeData))
  for _,t:=range []*tree{actual,example}{refs:=map[string]bool{};collectRefs(t.root,refs);for n:=range refs{if !envs[n]{return fmt.Errorf("YAML 引用的变量 %s 未写入 .env.example",n)};if !passed[n]{return fmt.Errorf("YAML 变量 %s 未由 Compose 显式注入容器",n)}}}
  for _,line:=range strings.Split(string(composeData),"\n"){line=strings.TrimSpace(line);if line==""||strings.HasPrefix(line,"#"){continue};for _,m:=range requiredComposeVar.FindAllStringSubmatch(line,-1){if len(m)==2&&!envs[m[1]]{return fmt.Errorf("Compose 必需变量 %s 未写入 .env.example",m[1])}}}

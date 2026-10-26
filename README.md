@@ -23,13 +23,13 @@
 
 ## 控制台登录与改密码
 
-Web 登录、命令行生成密码 hash、忘记密码重置：见 **[deploy/控制台与密码说明.md](deploy/控制台与密码说明.md)**。
+Web 登录、命令行生成密码 hash、忘记密码重置：见 **[控制台与密码说明.md](控制台与密码说明.md)**。
 
 ## 1Panel 部署
 
-地址、登录、思考开关分别写在哪一层，见 **[deploy/配置说明.md](deploy/配置说明.md)**。部署步骤见 **[deploy/README-1PANEL.md](deploy/README-1PANEL.md)**。
+地址、登录、思考开关分别写在哪一层，见 **[配置说明.md](配置说明.md)**。部署步骤见 **[README-1PANEL.md](README-1PANEL.md)**。
 
-进入 `deploy` 目录：
+在项目根目录执行：
 
 ```bash
 cp .env.example .env

@@ -13,7 +13,7 @@ jobs:
   test:
     name: 测试、静态检查与构建
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       REDIS_TEST_ADDR: 127.0.0.1:6379
       MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
@@ -54,6 +54,12 @@ jobs:
 
       - name: 校验配置结构、环境变量与部署模板
         run: go run ./scripts/check_config_contract.go
+
+      - name: 验证根目录 Docker Compose 配置
+        run: |
+          cp .env.example .env
+          cp providers.env.example providers.env
+          docker compose config -q
 
       - name: 单元测试
         run: go test ./...
@@ -160,6 +166,9 @@ jobs:
 
       - name: 构建 Gateway
         run: go build -o /tmp/llm-gateway ./cmd/gateway
+
+      - name: 构建 Docker 部署镜像
+        run: docker build --target release -t llm-gateway:ci .
 
       - name: 配置 Node.js
         uses: actions/setup-node@v4

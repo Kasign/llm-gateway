@@ -5,10 +5,10 @@
 ## 第一次部署
 
 1. 将项目放到宿主机目录，例如 `/server-whl/docker/llm-gateway-v11/`。
-2. 进入 `deploy`：
+2. 进入项目根目录：
 
 ```bash
-cd /server-whl/docker/llm-gateway-v11/deploy
+cd /server-whl/docker/llm-gateway-v11
 cp .env.example .env
 cp config.example.yaml config.yaml
 cp providers.env.example providers.env

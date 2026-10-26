@@ -211,6 +211,27 @@ func expandConfigEnv(raw string) string {
 	return string(expanded)
 }
 
+// inferredConfigEnvScalarTag 只恢复 YAML 的基本标量类型，不把复杂 YAML 片段解释为结构节点。
+func inferredConfigEnvScalarTag(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "!!str"
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(value), &document); err != nil || document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
+		return "!!str"
+	}
+	node := document.Content[0]
+	if node.Kind != yaml.ScalarNode {
+		return "!!str"
+	}
+	switch node.Tag {
+	case "!!int", "!!float", "!!bool", "!!null":
+		return node.Tag
+	default:
+		return "!!str"
+	}
+}
+
 func expandConfigEnvNode(node *yaml.Node) {
 	if node == nil {
 		return
@@ -233,7 +254,21 @@ func expandConfigEnvNode(node *yaml.Node) {
 		if node.Tag != "!!str" {
 			return
 		}
-		node.Value = configEnvRef.ReplaceAllStringFunc(node.Value, func(m string) string {
+		original := node.Value
+		// 只有未加引号、且整个标量都是一个环境变量时，才根据变量值恢复 YAML 原生标量类型。
+		// 例如 request_timeout_seconds: ${VAR} 在 VAR=0 时必须变成 !!int 0，而不是 !!str "0"。
+		// 带引号的环境变量始终按字符串处理，避免 API Key、密码哈希和数字型用户名被错误转换。
+		if node.Style == 0 && configEnvRef.MatchString(original) && configEnvRef.FindString(original) == original {
+			name := original[2 : len(original)-1]
+			if value, ok := os.LookupEnv(name); ok {
+				node.Value = value
+				if tag := inferredConfigEnvScalarTag(value); tag != "" {
+					node.Tag = tag
+				}
+				return
+			}
+		}
+		node.Value = configEnvRef.ReplaceAllStringFunc(original, func(m string) string {
 			name := m[2 : len(m)-1]
 			if value, ok := os.LookupEnv(name); ok {
 				return value

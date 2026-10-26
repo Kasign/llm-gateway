@@ -93,7 +93,7 @@
 
 ## 2026-10-26 追加：自定义 Provider 环境变量透传
 
-- 已为 DeepSeek/OpenAI 之外的 Provider 增加独立可选 `deploy/providers.env` 注入，解决 Compose 只显式传递两组 ID 的限制。
+- 已为 DeepSeek/OpenAI 之外的 Provider 增加独立可选 `providers.env` 注入，解决 Compose 只显式传递两组 ID 的限制。
 - 保留主 `.env` 的最小显式环境变量白名单，不把数据库管理员口令整份传给 Gateway。示例文件仅含注释，旧部署缺失此文件可继续使用；尚未运行 Compose 校验。
 
 
@@ -113,7 +113,7 @@
 ## 2026-10-26 追加：Provider RPM 视图配置补齐
 
 - Web Provider 安全视图包含 `requests_per_minute`，部署 YAML 也正确映射该值，避免管理台无法显示/编辑现存配额。
-- `deploy/config.example.yaml`、`deploy/providers.env.example` 和中文配置说明补充了 RPM 样例。
+- `config.example.yaml`、`providers.env.example` 和中文配置说明补充了 RPM 样例。
 
 ## 2026-10-26 追加：调用记录按 Provider 筛选
 

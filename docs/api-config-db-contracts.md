@@ -53,9 +53,9 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 配置加载先解析 YAML，再只对字符串值中的 `${ENV_NAME}` 做环境变量替换，最后重新序列化 YAML。这样可避免密钥包含引号、冒号或换行时破坏 YAML 结构。缺失的占位符不会被当成空白成功配置：启用的远程 Provider 和其他必需字段仍需通过字段级校验。
 
 建议约束：
-- 真实 Provider Key、数据库密码与 Admin API Key 只放在部署环境或受控 Secret 中；不要提交到 `deploy/config.yaml` 或示例文件。
+- 真实 Provider Key、数据库密码与 Admin API Key 只放在部署环境或受控 Secret 中；不要提交到 `config.yaml` 或示例文件。
 - `allow_insecure_http` 和 `allow_private_network` 是显式的安全例外，只能在确认目标来源可信后启用。
-- `providers.openai_compatible` 与 `LLM_GATEWAY_PROVIDER_<ID>_*` 是只读部署配置；Web 只修改 `source=web` 项。Web 项持久化后动态更新 Registry；同 ID 跨来源冲突拒绝覆盖。Compose 从主 `deploy/.env` 显式传递 DeepSeek/OpenAI 示例变量；其他 Provider ID 可通过可选 `deploy/providers.env` 注入。该专用文件只应包含 `LLM_GATEWAY_PROVIDER_<ID>_*`，避免向 Gateway 容器注入主 `.env` 中的数据库管理员密码等无关凭据。旧部署缺少此文件时 Compose 不会因此失败。
+- `providers.openai_compatible` 与 `LLM_GATEWAY_PROVIDER_<ID>_*` 是只读部署配置；Web 只修改 `source=web` 项。Web 项持久化后动态更新 Registry；同 ID 跨来源冲突拒绝覆盖。Compose 从主 `.env` 显式传递 DeepSeek/OpenAI 示例变量；其他 Provider ID 可通过可选 `providers.env` 注入。该专用文件只应包含 `LLM_GATEWAY_PROVIDER_<ID>_*`，避免向 Gateway 容器注入主 `.env` 中的数据库管理员密码等无关凭据。旧部署缺少此文件时 Compose 不会因此失败。
 - `/v1` 全局入口的活动 Provider 可由管理台选择；Agent 入口不读取这个活动指针，使用自己的固定 Provider/默认模型。
 
 ## 3. 数据库与迁移契约

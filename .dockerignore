@@ -5,3 +5,11 @@
 *.part
 data/models/*
 !data/models/.gitkeep
+
+# 本地部署配置可能含真实凭据，禁止进入 Docker build context。
+.env
+providers.env
+config.yaml
+**/.env
+**/providers.env
+**/config.yaml

@@ -7,7 +7,7 @@ server:
   trusted_proxies: []
 
 auth:
-  # 管理 API 密钥和 Web 登录都只写在 deploy/.env，这里只做引用。
+  # 管理 API 密钥和 Web 登录都只写在 .env，这里只做引用。
   admin_api_key: "${LLM_GATEWAY_ADMIN_API_KEY}"
   admin_username: "${LLM_GATEWAY_ADMIN_USERNAME}"
   admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"

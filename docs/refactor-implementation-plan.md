@@ -144,16 +144,16 @@ docs/                        中文架构、协议和运维文档
 
 ### 阶段 4.5：配置来源治理与部署样例一致性（新增计划）
 
-状态：实施中（第一批已加入模板对账与环境变量契约门禁）。当前不仅有 `deploy/.env` 与 `deploy/config.yaml`，还存在 `deploy/providers.env`、`deploy/config.example.yaml`、数据库中的 Web Provider 配置，以及 Go 代码中的默认值。分层并非天然不合理，但字段职责与默认值必须能被追踪，且不能让同一个配置项在多个位置以不透明的优先级覆盖。
+状态：实施中（第一批已加入模板对账与环境变量契约门禁）。当前不仅有 `.env` 与 `config.yaml`，还存在 `providers.env`、`config.example.yaml`、数据库中的 Web Provider 配置，以及 Go 代码中的默认值。分层并非天然不合理，但字段职责与默认值必须能被追踪，且不能让同一个配置项在多个位置以不透明的优先级覆盖。
 
 目标：保持部署简单、兼容现有用户配置，同时建立可审计的配置来源规则。**不以“所有配置必须塞进一个文件”为目标，也不在未完成兼容盘点前删除旧配置入口。**
 
 实施顺序：
 1. **先做配置清单**：逐项记录配置名、用途、来源（环境变量/YAML/数据库/代码默认值）、是否敏感、是否可热更新、是否需重启、生效优先级与对应代码位置。
 2. **明确唯一职责边界**：
-   - `deploy/.env`：部署环境变量、凭据与密钥，以及需要由部署环境提供的宿主机/网络参数；不再把 YAML 已有的非敏感默认项无说明地重复维护。
-   - `deploy/config.yaml`：结构化的服务行为与非敏感默认值，例如请求超时、输出上限、日志/保留策略、下载参数、代理信任和 Agent 路由。敏感值只通过明确的环境变量引用，不在 YAML 保存真实密钥。
-   - `deploy/providers.env`：仅保留需要通过环境预置任意 Provider ID 的高级入口；不能把主 `.env` 整份注入 Gateway，也不能和 YAML/其他来源静默覆盖同 ID Provider。
+   - `.env`：部署环境变量、凭据与密钥，以及需要由部署环境提供的宿主机/网络参数；不再把 YAML 已有的非敏感默认项无说明地重复维护。
+   - `config.yaml`：结构化的服务行为与非敏感默认值，例如请求超时、输出上限、日志/保留策略、下载参数、代理信任和 Agent 路由。敏感值只通过明确的环境变量引用，不在 YAML 保存真实密钥。
+   - `providers.env`：仅保留需要通过环境预置任意 Provider ID 的高级入口；不能把主 `.env` 整份注入 Gateway，也不能和 YAML/其他来源静默覆盖同 ID Provider。
    - Web/数据库：用于运行时动态管理的 Provider 和活动上游选择，明确哪些字段运行时可改、哪些由部署层托管只读；避免把活动 Provider 选择和 Provider 静态凭据配置混为一谈。
 3. **收敛重复与冲突**：审查 Compose `environment` 白名单、环境变量解析和 YAML 展开逻辑；移除重复的非敏感 Provider 默认值入口，明确环境变量覆盖的例外项。对跨来源同 ID 冲突继续失败关闭，而不是引入“最后一个值覆盖前一个值”的隐式行为。
 4. **消除样例漂移**：以 `config.example.yaml` 作为可复制模板，逐项比较当前跟踪的 `config.yaml` 与示例；补充配置一致性检查，防止默认值、配置字段和部署文档再次分叉。确认仓库中真实部署配置的跟踪策略，避免把机器专属配置误当成规范模板。
@@ -685,8 +685,8 @@ docs/                        中文架构、协议和运维文档
 
 ### 任意 ID 的部署 Provider 环境文件（2026-10-26）
 
-- 主 `deploy/.env` 继续显式向 Gateway 传递现有 DeepSeek/OpenAI 示例项，兼容旧配置。
-- 新增可选 `deploy/providers.env`，由 Compose 单独注入，可以配置任意 `LLM_GATEWAY_PROVIDER_<ID>_*` 变量；默认示例全是注释，不会自动创建 Provider。
+- 主 `.env` 继续显式向 Gateway 传递现有 DeepSeek/OpenAI 示例项，兼容旧配置。
+- 新增可选 `providers.env`，由 Compose 单独注入，可以配置任意 `LLM_GATEWAY_PROVIDER_<ID>_*` 变量；默认示例全是注释，不会自动创建 Provider。
 - 这个专用文件不会将主 `.env` 中的数据库管理员密码、Redis 密码等无关凭据传进 Gateway 容器。旧部署缺少文件也不影响启动。相关部署与契约文档已同步；按统一安排未执行 Compose/测试验证。
 
 
@@ -907,7 +907,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 2026-10-26 配置治理第一批：模板对账与环境变量契约门禁
 
-- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；DB/Redis 地址也已改为环境变量引用，Compose 继续提供 `Mariadb` 与 `Redis:6379` 默认回退以兼容已有 .env；配置检查器不允许两份 YAML 存在未登记静态值差异。
+- 将 config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；DB/Redis 地址也已改为环境变量引用，Compose 继续提供 `Mariadb` 与 `Redis:6379` 默认回退以兼容已有 .env；配置检查器不允许两份 YAML 存在未登记静态值差异。
 - 新增 scripts/check_config_contract.go，使用现有 yaml.v3 依赖反射检查 YAML 字段是否存在于 Go 配置结构，比较两份 YAML 的有效字段路径与静态默认值，校验 YAML 环境变量在 .env.example 声明并由 Compose 白名单注入，同时对账 Provider 环境变量解析器、示例文件与 DeepSeek/OpenAI Compose 字段。
 - 将配置契约检查加入 GitHub Actions；新增 docs/configuration-matrix.md 作为配置主维护入口清单，并更新中文配置说明、README、问题台账与本计划。
 - 按本轮约定没有手动运行测试或重放负载。提交后需查看新 Head 对应 Actions；真实部署兼容、Provider 跨来源冲突、慢模型超时和审计负载仍留在统一回归清单中。
