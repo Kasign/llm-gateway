@@ -843,3 +843,10 @@ docs/                        中文架构、协议和运维文档
 - 调整顺序为：先准备并立即应用下降，再持久化；若 MariaDB 持久化失败则回滚 limiter；Registry 更新失败仍同时回滚 limiter 与持久化配置。提高限额必须等 Registry 更新成功后才生效。
 - 编辑已停用 Provider 不改变当前 limiter，即使保存了较低的新配置；重新启用时才将新配置应用到运行时。新增边界测试验证 disabled edit 不上调、也不下调在途请求可能共享的许可器。
 - 本功能组与统计 API 错误脱敏、OpenAPI 状态码校准合成同一轮整合回归；只有当前 Head 的完整 Actions 通过后才更新工作分支。
+
+## 15. 管理端点 OpenAPI 覆盖扩展
+
+- 已按实际 `Server.Handler` 注册与 Handler 请求/响应实现，补入此前缺失的 HF 文件/搜索、模型安装和兼容操作、下载任务清理、Bootstrap、Backend 查看/切换、批量卸载、上游模型列表、目录搜索/Ollama tags、推理参数动态 Schema、Ollama Pull/模型动作、本地库存与统一 model-ops 等契约。
+- 补充可复用 Schema，描述稳定字段和异步任务边界；运行时、目录搜索卡片、推理参数和上游透传 JSON 保留扩展字段，避免过度承诺实现没有固定保证的属性。
+- 保持 `x-contract-status: partial`。后续需要把所有 `/api/*` 注册路径和 OpenAPI path 建立自动差异清单，再按 handler/schema 逐项收口；当前仍不声称契约已全覆盖或自动生成。
+- 当前批次更新 OpenAPI 与技术指导、问题台账、实施计划。按统一回归规则，不手动运行测试；提交后观察新 Head 的 GitHub Actions。

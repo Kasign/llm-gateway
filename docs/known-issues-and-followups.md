@@ -197,3 +197,10 @@
 - 同时，纯 helper 对“编辑已停用 Provider”只覆盖提高上限情形，未覆盖降低上限；现有逻辑可能改动仍被旧在途请求共享的 limiter。
 - 修复方式：降低上限前置到持久化之前，MariaDB 保存失败时回滚旧预算；提高上限仍延后到 Registry 替换成功后。编辑已停用 Provider 不改变当前运行时预算，重新启用时才根据已保存的新配置应用限额。
 - 增加禁用 Provider 降低上限边界的回归测试，保留现有 Registry 失败回滚与活动 Provider 保护。代码与测试已写，待整组提交触发的完整 CI 验收；未手动运行测试。
+
+## 2026-10-26 追加：扩大管理 API 的 OpenAPI 覆盖
+
+- 根据 `Server.Handler` 路由注册和各 Handler 实现，新增模型安装/删除/兼容动作、HF 文件/搜索、下载查询/清理、Backend 查看/切换/批量卸载/上游列表、Bootstrap 快照、目录搜索、Ollama tags/Pull/模型操作、本地库存与推理参数 Schema/读写/重置等端点契约。
+- 新增可复用请求/响应 Schema，明确 model_key、HF repo/filename、Ollama name/job_id、Backend、推理参数和下载清理字段；动态 upstream、运行时和 inference params 保留扩展对象，不作虚假字段承诺。
+- 文档明确 `POST /api/models/install` 与 `POST /api/admin/ollama/pull` 是后台任务入口，进度通过 `GET /api/downloads` 查询；模型卸载只释放内存，模型删除会移除本地模型。
+- 本批只扩展文档与机器可读契约，没有手动执行测试。契约依然标记 partial，尚未实现从路由/Handler 自动生成差异报告的 CI gate。

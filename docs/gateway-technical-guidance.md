@@ -746,3 +746,11 @@ Web Provider 管理端点的成功状态也需要与 Handler 一致：`POST /api
 Provider 更新复用共享 `ConcurrencyLimiter`，因此限额的应用时点影响正在执行的旧实例。降低上限时必须在持久化配置前收紧准入；如果 MariaDB 保存失败，立即将许可器恢复到原上限。若 Registry 替换失败，既要恢复许可器，也要回滚持久化配置。提高上限则只创建待处理动作，必须在 Registry 替换成功后应用，避免失败窗口内短暂放宽预算。
 
 编辑已停用 Provider 时只保存期望配置，不应改写可能仍被旧在途请求共享的运行时许可器；重新启用时，再按降低前置、提高后置的规则应用新预算。相关顺序需要有测试覆盖，不能只测试独立的并发许可器方法而忽略配置持久化与 Registry 操作之间的窗口。
+
+## 管理 API 路由与 OpenAPI 契约覆盖范围
+
+`docs/openapi.yaml` 现扩展覆盖模型目录/下载任务、Hugging Face 文件与搜索、Ollama Library tags、Backend 查看/切换/批量卸载/上游模型列表、Bootstrap 初始化快照、动态推理参数、Ollama Pull 和统一 model-ops 等路由。契约字段以注册路由和实际 Handler 为依据；安装模型和 Ollama Pull 都是异步任务，后续进度统一从 `GET /api/downloads` 查询。
+
+参数表单通过 `GET /api/admin/inference-params/schema` 动态描述，因此 `params`、`policy` 以及不同后端的运行时快照保留扩展 Schema。它们不代表已承诺每个内部字段长期稳定。兼容的逐模型 load/unload 与 Ollama load/unload 路由仍保留，但新管理操作优先走 `POST /api/admin/model-ops`，并注意卸载（仅释放内存）与删除（移除磁盘模型）是不同操作。
+
+当前 OpenAPI 依然标记为 partial：Agent 的完整协议组合、所有历史管理路由的 JSON 字段，以及动态参数与源码逐路由自动差异检查仍需后续完成。任何契约检查失败应按真实 Handler 修正规范，而非仅放宽检查或用通用对象掩盖已知稳定字段。

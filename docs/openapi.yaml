@@ -4,9 +4,11 @@ info:
   version: 0.1.0
   summary: LLM Gateway 稳定入口的分阶段 API 契约
   description: |
-    本规范是首阶段、部分覆盖的机器可读契约，不代表所有历史管理 API 均已描述。
-    已纳入：健康检查、公共推理入口、配置 Agent 前缀入口、调用统计及 Web Provider 管理。
-    管理操作需要有效管理员网页登录态或部署配置的管理员凭据；推理请求使用调用方 Gateway API Key。
+    本规范覆盖公共推理入口、配置 Agent 前缀入口、调用方 API Key、网页登录、请求审计与统计、
+    Web Provider、模型生命周期、下载任务、后端切换、推理参数与初始化快照等主要接口。
+    仍标记为 partial：动态推理参数、运行时/上游透传对象按可扩展字段描述；本规范尚未由 CI
+    自动逐路由与 Handler 做 schema 差异校验。管理操作需要管理员网页登录态或部署管理员凭据；
+    推理请求使用调用方 Gateway API Key。
   x-contract-status: partial
 servers:
   - url: /
@@ -15,7 +17,11 @@ tags:
   - name: Inference
     description: 对 OpenAI-compatible 与 Anthropic Messages 入口的转发
   - name: Admin
-    description: 管理员会话保护的只读统计和 Provider 管理
+    description: 管理员会话保护的统计、运行时、后端与 Provider 管理
+  - name: ModelManagement
+    description: Gateway 模型、上游后端、Hugging Face 和 Ollama 模型发现及生命周期操作
+  - name: Downloads
+    description: Hugging Face 下载和 Ollama Pull 任务进度与清理
   - name: APIKeys
     description: 生成与治理调用方 Gateway API Key；明文只在创建或轮换时返回一次。
   - name: Authentication
@@ -942,6 +948,758 @@ paths:
         "404":
           $ref: "#/components/responses/AdminError"
 
+  /api/hf/files:
+    get:
+      tags: [ModelManagement]
+      summary: 列出 Hugging Face 仓库中的 GGUF 文件
+      description: 只返回文件路径、大小和 SHA-256，不会开始下载；仓库名必填，revision 默认 main。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: repo
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: revision
+          in: query
+          required: false
+          schema: { type: string, default: main }
+      responses:
+        "200":
+          description: 仓库文件列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuggingFaceFileList"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/hf/search:
+    get:
+      tags: [ModelManagement]
+      summary: 搜索 Hugging Face 模型目录
+      description: q 优先；未提供时兼容 search。此接口只发现模型，不会触发下载。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: search
+          in: query
+          required: false
+          description: q 为空时使用的兼容参数。
+          schema: { type: string }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [hot, newest], default: hot }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 30 }
+        - name: hf_gguf
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: 搜索结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogSearchResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/models/install:
+    post:
+      tags: [ModelManagement]
+      summary: 将 Hugging Face GGUF 加入 Gateway 下载队列
+      description: 请求成功后立即返回 downloading；实际下载在后台执行，通过 GET /api/downloads 查询进度。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelInstallRequest"
+      responses:
+        "200":
+          description: 已创建下载记录并启动后台任务
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, status, model_key]
+                properties:
+                  success: { type: boolean, const: true }
+                  status: { type: string, const: downloading }
+                  model_key: { type: string }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: model_key 或同一仓库文件已存在。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/models/refresh:
+    post:
+      tags: [ModelManagement]
+      summary: 刷新 llama.cpp 上游模型注册表
+      description: 兼容管理接口；对于日常加载/卸载，优先使用 /api/admin/model-ops。响应透传上游 JSON。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 上游返回的刷新结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlexibleObject"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/models/{model_key}:
+    parameters:
+      - name: model_key
+        in: path
+        required: true
+        description: Gateway 本地模型记录的唯一 key。
+        schema: { type: string, minLength: 1 }
+    delete:
+      tags: [ModelManagement]
+      summary: 删除 Gateway 本地模型记录和文件
+      description: 会尝试卸载上游模型，并删除 Gateway 模型文件及数据库记录；这是破坏性操作。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "204":
+          description: 删除成功；响应正文为空。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/models/{model_key}/{action}:
+    parameters:
+      - name: model_key
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: action
+        in: path
+        required: true
+        description: load/unload/refresh/cancel/retry 均为兼容动作。
+        schema:
+          type: string
+          enum: [load, unload, refresh, cancel, retry]
+    post:
+      tags: [ModelManagement]
+      summary: 执行 Gateway 模型兼容操作
+      description: load/unload 只影响上游内存；cancel/retry 用于下载任务。新管理调用优先使用 /api/admin/model-ops。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 操作已成功提交。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/downloads:
+    get:
+      tags: [Downloads]
+      summary: 查询模型下载和 Ollama Pull 任务
+      description: 合并 HF 下载与 Ollama Pull 状态；进度来源包含 Gateway 数据库和 Redis。完成任务按服务端保留策略显示。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 当前应展示的下载任务列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/downloads/dismiss:
+    post:
+      tags: [Downloads]
+      summary: 清理单条失败/取消下载，或批量清理所有失败/取消任务
+      description: 不能清理仍处于 downloading 的任务。all_failed=true 忽略 model_key，并清理所有可清理的失败/取消项。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DownloadDismissRequest"
+      responses:
+        "200":
+          description: 已清理的记录数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadDismissResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/bootstrap:
+    get:
+      tags: [Admin]
+      summary: 获取管理台完整初始化快照
+      description: 返回活动后端、依赖可达性、模型计数与主机资源；主机指标是最近缓存快照，不应视为实时性能采样。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 完整管理台初始化快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/bootstrap/lite:
+    get:
+      tags: [Admin]
+      summary: 获取轻量管理台初始化快照
+      description: 只返回依赖可达性、推理概览与主机指标；不返回完整活动后端/URL 清单。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 轻量初始化快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapLiteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/backend:
+    get:
+      tags: [Admin]
+      summary: 查看活动上游和可用后端
+      description: refresh=1 或 probe=1 会刷新可达性探测缓存。远程 Provider 显示为已配置，不代表已经完成真实推理连通性验证。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          schema: { type: string, enum: ["1"] }
+        - name: probe
+          in: query
+          required: false
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: 活动上游、默认值、健康状态和探测结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackendOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Admin]
+      summary: 切换活动推理后端和模型
+      description: backend 接受 llamacpp、ollama 或已配置的远程 Provider ID。model_id 为空时兼容使用 model_name；切换可能触发上游模型加载。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackendSwitchRequest"
+      responses:
+        "200":
+          description: 活动后端切换完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackendSwitchResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/backend/unload-all:
+    post:
+      tags: [Admin]
+      summary: 卸载当前本地后端的所有内存模型
+      description: 只支持当前活动后端为 llama.cpp 或 Ollama 的情况；不删除磁盘模型，远程 Provider 返回 unsupported_operation。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 卸载完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: { type: boolean, const: true }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/backend/upstream-models:
+    get:
+      tags: [Admin]
+      summary: 获取活动后端可见的模型列表
+      description: 返回活动本地后端的上游模型列表；远程 Provider 返回当前配置模型的兼容列表，不会调用供应商模型目录 API。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 上游模型列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/catalog/search:
+    get:
+      tags: [Admin]
+      summary: 搜索模型目录（Hugging Face 或 Ollama Library）
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: source
+          in: query
+          required: false
+          description: 搜索来源；具体支持项由目录服务决定。
+          schema: { type: string, enum: [hf, ollama] }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [hot, newest], default: hot }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 30 }
+        - name: hf_gguf
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: 目录搜索结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogSearchResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/catalog/ollama/tags:
+    get:
+      tags: [Admin]
+      summary: 查询 Ollama Library 中某模型的 tags
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: model
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: 模型及 tags 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaTagList"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/inference-params/schema:
+    get:
+      tags: [Admin]
+      summary: 获取推理参数配置表单 Schema
+      description: 字段随 Gateway 支持的后端和推理参数实现演进；客户端应按此接口动态渲染，不要硬编码全部字段。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 参数字段、分组标题和分组说明
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InferenceParamsSchema"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/inference-params:
+    get:
+      tags: [Admin]
+      summary: 获取指定本地推理后端的推理参数与生效策略
+      description: backend 支持 llamacpp 或 ollama，缺省为 llamacpp。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      parameters:
+        - name: backend
+          in: query
+          required: false
+          schema: { type: string, enum: [llamacpp, ollama], default: llamacpp }
+      responses:
+        "200":
+          description: 已保存、有效和默认推理参数及策略
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InferenceParamsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+    put:
+      tags: [Admin]
+      summary: 保存指定后端的推理参数和可选参数策略
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InferenceParamsMutation"
+      responses:
+        "200":
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, const: true }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/inference-params/reset:
+    post:
+      tags: [Admin]
+      summary: 将指定后端推理参数恢复为部署默认值
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                backend:
+                  type: string
+                  enum: [llamacpp, ollama]
+                  default: llamacpp
+              additionalProperties: false
+      responses:
+        "200":
+          description: 重置后的推理参数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InferenceParamsResetResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/local-inventory:
+    get:
+      tags: [ModelManagement]
+      summary: 查询 Gateway 本地 GGUF 与 Ollama 模型目录
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: 本地模型与 Ollama tag 清单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalInventoryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama:
+    get:
+      tags: [ModelManagement]
+      summary: 查询配置的 Ollama 后端目录与加载状态
+      description: 需要部署时配置 OLLAMA_BASE_URL；模型本地列表与加载状态来自 Ollama API。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      responses:
+        "200":
+          description: Ollama 模型目录与加载状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaOverview"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/pull:
+    post:
+      tags: [ModelManagement]
+      summary: 启动 Ollama 模型 Pull 任务
+      description: 返回 job_id 后通过 GET /api/downloads 查询进度；本接口不会等待整个模型下载完毕。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaPullRequest"
+      responses:
+        "200":
+          description: 任务已启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaPullStartResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/pull/cancel:
+    post:
+      tags: [ModelManagement]
+      summary: 取消 Ollama Pull 任务
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaPullCancelRequest"
+      responses:
+        "200":
+          description: 已发出取消信号
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: { type: boolean, const: true }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/ollama/load:
+    post:
+      tags: [ModelManagement]
+      summary: 加载 Ollama 模型（兼容接口）
+      description: 只改变运行时内存状态，不删除模型文件。新调用优先使用 /api/admin/model-ops。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 加载请求已成功完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaModelActionResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/unload:
+    post:
+      tags: [ModelManagement]
+      summary: 卸载 Ollama 模型（兼容接口）
+      description: 只释放运行时内存；要从磁盘移除模型请使用 delete。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 卸载请求已成功完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaModelActionResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/delete:
+    post:
+      tags: [ModelManagement]
+      summary: 删除 Ollama 模型（兼容接口）
+      description: 从 Ollama 存储中移除模型；与仅释放内存的 unload 不同。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 操作步骤和完成状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelOpsResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/admin/model-ops:
+    post:
+      tags: [ModelManagement]
+      summary: 统一的模型列表、加载和卸载管理入口
+      description: action 支持 list/load/unload；load/unload 时需要 model_id 或 model_key。操作日志与业务成功标记放在 JSON 返回值中；上游操作失败可能返回 HTTP 200 且 success=false。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelOpsRequest"
+      responses:
+        "200":
+          description: 操作结果，包括操作步骤日志
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelOpsResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 components:
   securitySchemes:
     GatewayBearer:
@@ -1563,6 +2321,386 @@ components:
         analysis:
           type: object
           additionalProperties: true
+      additionalProperties: true
+
+    FlexibleObject:
+      type: object
+      description: 结构按具体运行时/上游响应动态变化，额外字段由后端实现决定。
+      additionalProperties: true
+    GatewayModel:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        model_key: { type: string }
+        display_name: { type: string }
+        source_type: { type: string }
+        hf_repo: { type: string }
+        hf_revision: { type: string }
+        filename: { type: string }
+        local_path: { type: string }
+        quantization: { type: string }
+        llama_model_name: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        sha256: { type: string }
+        status: { type: string }
+        enabled: { type: boolean }
+        runtime_json: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_loaded_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        upstream_llamacpp_id: { type: string }
+        upstream_ollama_name: { type: string }
+        upstream_name: { type: string }
+        disk_bytes: { type: integer, format: int64 }
+      additionalProperties: true
+    ModelInstallRequest:
+      type: object
+      required: [model_key, repo, filename]
+      properties:
+        model_key: { type: string, minLength: 1 }
+        display_name: { type: string }
+        repo: { type: string, minLength: 1 }
+        revision: { type: string, default: main }
+        filename: { type: string, minLength: 1 }
+        quantization: { type: string }
+        runtime:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    HuggingFaceFileList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required: [path, size, sha256]
+            properties:
+              path: { type: string }
+              size: { type: integer, format: int64 }
+              sha256: { type: string }
+            additionalProperties: true
+    CatalogSearchResult:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            description: 目录卡片字段以搜索来源和 catalog 服务返回内容为准。
+            additionalProperties: true
+      additionalProperties: true
+    DownloadsEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required: [model_key, status, done, total]
+            properties:
+              model_key: { type: string }
+              name: { type: string }
+              kind: { type: string, enum: [hf, ollama] }
+              status: { type: string, enum: [downloading, download_failed, download_cancelled, ready] }
+              done: { type: integer, format: int64 }
+              total: { type: integer, format: int64 }
+              error: { type: string }
+            additionalProperties: true
+      additionalProperties: true
+    DownloadDismissRequest:
+      type: object
+      properties:
+        model_key: { type: string }
+        all_failed:
+          type: boolean
+          default: false
+          description: true 时批量清理所有可清理的失败/取消下载任务。
+      description: 需要提供非空 model_key，或将 all_failed 设置为 true。
+      additionalProperties: true
+    DownloadDismissResult:
+      type: object
+      required: [success, cleared]
+      properties:
+        success: { type: boolean, const: true }
+        cleared: { type: integer, minimum: 0 }
+    BackendSwitchRequest:
+      type: object
+      required: [backend]
+      properties:
+        backend:
+          type: string
+          description: llamacpp、ollama 或部署/Web 配置的远程 Provider ID。
+        model_id: { type: string }
+        model_name:
+          type: string
+          description: model_id 的兼容别名；model_id 优先。
+      additionalProperties: true
+    BackendOverview:
+      type: object
+      required: [active, defaults, configured_urls, available_backends]
+      properties:
+        active:
+          type: object
+          additionalProperties: true
+        defaults:
+          type: object
+          additionalProperties: true
+        configured_urls:
+          type: object
+          additionalProperties: { type: string }
+        available_backends:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        url_warnings:
+          type: array
+          items: { type: string }
+        health: { type: string }
+        url_from_env_only: { type: boolean }
+        upstream_probes:
+          type: object
+          additionalProperties: true
+        inference_active_model_id: { type: string }
+        inference_active_by_backend:
+          type: object
+          additionalProperties: { type: string }
+      additionalProperties: true
+    BackendSwitchResult:
+      type: object
+      required: [success, active, available_backends]
+      properties:
+        success: { type: boolean, const: true }
+        active:
+          type: object
+          additionalProperties: true
+        configured_urls:
+          type: object
+          additionalProperties: { type: string }
+        available_backends:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        health: { type: string }
+      additionalProperties: true
+    BootstrapResponse:
+      type: object
+      required: [version, upstream, configured_urls, reachability, inference_summary, dependencies, gateway_counts, host]
+      properties:
+        version: { type: integer, const: 1 }
+        upstream:
+          type: object
+          required: [backend, model_name, base_url]
+          properties:
+            backend: { type: string }
+            model_name: { type: string }
+            base_url: { type: string }
+          additionalProperties: true
+        configured_urls:
+          type: object
+          additionalProperties: { type: string }
+        reachability:
+          type: object
+          additionalProperties: true
+        inference_summary:
+          type: object
+          additionalProperties: true
+        dependencies:
+          type: object
+          additionalProperties: true
+        gateway_counts:
+          type: object
+          additionalProperties: true
+        host:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    BootstrapLiteResponse:
+      type: object
+      required: [version, reachability, inference_summary, dependencies, host]
+      properties:
+        version: { type: integer, const: 1 }
+        reachability:
+          type: object
+          additionalProperties: true
+        inference_summary:
+          type: object
+          additionalProperties: true
+        dependencies:
+          type: object
+          additionalProperties: true
+        host:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    InferenceParamsSchema:
+      type: object
+      required: [fields, sections, section_descriptions]
+      properties:
+        fields:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sections:
+          type: object
+          additionalProperties: true
+        section_descriptions:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    InferenceParamsMutation:
+      type: object
+      properties:
+        backend: { type: string, enum: [llamacpp, ollama], default: llamacpp }
+        params:
+          type: object
+          description: 具体参数字段以 GET /api/admin/inference-params/schema 返回的 fields 为准。
+          additionalProperties: true
+        policy:
+          type: object
+          description: 可选参数来源/优先级策略；字段按当前推理参数实现演进。
+          additionalProperties: true
+      additionalProperties: true
+    InferenceParamsEnvelope:
+      type: object
+      required: [backend, params, policy, effective, defaults, default_policy]
+      properties:
+        backend: { type: string, enum: [llamacpp, ollama] }
+        params:
+          type: object
+          additionalProperties: true
+        policy:
+          type: object
+          additionalProperties: true
+        effective:
+          type: object
+          additionalProperties: true
+        defaults:
+          type: object
+          additionalProperties: true
+        default_policy:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    InferenceParamsResetResult:
+      type: object
+      required: [params]
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+    LocalInventoryEnvelope:
+      type: object
+      required: [gguf, ollama_names]
+      properties:
+        gguf:
+          type: array
+          items:
+            type: object
+            required: [model_key, repo, filename, status, size_bytes]
+            properties:
+              model_key: { type: string }
+              repo: { type: string }
+              filename: { type: string }
+              status: { type: string }
+              size_bytes: { type: integer, format: int64 }
+            additionalProperties: true
+        ollama_names:
+          type: array
+          items: { type: string }
+      additionalProperties: true
+    OllamaOverview:
+      type: object
+      required: [base_url, catalog, loaded, active]
+      properties:
+        base_url: { type: string }
+        catalog:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        loaded:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        active: { type: string }
+      additionalProperties: true
+    OllamaPullRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+      additionalProperties: true
+    OllamaPullStartResult:
+      type: object
+      required: [success, name, job_id]
+      properties:
+        success: { type: boolean, const: true }
+        name: { type: string }
+        job_id: { type: string }
+    OllamaPullCancelRequest:
+      type: object
+      required: [job_id]
+      properties:
+        job_id: { type: string, minLength: 1 }
+      additionalProperties: true
+    OllamaModelRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+      additionalProperties: true
+    OllamaModelActionResult:
+      type: object
+      required: [success, name]
+      properties:
+        success: { type: boolean, const: true }
+        name: { type: string }
+      additionalProperties: true
+    OllamaTagList:
+      type: object
+      required: [model, tags]
+      properties:
+        model: { type: string }
+        tags:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    ModelOpsRequest:
+      type: object
+      required: [backend, action]
+      properties:
+        backend: { type: string, enum: [llamacpp, ollama] }
+        action: { type: string, enum: [list, load, unload] }
+        model_id: { type: string }
+        model_key: { type: string }
+      additionalProperties: true
+    ModelOpsResult:
+      type: object
+      required: [success, logs]
+      properties:
+        success: { type: boolean }
+        logs:
+          type: array
+          items:
+            type: object
+            required: [at, level, message]
+            properties:
+              at: { type: string }
+              level: { type: string, enum: [info, warn, err, ok] }
+              message: { type: string }
+            additionalProperties: true
+        error: { type: string }
       additionalProperties: true
 
   parameters:
