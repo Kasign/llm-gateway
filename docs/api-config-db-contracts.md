@@ -175,3 +175,8 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 ### Provider RPM 实时用量
 
 `GET /api/admin/providers` 在原有安全视图外附加当前 UTC 分钟窗口的用量字段：`requests_per_minute_used`、`requests_per_minute_remaining`、`requests_per_minute_reset_seconds`、`requests_per_minute_usage_available`。用量读取只对 Redis 做批量 `MGET`，不递增计数、不查询 MariaDB；Redis 查询失败时 Provider 列表依旧返回配置数据，只将用量标记为不可用。计数可能包含超额后被拒绝的新请求尝试，因此在突发限流时已用计数可能大于限额，剩余额度会归零。
+
+
+### Provider RPM 超限响应
+
+Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_exceeded`，并设置 `Retry-After` 响应头（秒），提示客户端当前 UTC 固定分钟窗口何时重置。该值按响应生成时的剩余窗口秒数计算；客户端应把它作为最早重试时间参考，并继续遵守自己的退避策略。Redis 不可用导致的 503 不附加此头。

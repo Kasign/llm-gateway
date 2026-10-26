@@ -34,6 +34,15 @@ func maxInferenceRequestBodyBytesForPath(rawPath string) int64 {
 
 // writeInferenceError 保持 Anthropic Messages 客户端可识别的错误信封；其他入口维持原有统一格式。
 func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code, message string) {
+	// Provider RPM 使用 UTC 固定分钟窗口；告知客户端当前窗口的保守重试时间。
+	// 该响应尚未提交时才会执行此函数，保证可安全设置响应头。
+	if code == "provider_rate_limit_exceeded" {
+		retryAfter := 60 - time.Now().UTC().Second()
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	}
 	if isAnthropicMessagesRequestPath(rawPath) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")

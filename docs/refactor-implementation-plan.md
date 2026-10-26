@@ -682,3 +682,10 @@ docs/                        中文架构、协议和运维文档
 - 管理台 Provider 列表现在显示当前分钟已计数请求数、剩余额度及窗口重置倒计时；按原有“刷新”按钮获取最新快照，不额外增加后台定时轮询。
 - 后端采用单次 Redis MGET 读取限流计数，不改变预算、不接触 MariaDB。Redis 查询失败或超时不会阻断 Provider 管理，只将用量显示为暂不可用。
 - 已补充 Redis 只读用量测试代码；遵从统一安排没有运行测试。
+
+
+### Provider RPM 的客户端退避提示（2026-10-26）
+
+- 对未提交响应的 Provider RPM 429 增加标准 `Retry-After` 秒数响应头，指向当前 UTC 固定分钟窗口预计重置时间。
+- Chat Completions、Responses 和 Anthropic Messages 共享错误处理函数；不改变状态码、错误 envelope 或 SSE 已提交后的不可逆行为。
+- 本次仅完成实现与契约说明，未运行测试。
