@@ -37,7 +37,7 @@ func TestRemoteProviderUsesRequestedPublicModelAlias(t *testing.T) {
 			"public-reasoner": "deepseek-reasoner",
 		},
 	}}
-	choice, err := s.resolveInference(context.Background(), core.State{ID: "mapped-request", ClientModel: "public-reasoner"})
+	choice, err := s.resolveInference(context.Background(), core.State{Request: core.Request{ID: "mapped-request"}, ClientModel: "public-reasoner"})
 	if err != nil {
 		t.Fatal(err)
 	}
