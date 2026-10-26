@@ -99,8 +99,10 @@ type Server struct {
 	webLogin   webLoginSnapshot // 当前网页登录快照（谁登录了、登录态是否有效）
 	pipe       *core.Pipeline   // 固化的推理主流程
 	runs       *runCancels      // 进行中推理的取消函数
-	requestRetentionCancel context.CancelFunc
-	requestRetentionWG     sync.WaitGroup
+	requestRetentionCancel    context.CancelFunc
+	requestRetentionWG        sync.WaitGroup
+	requestRetentionStatusMu  sync.RWMutex
+	requestRetentionStatus    requestRetentionRuntimeStatus
 	calls      sync.Map         // request id -> *callState
 }
 
@@ -261,6 +263,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/inference-params/reset", s.inferenceParamsResetAPI)   // 重置推理参数为默认
 	mux.HandleFunc("/api/admin/inference-params", s.inferenceParamsAPI)              // 读取/保存推理参数
 	mux.HandleFunc("/api/admin/audit/metrics", s.auditMetricsAPI)                     // 查看审计队列的只读聚合指标
+	mux.HandleFunc("/api/admin/retention/status", s.requestRetentionStatusAPI)           // 查看请求日志保留策略的只读运行状态
 
 	// —— 管理 API：下载任务 ——
 	mux.HandleFunc("/api/downloads", s.downloadsAPI)                // 查看下载中的任务列表

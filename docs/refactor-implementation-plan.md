@@ -925,3 +925,9 @@ docs/                        中文架构、协议和运维文档
 - `docs/openapi.yaml` 当前 66 条路径包含 71 个 HTTP operation。本批为所有 operation 添加唯一、稳定的 `operationId`，方便 SDK 生成和管理 API 的引用。
 - `scripts/check_openapi_routes.py` 在原有路径双向对账之外，新增 operationId 唯一性、summary、responses 和显式 security 检查；健康检查和登录是仅有的公开操作，其余 operation 必须有安全契约。
 - 该门禁确保 operation 元数据完整，但不宣称所有 JSON Schema 已与 Go Handler 序列化完全等价；字段级契约继续依实际 Handler 与响应类型分批对照。
+
+## 2026-10-26 请求日志保留可观测性
+
+在现有分批删除逻辑上增加管理员只读 API `GET /api/admin/retention/status`，公开最近运行状态、耗时、删除量、成功/失败计数和稳定失败代码，支持外部监控器轮询。指标只存当前进程内，重启后计数归零；原始数据库错误只写服务日志，不经 API 返回。此功能不增加通知服务，也不声称主动推送告警。
+
+同时同步 OpenAPI 响应结构及状态契约测试。本提交后的验证依赖 GitHub Actions，不手动运行测试。

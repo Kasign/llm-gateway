@@ -712,6 +712,85 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/AdminError"
+  /api/admin/retention/status:
+    get:
+      operationId: getApiAdminRetentionStatus
+      tags: [Admin]
+      summary: 查看请求日志保留策略的运行状态
+      description: 返回静态保留配置、当前进程计数、最近一次清理结果和稳定失败代码；不查询数据库、不暴露原始数据库错误，进程重启后计数归零。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 保留策略运行状态
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [enabled, retention_days, batch_size, interval_seconds, max_batches_per_run, runtime]
+                    properties:
+                      enabled:
+                        type: boolean
+                      retention_days:
+                        type: integer
+                      batch_size:
+                        type: integer
+                      interval_seconds:
+                        type: integer
+                      max_batches_per_run:
+                        type: integer
+                        const: 10
+                      runtime:
+                        type: object
+                        required: [last_run_status, run_count, success_count, failure_count, last_run_duration_ms, last_run_deleted_rows, total_deleted_rows]
+                        properties:
+                          last_run_status:
+                            type: string
+                            enum: [disabled, unavailable, waiting, running, success, failed, cancelled]
+                          run_count:
+                            type: integer
+                            format: int64
+                          success_count:
+                            type: integer
+                            format: int64
+                          failure_count:
+                            type: integer
+                            format: int64
+                          last_run_started_at:
+                            type: string
+                            format: date-time
+                          last_run_finished_at:
+                            type: string
+                            format: date-time
+                          last_run_duration_ms:
+                            type: integer
+                            format: int64
+                          last_run_deleted_rows:
+                            type: integer
+                            format: int64
+                          total_deleted_rows:
+                            type: integer
+                            format: int64
+                          last_failure_code:
+                            type: string
+                            enum: [cleanup_failed]
+                          last_failure_at:
+                            type: string
+                            format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
   /api/requests:
     get:
       operationId: getApiRequests

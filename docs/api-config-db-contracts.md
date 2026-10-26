@@ -239,3 +239,9 @@ OpenAPI 为 66 条路径下的 71 个 HTTP operation 分配唯一 operationId。
 ## 9. Benchmark 的可选整体时限
 
 `POST /api/benchmark` 的后台任务现在遵循 `llama.request_timeout_seconds` 的零值语义：正数限制整个后台任务时长，0 不追加整体 Deadline。Benchmark 的 Stop/DELETE 取消信号通过独立父 Context 保留，不会因关闭超时而失效。该设置只控制 Gateway 侧总时限，不会延长调用方客户端自己的超时，也不代表上游永远可用。
+
+### 请求日志保留状态 API
+
+`GET /api/admin/retention/status` 提供受管理员鉴权保护的只读快照，包括是否启用、保留期限、批次/间隔配置、最近执行开始/结束时间、执行耗时、删除行数、进程累计删除量和失败次数。正常情况下此接口不查询数据库，返回 `Cache-Control: no-store`。
+
+清理失败只向 API 暴露稳定的 `cleanup_failed` 代码和失败时间，真实数据库诊断仍写入 Gateway 服务日志。该指标保存在当前进程内，Gateway 重启后计数清零；`last_run_status` 表示最近一次运行状态，`last_failure_*` 保留最近一次失败历史，供外部监控器轮询。此接口不主动推送告警。

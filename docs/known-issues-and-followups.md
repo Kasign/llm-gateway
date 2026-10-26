@@ -18,18 +18,18 @@
 | GW-REL-002 | 上游已提交 HTTP 200 和部分 SSE 后发生 TCP RST 的行为，原先缺少完整 MariaDB 集成测试。 | Actions #164 全量验收通过 | 在 Gateway Handler + Redis + MariaDB 集成测试中，上游发送 200 与部分 SSE 后触发 TCP RST；验证已提交状态不可逆及审计一致性。 | 客户端 HTTP=200、保留部分 SSE 并追加安全 `event: error`；审计 `http_status=200`、`upstream_http_status=200`、`status=error`、`error_code=provider_upstream`；无凭据/底层网络诊断泄漏；Actions #164 全量 CI 通过。真实供应商 E2E 仍未覆盖。 |
 | GW-REL-003 | TCP 拒绝后同端口恢复已由 PR #5 覆盖并合入 `dev`。 | 已合入，合并后整体回归仍需持续关注 | 不再从旧分支重复合入；后续回归检查请求与审计状态的一致性。 | 新 `dev` Head 对应完整 Actions 通过，并在统一回归中保持恢复语义。 |
 | GW-OBS-001 | 审计队列已有有界容量、关键任务预留及 dropped 计数。 | 实现完成；Actions #162（Head `dfbc2955`）全量通过 | 原子计数与低成本快照暴露队列深度、容量、成功/失败、按原因丢弃、累计排队时延/最大排队时延和累计 drop rate；管理员 GET API 不查询数据库，不返回正文、Key 或原始错误。 | Actions #162：单测、MariaDB 审计积压、Gateway 负载/故障注入/TCP 恢复、race、性能基线、go vet、Go 构建与前端 bundle 均通过。 |
-| GW-OBS-002 | 请求日志 / Payload 的数据库保留期限与自动清理。 | 代码已实现，待统一测试 | `logging.retention_days` 默认 0（禁用）；正数保留天数后，按 500 条默认批次、每轮最多 10 批清理已结束请求，先删除流事件和 Payload 再删除请求日志；单批独立事务并支持取消。 | MariaDB 验证到期/未到期、运行中请求、批次边界、并发写入与取消；确认清理指标/日志与失败告警后关闭。 |
+| GW-OBS-002 | 请求日志 / Payload 的数据库保留期限与自动清理。 | 清理逻辑与 MariaDB 集成用例已随完整 Actions #222/#224 通过；本批新增只读运行状态 API，等待最新 CI | `logging.retention_days` 默认 0（禁用）；正数保留天数后，按 500 条默认批次、每轮最多 10 批清理已结束请求，先删除流事件和 Payload 再删除请求日志；单批独立事务并支持取消。运行状态只保留进程内聚合计数，API 不暴露原始数据库异常。 | 完整 Actions 通过；状态 API 可区分 waiting/success/failed/cancelled，返回耗时、删除量和失败次数，且不泄露原始 DB 错误。 |
 | GW-OBS-003 | 管理台轮询对 DB/CPU/推理热路径的影响仍需实测；短期缓存不等于完整负载证明。 | 待基准 | 对照无轮询、常态轮询和高频轮询，测量 DB 查询量、延迟分位数、CPU 与缓存命中率。 | 同一 Go 版本和相近 Runner 下重复采样；定义预算与刷新频率；不凭单次抖动设置阈值。 |
-| GW-NET-001 | TLS 握手中断、连接池陈旧连接及公网代理链路的覆盖不相同。 | TLS 握手中断由 Actions #166 验收通过；陈旧 Keep-Alive 恢复专项新增，待 CI；公网反代/路由待部署环境验收 | 区分故障注入：TLS 在握手前关闭；陈旧连接先建立成功响应，再由服务端清空空闲连接，第二次请求必须成功并建立替代 TCP 连接。公网链路不能由 loopback 代替。 | 陈旧连接测试在完整 CI/race 通过，第二次请求成功且请求/连接计数满足预期；公网项另附环境、时间与脱敏日志。 |
+| GW-NET-001 | TLS 握手中断、连接池陈旧连接及公网代理链路的覆盖不相同。 | TLS 握手中断、陈旧 Keep-Alive 恢复用例均随完整 Actions #222/#224 通过；公网反代/路由仍待部署环境验收 | 区分故障注入：TLS 在握手前关闭；陈旧连接先建立成功响应，再由服务端清空空闲连接，第二次请求必须成功并建立替代 TCP 连接。公网链路不能由 loopback 代替。 | 陈旧连接测试在完整 CI/race 通过，第二次请求成功且请求/连接计数满足预期；公网项另附环境、时间与脱敏日志。 |
 
-| GW-NET-002 | Provider Transport 复用的 Keep-Alive 连接可能被 NAT、反向代理或上游空闲超时提前关闭。 | 陈旧连接恢复用例已纳入完整 Actions；当前 Head 的 #172 运行全量通过 | 首次请求成功后关闭空闲连接；不得盲目重试可能已执行的 POST；允许当前请求映射安全 502，但下一次请求必须建立替代 TCP 连接并成功。 | 当前完整 Actions 的 race、静态检查、Go build 和 bundle 均通过；公网反代和真实供应商链路仍单独验收。 |
+| GW-NET-002 | Provider Transport 复用的 Keep-Alive 连接可能被 NAT、反向代理或上游空闲超时提前关闭。 | 陈旧连接恢复用例由完整 Actions #222/#224 复验通过；公网反代/真实供应商仍需部署环境确认 | 首次请求成功后关闭空闲连接；不得盲目重试可能已执行的 POST；允许当前请求映射安全 502，但下一次请求必须建立替代 TCP 连接并成功。 | 当前完整 Actions 的 race、静态检查、Go build 和 bundle 均通过；公网反代和真实供应商链路仍单独验收。 |
 
 ## P1：运行治理
 
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
-| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与配置热更新随 PR #7 合入 `dev`；合并后负载回归尚需统一确认 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、Token 预算与排队策略尚未全部齐全。 | Provider RPM 已实现，待统一测试；Token 预算与排队仍待设计 | `requests_per_minute=0` 默认禁用；正数在请求级 ACL 之后、WarmStart/上游前按 Provider ID 使用 Redis UTC 固定分钟窗口计数。多个 API Key 和 Agent 共享 Provider 额度；超过上限返回 429，Redis 不可用时 fail-closed 返回 503。本地 llama.cpp/Ollama 不受该远程 Provider 限额影响。 | 统一测试 Redis 计数隔离、429/503 审计、动态 Web 配置更新与多 Agent 共用额度；Token 预算与排队另行评审。 |
+| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
+| GW-GOV-002 | Provider 级 RPM、Token 预算与排队策略尚未全部齐全。 | Provider RPM 的限流语义随完整 Actions #222/#224 通过；Token 预算与排队仍待设计 | `requests_per_minute=0` 默认禁用；正数在请求级 ACL 之后、WarmStart/上游前按 Provider ID 使用 Redis UTC 固定分钟窗口计数。多个 API Key 和 Agent 共享 Provider 额度；超过上限返回 429，Redis 不可用时 fail-closed 返回 503。本地 llama.cpp/Ollama 不受该远程 Provider 限额影响。 | 统一测试 Redis 计数隔离、429/503 审计、动态 Web 配置更新与多 Agent 共用额度；Token 预算与排队另行评审。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -38,9 +38,9 @@
 |---|---|---|---|---|
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
-| GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 代码与 PR #7 已合入 `dev`；合并后首次 CI 的负载步骤失败，未影响该事实，但全量回归仍需跟进。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
+| GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 代码随 PR #7 合入 `dev`，完整 Actions #222/#224 通过；真实供应商与已部署 Web 行为仍需用户环境验收。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | OpenAPI 的路径覆盖和 operation 级元数据检查仍需完善。 | 66 条路径已与 `Server.Handler` 中的注册路径匹配；当前 OpenAPI 覆盖 HF/Ollama、下载、推理参数、Bootstrap 和 Web Provider 路由。本批为 71 个 operation 添加 operationId，并在 CI 检查 operationId 唯一性、summary、responses 与 security（健康检查、登录除外）。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 路由与 operation 元数据门禁通过；稳定 Schema 有可复核的字段/状态码约束；OpenAPI 的 `partial` 状态仅在字段级覆盖实际完整后调整。 |
+| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 66 条路径和 71 个 operation 的路由/元数据门禁已由完整 Actions #224 通过；本批新增的保留状态 API 将由后续 Actions 验证。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 路由与 operation 元数据门禁通过；稳定 Schema 有可复核的字段/状态码约束；OpenAPI 的 `partial` 状态仅在字段级覆盖实际完整后调整。 |
 
 ## 本轮实施规则
 
@@ -244,3 +244,9 @@
 
 - 为现有 71 个 OpenAPI operation 增加唯一 operationId，并将 CI 检查扩展到 summary、responses 和显式 security。仅 `GET /health` 与 `POST /api/auth/login` 为公开 operation。
 - 路径覆盖已达 66/66；尚未完全自动验证每个请求/响应 Schema 的字段与 Go Handler 的序列化等价性，因此不会把 OpenAPI 的 partial 状态改为 complete。
+
+## 2026-10-26 请求日志保留运行状态 API
+
+新增 `GET /api/admin/retention/status`。在管理员鉴权后返回保留配置与进程内聚合指标，包括最近执行状态、执行次数、成功/失败次数、执行时间/耗时、删除行数、累计删除量和稳定失败代码。
+
+该接口只读取内存状态，设置 `Cache-Control: no-store`；原始数据库异常只进入 Gateway 服务日志。计数在进程重启后清零；外部监控器可轮询 `last_run_status`/`failure_count`，Gateway 本身不推送告警。此功能和 OpenAPI 契约已加入当前 Head，待 CI 验证。
