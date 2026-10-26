@@ -43,7 +43,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、超时、模型数、warm-start | 全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
-| `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限与并发上限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID，旧 YAML 不写此字段仍保持原行为。 |
+| `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限、并发上限与整体请求时限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID；`request_timeout_seconds` 为 0 时保留既有 Context 与响应头超时行为，非 0 时限制完整 JSON/SSE 请求时长。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |
 | `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；生产环境必须明确评估隐私与磁盘代价。 |
@@ -157,6 +157,8 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 
 
 ### Web 多 Provider 存储与运行时契约（2026-10-26）
+
+- Provider 可配置 `request_timeout_seconds`（0–86400）；非 0 时设置独立 HTTP Client 的整体期限，覆盖请求发送、等待响应和读取完整响应体，因此也会限制 SSE 生成的最长时长。0 表示不增加 Provider 级整体期限，仍受请求 Context、拨号/TLS 和响应头超时约束。Web 编辑、YAML、`.env` 与 Compose 透传同一字段。
 
 - 新增/编辑/启用/停用/删除前校验 Provider 配置与安全策略；先保存到 `gateway_settings.remote_providers:web:v1`，再更新 Registry。Registry 替换只改变新请求解析到的 Provider 工厂；已解析的请求与 SSE 保留旧实例，不被主动取消。
 - Web Provider API Key 使用 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`（base64 编码的 32 字节随机值）进行 AES-256-GCM 加密；数据库只保存版本化密文。列表/详情 API 只返回 `api_key_configured` 和通用掩码，不返回 `api_key` 或 `api_key_ciphertext`。编辑时空 Key 保留旧值，显式清除走独立 `clear-key` 动作。

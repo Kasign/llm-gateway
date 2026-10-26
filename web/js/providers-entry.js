@@ -88,6 +88,7 @@
     $('providerApiKeyHeader').value = row?.api_key_header || 'authorization';
     $('providerConcurrency').value = row?.max_concurrent_requests ?? 64;
     $('providerMaxResponse').value = row?.max_response_bytes ?? 0;
+    $('providerRequestTimeout').value = row?.request_timeout_seconds ?? 0;
     $('providerEnabled').value = String(row?.enabled ?? true);
     $('providerMappings').value = JSON.stringify(row?.model_mappings || {}, null, 2);
     $('providerAllowPrivate').checked = !!row?.allow_private_network;
@@ -123,6 +124,7 @@
       allow_private_network: $('providerAllowPrivate').checked,
       max_response_bytes: Number($('providerMaxResponse').value || 0),
       max_concurrent_requests: Number($('providerConcurrency').value || 0),
+      request_timeout_seconds: Number($('providerRequestTimeout').value || 0),
     };
   }
   async function saveProvider(event) {

@@ -103,7 +103,7 @@ docs/                        中文架构、协议和运维文档
 ### 阶段 4：外部 Provider 与凭据管理
 状态：进行中（YAML/环境变量/数据库 Web Provider 配置与管理台已经在 PR #7 实现；当前继续治理 Provider 热更新期间的并发许可生命周期、配置回滚与并发预算生效顺序）。
 
-已完成：远程 Provider 静态配置、独立 API Key、模型 ID 覆盖、默认阻止私网及特殊用途 IP、禁止重定向、响应体上限与安全错误响应已接入；CI 基线通过。真实供应商端到端与故障注入测试仍待执行。
+已完成：远程 Provider 静态配置、独立 API Key、模型 ID 覆盖、默认阻止私网及特殊用途 IP、禁止重定向、响应体上限、安全错误响应、Web 多 Provider 管理、`.env` 多 Provider 预置与每 Provider 整体请求时限均已实现。真实供应商端到端与公网故障注入仍待执行；本轮按用户要求不等待 CI，后续统一测试。
 
 任务：
 - 增加 Provider、远程模型映射和凭据引用的安全配置/存储。
@@ -123,7 +123,7 @@ docs/                        中文架构、协议和运维文档
 为同时支持部署预置和 Web 动态管理，配置来源必须可识别，不做静默的字段级覆盖：
 
 1. **兼容现有 YAML 配置。** 保留 `providers.openai_compatible[]` 与现有 `${ENV_NAME}` 展开逻辑；原有部署无需迁移。该来源标记为“部署配置”，由 YAML/部署环境维护。
-2. **支持直接用 `.env` 预置完整 Provider。** 新增统一前缀 `LLM_GATEWAY_PROVIDER_<ID>_`，至少支持 `ENABLED`、`BASE_URL`、`DEFAULT_MODEL`、`API_KEY`，并支持 `API_KEY_HEADER`、`REQUEST_TIMEOUT_SECONDS`、`MAX_CONCURRENT_REQUESTS`、`MAX_RESPONSE_BYTES`、`ALLOW_INSECURE_HTTP`、`ALLOW_PRIVATE_NETWORK` 及模型映射配置。环境变量 ID 段转为小写后作为 Provider ID；变量值必须走与 YAML 相同的规范化、URL/SSRF、安全和范围校验。真实 Key 仅放在部署环境，不提交到 Git。
+2. **支持直接用 `.env` 预置完整 Provider。** 新增统一前缀 `LLM_GATEWAY_PROVIDER_<ID>_`，至少支持 `ENABLED`、`BASE_URL`、`DEFAULT_MODEL`、`API_KEY`，并支持 `API_KEY_HEADER`、`REQUEST_TIMEOUT_SECONDS`、`MAX_CONCURRENT_REQUESTS`、`MAX_RESPONSE_BYTES`、`ALLOW_INSECURE_HTTP`、`ALLOW_PRIVATE_NETWORK` 及模型映射配置。`REQUEST_TIMEOUT_SECONDS=0` 不增加 Provider 级总时限，`1–86400` 秒限制完整 JSON/SSE 请求。环境变量 ID 段转为小写后作为 Provider ID；变量值必须走与 YAML 相同的规范化、URL/SSRF、安全和范围校验。真实 Key 仅放在部署环境，不提交到 Git。
 3. **Provider ID 跨来源冲突一律失败关闭。** YAML、前缀环境变量和数据库中 Web 创建的 Provider 合并成可用目录；同一 ID 在多个来源出现时给出不含密钥值的启动/保存错误，不按“谁优先”覆盖整份配置。这样不会因增加环境变量而意外替换正在使用的 Provider。原有 `gateway_settings.llm_upstream` 仍只代表全局活动 Provider/模型选择，不覆盖某个 Provider 自身的地址、模型或凭据。
 4. **部署管理项只读，Web 管理项动态生效。** YAML/环境变量来源在 Web 列表中显示来源并禁止直接编辑、删除；变更需修改部署配置并重启。Web 新建项保存在专用 Provider 配置存储，更新时先完整校验并持久化，再以不可见中间态的方式切换运行时 Registry；请求已拿到旧 Provider 实例时允许其完成，不中断在途 SSE。关闭或删除当前活动 Provider 前必须先切换到其他 Provider。
 5. **Web 密钥不明文持久化或回显。** Web 管理创建的 Provider Key 需要使用 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY` 提供的独立 32 字节密钥做 AEAD 加密后再落库；密钥缺失/格式不合法时，不允许保存带 Key 的 Web Provider。API 只返回 `api_key_configured` 与掩码状态，永远不返回明文。编辑表单留空表示保留原 Key；单独的显式清除动作需要二次确认。日志、错误、测试产物和导出均不得包含 Key。

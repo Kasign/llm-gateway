@@ -37,6 +37,7 @@ type managedProvider struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
+	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
 	ConcurrencyLimiter *provider.ConcurrencyLimiter `json:"-"`
 	APIKey string `json:"-"`
 	SourceConflict bool `json:"-"`
@@ -55,6 +56,7 @@ type providerMutationRequest struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests"`
+	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
 }
 
 type providerManagementError struct { status int; code string; message string }
@@ -160,6 +162,7 @@ func (s *Server) buildRemoteProvider(row managedProvider) (*provider.OpenAICompa
 		ID:row.ID,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,
 		AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,
 		MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,
+		RequestTimeoutSeconds:row.RequestTimeoutSeconds,
 		RequestLimiter:row.ConcurrencyLimiter,
 	})
 }
@@ -181,7 +184,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 	id:=strings.ToLower(strings.TrimSpace(in.ID));if id==""{id=strings.ToLower(strings.TrimSpace(routeID))}
 	if !managedProviderIDPattern.MatchString(id)||id=="llamacpp"||id=="ollama" {return managedProvider{},providerErr(400,"invalid_provider_id","Provider ID 格式无效或与内置 Provider 冲突")}
 	if routeID!=""&&id!=strings.ToLower(strings.TrimSpace(routeID)){return managedProvider{},providerErr(400,"provider_id_immutable","Provider ID 不允许通过编辑修改")}
-	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests}
+	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests,RequestTimeoutSeconds:in.RequestTimeoutSeconds}
 	if row.APIKeyHeader==""{row.APIKeyHeader="authorization"}
 	if row.APIKeyHeader!="authorization"&&row.APIKeyHeader!="api-key"&&row.APIKeyHeader!="x-api-key" {return managedProvider{},providerErr(400,"invalid_api_key_header","API Key Header 仅支持 Authorization、api-key 或 x-api-key")}
 	if row.DefaultModel==""||len(row.DefaultModel)>255||strings.ContainsAny(row.DefaultModel,"\r\n"){return managedProvider{},providerErr(400,"invalid_default_model","默认模型 ID 必须是非空单行字符串")}
@@ -193,7 +196,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 		mappings[alias]=target
 	}
 	row.ModelMappings=mappings
-	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")}
+	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
 	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable;row.ConcurrencyLimiter=old.ConcurrencyLimiter}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))
@@ -208,7 +211,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 
 func (s *Server) safeProviderView(row managedProvider,source string,editable bool) map[string]interface{} {
 	configured:=row.APIKey!=""||row.APIKeyCiphertext!=""
-	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"source":source,"editable":editable}
+	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"request_timeout_seconds":row.RequestTimeoutSeconds,"source":source,"editable":editable}
 	if configured{v["api_key_masked"]="••••••••"}
 	if row.SourceConflict{v["source_conflict"]=true;v["enabled"]=false;v["warning"]="ID 与部署配置冲突，已拒绝覆盖"}
 	if row.SecretUnavailable{v["secret_unavailable"]=true;v["warning"]="密文无法解密；请重新填写 API Key 或显式清除"}
@@ -218,7 +221,7 @@ func (s *Server) listManagedProviderViews() []map[string]interface{} {
 	out:=make([]map[string]interface{},0)
 	if s!=nil&&s.cfg!=nil {
 		for _,r:=range s.cfg.Providers.OpenAICompatible {
-			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests}
+			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
 			out=append(out,s.safeProviderView(row,"deployment",false))
 		}
 	}
@@ -423,7 +426,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 		if key=="" {s.providerConfigMu.RLock();if row,ok:=s.webProviders[id];ok{key=row.APIKey};s.providerConfigMu.RUnlock()}
 		in.APIKey=""
 		row,err:=s.validateProviderInput(in,nil,id);if err!=nil{writeProviderManagementError(w,err);return};row.APIKey=key
-		cfg=config.OpenAICompatibleProviderConfig{ID:row.ID,Enabled:true,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,DefaultModel:row.DefaultModel,ModelMappings:cloneStringMap(row.ModelMappings),AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests}
+		cfg=config.OpenAICompatibleProviderConfig{ID:row.ID,Enabled:true,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,DefaultModel:row.DefaultModel,ModelMappings:cloneStringMap(row.ModelMappings),AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,RequestTimeoutSeconds:row.RequestTimeoutSeconds}
 	} else {
 		if r.URL.Query().Get("source") == "deployment" {
 			for _, item := range s.cfg.Providers.OpenAICompatible {
@@ -441,6 +444,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 					ModelMappings: cloneStringMap(row.ModelMappings),
 					AllowInsecureHTTP: row.AllowInsecureHTTP, AllowPrivateNetwork: row.AllowPrivateNetwork,
 					MaxResponseBytes: row.MaxResponseBytes, MaxConcurrentRequests: row.MaxConcurrentRequests,
+					RequestTimeoutSeconds: row.RequestTimeoutSeconds,
 				}
 			}
 		}
@@ -449,7 +453,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 			return
 		}
 	}
-	remote,err:=provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{ID:cfg.ID,BaseURL:cfg.BaseURL,APIKey:cfg.APIKey,APIKeyHeader:cfg.APIKeyHeader,AllowInsecureHTTP:cfg.AllowInsecureHTTP,AllowPrivateNetwork:cfg.AllowPrivateNetwork,MaxResponseBytes:cfg.MaxResponseBytes,MaxConcurrentRequests:cfg.MaxConcurrentRequests})
+	remote,err:=provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{ID:cfg.ID,BaseURL:cfg.BaseURL,APIKey:cfg.APIKey,APIKeyHeader:cfg.APIKeyHeader,AllowInsecureHTTP:cfg.AllowInsecureHTTP,AllowPrivateNetwork:cfg.AllowPrivateNetwork,MaxResponseBytes:cfg.MaxResponseBytes,MaxConcurrentRequests:cfg.MaxConcurrentRequests,RequestTimeoutSeconds:cfg.RequestTimeoutSeconds})
 	if err!=nil{jsonError(w,400,"invalid_provider_config","Provider 配置校验失败；请检查 HTTPS、URL 与网络访问策略");return}
 	ctx,cancel:=context.WithTimeout(r.Context(),4*time.Second);defer cancel()
 	models,err:=remote.TestConnection(ctx)

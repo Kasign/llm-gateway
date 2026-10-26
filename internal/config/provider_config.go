@@ -22,6 +22,7 @@ type OpenAICompatibleProviderConfig struct {
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
 	MaxConcurrentRequests int  `yaml:"max_concurrent_requests"`
+	RequestTimeoutSeconds int `yaml:"request_timeout_seconds"`
 }
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -59,6 +60,9 @@ func (c *Config) validateProviderConfigs() error {
 		if item.MaxConcurrentRequests < 0 || item.MaxConcurrentRequests > gatewayprovider.MaxOpenAICompatibleConcurrentRequests {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): max_concurrent_requests must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleConcurrentRequests)
 		}
+		if item.RequestTimeoutSeconds < 0 || item.RequestTimeoutSeconds > gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): request_timeout_seconds must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds)
+		}
 		if !item.Enabled {
 			continue
 		}
@@ -73,6 +77,7 @@ func (c *Config) validateProviderConfigs() error {
 			AllowInsecureHTTP: item.AllowInsecureHTTP, AllowPrivateNetwork: item.AllowPrivateNetwork,
 			MaxResponseBytes: item.MaxResponseBytes,
 			MaxConcurrentRequests: item.MaxConcurrentRequests,
+			RequestTimeoutSeconds: item.RequestTimeoutSeconds,
 		})
 		if err != nil {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): %w", i, item.ID, err)

@@ -1831,6 +1831,25 @@ func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestNewOpenAICompatibleProviderAppliesRequestTimeout(t *testing.T) {
+	for _, seconds := range []int{-1, MaxOpenAICompatibleRequestTimeoutSeconds + 1} {
+		_, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+			ID: "timeout-limit", BaseURL: "https://provider.example/v1", RequestTimeoutSeconds: seconds,
+		})
+		if err == nil {
+			t.Errorf("RequestTimeoutSeconds=%d should be rejected", seconds)
+		}
+	}
+	p, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		ID: "timeout-enabled", BaseURL: "https://provider.example/v1", RequestTimeoutSeconds: 120,
+	})
+	if err != nil { t.Fatal(err) }
+	if p.client.Timeout != 120*time.Second { t.Fatalf("client timeout = %s, want 2m", p.client.Timeout) }
+	unlimited, err := NewOpenAICompatibleProvider(OpenAICompatibleConfig{ID:"timeout-default",BaseURL:"https://provider.example/v1"})
+	if err != nil { t.Fatal(err) }
+	if unlimited.client.Timeout != 0 { t.Fatalf("default client timeout = %s, want no additional overall timeout", unlimited.client.Timeout) }
+}
+
 
 // TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection 验证服务端关闭空闲 Keep-Alive 连接后，
 // Provider 的 HTTP Transport 能从陈旧连接恢复，而不是让后续请求永久卡住或污染响应。

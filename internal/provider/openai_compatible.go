@@ -37,6 +37,8 @@ const (
 	// MaxOpenAICompatibleConcurrentRequests matches the HTTP transport per-host connection ceiling.
 	MaxOpenAICompatibleConcurrentRequests        = 64
 	defaultOpenAICompatibleMaxConcurrentRequests = 64
+	// MaxOpenAICompatibleRequestTimeoutSeconds 限制可配置的 Provider 整体请求时限（包含完整流式响应）。
+	MaxOpenAICompatibleRequestTimeoutSeconds = 86400
 )
 
 // ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
@@ -123,6 +125,8 @@ type OpenAICompatibleConfig struct {
 	MaxConcurrentRequests int
 	// RequestLimiter 可用于同一 Provider 的热更新实例共享并发预算；nil 时会创建独立许可器。
 	RequestLimiter *ConcurrencyLimiter
+	// RequestTimeoutSeconds 为完整 HTTP 请求时限，包含 JSON/SSE 响应体读取；0 表示不增加 Provider 级总时限。
+	RequestTimeoutSeconds int
 }
 
 // OpenAICompatibleProvider 负责 OpenAI-compatible JSON 与 SSE 传输，不负责 Gateway 鉴权/模型路由。
@@ -156,6 +160,9 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 	}
 	if cfg.MaxConcurrentRequests < 0 || cfg.MaxConcurrentRequests > MaxOpenAICompatibleConcurrentRequests {
 		return nil, fmt.Errorf("provider max_concurrent_requests must be between 0 and %d", MaxOpenAICompatibleConcurrentRequests)
+	}
+	if cfg.RequestTimeoutSeconds < 0 || cfg.RequestTimeoutSeconds > MaxOpenAICompatibleRequestTimeoutSeconds {
+		return nil, fmt.Errorf("provider request_timeout_seconds must be between 0 and %d", MaxOpenAICompatibleRequestTimeoutSeconds)
 	}
 	for _, r := range id {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
@@ -211,6 +218,11 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 	if maxResponseBytes > maxRemoteResponseLimit {
 		return nil, fmt.Errorf("provider max_response_bytes must not exceed %d bytes (512 MiB)", maxRemoteResponseLimit)
 	}
+	client := newRestrictedHTTPClientWithResolver(cfg.AllowPrivateNetwork, resolver)
+	if cfg.RequestTimeoutSeconds > 0 {
+		// http.Client.Timeout 覆盖整个请求生命周期；为 0 时保留既有 Context/响应头超时语义。
+		client.Timeout = time.Duration(cfg.RequestTimeoutSeconds) * time.Second
+	}
 	requestLimiter := cfg.RequestLimiter
 	if requestLimiter == nil {
 		requestLimiter, err = NewConcurrencyLimiter(maxConcurrentRequests)
@@ -226,7 +238,7 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		maxResponseBytes:    maxResponseBytes,
 		requestLimiter:      requestLimiter,
-		client:              newRestrictedHTTPClientWithResolver(cfg.AllowPrivateNetwork, resolver),
+		client:              client,
 	}, nil
 }
 
