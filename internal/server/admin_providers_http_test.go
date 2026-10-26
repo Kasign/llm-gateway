@@ -2,11 +2,14 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/settings"
 )
 
 func TestProviderAPIKeyEncryptionRoundTripAndRejectsWrongKey(t *testing.T) {
@@ -36,4 +39,65 @@ func TestDeploymentProviderIDIncludesDisabledEntries(t *testing.T) {
 	s.cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{ID:"reserved-remote",Enabled:false}}
 	if !s.deploymentProviderID("RESERVED-REMOTE") { t.Fatal("disabled deployment Provider ID must remain reserved") }
 	if s.deploymentProviderID("other") { t.Fatal("unconfigured Provider ID must not be reserved") }
+}
+
+ 
+func TestChangeWebProviderRejectsDeploymentManagedIDIncludingDisabled(t *testing.T) {
+	s := &Server{cfg: &config.Config{}}
+	s.cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{ID:"reserved", Enabled:false}}
+	err := s.changeWebProvider(context.Background(), "reserved", &providerMutationRequest{
+		ID:"reserved", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model",
+	}, "save")
+	var managedErr *providerManagementError
+	if !errors.As(err, &managedErr) || managedErr.status != 409 {
+		t.Fatalf("deployment-owned ID should return 409, got %v", err)
+	}
+}
+
+func TestChangeWebProviderCannotDisableOrDeleteActiveProvider(t *testing.T) {
+	for _, action := range []string{"disable", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			s := &Server{
+				cfg: &config.Config{},
+				upstream: settings.Upstream{Backend:"remote"},
+				webProviders: map[string]managedProvider{
+					"remote": {ID:"remote", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model"},
+				},
+			}
+			err := s.changeWebProvider(context.Background(), "remote", nil, action)
+			var managedErr *providerManagementError
+			if !errors.As(err, &managedErr) || managedErr.status != 409 {
+				t.Fatalf("active Provider %s should return 409, got %v", action, err)
+			}
+		})
+	}
+}
+
+func TestChangeWebProviderRejectsCreateWhenStaleUpstreamPointsAtNewID(t *testing.T) {
+	s := &Server{cfg:&config.Config{}, upstream:settings.Upstream{Backend:"orphan"}}
+	err := s.changeWebProvider(context.Background(), "orphan", &providerMutationRequest{
+		ID:"orphan", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model",
+	}, "save")
+	var managedErr *providerManagementError
+	if !errors.As(err, &managedErr) || managedErr.status != 409 {
+		t.Fatalf("creating the currently selected but unconfigured ID should return 409, got %v", err)
+	}
+}
+
+func TestValidateProviderInputKeepsExistingKeyWhenInputIsBlank(t *testing.T) {
+	s := &Server{}
+	old := managedProvider{
+		ID:"remote", Enabled:true, BaseURL:"http://127.0.0.1:9000/v1",
+		APIKey:"previous-secret", APIKeyCiphertext:"v1:existing-ciphertext",
+		APIKeyHeader:"authorization", DefaultModel:"model",
+		AllowInsecureHTTP:true, AllowPrivateNetwork:true,
+	}
+	next, err := s.validateProviderInput(providerMutationRequest{
+		ID:"remote", Enabled:false, BaseURL:old.BaseURL, DefaultModel:"model",
+		APIKeyHeader:"authorization", AllowInsecureHTTP:true, AllowPrivateNetwork:true,
+	}, &old, "remote")
+	if err != nil { t.Fatal(err) }
+	if next.APIKey != old.APIKey || next.APIKeyCiphertext != old.APIKeyCiphertext {
+		t.Fatalf("blank API Key should retain existing credential; got plaintext=%q ciphertext=%q", next.APIKey, next.APIKeyCiphertext)
+	}
 }
