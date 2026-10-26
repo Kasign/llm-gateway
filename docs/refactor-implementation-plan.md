@@ -850,3 +850,10 @@ docs/                        中文架构、协议和运维文档
 - 补充可复用 Schema，描述稳定字段和异步任务边界；运行时、目录搜索卡片、推理参数和上游透传 JSON 保留扩展字段，避免过度承诺实现没有固定保证的属性。
 - 保持 `x-contract-status: partial`。后续需要把所有 `/api/*` 注册路径和 OpenAPI path 建立自动差异清单，再按 handler/schema 逐项收口；当前仍不声称契约已全覆盖或自动生成。
 - 当前批次更新 OpenAPI 与技术指导、问题台账、实施计划。按统一回归规则，不手动运行测试；提交后观察新 Head 的 GitHub Actions。
+
+## 16. OpenAPI 第二轮精确性与高风险路径 Review
+
+- 补齐 Agent 固定 Provider 的所有已支持协议路径：models、Chat Completions、Completions、Responses、Anthropic Messages 和 Messages count_tokens。Agent 使用固定 Provider，不等于可由请求体任意切换后端。
+- 将 Ollama Library tag 与可用 Backend 的已知 JSON 字段从泛型对象升级为显式属性；运行时快照/目录卡片/动态推理参数仍允许扩展字段。
+- 第二轮高风险 Review 覆盖请求取消与 Finish 竞态、SSE 响应已提交后错误处理、审计 FIFO/排队丢弃指标、管理员认证与 Provider 共享并发许可器。当前未发现需在此批引入新的运行时代码改动的问题；仍须靠当前完整 CI 验收。
+- 当前 OpenAPI 仍为 partial。后续重点是建立 Handler 路由与 OpenAPI path 自动对账，避免新增管理端点时只靠人工台账；此项先在回归通过后按独立功能规划。

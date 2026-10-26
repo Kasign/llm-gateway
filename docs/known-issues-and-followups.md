@@ -204,3 +204,10 @@
 - 新增可复用请求/响应 Schema，明确 model_key、HF repo/filename、Ollama name/job_id、Backend、推理参数和下载清理字段；动态 upstream、运行时和 inference params 保留扩展对象，不作虚假字段承诺。
 - 文档明确 `POST /api/models/install` 与 `POST /api/admin/ollama/pull` 是后台任务入口，进度通过 `GET /api/downloads` 查询；模型卸载只释放内存，模型删除会移除本地模型。
 - 本批只扩展文档与机器可读契约，没有手动执行测试。契约依然标记 partial，尚未实现从路由/Handler 自动生成差异报告的 CI gate。
+
+## 2026-10-26 追加：OpenAPI 第二轮精确性 Review
+
+- 为 Agent 固定 Provider 路由补齐 Completions、Responses、Anthropic Messages 和 Messages count_tokens，与实际 Handler 的前缀路由范围保持一致。
+- 对 Ollama Library tags 明确 tag/full_name/size/context/input 字段；对 available_backends 明确 id/label/kind/base_url/source/editable 及可选运行信息，不再只用无字段对象表达已知稳定返回内容。
+- 修正 OpenAPI 3.1 时间字段的空值建模，并避免在与 Handler 兼容的推理参数 reset body 上使用过严的 additionalProperties=false。
+- 高风险代码 Review 复核了请求生命周期结束状态、响应已提交后的状态保持、审计 FIFO/有界队列、管理员会话与 Provider 运行时预算；本轮未发现需要额外扩大代码变更范围的阻塞项。Actions #214 尚在执行，本批修正先暂存为候选提交，待该轮回归结束后再推送，避免两个完整 CI 重叠。

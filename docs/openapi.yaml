@@ -948,6 +948,109 @@ paths:
         "404":
           $ref: "#/components/responses/AdminError"
 
+  /{agentPrefix}/v1/completions:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    post:
+      tags: [Inference]
+      summary: 通过指定 Agent 执行 Completions
+      description: Agent 固定 Provider，不允许请求体任意选择后端；具体兼容性取决于该 Provider。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /{agentPrefix}/v1/responses:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    post:
+      tags: [Inference]
+      summary: 通过指定 Agent 执行 Responses API
+      description: 流式错误使用 Responses 事件形状；响应已提交后不能更改 HTTP 状态。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /{agentPrefix}/v1/messages:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    post:
+      tags: [Inference]
+      summary: 通过指定 Agent 执行 Anthropic Messages
+      description: 请求体限制为 32,000,000 字节；错误信封与 OpenAI 协议不同。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "400":
+          $ref: "#/components/responses/InferenceError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/InferenceError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /{agentPrefix}/v1/messages/count_tokens:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    post:
+      tags: [Inference]
+      summary: 通过指定 Agent 转发 Anthropic token 计数请求
+      description: Gateway 不自行计算 token；该路由是否可用取决于 Agent 固定的上游 Provider。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+
   /api/hf/files:
     get:
       tags: [ModelManagement]
@@ -1127,7 +1230,7 @@ paths:
       x-authentication-requirements: [valid admin web session, configured administrator credential]
       responses:
         "200":
-          description: 操作已成功提交。
+          description: 操作执行成功。
           content:
             application/json:
               schema:
@@ -1482,7 +1585,7 @@ paths:
                   type: string
                   enum: [llamacpp, ollama]
                   default: llamacpp
-              additionalProperties: false
+              additionalProperties: true
       responses:
         "200":
           description: 重置后的推理参数
@@ -2347,8 +2450,8 @@ components:
         runtime_json: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-        last_loaded_at: { type: string, format: date-time, nullable: true }
-        last_used_at: { type: string, format: date-time, nullable: true }
+        last_loaded_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
         upstream_llamacpp_id: { type: string }
         upstream_ollama_name: { type: string }
         upstream_name: { type: string }
@@ -2457,6 +2560,17 @@ components:
           type: array
           items:
             type: object
+            required: [id, label, kind, base_url, source, editable]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              kind: { type: string, enum: [local, remote] }
+              base_url: { type: string }
+              source: { type: string, enum: [deployment, web] }
+              editable: { type: boolean }
+              default_model: { type: string }
+              requests_per_minute: { type: integer, minimum: 0 }
+              api_key_configured: { type: boolean }
             additionalProperties: true
         url_warnings:
           type: array
@@ -2674,6 +2788,13 @@ components:
           type: array
           items:
             type: object
+            required: [tag, full_name]
+            properties:
+              tag: { type: string }
+              full_name: { type: string }
+              size: { type: string }
+              context: { type: string }
+              input: { type: string }
             additionalProperties: true
       additionalProperties: true
     ModelOpsRequest:

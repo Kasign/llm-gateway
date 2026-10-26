@@ -754,3 +754,9 @@ Provider 更新复用共享 `ConcurrencyLimiter`，因此限额的应用时点�
 参数表单通过 `GET /api/admin/inference-params/schema` 动态描述，因此 `params`、`policy` 以及不同后端的运行时快照保留扩展 Schema。它们不代表已承诺每个内部字段长期稳定。兼容的逐模型 load/unload 与 Ollama load/unload 路由仍保留，但新管理操作优先走 `POST /api/admin/model-ops`，并注意卸载（仅释放内存）与删除（移除磁盘模型）是不同操作。
 
 当前 OpenAPI 依然标记为 partial：Agent 的完整协议组合、所有历史管理路由的 JSON 字段，以及动态参数与源码逐路由自动差异检查仍需后续完成。任何契约检查失败应按真实 Handler 修正规范，而非仅放宽检查或用通用对象掩盖已知稳定字段。
+
+## 固定 Provider Agent 的协议路径覆盖
+
+Agent 前缀路由复用同一套鉴权、请求限流、Pipeline 与审计，同时使用启动配置中的固定 Provider，不允许请求体自行选择 Provider。OpenAPI 现在覆盖 Agent 的 models、Chat Completions、Completions、Responses、Anthropic Messages 和 Messages count_tokens 路径；不同协议仍保留各自的请求和错误信封边界。
+
+Ollama Library tags 的稳定字段包括 tag、full_name，以及可选的 size/context/input；Backend 查看接口的 available_backends 是对象数组，包含 id、label、kind、base_url、source 和 editable，可选字段包括 default_model、RPM 与 Key 是否已配置。契约优先明确这些稳定字段，只有运行时快照和目录搜索卡片等确实动态的结构才使用扩展对象。
