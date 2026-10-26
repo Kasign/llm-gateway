@@ -91,6 +91,8 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (res Result, err error)
 	res, err = p.Forward.Forward(ctx, st, func(chunk []byte) {
 		p.emit(ctx, Event{Stage: StageChunk, State: st, Chunk: append([]byte(nil), chunk...)})
 	})
+	// Provider 只在实际收到上游 HTTP 响应时显式填充 UpstreamStatus。
+	// Pipeline 不从 Gateway 状态码或计时字段推断，避免把连接失败映射的 502/504 伪装成上游状态。
 	return res, err
 }
 

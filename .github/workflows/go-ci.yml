@@ -81,6 +81,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Gateway TCP 连接拒绝与恢复验证
+        run: |
+          set -o pipefail
+          GATEWAY_LOAD_TEST=1 GATEWAY_TRANSPORT_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-transport-recovery.txt
+
+      - name: 保存 Gateway 传输恢复产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-transport-recovery-${{ github.sha }}
+          path: /tmp/gateway-transport-recovery.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 

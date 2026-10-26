@@ -548,7 +548,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 // finishStatus 分开计算 Gateway 状态与上游状态。流式保活或首个数据块提交状态行后，Gateway 状态不可再被上游改写。
 func finishStatus(ctx context.Context, ev core.Event, reason string) (gatewayStatus, upstreamStatus int, state, code, msg string) {
 	if ev.Result != nil {
-		upstreamStatus = ev.Result.Status
+		upstreamStatus = ev.Result.UpstreamStatus
 	}
 
 	committed := false

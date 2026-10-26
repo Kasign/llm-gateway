@@ -812,7 +812,8 @@ func (c *Client) Proxy(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		// 超限时还没有向客户端提交状态行，可以返回明确的网关错误而不是转发被截断的 JSON。
 		if errors.Is(err, errUpstreamResponseTooLarge) {
-			return 0, nil, http.StatusBadGateway, err
+			// 已收到上游 HTTP 响应；保留真实上游状态，Gateway 502 由调用层根据错误单独映射。
+			return 0, nil, resp.StatusCode, err
 		}
 		return int64(len(b)), b, resp.StatusCode, err
 	}
