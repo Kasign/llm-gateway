@@ -721,3 +721,10 @@ OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、�
 - `GET /api/admin/audit/metrics` 仅读取审计队列快照，不访问数据库，返回带 `Cache-Control: no-store` 的数据；它的计数用于发现积压和丢弃，不等于数据库历史行数。
 - `/api/admin/runtime/select` 和 `/unload` 操作的是当前活动的本地推理后端，远程 Provider 不支持本地模型加载/卸载。切换或卸载前端应先核实活动 backend，避免把本地容器生命周期操作误认为供应商操作。
 - Benchmark 接口采用异步任务模型，GET 查询任务与 SSE 事件快照，DELETE 发送停止信号；它与真实调用方请求的持久化审计是不同视图。进程重启会丢失内存中的历史 Benchmark Job。
+
+
+## 慢模型的 Benchmark 超时语义
+
+`llama.request_timeout_seconds` 显式设置为 `0` 表示不添加 Gateway 整体请求 Deadline；旧配置未指定时仍使用兼容默认值。Benchmark 与普通推理必须遵守同一语义，不能将零秒交给 `context.WithTimeout`，因为那会立刻使 Context 进入超时状态。
+
+目前 Benchmark 使用可选时限 Context：正数创建带 Deadline 的 Context，0 创建仅继承父 Context 的可取消 Context。这样长 prefill / 首 Token 等待不会被零秒配置误取消，同时用户发出的停止信号仍然可中断模型加载和推理。该改动不影响 Codex、Cursor 等客户端自身设置的等待时限；客户端断开后父请求链的取消语义仍需要保持。

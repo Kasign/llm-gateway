@@ -550,7 +550,7 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	defer stopCancel()
 	job.setCancel(stopCancel)
 	defer job.clearCancel()
-	ctx, cancel := context.WithTimeout(stopCtx, time.Duration(s.cfg.Llama.RequestTimeout)*time.Second)
+	ctx, cancel := contextWithOptionalTimeout(stopCtx, s.cfg.Llama.RequestTimeout)
 	defer cancel()
 
 	activeUpstream := s.effectiveUpstream()

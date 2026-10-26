@@ -772,3 +772,10 @@ docs/                        中文架构、协议和运维文档
 - 对含敏感 payload 的请求详情、会清理历史数据的 DELETE、内存态审计指标与进程内 Benchmark job 均记录边界；运行时 schema 保持宽松，避免把多后端异构字段误写成稳定契约。
 - 顺手纠正 OpenAPI 一次性返回的 Key 和登录 Token Schema 方向：它们是服务端输出字段，应标记为 `readOnly`；输入密码和 Provider Key 仍使用 `writeOnly`。本轮没有运行测试或重跑 Actions。
 - 仍未覆盖：模型安装/下载、HuggingFace 搜索、Ollama 管理、完整上游/Bootstrap、推理参数及配置 API；待按 Handler 逐组补齐，并后续讨论自动契约差异检查。
+
+
+## 2026-10-26 修正：Benchmark 的零时限语义
+
+- 代码核实发现普通推理配置允许 `request_timeout_seconds: 0` 禁用整体时限，但 Benchmark 后台任务仍无条件执行 `context.WithTimeout(..., 0)`，使任务立即到期。
+- 新增共享的可选时限 Context helper；正数才创建 Deadline，0 改为可取消但不设 Deadline 的 Context。用户取消任务仍经父 Context 传播。
+- 补充了零值、正值和父 Context 取消的回归测试代码；遵从统一测试安排，本次未运行测试、构建或重跑 Actions。

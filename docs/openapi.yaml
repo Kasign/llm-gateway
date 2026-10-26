@@ -881,7 +881,7 @@ paths:
     post:
       tags: [Admin]
       summary: 启动异步模型 Benchmark
-      description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。
+      description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。
       security:
         - AdminSessionBearer: []
         - AdminKey: []

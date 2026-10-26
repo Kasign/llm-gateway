@@ -227,3 +227,8 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 - 审计队列指标是内存快照，不查询数据库；运行时模型管理接口只对本地 llama.cpp/Ollama 执行 load/unload。远程 Provider 的模型生命周期由供应商管理。
 - Benchmark 创建任务后立即返回 job ID 和 poll URL；任务状态表在进程内，重启后不承诺恢复。模型生成较慢时，客户端应轮询状态接口，不应把异步 Benchmark 当同步 HTTP 推理请求。
 - 本批响应中动态变化的运行时与详情对象采用宽松 Schema，并未伪造所有字段的静态保证；剩余下载、HuggingFace 搜索、Ollama 专属操作、配置引导与推理参数路由仍待逐项覆盖。
+
+
+## 9. Benchmark 的可选整体时限
+
+`POST /api/benchmark` 的后台任务现在遵循 `llama.request_timeout_seconds` 的零值语义：正数限制整个后台任务时长，0 不追加整体 Deadline。Benchmark 的 Stop/DELETE 取消信号通过独立父 Context 保留，不会因关闭超时而失效。该设置只控制 Gateway 侧总时限，不会延长调用方客户端自己的超时，也不代表上游永远可用。

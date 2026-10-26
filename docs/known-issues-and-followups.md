@@ -148,3 +148,10 @@
 - 已添加请求列表/详情/清理、内存审计队列指标、模型列表、运行时概览/本地 load-unload 与异步 Benchmark 任务契约。
 - 请求详情明确提示可能包含保存的上下文/正文与头部；清空请求日志声明为破坏性操作。动态运行时 JSON 使用扩展字段 Schema，避免暗示固定字段集。
 - 机器可读契约仍为分阶段覆盖；尚未加入 API/Handler 自动差异校验。没有手动运行测试或重跑 CI。
+
+
+## 2026-10-26 追加：慢模型 Benchmark 的零时限修正
+
+- 修正 `runBenchmark` 对 `llama.request_timeout_seconds: 0` 的处理，避免将零秒传给 `context.WithTimeout` 导致任务立刻超时。
+- 新增可选时限 Context helper，0 表示无整体 Deadline，但仍继承用户停止/父 Context 取消；正数时限保持既有行为。
+- 已新增针对 0、正数和父 Context 取消传播的回归测试代码。未手动运行测试；推送后 GitHub Actions 由仓库配置自动触发，状态以最新 Head 对应运行记录为准。
