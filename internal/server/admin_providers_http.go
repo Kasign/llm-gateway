@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -183,7 +182,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 		mappings[alias]=target
 	}
 	row.ModelMappings=mappings
-	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")}
+	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")}
 	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))

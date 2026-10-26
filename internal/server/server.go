@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -427,23 +428,41 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, remote := s.remoteProviderConfig(s.effectiveUpstream().Backend); remote {
+	if remote, ok := s.remoteProviderConfig(s.effectiveUpstream().Backend); ok {
 		target, err := s.resolveProxyModelTarget(r.Context())
 		if err != nil {
 			finish(503, "error", "no_proxy_model", err.Error(), 0)
 			jsonError(w, 503, "no_proxy_model", err.Error())
 			return
 		}
-		data := make([]map[string]interface{}, 0, 1)
-		modelID := strings.TrimSpace(target.ModelKey)
-		if target.Model != nil {
-			modelID = target.Model.ModelKey
+		type exposedModel struct { publicID string; upstreamID string }
+		models := make([]exposedModel, 0, len(remote.ModelMappings)+1)
+		seenModels := make(map[string]bool)
+		addModel := func(publicID, upstreamID string) {
+			publicID, upstreamID = strings.TrimSpace(publicID), strings.TrimSpace(upstreamID)
+			if publicID == "" || upstreamID == "" || seenModels[publicID] { return }
+			seenModels[publicID] = true
+			models = append(models, exposedModel{publicID: publicID, upstreamID: upstreamID})
 		}
-		// 远程 Provider 的 /v1 实际只路由到其当前配置模型，且仍执行每个 Gateway Key 的模型 ACL。
-		if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+		if len(remote.ModelMappings) > 0 {
+			aliases := make([]string, 0, len(remote.ModelMappings))
+			for alias := range remote.ModelMappings { aliases = append(aliases, alias) }
+			sort.Strings(aliases)
+			for _, alias := range aliases { addModel(alias, remote.ModelMappings[alias]) }
+			defaultID := strings.TrimSpace(remote.DefaultModel)
+			if defaultID != "" {
+				if mapped := strings.TrimSpace(remote.ModelMappings[defaultID]); mapped != "" { addModel(defaultID, mapped) } else { addModel(defaultID, defaultID) }
+			}
+		}
+		activeID := strings.TrimSpace(target.ModelKey)
+		if target.Model != nil { activeID = strings.TrimSpace(target.Model.ModelKey) }
+		addModel(activeID, target.UpstreamID)
+		data := make([]map[string]interface{}, 0, len(models))
+		for _, item := range models {
+			if !modelAllowedForKey(key, item.publicID, item.upstreamID, item.publicID) { continue }
 			data = append(data, map[string]interface{}{
-				"id": modelID, "object": "model", "created": time.Now().Unix(),
-				"owned_by": s.effectiveUpstream().Backend, "display_name": target.UpstreamID,
+				"id": item.publicID, "object": "model", "created": time.Now().Unix(),
+				"owned_by": s.effectiveUpstream().Backend, "display_name": item.upstreamID,
 			})
 		}
 		body, _ := json.Marshal(map[string]interface{}{"object": "list", "data": data})
