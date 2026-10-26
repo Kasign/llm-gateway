@@ -39,8 +39,6 @@ const (
 	defaultOpenAICompatibleMaxConcurrentRequests = 64
 )
 
-// OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
-// 私网访问和明文 HTTP 均默认关闭；只有管理员明确配置后才放行。
 // ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
 // Web 配置热更新会替换 Provider 实例，但仍在执行的请求必须继续占用同一份预算。
 type ConcurrencyLimiter struct {
@@ -111,6 +109,8 @@ func (l *ConcurrencyLimiter) Limit() int {
 	return l.limit
 }
 
+// OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
+// 私网访问和明文 HTTP 均默认关闭；只有管理员明确配置后才放行。
 type OpenAICompatibleConfig struct {
 	ID                  string
 	BaseURL             string

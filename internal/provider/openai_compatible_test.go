@@ -1640,9 +1640,6 @@ func TestOpenAICompatibleProviderSharesConcurrencyLimitAcrossReplacement(t *test
 
 	oldProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 2})
 	sharedLimiter := oldProvider.ConcurrencyLimiter()
-	if err := sharedLimiter.SetLimit(1); err != nil {
-		t.Fatal(err)
-	}
 	newProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{
 		MaxConcurrentRequests: 1,
 		RequestLimiter:        sharedLimiter,
@@ -1670,6 +1667,11 @@ func TestOpenAICompatibleProviderSharesConcurrencyLimitAcrossReplacement(t *test
 	case <-time.After(2 * time.Second):
 		close(releaseFirst)
 		t.Fatal("first request did not reach the upstream")
+	}
+	// 模拟管理台在旧请求已占用许可时降低 Provider 并发上限。
+	if err := sharedLimiter.SetLimit(1); err != nil {
+		close(releaseFirst)
+		t.Fatal(err)
 	}
 
 	second, secondErr, _ := forward(newProvider)
@@ -1823,7 +1825,7 @@ func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			if p.requestLimiter.Limit() != tc.want {
-				t.Fatalf("effective concurrency = %d, want %d", cap(p.requestSlots), tc.want)
+				t.Fatalf("effective concurrency = %d, want %d", p.requestLimiter.Limit(), tc.want)
 			}
 		})
 	}
