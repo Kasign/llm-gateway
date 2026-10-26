@@ -155,16 +155,16 @@ docs/                        中文架构、协议和运维文档
 
 ## 6. 当前进度
 
-> 最新已通过完整 CI 的代码 Head：`8858da0e2833d7ed7e2ae1293e24e561e141578f`（Actions #164，29 个步骤全部成功）。Gateway + loopback Mock + Redis/MariaDB 验收覆盖 DNS NXDOMAIN=502、解析超时=504、TCP 拒绝/恢复、429/503，以及 HTTP 200 已提交后的 SSE 中断与审计一致性；真实供应商 E2E、公网反向代理链路和 TLS 握手中断仍未验收。
+> 最新已通过完整 CI 的代码 Head：`0647b6aeef8c01f68d2a783989369c36e511293e`（[Actions #166](https://github.com/Kasign/llm-gateway/actions/runs/40259993963)，32/32 步骤成功）。Gateway + loopback Mock + Redis/MariaDB 验收覆盖 DNS NXDOMAIN=502、解析超时=504、TCP 拒绝/恢复、429/503、HTTP 200 已提交后的 SSE 中断与审计一致性；新增的本地 TLS 握手中断用例也通过。真实供应商 E2E 和公网反向代理链路仍未验收。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
 | 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 审计队列与只读指标、60 秒 Gateway Handler+Redis+MariaDB 负载、429/503 注入、TCP 拒绝/恢复（#162）、DNS NXDOMAIN/timeout 审计（#163）、HTTP 200 已提交后 SSE 正文 TCP RST 与 MariaDB 审计一致性（#164）均全量通过。真实供应商 E2E 与生产环境故障恢复观测仍待。 |
+| 阶段 1：日志可靠性 | 进行中 | 99% | 审计队列与只读指标、60 秒 Gateway Handler+Redis+MariaDB 负载、429/503 注入、TCP 拒绝/恢复（#162）、DNS NXDOMAIN/timeout 审计（#163）、HTTP 200 已提交后 SSE 正文 TCP RST 与 MariaDB 审计一致性（#164），以及 TLS 握手前 TCP 中断的 Provider 回归测试（#166）均全量通过。真实供应商 E2E 与生产环境故障恢复观测仍待。 |
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 82% | PR #7 当前 Head `8858da0e` 的 Actions #164 完整 CI 已通过，包含并发限制、审计指标、MariaDB 积压、持续负载、429/503、TCP、DNS、已提交 SSE 中断、race、性能、go vet、Gateway 构建与前端 bundle。PR #5/#7 仍未合并；下一步补 TLS 握手中断回归，再按独立功能组推进 Web 多 Provider 管理和 Payload 保留策略。 |
+| 阶段 5：运行治理与 CI | 进行中 | 83% | 代码 Head `0647b6ae` 的 Actions #166 完整 CI 已通过，包含并发限制、审计指标、MariaDB 积压、持续负载、429/503、TCP、DNS、已提交 SSE 中断、TLS 握手中断、race、性能、go vet、Gateway 构建与前端 bundle。PR #5/#7 仍未合并；下一步按独立功能组推进 Web 多 Provider 管理，并继续处理连接池陈旧连接与 Payload 保留策略。 |
 
 ### 已核实的历史 CI 问题
 
@@ -175,7 +175,7 @@ docs/                        中文架构、协议和运维文档
 ### 下一步
 
 1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **运行治理当前功能组**：远程 Provider 并发限制、审计队列只读指标、DNS 故障审计语义和响应已提交后的 SSE 中断均已由当前 Head Actions #164 完整验收。PR #5/#7 仍未合并；PR #5 合并后，将 PR #7 base 切回最新 `dev` 并重新验收。下一项先做确定性的 TLS 握手中断测试，然后将 Web 多 Provider 配置作为独立功能组实施；统一问题与验收条件见 [docs/known-issues-and-followups.md](known-issues-and-followups.md)。
+2. **运行治理当前功能组**：远程 Provider 并发限制、审计队列只读指标、DNS 故障审计语义、响应已提交后的 SSE 中断和本地 TLS 握手中断均已由代码 Head `0647b6ae` 的 Actions #166 完整验收。PR #5/#7 仍未合并；PR #5 合并后，将 PR #7 base 切回最新 `dev` 并重新验收。下一项按独立功能组推进 Web 多 Provider 管理；连接池陈旧连接、Payload 保留策略及真实供应商验收仍在问题台账中。
 3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
 4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
 5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。

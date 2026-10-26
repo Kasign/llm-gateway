@@ -7,7 +7,7 @@
 - `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
 - PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，状态 Open / 未合并。
 - PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限](https://github.com/Kasign/llm-gateway/pull/7)）最近一次已验证的代码 Head 为 `8858da0e2833d7ed7e2ae1293e24e561e141578f`，对应 [Actions #164](https://github.com/Kasign/llm-gateway/actions/runs/40258215101)，29 个步骤全部成功；本轮新增 TLS 握手中断用例与专属 CI 步骤后，将以新 Head 重新验收。PR 仍依赖 PR #5，尚未合并。
+- PR #7（[远程 Provider 并发上限](https://github.com/Kasign/llm-gateway/pull/7)）最近一次已验证的代码 Head 为 `0647b6aeef8c01f68d2a783989369c36e511293e`，对应 [Actions #166](https://github.com/Kasign/llm-gateway/actions/runs/40259993963)，32/32 步骤全部成功；PR 仍依赖 PR #5，尚未合并。
 - #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
 
 ## P1：可靠性与可观测性
@@ -20,7 +20,7 @@
 | GW-OBS-001 | 审计队列已有有界容量、关键任务预留及 dropped 计数。 | 实现完成；Actions #162（Head `dfbc2955`）全量通过 | 原子计数与低成本快照暴露队列深度、容量、成功/失败、按原因丢弃、累计排队时延/最大排队时延和累计 drop rate；管理员 GET API 不查询数据库，不返回正文、Key 或原始错误。 | Actions #162：单测、MariaDB 审计积压、Gateway 负载/故障注入/TCP 恢复、race、性能基线、go vet、Go 构建与前端 bundle 均通过。 |
 | GW-OBS-002 | 请求日志 / Payload 的数据库保留期限、自动清理策略和清理任务运行指标还需要明确。 | 待设计 | 先盘点当前迁移、Payload 开关与部署数据存储，再定 retention 配置、清理批次、索引及避免长事务的策略；不得未授权删除现有数据。 | 明确默认保留期、配置兼容、清理边界和可恢复性；覆盖到期/未到期、分页批次与并发写入测试。 |
 | GW-OBS-003 | 管理台轮询对 DB/CPU/推理热路径的影响仍需实测；短期缓存不等于完整负载证明。 | 待基准 | 对照无轮询、常态轮询和高频轮询，测量 DB 查询量、延迟分位数、CPU 与缓存命中率。 | 同一 Go 版本和相近 Runner 下重复采样；定义预算与刷新频率；不凭单次抖动设置阈值。 |
-| GW-NET-001 | TLS 握手中断、连接池长时间陈旧、跨网络 DNS/路由恢复和公网代理链路没有 CI 等价覆盖。 | 本地 TLS 握手中断用例及专属 Actions 步骤已加入，等待当前 Head CI；其余依赖专项环境 | 测试以本地 TCP Listener 在 TLS 握手前关闭连接，验证 Provider 将故障映射为安全 502 且上游 HTTP 状态为空；随后再测连接池陈旧连接与重连。公网反代/路由由用户可控环境单独验收，不把 loopback 测试称作供应商 E2E。 | 专属 TLS 用例、race 和完整 CI 通过；其余网络类型有独立结果；公网项附环境、时间与脱敏日志。 |
+| GW-NET-001 | 连接池长时间陈旧、跨网络 DNS/路由恢复和公网代理链路仍没有 CI 等价覆盖。 | 本地 TLS 握手中断用例已由 Actions #166 验收通过；其余依赖专项环境 | 本地 TCP Listener 在 TLS 握手前关闭连接，Provider 映射为安全 502、上游 HTTP 状态为空；专属步骤、race、完整 CI 均通过。后续补连接池陈旧连接与重连；公网反代/路由由用户可控环境单独验收，不把 loopback 测试称作供应商 E2E。 | TLS 用例：Actions #166 32/32 步骤成功；剩余网络类型有独立结果；公网项附环境、时间与脱敏日志。 |
 
 ## P1：运行治理
 
@@ -42,7 +42,7 @@
 
 ## 本轮实施规则
 
-1. `GW-OBS-001`（Actions #162）、`GW-REL-001`（Actions #163）、`GW-REL-002`（Actions #164）均已验收。当前 Head 已新增 `GW-NET-001` 的确定性 TLS 握手中断测试与独立 CI 步骤；结果以新 Head Actions 为准。通过后再将 `GW-PROV-UI-001` 作为独立功能组实现。真实供应商 E2E 需等安全凭据与预算条件明确后再做。
+1. `GW-OBS-001`（Actions #162）、`GW-REL-001`（Actions #163）、`GW-REL-002`（Actions #164）和本地 TLS 握手中断（Actions #166）均已验收。下一项按独立功能组推进 `GW-PROV-UI-001`。真实供应商 E2E 需等安全凭据与预算条件明确后再做。
 2. 每次开发前核实 HEAD、PR 和 CI；不要依据过期会话状态修改远程代码。
 3. 按完整功能组提交中文 Conventional Commit；CI 失败必须查看日志并修复，不降低断言。
 4. 真实 E2E 仅在供应商凭据与预算明确可用时执行；Mock CI 不能替代真实端点验收。
@@ -57,5 +57,5 @@
 - `GW-OBS-001` 已经 Actions #162 全量通过：审计快照与管理员只读 API、MariaDB 审计积压、race、go vet、Go build、前端 bundle 检查均成功。
 - `GW-REL-001` 已由 Actions #163 全量验收：NXDOMAIN 返回 502、解析超时返回 504，MariaDB 两条记录的 `upstream_http_status` 均为 NULL，响应与审计元数据均未泄漏主机名/诊断/凭据。
 - `GW-REL-002` 由 Actions #164 全量验收通过：上游发出 200 和部分 SSE 后 TCP RST，客户端保留 HTTP 200 并追加安全 `event: error`，MariaDB 审计为 `http_status=200/upstream_http_status=200/status=error/error_code=provider_upstream`。
-- `GW-NET-001` 已新增本地 TLS 握手中断回归测试：对端在 TLS 握手前关闭连接，预期错误映射为 502、`upstream_http_status` 保持为空；独立 Actions 步骤及 Artifact 等待当前 Head 验收。
+- `GW-NET-001` 本地 TLS 握手中断回归测试已由 Actions #166 通过：对端在 TLS 握手前关闭连接，错误映射为安全 502，`upstream_http_status` 保持为空；独立步骤与 Artifact 已保存。连接池陈旧连接、跨网络路由与公网代理链路仍未验收。
 - `GW-PROV-UI-001` 已纳入计划并细化配置来源/安全规则，但尚未实施：环境托管项只读、Web 项动态持久化、ID 冲突拒绝覆盖、Web Key 加密与掩码不回显。
