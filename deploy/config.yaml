@@ -1,3 +1,4 @@
+# 当前部署配置实例。通用默认值以 config.example.yaml 为准；仅保留本环境的服务名覆盖。
 server:
   host: 0.0.0.0
   port: 8088
@@ -40,8 +41,8 @@ llama:
   ollama_base_url: "${OLLAMA_BASE_URL}"
   # 可选：仅当 llama.cpp 启用了 --api-key 时填写
   upstream_api_key: "${LLAMA_UPSTREAM_API_KEY}"
-  # 等待上游的最长时间（秒）。全进程共用，不按上游拆开。
-  request_timeout_seconds: 3600
+  # 0 不设置 Gateway 整体时限，适合慢速本地模型；调用方取消仍会终止请求。
+  request_timeout_seconds: ${LLAMA_REQUEST_TIMEOUT_SECONDS}
   # 同时只允许少量模型驻留内存时的加载策略（1=偏单模型串行）
   models_max: 1
   auto_load_on_proxy: true
@@ -73,6 +74,10 @@ logging:
   # 流事件默认只保存类型、字段、字节数与时间；以下两项会保留原始内容，应谨慎开启。
   store_stream_raw: false
   store_stream_preview: false
+  # 默认不自动删除历史请求；正数才启用保留策略。
+  retention_days: 0
+  retention_batch_size: 500
+  retention_interval_seconds: 3600
 
 
 # 远程 OpenAI-compatible Provider（可选）。需要启用时，将 openai_compatible: [] 替换为下面的列表。
@@ -99,3 +104,6 @@ providers:
   #     allow_insecure_http: false
   #     allow_private_network: false
   #     max_response_bytes: 33554432 # 可选：默认 32 MiB，最大 512 MiB
+
+# 固定 Provider 的 Agent 路由默认关闭，按需配置。
+agents: []

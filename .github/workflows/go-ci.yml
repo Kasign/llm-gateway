@@ -52,6 +52,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: 校验配置结构、环境变量与部署模板
+        run: go run ./scripts/check_config_contract.go
+
       - name: 单元测试
         run: go test ./...
 

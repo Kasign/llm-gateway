@@ -8,10 +8,10 @@
 
 本节用于校正历史计划中的旧状态；发生冲突时，以本节的最新核验结果为准。
 
-- 集成目标分支：`dev`，当前 HEAD：`17ce32918a872341a0475d103b69097b061acf53`；默认分支 `main` 仍是独立基线。
+- 本轮配置治理开始前的 `dev` HEAD：`f89d064bc0b31478079e71631cbe23a18db139af`；本批在该基线上形成一个完整功能提交，默认分支 `main` 保持独立。
 - PR #5（TCP 连接拒绝与恢复）和 PR #7（远程 Provider 并发与管理能力）已分别于 2026-10-26 合并至 `dev`。PR #6 是重复的 Provider 并发功能分支，已关闭且未合并；当前已核实的 PR 列表中没有开放 PR。
-- 合并后的最新 GitHub Actions：运行 [40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 失败。路由/OpenAPI 校验、`go test ./...` 和 MariaDB 审计积压测试通过；Gateway 负载验收中，请求总量为 12,192，但最终审计行只有 11,851，且成功状态、模型字段计数也未达到预期。合并前 PR #7 的 CI 通过不能替代合并后 HEAD 的验收。当前没有重新执行本地或 CI 测试，本问题需在下一次统一回归时优先处理。
-- 远程现有 9 个分支：`main`、`dev` 和 7 个历史功能/测试分支。多个已关闭 PR 的分支与 `dev` 的提交历史已分叉，不能仅凭 PR 已关闭或已合并就批量删除；需要先比较文件树及分支独有改动，再确定保留、归档或删除。后续以 `dev` 作为唯一集成目标，避免从旧测试分支继续叠加开发。
+- 合并提交上的 Actions [40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 曾因 12,192 个请求仅持久化 11,851 行审计而失败；随后文档计划提交的 Actions [40299207550](https://github.com/Kasign/llm-gateway/actions/runs/40299207550) 通过，但它没有覆盖本轮配置治理代码。本批新提交会触发独立 Actions；审计负载根因仍需统一回归关注。
+- 历史功能/测试分支可以暂时保留；已确认的 PR #1–#5、#7 功能已进入 `dev`，不会重复合并。后续以 `dev` 作为唯一日常集成目标，只有独立的大型功能或紧急修复才短期开新分支并及时合回。
 
 ## 1. 重构目标
 
@@ -144,7 +144,7 @@ docs/                        中文架构、协议和运维文档
 
 ### 阶段 4.5：配置来源治理与部署样例一致性（新增计划）
 
-状态：计划中。当前不仅有 `deploy/.env` 与 `deploy/config.yaml`，还存在 `deploy/providers.env`、`deploy/config.example.yaml`、数据库中的 Web Provider 配置，以及 Go 代码中的默认值。分层并非天然不合理，但字段职责与默认值必须能被追踪，且不能让同一个配置项在多个位置以不透明的优先级覆盖。
+状态：实施中（第一批已加入模板对账与环境变量契约门禁）。当前不仅有 `deploy/.env` 与 `deploy/config.yaml`，还存在 `deploy/providers.env`、`deploy/config.example.yaml`、数据库中的 Web Provider 配置，以及 Go 代码中的默认值。分层并非天然不合理，但字段职责与默认值必须能被追踪，且不能让同一个配置项在多个位置以不透明的优先级覆盖。
 
 目标：保持部署简单、兼容现有用户配置，同时建立可审计的配置来源规则。**不以“所有配置必须塞进一个文件”为目标，也不在未完成兼容盘点前删除旧配置入口。**
 
@@ -197,7 +197,7 @@ docs/                        中文架构、协议和运维文档
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Anthropic Messages 协议边界由 Actions #85 验证；确定性 DNS NXDOMAIN/timeout、本机连接拒绝由 #92 验证；真实 ResponseHeaderTimeout 对 OpenAI/Anthropic 的 504 映射由提交 `3a9d560` 的 Actions #96 验证。真实供应商端到端及真实公网故障注入仍待执行。 |
-| 阶段 5：运行治理与 CI | 进行中 | 83% | 代码 Head `0647b6ae` 的 Actions #166 完整 CI 已通过，包含并发限制、审计指标、MariaDB 积压、持续负载、429/503、TCP、DNS、已提交 SSE 中断、TLS 握手中断、race、性能、go vet、Gateway 构建与前端 bundle。PR #5/#7 已于 2026-10-26 合并到 `dev`；最新合并后 CI 在 Gateway 审计负载验收失败，详见本文“当前状态快照”。后续不从旧 Provider 分支继续叠加开发，先完成分支内容审计；配置来源治理进入新增阶段 4.5。 |
+| 阶段 5：运行治理与 CI | 进行中 | 83% | 代码 Head `0647b6ae` 的 Actions #166 完整 CI 已通过，包含并发限制、审计指标、MariaDB 积压、持续负载、429/503、TCP、DNS、已提交 SSE 中断、TLS 握手中断、race、性能、go vet、Gateway 构建与前端 bundle。PR #5/#7 已于 2026-10-26 合并到 `dev`；最新合并后 CI 在 Gateway 审计负载验收失败，详见本文“当前状态快照”。历史分支不作为当前阻塞，日常开发统一回到 `dev`；配置来源治理按新增阶段 4.5 持续推进。 |
 
 ### 已核实的历史 CI 问题
 
@@ -903,3 +903,11 @@ docs/                        中文架构、协议和运维文档
 - 自动 Review 指出 Provider 并发测试首请求等待启动超时后直接 Fatal，mock handler 可能仍阻塞在 `releaseFirst`，使 `httptest.Server.Close` 一直等待。
 - 在该 timeout 分支先释放 mock handler，再结束测试；错误路径不再依赖请求恰好没到达 handler 的调度假设。成功路径和并发/上游请求数量断言保持不变。
 - 该变更属于测试基础设施可靠性的小修复，和生产并发逻辑无关。先等待当前 Head 的完整 Actions，再将修复和中文问题台账作为一个逻辑提交推送。
+
+## 2026-10-26 配置治理第一批：模板对账与环境变量契约门禁
+
+- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；保留当前部署所需的数据库、Redis 服务名差异，不改变旧配置省略时的 Go 兼容默认值。
+- 新增 scripts/check_config_contract.go，使用现有 yaml.v3 依赖反射检查 YAML 字段是否存在于 Go 配置结构，比较两份 YAML 的有效字段路径与静态默认值，校验 YAML 环境变量在 .env.example 声明并由 Compose 白名单注入，同时对账 Provider 环境变量解析器、示例文件与 DeepSeek/OpenAI Compose 字段。
+- 将配置契约检查加入 GitHub Actions；新增 docs/configuration-matrix.md 作为配置主维护入口清单，并更新中文配置说明、README、问题台账与本计划。
+- 按本轮约定没有手动运行测试或重放负载。提交后需查看新 Head 对应 Actions；真实部署兼容、Provider 跨来源冲突、慢模型超时和审计负载仍留在统一回归清单中。
+- 剩余工作：继续核对所有配置字段与管理台/数据库运行态边界，确认 Web Provider 的冲突与热更新行为，Review 通过后再考虑是否迁移 config.yaml 的仓库跟踪策略；当前不删除该文件，以免给现有部署升级带来缺失挂载风险。
