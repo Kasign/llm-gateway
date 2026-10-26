@@ -26,7 +26,16 @@ type Writer struct {
 	ch          chan job
 	normalLimit int
 	wg          sync.WaitGroup
-	dropped     atomic.Uint64
+	dropped                   atomic.Uint64
+	enqueued                  atomic.Uint64
+	droppedWriterClosed       atomic.Uint64
+	droppedNormalReserved     atomic.Uint64
+	droppedQueueFull           atomic.Uint64
+	writeSucceeded            atomic.Uint64
+	writeFailed               atomic.Uint64
+	queueWaitCount             atomic.Uint64
+	queueWaitTotalNS           atomic.Uint64
+	queueWaitMaxNS             atomic.Uint64
 
 	// mu 串行化入队、容量判断与关闭，确保普通事件不会抢占关键记录的预留空间。
 	mu     sync.Mutex
@@ -104,7 +113,8 @@ func (w *Writer) enqueueWithPriority(fn job, critical bool) {
 		reason = "normal_capacity_reserved"
 	} else {
 		select {
-		case w.ch <- fn:
+		case w.ch <- w.track(fn, time.Now()):
+			w.enqueued.Add(1)
 		default:
 			reason = "queue_full"
 		}
@@ -116,7 +126,41 @@ func (w *Writer) enqueueWithPriority(fn job, critical bool) {
 	}
 }
 
+func (w *Writer) track(fn job, queuedAt time.Time) job {
+	return func(ctx context.Context, repo *store.Repo) error {
+		wait := time.Since(queuedAt)
+		if wait < 0 {
+			wait = 0
+		}
+		ns := uint64(wait)
+		w.queueWaitCount.Add(1)
+		w.queueWaitTotalNS.Add(ns)
+		for {
+			old := w.queueWaitMaxNS.Load()
+			if ns <= old || w.queueWaitMaxNS.CompareAndSwap(old, ns) {
+				break
+			}
+		}
+
+		err := fn(ctx, repo)
+		if err != nil {
+			w.writeFailed.Add(1)
+		} else {
+			w.writeSucceeded.Add(1)
+		}
+		return err
+	}
+}
+
 func (w *Writer) recordDrop(reason string) {
+	switch reason {
+	case "writer_closed":
+		w.droppedWriterClosed.Add(1)
+	case "normal_capacity_reserved":
+		w.droppedNormalReserved.Add(1)
+	case "queue_full":
+		w.droppedQueueFull.Add(1)
+	}
 	n := w.dropped.Add(1)
 	if n == 1 || n%1000 == 0 {
 		applog.Printf("audit enqueue dropped: reason=%s total=%d", reason, n)

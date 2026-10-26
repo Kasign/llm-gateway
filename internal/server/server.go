@@ -236,6 +236,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/inference-params/schema", s.inferenceParamsSchemaAPI) // 获取推理参数的配置表单结构
 	mux.HandleFunc("/api/admin/inference-params/reset", s.inferenceParamsResetAPI)   // 重置推理参数为默认
 	mux.HandleFunc("/api/admin/inference-params", s.inferenceParamsAPI)              // 读取/保存推理参数
+	mux.HandleFunc("/api/admin/audit/metrics", s.auditMetricsAPI)                     // 查看审计队列的只读聚合指标
 
 	// —— 管理 API：下载任务 ——
 	mux.HandleFunc("/api/downloads", s.downloadsAPI)                // 查看下载中的任务列表
