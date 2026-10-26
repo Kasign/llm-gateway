@@ -864,3 +864,9 @@ docs/                        中文架构、协议和运维文档
 - 新增 Python 标准库脚本读取 Go 路由注册和 OpenAPI 顶层 paths，并用明确、可审查的映射展开动态 Go 前缀路由；把该检查放到 Actions 的前置步骤，尽早发现路由漏文档。
 - 对账采用双向集合比较，同时发现漏写 path 和已删除路由留下的旧 path。动态路由系列不使用通配忽略，而用显式路径清单映射。
 - 该门禁只证明路径键对应，不等于 JSON Schema/HTTP method/response code 自动验证；OpenAPI 继续保持 partial。先待 Actions #215 对 `dba3892` 的完整回归结束，再推送该批候选提交。
+
+## 18. 处理 PR #7 未解决的测试清理 Review
+
+- 自动 Review 指出 Provider 并发测试首请求等待启动超时后直接 Fatal，mock handler 可能仍阻塞在 `releaseFirst`，使 `httptest.Server.Close` 一直等待。
+- 在该 timeout 分支先释放 mock handler，再结束测试；错误路径不再依赖请求恰好没到达 handler 的调度假设。成功路径和并发/上游请求数量断言保持不变。
+- 该变更属于测试基础设施可靠性的小修复，和生产并发逻辑无关。先等待当前 Head 的完整 Actions，再将修复和中文问题台账作为一个逻辑提交推送。

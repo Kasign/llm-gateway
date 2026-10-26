@@ -1587,6 +1587,9 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):
+		// 若 handler 已开始等待 releaseFirst，先放行它再触发 Fatal；
+		// 否则 defer server.Close 会一直等这个仍被测试卡住的 handler。
+		close(releaseFirst)
 		t.Fatal("first upstream request did not start")
 	}
 	second, secondErr, _ := forward()

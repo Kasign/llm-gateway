@@ -218,3 +218,9 @@
 - 新增标准库 Python 脚本 `scripts/check_openapi_routes.py`，从 Server.Handler 解析字面路由，使用明确的动态前缀映射核对模型/请求详情与取消/Provider/Benchmark/API Key 族，以及 Agent 公共协议路径；CI 新增一步运行该检查。
 - 对账范围是路径集合，不是完整的 Handler JSON Schema 等价性。后续仍应将每个新增 operation 的方法、状态码和字段契约与 Handler Review 结合；本功能不把 OpenAPI 的 partial 状态改为 complete。
 - 候选提交已准备，但 Actions #215（Head `dba3892`）尚未结束；不会在当前完整回归期间更新远程分支，避免 CI 重叠。
+
+## 2026-10-26 追加：并发许可器测试的超时清理
+
+- PR #7 有一条未解决的自动 Review P2（`internal/provider/openai_compatible_test.go`）：首个请求等待启动超时后直接 `t.Fatal`，若上游 mock handler 已进入 `<-releaseFirst`，延迟的 `server.Close()` 会等待被阻塞的 handler，导致测试卡住。
+- 修复是在 startup timeout 分支先关闭 `releaseFirst`，再触发 Fatal，确保 handler 有机会结束。此修改只影响测试失败清理，不改变并发限制生产逻辑或成功路径断言。
+- 本修复先作为候选提交保存；当前 Actions #216 尚在执行，不在该轮完整回归中途推送下一 Head。新 Head 的回归结果仍以 GitHub Actions 为准。
