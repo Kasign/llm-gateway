@@ -69,6 +69,93 @@ def read_openapi_paths() -> set[str]:
     return set(re.findall(r"^  (/[^:\n]+):\s*$", paths_section, re.MULTILINE))
 
 
+
+PUBLIC_OPERATIONS = {
+    ("GET", "/health"),
+    ("POST", "/api/auth/login"),
+}
+
+
+def validate_openapi_operations() -> set[str]:
+    """Check stable per-operation metadata without third-party YAML dependencies."""
+    text = OPENAPI_FILE.read_text(encoding="utf-8")
+    if "\npaths:\n" not in text or "\ncomponents:\n" not in text:
+        raise ValueError("unexpected OpenAPI document layout")
+    section = text.split("\npaths:\n", 1)[1].split("\ncomponents:\n", 1)[0]
+    operations: list[tuple[str, str, str, bool, bool, bool]] = []
+    path: str | None = None
+    method: str | None = None
+    operation_id = ""
+    has_summary = False
+    has_responses = False
+    has_security = False
+
+    def flush() -> None:
+        if path is not None and method is not None:
+            operations.append(
+                (path, method, operation_id, has_summary, has_responses, has_security)
+            )
+
+    for line in section.splitlines():
+        path_match = re.match(r"^  (/[^:\n]+):\s*$", line)
+        if path_match:
+            flush()
+            path = path_match.group(1)
+            method = None
+            operation_id = ""
+            has_summary = has_responses = has_security = False
+            continue
+
+        method_match = re.match(
+            r"^    (get|post|put|patch|delete|options|head|trace):\s*$", line
+        )
+        if method_match:
+            flush()
+            method = method_match.group(1)
+            operation_id = ""
+            has_summary = has_responses = has_security = False
+            continue
+
+        if method is None:
+            continue
+        match = re.match(r"^      operationId:\s*([^#\s]+)", line)
+        if match:
+            operation_id = match.group(1)
+        if re.match(r"^      summary:\s*\S", line):
+            has_summary = True
+        if re.match(r"^      responses:\s*$", line):
+            has_responses = True
+        if re.match(r"^      security:\s*$", line):
+            has_security = True
+    flush()
+
+    errors: list[str] = []
+    ids: dict[str, tuple[str, str]] = {}
+    paths: set[str] = set()
+    for path, method, operation_id, summary, responses, security in operations:
+        paths.add(path)
+        route = (method.upper(), path)
+        if not operation_id:
+            errors.append(f"{method.upper()} {path}: 缺少 operationId")
+        elif operation_id in ids:
+            previous = ids[operation_id]
+            errors.append(
+                f"{method.upper()} {path}: operationId {operation_id!r} "
+                f"与 {previous[0]} {previous[1]} 重复"
+            )
+        else:
+            ids[operation_id] = (method.upper(), path)
+        if not summary:
+            errors.append(f"{method.upper()} {path}: 缺少 summary")
+        if not responses:
+            errors.append(f"{method.upper()} {path}: 缺少 responses")
+        if route not in PUBLIC_OPERATIONS and not security:
+            errors.append(f"{method.upper()} {path}: 缺少显式 security")
+    if errors:
+        raise ValueError("OpenAPI operation 契约不完整：\n  " + "\n  ".join(errors))
+    return paths
+
+
 def registered_api_paths() -> set[str]:
     source = ROUTER_FILE.read_text(encoding="utf-8")
     routes = set(re.findall(r'mux\.HandleFunc\("([^"]+)"', source))
@@ -101,6 +188,7 @@ def main() -> int:
     try:
         registered = registered_api_paths()
         documented = read_openapi_paths()
+        operation_paths = validate_openapi_operations()
     except (OSError, ValueError) as exc:
         print(f"OpenAPI route coverage check could not run: {exc}", file=sys.stderr)
         return 2
@@ -127,9 +215,8 @@ def main() -> int:
         "OpenAPI path coverage OK: "
         f"{len(registered)} registered API route paths match {len(documented)} OpenAPI paths."
     )
-    print(
-        "Note: this check covers path registration only, not full Handler/schema equivalence."
-    )
+    print(f"OpenAPI operation metadata OK: {len(operation_paths)} paths; operationId 唯一，summary/responses/security 元数据完整。")
+    print("Note: this gate does not compare every JSON Schema field against Handler serialization.")
     return 0
 
 

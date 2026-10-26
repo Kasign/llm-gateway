@@ -30,6 +30,7 @@ tags:
 paths:
   /health:
     get:
+      operationId: getHealth
       tags: [Inference]
       summary: 查看 Gateway 与依赖的健康状态
       description: 远程 Provider 状态主要表示已配置；健康检查结果不等于真实供应商推理 E2E 已通过。
@@ -43,6 +44,7 @@ paths:
                 additionalProperties: true
   /v1/models:
     get:
+      operationId: getV1Models
       tags: [Inference]
       summary: 列出当前活动 Provider 对外发布的模型
       security:
@@ -59,6 +61,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /v1/chat/completions:
     post:
+      operationId: postV1ChatCompletions
       tags: [Inference]
       summary: Chat Completions 推理
       security:
@@ -83,6 +86,7 @@ paths:
           $ref: "#/components/responses/InferenceError"
   /v1/completions:
     post:
+      operationId: postV1Completions
       tags: [Inference]
       summary: Completions 推理
       security:
@@ -105,6 +109,7 @@ paths:
           $ref: "#/components/responses/InferenceError"
   /v1/responses:
     post:
+      operationId: postV1Responses
       tags: [Inference]
       summary: Responses API 推理
       description: 流式错误必须使用 Responses 事件形状；响应已提交后不能再更改 HTTP 状态。
@@ -128,6 +133,7 @@ paths:
           $ref: "#/components/responses/InferenceError"
   /v1/messages:
     post:
+      operationId: postV1Messages
       tags: [Inference]
       summary: Anthropic Messages 兼容转发
       description: 请求体限制为 32,000,000 字节；错误信封与 OpenAI 协议不同，具体兼容性取决于配置的上游。
@@ -155,6 +161,7 @@ paths:
           $ref: "#/components/responses/InferenceError"
   /v1/messages/count_tokens:
     post:
+      operationId: postV1MessagesCountTokens
       tags: [Inference]
       summary: 转发 Anthropic Messages Token 计数请求
       description: Gateway 不自行计算 Anthropic Token；该路径是否可用取决于上游实现。
@@ -178,6 +185,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     get:
+      operationId: getAgentPrefixV1Models
       tags: [Inference]
       summary: 列出指定 Agent 固定 Provider 的模型
       description: agentPrefix 必须与启动配置中已启用的 Agent path_prefix 匹配；该路径不允许任意客户端选择 Provider。
@@ -197,6 +205,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     post:
+      operationId: postAgentPrefixV1ChatCompletions
       tags: [Inference]
       summary: 通过指定 Agent 执行 Chat Completions
       security:
@@ -219,6 +228,7 @@ paths:
           $ref: "#/components/responses/InferenceError"
   /api/requests/stats:
     get:
+      operationId: getApiRequestsStats
       tags: [Admin]
       security:
         - AdminSessionBearer: []
@@ -262,6 +272,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/providers:
     get:
+      operationId: getApiAdminProviders
       tags: [Admin]
       security:
         - AdminSessionBearer: []
@@ -281,6 +292,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
+      operationId: postApiAdminProviders
       tags: [Admin]
       security:
         - AdminSessionBearer: []
@@ -322,6 +334,7 @@ paths:
           minLength: 1
           maxLength: 64
     put:
+      operationId: putApiAdminProvidersId
       tags: [Admin]
       security:
         - AdminSessionBearer: []
@@ -353,6 +366,7 @@ paths:
         "503":
           $ref: "#/components/responses/AdminError"
     delete:
+      operationId: deleteApiAdminProvidersId
       tags: [Admin]
       security:
         - AdminSessionBearer: []
@@ -384,6 +398,7 @@ paths:
 
   /api/admin/keys:
     get:
+      operationId: getApiAdminKeys
       tags: [APIKeys]
       summary: 列出调用方 API Key 元数据
       description: 不返回明文 Key 或存储哈希。
@@ -402,6 +417,7 @@ paths:
         "500":
           $ref: "#/components/responses/AdminError"
     post:
+      operationId: postApiAdminKeys
       tags: [APIKeys]
       summary: 创建调用方 API Key
       description: 明文 Key 只在创建响应中返回一次；服务端持久化哈希，不提供再次查询明文的接口。
@@ -436,6 +452,7 @@ paths:
           format: int64
           minimum: 1
     put:
+      operationId: putApiAdminKeysId
       tags: [APIKeys]
       summary: 更新调用方 API Key 的元数据与权限
       security:
@@ -464,6 +481,7 @@ paths:
         "500":
           $ref: "#/components/responses/AdminError"
     delete:
+      operationId: deleteApiAdminKeysId
       tags: [APIKeys]
       summary: 删除调用方 API Key
       security:
@@ -480,6 +498,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/APIKeyID"
     post:
+      operationId: postApiAdminKeysIdDisable
       tags: [APIKeys]
       summary: 禁用调用方 API Key
       security:
@@ -500,6 +519,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/APIKeyID"
     post:
+      operationId: postApiAdminKeysIdEnable
       tags: [APIKeys]
       summary: 启用调用方 API Key
       security:
@@ -520,6 +540,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/APIKeyID"
     post:
+      operationId: postApiAdminKeysIdRotate
       tags: [APIKeys]
       summary: 轮换调用方 API Key
       description: 旧 Key 立即失效；新明文只在本次响应中返回一次。
@@ -539,6 +560,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/auth/login:
     post:
+      operationId: postApiAuthLogin
       tags: [Authentication]
       summary: 使用用户名和密码创建管理会话
       description: 登录请求按客户端 IP 限流；成功返回的会话 Token 通过后续请求的 Authorization Bearer 头传递，不使用 Cookie。
@@ -565,6 +587,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/auth/logout:
     post:
+      operationId: postApiAuthLogout
       tags: [Authentication]
       summary: 注销当前管理会话
       description: 请求附带有效的管理会话 Bearer Token 时会撤销该 Token；接口保持幂等并始终返回 204。
@@ -575,6 +598,7 @@ paths:
           description: 注销请求完成，无响应正文
   /api/auth/me:
     get:
+      operationId: getApiAuthMe
       tags: [Authentication]
       summary: 查询当前管理会话用户
       security:
@@ -590,6 +614,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/auth/credentials:
     get:
+      operationId: getApiAuthCredentials
       tags: [Authentication]
       summary: 查询控制台登录配置概要
       security:
@@ -607,6 +632,7 @@ paths:
         "503":
           $ref: "#/components/responses/AdminError"
     put:
+      operationId: putApiAuthCredentials
       tags: [Authentication]
       summary: 修改控制台登录用户名或密码
       description: 必须使用 Web 登录会话，且提供当前密码；修改后会更新会话版本。
@@ -637,6 +663,7 @@ paths:
 
   /api/models:
     get:
+      operationId: getApiModels
       tags: [Admin]
       summary: 列出 Gateway 管理的模型元数据
       security:
@@ -662,6 +689,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/audit/metrics:
     get:
+      operationId: getApiAdminAuditMetrics
       tags: [Admin]
       summary: 读取审计队列内存指标
       description: 此接口只读取进程内审计队列快照，不查询数据库，不返回请求正文或凭据。
@@ -686,6 +714,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/requests:
     get:
+      operationId: getApiRequests
       tags: [Admin]
       summary: 查询请求记录列表
       description: 列表合并数据库历史记录与当前 Gateway 进程的实时请求；provider 按规范化 Provider ID 完整匹配。
@@ -732,6 +761,7 @@ paths:
         "500":
           $ref: "#/components/responses/AdminError"
     delete:
+      operationId: deleteApiRequests
       tags: [Admin]
       summary: 清空请求日志
       description: 危险操作，会清除请求历史记录与实时看板记录。
@@ -761,6 +791,7 @@ paths:
         description: Gateway 请求 ID。
         schema: { type: string, minLength: 1 }
     get:
+      operationId: getApiRequestsId
       tags: [Admin]
       summary: 获取单条请求详情
       description: 详情可能包含已保存的 prompt、请求/响应正文、请求头和 SSE 事件；这些字段受 logging.store_payload 等配置影响，应仅对可信管理员开放。
@@ -791,6 +822,7 @@ paths:
         description: 正在运行或需要收口的 Gateway 请求 ID。
         schema: { type: string, minLength: 1 }
     post:
+      operationId: postApiRequestsIdCancel
       tags: [Admin]
       summary: 取消正在运行的推理请求
       description: 取消在途 Run；若进程内任务已不存在，会尝试将遗留的 running 审计记录收口。请求已开始收尾或已经结束时返回 409。
@@ -825,6 +857,7 @@ paths:
 
   /api/admin/runtime:
     get:
+      operationId: getApiAdminRuntime
       tags: [Admin]
       summary: 获取活动后端的运行时概览
       description: 本地后端返回已加载模型和目录；远程 Provider 不会伪装成本地运行时模型。
@@ -844,6 +877,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/runtime/preview:
     get:
+      operationId: getApiAdminRuntimePreview
       tags: [Admin]
       summary: 预览指定本地运行时的模型清单
       parameters:
@@ -869,6 +903,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/runtime/select:
     post:
+      operationId: postApiAdminRuntimeSelect
       tags: [Admin]
       summary: 加载或选择本地模型
       description: 只支持本地 llama.cpp/Ollama 后端；model_id 或 model_key 至少提供一个。
@@ -896,6 +931,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/runtime/unload:
     post:
+      operationId: postApiAdminRuntimeUnload
       tags: [Admin]
       summary: 卸载当前本地模型
       security:
@@ -923,6 +959,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/benchmark:
     post:
+      operationId: postApiBenchmark
       tags: [Admin]
       summary: 启动异步模型 Benchmark
       description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。
@@ -955,6 +992,7 @@ paths:
         required: true
         schema: { type: string, minLength: 1 }
     get:
+      operationId: getApiBenchmarkJobId
       tags: [Admin]
       summary: 查询 Benchmark 任务状态和输出
       security:
@@ -972,6 +1010,7 @@ paths:
         "404":
           $ref: "#/components/responses/AdminError"
     delete:
+      operationId: deleteApiBenchmarkJobId
       tags: [Admin]
       summary: 请求停止 Benchmark 任务
       security:
@@ -994,6 +1033,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     post:
+      operationId: postAgentPrefixV1Completions
       tags: [Inference]
       summary: 通过指定 Agent 执行 Completions
       description: Agent 固定 Provider，不允许请求体任意选择后端；具体兼容性取决于该 Provider。
@@ -1019,6 +1059,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     post:
+      operationId: postAgentPrefixV1Responses
       tags: [Inference]
       summary: 通过指定 Agent 执行 Responses API
       description: 流式错误使用 Responses 事件形状；响应已提交后不能更改 HTTP 状态。
@@ -1044,6 +1085,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     post:
+      operationId: postAgentPrefixV1Messages
       tags: [Inference]
       summary: 通过指定 Agent 执行 Anthropic Messages
       description: 请求体限制为 32,000,000 字节；错误信封与 OpenAI 协议不同。
@@ -1073,6 +1115,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/AgentPrefix"
     post:
+      operationId: postAgentPrefixV1MessagesCountTokens
       tags: [Inference]
       summary: 通过指定 Agent 转发 Anthropic token 计数请求
       description: Gateway 不自行计算 token；该路由是否可用取决于 Agent 固定的上游 Provider。
@@ -1095,6 +1138,7 @@ paths:
 
   /api/hf/files:
     get:
+      operationId: getApiHfFiles
       tags: [ModelManagement]
       summary: 列出 Hugging Face 仓库中的 GGUF 文件
       description: 只返回文件路径、大小和 SHA-256，不会开始下载；仓库名必填，revision 默认 main。
@@ -1126,6 +1170,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/hf/search:
     get:
+      operationId: getApiHfSearch
       tags: [ModelManagement]
       summary: 搜索 Hugging Face 模型目录
       description: q 优先；未提供时兼容 search。此接口只发现模型，不会触发下载。
@@ -1168,6 +1213,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/models/install:
     post:
+      operationId: postApiModelsInstall
       tags: [ModelManagement]
       summary: 将 Hugging Face GGUF 加入 Gateway 下载队列
       description: 请求成功后立即返回 downloading；实际下载在后台执行，通过 GET /api/downloads 查询进度。
@@ -1207,6 +1253,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/models/refresh:
     post:
+      operationId: postApiModelsRefresh
       tags: [ModelManagement]
       summary: 刷新 llama.cpp 上游模型注册表
       description: 兼容管理接口；对于日常加载/卸载，优先使用 /api/admin/model-ops。响应透传上游 JSON。
@@ -1233,6 +1280,7 @@ paths:
         description: Gateway 本地模型记录的唯一 key。
         schema: { type: string, minLength: 1 }
     delete:
+      operationId: deleteApiModelsModelKey
       tags: [ModelManagement]
       summary: 删除 Gateway 本地模型记录和文件
       description: 会尝试卸载上游模型，并删除 Gateway 模型文件及数据库记录；这是破坏性操作。
@@ -1263,6 +1311,7 @@ paths:
           type: string
           enum: [load, unload, refresh, cancel, retry]
     post:
+      operationId: postApiModelsModelKeyAction
       tags: [ModelManagement]
       summary: 执行 Gateway 模型兼容操作
       description: load/unload 只影响上游内存；cancel/retry 用于下载任务。新管理调用优先使用 /api/admin/model-ops。
@@ -1288,6 +1337,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/downloads:
     get:
+      operationId: getApiDownloads
       tags: [Downloads]
       summary: 查询模型下载和 Ollama Pull 任务
       description: 合并 HF 下载与 Ollama Pull 状态；进度来源包含 Gateway 数据库和 Redis。完成任务按服务端保留策略显示。
@@ -1308,6 +1358,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/downloads/dismiss:
     post:
+      operationId: postApiDownloadsDismiss
       tags: [Downloads]
       summary: 清理单条失败/取消下载，或批量清理所有失败/取消任务
       description: 不能清理仍处于 downloading 的任务。all_failed=true 忽略 model_key，并清理所有可清理的失败/取消项。
@@ -1336,6 +1387,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/bootstrap:
     get:
+      operationId: getApiAdminBootstrap
       tags: [Admin]
       summary: 获取管理台完整初始化快照
       description: 返回活动后端、依赖可达性、模型计数与主机资源；主机指标是最近缓存快照，不应视为实时性能采样。
@@ -1354,6 +1406,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/admin/bootstrap/lite:
     get:
+      operationId: getApiAdminBootstrapLite
       tags: [Admin]
       summary: 获取轻量管理台初始化快照
       description: 只返回依赖可达性、推理概览与主机指标；不返回完整活动后端/URL 清单。
@@ -1372,6 +1425,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/admin/backend:
     get:
+      operationId: getApiAdminBackend
       tags: [Admin]
       summary: 查看活动上游和可用后端
       description: refresh=1 或 probe=1 会刷新可达性探测缓存。远程 Provider 显示为已配置，不代表已经完成真实推理连通性验证。
@@ -1398,6 +1452,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
     put:
+      operationId: putApiAdminBackend
       tags: [Admin]
       summary: 切换活动推理后端和模型
       description: backend 接受 llamacpp、ollama 或已配置的远程 Provider ID。model_id 为空时兼容使用 model_name；切换可能触发上游模型加载。
@@ -1426,6 +1481,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/backend/unload-all:
     post:
+      operationId: postApiAdminBackendUnloadAll
       tags: [Admin]
       summary: 卸载当前本地后端的所有内存模型
       description: 只支持当前活动后端为 llama.cpp 或 Ollama 的情况；不删除磁盘模型，远程 Provider 返回 unsupported_operation。
@@ -1451,6 +1507,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/backend/upstream-models:
     get:
+      operationId: getApiAdminBackendUpstreamModels
       tags: [Admin]
       summary: 获取活动后端可见的模型列表
       description: 返回活动本地后端的上游模型列表；远程 Provider 返回当前配置模型的兼容列表，不会调用供应商模型目录 API。
@@ -1471,6 +1528,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/catalog/search:
     get:
+      operationId: getApiAdminCatalogSearch
       tags: [Admin]
       summary: 搜索模型目录（Hugging Face 或 Ollama Library）
       security:
@@ -1512,6 +1570,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/catalog/ollama/tags:
     get:
+      operationId: getApiAdminCatalogOllamaTags
       tags: [Admin]
       summary: 查询 Ollama Library 中某模型的 tags
       security:
@@ -1538,6 +1597,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/inference-params/schema:
     get:
+      operationId: getApiAdminInferenceParamsSchema
       tags: [Admin]
       summary: 获取推理参数配置表单 Schema
       description: 字段随 Gateway 支持的后端和推理参数实现演进；客户端应按此接口动态渲染，不要硬编码全部字段。
@@ -1556,6 +1616,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/admin/inference-params:
     get:
+      operationId: getApiAdminInferenceParams
       tags: [Admin]
       summary: 获取指定本地推理后端的推理参数与生效策略
       description: backend 支持 llamacpp 或 ollama，缺省为 llamacpp。
@@ -1580,6 +1641,7 @@ paths:
         "500":
           $ref: "#/components/responses/AdminError"
     put:
+      operationId: putApiAdminInferenceParams
       tags: [Admin]
       summary: 保存指定后端的推理参数和可选参数策略
       security:
@@ -1610,6 +1672,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/inference-params/reset:
     post:
+      operationId: postApiAdminInferenceParamsReset
       tags: [Admin]
       summary: 将指定后端推理参数恢复为部署默认值
       security:
@@ -1641,6 +1704,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/local-inventory:
     get:
+      operationId: getApiAdminLocalInventory
       tags: [ModelManagement]
       summary: 查询 Gateway 本地 GGUF 与 Ollama 模型目录
       security:
@@ -1660,6 +1724,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/ollama:
     get:
+      operationId: getApiAdminOllama
       tags: [ModelManagement]
       summary: 查询配置的 Ollama 后端目录与加载状态
       description: 需要部署时配置 OLLAMA_BASE_URL；模型本地列表与加载状态来自 Ollama API。
@@ -1682,6 +1747,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/ollama/pull:
     post:
+      operationId: postApiAdminOllamaPull
       tags: [ModelManagement]
       summary: 启动 Ollama 模型 Pull 任务
       description: 返回 job_id 后通过 GET /api/downloads 查询进度；本接口不会等待整个模型下载完毕。
@@ -1710,6 +1776,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/ollama/pull/cancel:
     post:
+      operationId: postApiAdminOllamaPullCancel
       tags: [ModelManagement]
       summary: 取消 Ollama Pull 任务
       security:
@@ -1738,6 +1805,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/admin/ollama/load:
     post:
+      operationId: postApiAdminOllamaLoad
       tags: [ModelManagement]
       summary: 加载 Ollama 模型（兼容接口）
       description: 只改变运行时内存状态，不删除模型文件。新调用优先使用 /api/admin/model-ops。
@@ -1766,6 +1834,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/ollama/unload:
     post:
+      operationId: postApiAdminOllamaUnload
       tags: [ModelManagement]
       summary: 卸载 Ollama 模型（兼容接口）
       description: 只释放运行时内存；要从磁盘移除模型请使用 delete。
@@ -1794,6 +1863,7 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/ollama/delete:
     post:
+      operationId: postApiAdminOllamaDelete
       tags: [ModelManagement]
       summary: 删除 Ollama 模型（兼容接口）
       description: 从 Ollama 存储中移除模型；与仅释放内存的 unload 不同。
@@ -1820,6 +1890,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
   /api/admin/model-ops:
     post:
+      operationId: postApiAdminModelOps
       tags: [ModelManagement]
       summary: 统一的模型列表、加载和卸载管理入口
       description: action 支持 list/load/unload；load/unload 时需要 model_id 或 model_key。操作日志与业务成功标记放在 JSON 返回值中；上游操作失败可能返回 HTTP 200 且 success=false。

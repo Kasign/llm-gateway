@@ -40,7 +40,7 @@
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 代码与 PR #7 已合入 `dev`；合并后首次 CI 的负载步骤失败，未影响该事实，但全量回归仍需跟进。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | `docs/openapi.yaml` 已覆盖健康检查、推理入口、调用方 API Key、登录会话、请求统计、请求审计、审计指标、运行时/Benchmark 的常用端点及 Web Provider 管理；仍为 partial，尚缺下载、HuggingFace/Ollama、推理参数和 Bootstrap 等端点与自动差异检查。 | 按功能层继续补齐未覆盖端点；每个端点依照 Handler、权限与实际响应核对，不猜字段。 | OpenAPI 覆盖全部公开/管理 API，认证与错误模式核实完成，且有自动差异或契约检查。 |
+| GW-API-001 | OpenAPI 的路径覆盖和 operation 级元数据检查仍需完善。 | 66 条路径已与 `Server.Handler` 中的注册路径匹配；当前 OpenAPI 覆盖 HF/Ollama、下载、推理参数、Bootstrap 和 Web Provider 路由。本批为 71 个 operation 添加 operationId，并在 CI 检查 operationId 唯一性、summary、responses 与 security（健康检查、登录除外）。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 路由与 operation 元数据门禁通过；稳定 Schema 有可复核的字段/状态码约束；OpenAPI 的 `partial` 状态仅在字段级覆盖实际完整后调整。 |
 
 ## 本轮实施规则
 
@@ -227,7 +227,20 @@
 
 ## 2026-10-26 配置治理第一批：模板与环境变量契约
 
-- 本批已补齐 logging.retention_days、retention_batch_size、retention_interval_seconds 和 agents，并使本地请求时限引用 LLAMA_REQUEST_TIMEOUT_SECONDS。下一增量将移除 database.host 与 redis.addr 最后的静态差异，统一通过 .env + Compose 兼容默认值注入。
+- 本批已补齐 logging.retention_days、retention_batch_size、retention_interval_seconds 和 agents，并使本地请求时限引用 LLAMA_REQUEST_TIMEOUT_SECONDS。紧随其后的提交将 database.host 与 redis.addr 移为环境变量引用，并通过 Compose 默认值兼容旧 .env。
 - 本批对齐配置路径和超时来源，仅保留数据库、Redis 服务名作为已登记部署差异；新建静态契约检查，校验 Go YAML 字段、两个配置文件的字段路径/默认值、YAML 环境变量与 Compose 白名单，以及 Provider 环境变量支持字段与示例。
 - 新 CI 检查只验证静态配置结构与注入链路，不代表实际 YAML 启动、真实凭据、远程 Provider 连通性或数据库运行时已验收。按用户约定不手动跑测试；以本批提交后的 GitHub Actions 为准。
 - 继续事项：更完整地核对 Web/数据库 Provider 的热更新、跨来源冲突和默认值兼容，并在统一回归前不改变当前 config.yaml 跟踪策略。
+
+
+## 2026-10-26 配置治理第二批：数据库/Redis 服务地址归入环境层
+
+- 配置模板不再把 MariaDB/Redis 的网络地址硬编码在 YAML：统一引用 `LLM_GATEWAY_DB_HOST` 与 `LLM_GATEWAY_REDIS_ADDR`，主 `.env.example` 提供本部署的示例值。
+- Compose 对未更新的旧 `.env` 回退到 `Mariadb` 与 `Redis:6379`，不要求升级时马上手动添加新变量。两份 YAML 静态字段和值完全一致，CI 不再为这两项保留例外。
+- 本批提交对应 Actions #40302076802；提交时该运行尚未结束，不能先写成已通过。
+
+
+## 2026-10-26 OpenAPI operation 元数据门禁
+
+- 为现有 71 个 OpenAPI operation 增加唯一 operationId，并将 CI 检查扩展到 summary、responses 和显式 security。仅 `GET /health` 与 `POST /api/auth/login` 为公开 operation。
+- 路径覆盖已达 66/66；尚未完全自动验证每个请求/响应 Schema 的字段与 Go Handler 的序列化等价性，因此不会把 OpenAPI 的 partial 状态改为 complete。
