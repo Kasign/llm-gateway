@@ -1814,3 +1814,35 @@ func TestOpenAICompatibleProviderRecoversAfterStaleIdleConnection(t *testing.T) 
 		t.Fatalf("accepted TCP connections = %d, want a replacement connection", got)
 	}
 }
+
+
+func TestOpenAICompatibleProviderTestConnectionUsesCredentialAndSanitizesFailures(t *testing.T) {
+	const secret = "provider-test-secret"
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"model-a"},{"id":"model-b"}]}`)
+	}))
+	defer server.Close()
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{APIKey: secret})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	models, err := p.TestConnection(ctx)
+	if err != nil { t.Fatal(err) }
+	if gotAuth != "Bearer "+secret || strings.Join(models, ",") != "model-a,model-b" {
+		t.Fatalf("auth/models = %q/%v", gotAuth, models)
+	}
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"private upstream body"}`)
+	}))
+	defer failure.Close()
+	failedProvider := testRemoteProvider(t, failure, OpenAICompatibleConfig{APIKey: secret})
+	_, err = failedProvider.TestConnection(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "401") { t.Fatalf("expected sanitized HTTP status, got %v", err) }
+	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "private upstream body") || strings.Contains(err.Error(), failure.URL) {
+		t.Fatalf("connection test leaked sensitive details: %v", err)
+	}
+}

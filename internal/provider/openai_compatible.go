@@ -291,6 +291,43 @@ func (p *OpenAICompatibleProvider) releaseRequestSlot() {
 	<-p.requestSlots
 }
 
+// TestConnection 通过当前 Provider 的安全 HTTP Client 请求 /v1/models。
+// 调用方应设置短 Context 超时；返回值仅包含模型 ID，不暴露 URL、响应正文或凭据。
+func (p *OpenAICompatibleProvider) TestConnection(ctx context.Context) ([]string, error) {
+	if p == nil || p.client == nil { return nil, errors.New("provider client is unavailable") }
+	endpoint, err := p.endpoint("/v1/models")
+	if err != nil { return nil, errors.New("provider connection test configuration is invalid") }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil { return nil, errors.New("provider connection test request is invalid") }
+	req.Header.Set("Accept", "application/json")
+	if p.apiKey != "" {
+		switch p.apiKeyHeader {
+		case "authorization": req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		case "api-key": req.Header.Set("api-key", p.apiKey)
+		case "x-api-key": req.Header.Set("X-API-Key", p.apiKey)
+		}
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil { return nil, errors.New("provider connection test timed out or was cancelled") }
+		return nil, errors.New("provider connection failed; check URL, DNS, TLS, firewall and credentials")
+	}
+	defer resp.Body.Close()
+	if isRedirectStatus(resp.StatusCode) { return nil, errors.New("provider redirects are disabled for security") }
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices { return nil, fmt.Errorf("provider returned HTTP %d", resp.StatusCode) }
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1_048_577))
+	if err != nil { return nil, errors.New("provider model response could not be read") }
+	if len(body) > 1_048_576 { return nil, errors.New("provider model response exceeds the 1 MiB test limit") }
+	var payload struct { Data []struct { ID string `json:"id"` } `json:"data"` }
+	if err := json.Unmarshal(body, &payload); err != nil { return nil, errors.New("provider returned an invalid /v1/models response") }
+	models := make([]string, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id != "" && len(id) <= 255 && !strings.ContainsAny(id, "\r\n") { models = append(models, id) }
+		if len(models) >= 100 { break }
+	}
+	return models, nil
+}
 func (p *OpenAICompatibleProvider) endpoint(rawPath string) (string, error) {
 	requestURL, err := url.ParseRequestURI(strings.TrimSpace(rawPath))
 	if err != nil || requestURL == nil || requestURL.IsAbs() || requestURL.Host != "" || !strings.HasPrefix(requestURL.Path, "/v1/") {
