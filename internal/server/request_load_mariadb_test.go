@@ -47,9 +47,10 @@ func (r gatewayDNSFailureResolver) LookupNetIP(context.Context, string, string) 
 
 func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	dnsFailureTest := strings.TrimSpace(os.Getenv("GATEWAY_DNS_FAILURE_TEST")) == "1"
+	streamFailureTest := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_FAILURE_TEST")) == "1"
 	loadTest := strings.TrimSpace(os.Getenv("GATEWAY_LOAD_TEST")) == "1"
-	if !dnsFailureTest && !loadTest {
-		t.Skip("set GATEWAY_LOAD_TEST=1 or GATEWAY_DNS_FAILURE_TEST=1 to run the Gateway integration test")
+	if !dnsFailureTest && !streamFailureTest && !loadTest {
+		t.Skip("set GATEWAY_LOAD_TEST=1, GATEWAY_DNS_FAILURE_TEST=1, or GATEWAY_STREAM_FAILURE_TEST=1 to run the Gateway integration test")
 	}
 
 	dnsFailureCases := []struct {
@@ -155,6 +156,37 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 		upstreamRequests.Add(1)
 		switch r.URL.Query().Get("fault") {
+		case "stream_reset":
+			// 先提交 200 响应头与部分 SSE 数据，再以 TCP RST 中断 Content-Length 正文。
+			// 这模拟上游已经开始正常返回流、随后连接被异常终止的情况。
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "upstream does not support hijacking", http.StatusInternalServerError)
+				return
+			}
+			conn, buffered, hijackErr := hijacker.Hijack()
+			if hijackErr != nil {
+				return
+			}
+			partial := "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: 4096\r\nConnection: keep-alive\r\n\r\n" +
+				"data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial-stream-fragment\"},\"finish_reason\":null}]}\n\n"
+			if _, writeErr := buffered.WriteString(partial); writeErr == nil {
+				writeErr = buffered.Flush()
+				if writeErr != nil {
+					_ = conn.Close()
+					return
+				}
+			} else {
+				_ = conn.Close()
+				return
+			}
+			// 给 HTTP 客户端留出接收响应头和部分数据的窗口，避免依赖线程调度时序。
+			time.Sleep(50 * time.Millisecond)
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				_ = tcpConn.SetLinger(0)
+			}
+			_ = conn.Close()
+			return
 		case "delay":
 			// 受控延迟用于检查故障下的真实端到端等待，而不是模拟真实模型推理。
 			time.Sleep(75 * time.Millisecond)
@@ -472,6 +504,116 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 		t.Logf("Gateway DNS failure integration: NXDOMAIN=502, resolver timeout=504, upstream_http_status NULL for %d/%d rows; DNS diagnostics and credential leakage absent",
 			absentUpstreamStatus, persisted)
+		return
+	}
+
+	// 上游已返回 200 响应头/部分 SSE 后异常 RST：Gateway 状态不可回退，但请求与审计必须标记失败。
+	if streamFailureTest {
+		streamBody, marshalErr := json.Marshal(map[string]interface{}{
+			"model": "client-model-must-not-win",
+			"stream": true,
+			"messages": []interface{}{map[string]string{"role": "user", "content": "stream reset integration test"}},
+		})
+		if marshalErr != nil {
+			t.Fatalf("marshal stream-reset request: %v", marshalErr)
+		}
+		req, buildErr := http.NewRequest(http.MethodPost,
+			handler.URL+"/loadtest/v1/chat/completions?fault=stream_reset", bytes.NewReader(streamBody))
+		if buildErr != nil {
+			t.Fatalf("build stream-reset request: %v", buildErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("X-API-Key", rawKey)
+		req.Header.Set("X-Request-ID", "gateway-stream-reset-"+suffix)
+
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			t.Fatalf("Gateway stream-reset request: %v", requestErr)
+		}
+		responseBody, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			t.Errorf("read Gateway stream-reset response: %v", readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Gateway stream-reset HTTP status=%d, want 200 because headers were already committed; body=%s", resp.StatusCode, responseBody)
+		}
+		if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+			t.Errorf("Gateway stream-reset Content-Type=%q, want text/event-stream", resp.Header.Get("Content-Type"))
+		}
+		if !bytes.Contains(responseBody, []byte("partial-stream-fragment")) || !bytes.Contains(responseBody, []byte("event: error")) {
+			t.Errorf("Gateway must retain partial data and append a safe SSE error event after upstream reset; body=%s", responseBody)
+		}
+		for _, private := range []string{"private-provider-secret", "provider.example", "unexpected EOF", "connection reset by peer"} {
+			if bytes.Contains(responseBody, []byte(private)) {
+				t.Errorf("private upstream failure detail %q leaked in streamed response", private)
+			}
+		}
+		if got := upstreamRequests.Load(); got != 1 {
+			t.Fatalf("stream-reset upstream request count=%d, want 1", got)
+		}
+
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := srv.audit.Flush(drainCtx); err != nil {
+			cancelDrain()
+			t.Fatalf("flush audit after stream-reset integration test: %v", err)
+		}
+		cancelDrain()
+
+		verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelVerify()
+		var persisted, gateway200, upstream200, errorState, providerUpstreamError int
+		err = db.QueryRowContext(verifyCtx,
+			"SELECT COUNT(*), COALESCE(SUM(http_status=200),0), COALESCE(SUM(upstream_http_status=200),0), COALESCE(SUM(status='error'),0), COALESCE(SUM(error_code='provider_upstream'),0) FROM request_logs WHERE api_key_name=?",
+			keyName).Scan(&persisted, &gateway200, &upstream200, &errorState, &providerUpstreamError)
+		if err != nil {
+			t.Fatalf("query stream-reset audit summary: %v", err)
+		}
+		if persisted != 1 || gateway200 != 1 || upstream200 != 1 || errorState != 1 || providerUpstreamError != 1 {
+			t.Fatalf("stream-reset audit summary: rows=%d gateway200=%d upstream200=%d error_state=%d provider_upstream_error=%d; want 1/1/1/1/1",
+				persisted, gateway200, upstream200, errorState, providerUpstreamError)
+		}
+
+		rows, queryErr := db.QueryContext(verifyCtx,
+			"SELECT http_status, upstream_http_status, status, error_code, COALESCE(error_message,'') FROM request_logs WHERE api_key_name=?",
+			keyName)
+		if queryErr != nil {
+			t.Fatalf("query stream-reset audit details: %v", queryErr)
+		}
+		seen := 0
+		for rows.Next() {
+			var gatewayStatus, upstreamStatus sql.NullInt64
+			var state, errorCode, errorMessage string
+			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &state, &errorCode, &errorMessage); scanErr != nil {
+				_ = rows.Close()
+				t.Fatalf("scan stream-reset audit detail: %v", scanErr)
+			}
+			seen++
+			if !gatewayStatus.Valid || gatewayStatus.Int64 != http.StatusOK ||
+				!upstreamStatus.Valid || upstreamStatus.Int64 != http.StatusOK {
+				t.Errorf("committed stream status must preserve Gateway/upstream 200/200; got %v/%v", gatewayStatus, upstreamStatus)
+			}
+			if state != "error" || errorCode != "provider_upstream" {
+				t.Errorf("interrupted stream state/code=%q/%q, want error/provider_upstream", state, errorCode)
+			}
+			for _, private := range []string{"private-provider-secret", "provider.example", "unexpected EOF", "connection reset by peer"} {
+				if strings.Contains(errorMessage, private) {
+					t.Errorf("private stream failure detail %q leaked into MariaDB audit message", private)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatalf("iterate stream-reset audit details: %v", err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close stream-reset audit rows: %v", err)
+		}
+		if seen != 1 {
+			t.Fatalf("stream-reset audit detail rows=%d, want 1", seen)
+		}
+		t.Logf("Gateway stream reset integration: client HTTP=200 (committed), upstream HTTP=200, request state=error/provider_upstream, partial SSE retained and error event appended")
 		return
 	}
 

@@ -107,6 +107,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Gateway 已提交响应头后的流式正文中断验证
+        run: |
+          set -o pipefail
+          GATEWAY_STREAM_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-stream-failure.txt
+
+      - name: 保存 Gateway 流式中断产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-stream-failure-${{ github.sha }}
+          path: /tmp/gateway-stream-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
 
