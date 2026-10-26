@@ -30,6 +30,7 @@ services:
       LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
       LLAMA_UPSTREAM_API_KEY: ${LLAMA_UPSTREAM_API_KEY}
+      LLAMA_REQUEST_TIMEOUT_SECONDS: ${LLAMA_REQUEST_TIMEOUT_SECONDS:-0}
       # Optional remote OpenAI-compatible provider credentials, referenced by config.yaml.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

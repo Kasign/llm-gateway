@@ -146,7 +146,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 7. 加载网页登录状态（从数据库恢复上次的登录会话）
 	srv.loadWebLoginState(context.Background())
 	// 8. 打一条启动日志，记录关键配置（方便排查问题）
-	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout=%ds auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
+	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout_seconds=%d (0=unlimited) auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
 	return srv
 }
 

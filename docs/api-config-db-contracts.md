@@ -42,7 +42,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `auth` | Admin API Key、用户名/密码或密码哈希、会话 TTL | 管理员凭据与调用方推理 API Key 是两套身份。 |
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
-| `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、超时、模型数、warm-start | 全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
+| `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、请求时限、模型数、warm-start | `LLAMA_REQUEST_TIMEOUT_SECONDS` 控制本地推理客户端的整体请求时限；显式设为 `0` 时不设客户端整体时限，适合慢速本地模型，调用方取消仍然有效。旧配置未填写时继续默认 3600 秒；正整数上限 604800 秒。全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
 | `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限、并发上限与整体请求时限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID；`request_timeout_seconds` 为 0 时保留既有 Context 与响应头超时行为，非 0 时限制完整 JSON/SSE 请求时长。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |

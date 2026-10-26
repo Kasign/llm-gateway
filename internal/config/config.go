@@ -59,7 +59,8 @@ type Config struct {
 		UpstreamAPIKey    string `yaml:"upstream_api_key"`
 		ModelName         string `yaml:"-"` // 运行时由数据库里的当前模型写入
 		ModelsDir         string `yaml:"-"` // 空则用 storage.models_dir
-		RequestTimeout    int    `yaml:"request_timeout_seconds"`
+		RequestTimeout        int  `yaml:"-"` // 运行时值；由 RequestTimeoutSeconds 规范化后写入
+		RequestTimeoutSeconds *int `yaml:"request_timeout_seconds"` // nil 表示旧配置未指定；显式 0 表示不限整体请求时长
 		ModelsMax         int    `yaml:"models_max"`
 		AutoLoadOnProxy   bool   `yaml:"auto_load_on_proxy"`
 		WarmStart         bool   `yaml:"warm_start"`
@@ -318,6 +319,29 @@ func validateResolvedConfigEnv(c *Config) error {
 }
 
 // Load 读取并校验配置文件，填充默认值；校验失败会直接返回错误，避免带着错误配置启动。
+const (
+	defaultLocalRequestTimeoutSeconds = 3600
+	maxLocalRequestTimeoutSeconds     = 604800
+)
+
+// normalizeLlamaRequestTimeout 保留旧配置的一小时默认值，同时允许新配置显式使用 0 关闭客户端整体超时。
+// 即使整体超时关闭，调用方取消请求仍会通过 HTTP 请求上下文中止在途推理。
+func (c *Config) normalizeLlamaRequestTimeout() error {
+	if c == nil {
+		return errors.New("config is required")
+	}
+	if c.Llama.RequestTimeoutSeconds == nil {
+		c.Llama.RequestTimeout = defaultLocalRequestTimeoutSeconds
+		return nil
+	}
+	seconds := *c.Llama.RequestTimeoutSeconds
+	if seconds < 0 || seconds > maxLocalRequestTimeoutSeconds {
+		return fmt.Errorf("llama.request_timeout_seconds must be between 0 and %d (0 disables the client-wide request timeout)", maxLocalRequestTimeoutSeconds)
+	}
+	c.Llama.RequestTimeout = seconds
+	return nil
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -356,8 +380,8 @@ func Load(path string) (*Config, error) {
 	if c.Database.MigrationFile == "" {
 		c.Database.MigrationFile = "/app/migrations/001_init.sql"
 	}
-	if c.Llama.RequestTimeout <= 0 {
-		c.Llama.RequestTimeout = 3600
+	if err := c.normalizeLlamaRequestTimeout(); err != nil {
+		return nil, err
 	}
 	c.Llama.Backend = strings.ToLower(strings.TrimSpace(c.Llama.Backend))
 	if c.Llama.Backend == "" || strings.Contains(c.Llama.Backend, "${") {
