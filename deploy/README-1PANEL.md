@@ -50,7 +50,7 @@ sudo docker exec llm-gateway wget -qO- http://Llama-cpp:8080/models
 sudo docker exec llm-gateway wget -qO- http://ollama:11434/api/tags
 ```
 
-Gateway 只监听 `127.0.0.1:8088`。OpenResty 反代到这个地址，SSE 需要 `proxy_buffering off` 和较长的 `proxy_read_timeout`。
+Gateway 只监听 `127.0.0.1:8088`。OpenResty 反代到这个地址，SSE 需要 `proxy_buffering off` 和较长的 `proxy_read_timeout`。关闭 Gateway 客户端整体超时不代表反向代理和 Codex 自身也没有读取期限；本地模型首 Token 可能较慢时，这几层都要分别确认。
 
 ## 切换上游
 

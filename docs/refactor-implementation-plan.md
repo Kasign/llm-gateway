@@ -654,3 +654,10 @@ docs/                        中文架构、协议和运维文档
 - 主 `deploy/.env` 继续显式向 Gateway 传递现有 DeepSeek/OpenAI 示例项，兼容旧配置。
 - 新增可选 `deploy/providers.env`，由 Compose 单独注入，可以配置任意 `LLM_GATEWAY_PROVIDER_<ID>_*` 变量；默认示例全是注释，不会自动创建 Provider。
 - 这个专用文件不会将主 `.env` 中的数据库管理员密码、Redis 密码等无关凭据传进 Gateway 容器。旧部署缺少文件也不影响启动。相关部署与契约文档已同步；按统一安排未执行 Compose/测试验证。
+
+
+### Provider 响应大小配置透传与本地超时文档（2026-10-26）
+
+- DeepSeek/OpenAI 部署示例与 Compose 环境透传已补齐 `MAX_RESPONSE_BYTES`，可通过 0 使用默认响应体上限，避免环境解析器支持但部署层无法设置。
+- 部署配置指南已同步本地模型超时语义：当前示例默认 0 不设置客户端整体时限，旧配置未指定时保留 3600 秒默认；同时明确反向代理与调用方的超时仍需单独设置。
+- 按用户统一测试安排未运行 Compose、测试或 CI。

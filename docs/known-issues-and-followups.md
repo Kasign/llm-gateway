@@ -95,3 +95,9 @@
 
 - 已为 DeepSeek/OpenAI 之外的 Provider 增加独立可选 `deploy/providers.env` 注入，解决 Compose 只显式传递两组 ID 的限制。
 - 保留主 `.env` 的最小显式环境变量白名单，不把数据库管理员口令整份传给 Gateway。示例文件仅含注释，旧部署缺失此文件可继续使用；尚未运行 Compose 校验。
+
+
+## 2026-10-26 追加：Provider 最大响应大小透传
+
+- DeepSeek/OpenAI `.env` 示例和 Compose 容器环境均已传递 `MAX_RESPONSE_BYTES`，补齐部署变量与 Provider 环境解析器之间的配置链路。
+- 尚未执行运行验证，后续统一测试时再检查 Compose 渲染结果与实际容器环境。
