@@ -741,3 +741,11 @@ docs/                        中文架构、协议和运维文档
 - 列表缓存键包含 Provider ID，防止跨条件污染；实时请求先合并 LiveRegistry 的最新 Provider 身份再过滤，避免请求解析前后 Provider 归属变化造成结果残留。
 - 已同步 `web/js/features/requests.js`、`web/index.html`、`web/static/dist/app.js`、API/数据库契约、技术指导和问题台账。新增 Provider ID 大小写、空白和精确匹配回归测试代码。
 - 遵从用户要求未运行测试、构建、迁移或 GitHub Actions；该功能组为代码和文档已提交状态，不代表运行验收完成。
+
+### 调用统计与 Token 来源拆分（2026-10-26）
+
+- 新增管理员接口 `GET /api/requests/stats`，仅允许 24h、7d、30d 窗口，并可选按 Provider ID 精确过滤。
+- Store 层使用 MariaDB 聚合查询计算请求总量、已结束/成功/错误/取消/进行中、成功率、平均耗时和六档延迟分布，不将整个时间窗口的明细行加载到进程内存。
+- Token 统计按 `analysis_json.throughput.source` 拆分上游 usage、llama.cpp timings 与来源未知；旧记录和缺失来源不推测为供应商实际 usage。注意分析 JSON 异步落库时会存在短暂的未知来源过渡态。
+- 调用记录 UI 增加统计时间窗口、汇总卡片和延迟分布；统计窗口只按 Provider 过滤，不套用模型/状态/Key 明细筛选，避免界面范围含混。
+- 新增时间范围参数回归测试代码；已更新 API 契约、技术指导、实施计划和问题台账。按用户要求未运行测试、构建或 CI；MariaDB JSON 函数兼容性、聚合查询性能和 Token 来源数值仍待统一验证。

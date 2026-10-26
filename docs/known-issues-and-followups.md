@@ -120,3 +120,9 @@
 - `GET /api/requests?provider=<id>` 与模型、状态、Key 名筛选组合使用；Provider ID 去除首尾空格并按小写完整匹配，支持自定义 Provider ID。
 - 查询缓存以 Provider 条件隔离；在途请求以 LiveRegistry 最新 Provider 身份完成合并后再过滤。历史空 Provider ID 不会被反推归属。
 - 已添加 Provider ID 匹配回归测试代码并同步前端源码、部署 bundle、API/数据库契约、技术说明和实施计划。按当前统一测试安排未运行测试、构建、迁移或 CI；需要后续验证缓存隔离、MariaDB 索引/查询计划及 Resolver 归属更新场景。
+
+## 2026-10-26 追加：请求统计和 Token 来源口径
+
+- 增加管理员聚合接口计划：固定 24h/7d/30d 时间窗口，统计请求量、成功率、平均耗时、延迟分布与 Token 来源分组；时间条件限定在 `started_at` 索引范围。
+- Token 来源区分上游 usage、llama.cpp timings 与来源未知。异步写入 `analysis_json` 可能造成短暂的 unknown_source 过渡态；旧记录未标记来源不应被猜测为实际计费 Token。
+- 已编写实现和范围测试代码并同步管理台 Bundle 与技术文档；本轮未运行测试、构建、迁移或 CI。后续统一验证 MariaDB 的 `JSON_VALID/JSON_EXTRACT` 行为、状态统计语义、窗口边界、空数据与聚合性能。

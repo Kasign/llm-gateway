@@ -267,8 +267,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/downloads/dismiss", s.downloadsDismissAPI) // 清除已完成/失败的下载记录
 
 	// —— 管理 API：请求日志 ——
-	mux.HandleFunc("/api/requests", s.requestsAPI)       // 查看请求日志列表（支持筛选）
-	mux.HandleFunc("/api/requests/", s.requestDetailAPI) // 查看单次请求的详细信息
+	mux.HandleFunc("/api/requests", s.requestsAPI)            // 查看请求日志列表（支持筛选）
+	mux.HandleFunc("/api/requests/stats", s.requestsStatsAPI) // 按时间窗口汇总调用与 Token 数据
+	mux.HandleFunc("/api/requests/", s.requestDetailAPI)      // 查看单次请求的详细信息
 
 	// —— 管理 API：系统引导/后端管理 ——
 	mux.HandleFunc("/api/admin/bootstrap/lite", s.bootstrapLiteAPI)           // 轻量引导（首次启动的快速配置）

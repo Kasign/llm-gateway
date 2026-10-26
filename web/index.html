@@ -334,8 +334,10 @@
               <select id="rqStatus"><option value="">全部</option><option value="success">成功</option><option value="error">失败</option></select>
             </div>
             <div class="field"><label>密钥名称</label><input id="rqKey"></div>
-            <button type="button" class="btn" onclick="loadRequests()">查询</button>
+            <div class="field sm"><label>统计范围</label><select id="rqStatsRange"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
+            <button type="button" class="btn" onclick="loadRequests()">查询 / 更新统计</button>
           </div>
+          <div id="requestStats" style="margin-top:14px"><p class="muted small">选择统计范围后点击查询，可查看请求量、延迟分布和 Token 来源统计。</p></div>
           <div id="requestsTable" style="margin-top:12px"></div>
         </div>
       </section>

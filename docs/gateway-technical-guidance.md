@@ -679,3 +679,13 @@ GET /api/requests?limit=100&provider=deepseek
 列表同时显示数据库历史记录和进程内 LiveRegistry 快照。运行中的请求在 Resolver 完成前可能只有候选 Provider；因此列表先按已有条件合并实时快照，再按最新的 `provider_id` 过滤，并在排序/截断前过滤，避免候选身份更新后旧 Provider 视图残留，也避免不匹配的实时行占用返回条数。该实时修正仅对当前 Gateway 进程中的在途请求有效；重启后不再有 LiveRegistry 快照，最终归属以落库记录为准。
 
 本功能只增加观测与检索能力，不改变路由选择、限流、请求执行和 Provider 权限边界。代码与文档完成后按统一安排未运行测试、构建或 CI；真实 MariaDB 查询计划、筛选与并发更新时的列表一致性需在后续统一验证。
+
+## 调用统计的窗口、延迟和 Token 来源
+
+统计 API 为 `GET /api/requests/stats?range=24h&provider=deepseek`，只接受 24 小时、7 天和 30 天的固定窗口。窗口按 `[from,to)` 计算并使用 `started_at` 归属；可选 Provider 条件按规范化的 ID 完整匹配。统计为管理员接口，不返回单条请求、正文、Header、Key 或原始上游错误。
+
+数据库执行一次聚合查询：时间范围先在内层查询过滤，并复用 `idx_started(started_at)`；指定 Provider 时使用 `provider_id` 条件并可利用 `idx_provider_started(provider_id,started_at)`。SQL 汇总状态数量、平均延迟、六档延迟直方图和来源分组 Token 总量，不把窗口内所有请求行拉回 Go 进程。成功率定义为 `success / completed`，已取消请求属于已结束请求分母；延迟只纳入已结束且有耗时值的调用。
+
+Token 来源必须与数值分开判断。网关把 `analysis_json.throughput.source` 为 `usage/upstream_usage` 的记录归到上游 usage；`llama_timings` 代表本地 llama.cpp timings 计数，不应当成供应商计费 usage；未知或旧记录来源归入 `unknown_source`，即使有 Token 数字也不猜测来源。分析 JSON 是异步审计写入的一部分，极短时间内统计结果可能暂时把尚未写入来源标记的记录算入未知来源；之后重新查询即可看到最终分类。Token 汇总使用审计行已经记录的数字，不读取 Payload 重新解析，也不回写历史记录。
+
+管理台调用记录页增加统计窗口和聚合卡片；统计仅受时间范围与 Provider ID 过滤，不继承模型、状态和 Key 名称筛选。横条展示延迟数量区间，不伪称为精确的 p50/p95 分位数。

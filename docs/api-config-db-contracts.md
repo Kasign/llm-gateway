@@ -27,7 +27,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 管理配置 | `/api/admin/bootstrap*`、`/api/admin/backend*`、`/api/admin/inference-params*` | 初始化、后端选择、推理参数。 |
 | 本地运行时 | `/api/admin/runtime*`、`/api/admin/ollama*`、`/api/admin/local-inventory` | 本地模型运行时、Ollama 与文件清单管理。 |
 | 下载与基准测试 | `/api/downloads*`、`/api/benchmark*` | 下载任务、Benchmark 状态和结果。 |
-| 请求审计 | `/api/requests*` | 请求记录筛选与详情。`GET /api/requests` 支持 `provider` 查询参数，对 Provider ID 做不区分大小写的完整 ID 精确匹配；空值不筛选，旧记录没有 Provider ID 时不会匹配具体 Provider。 |
+| 请求审计 | `/api/requests*` | 请求记录筛选与详情。`GET /api/requests` 支持 `provider` 查询参数，对 Provider ID 做不区分大小写的完整 ID 精确匹配；`GET /api/requests/stats` 返回受限时间窗口内的聚合调用、延迟及 Token 来源汇总。 |
 | API Key 管理 | `/api/admin/keys*` | 创建、修改、禁用、轮换、删除、过期时间、RPM、模型 ACL。 |
 | 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。列表同时返回 RPM 用量、当前 Gateway 进程的并发占用快照，以及该进程自启动以来因并发上限拒绝的新请求累计数；计数通过原有刷新请求更新，不使用额外后台轮询，多副本环境下不代表全局并发总数，进程重启后拒绝累计数归零。
 | Web 登录 | `/api/auth/*` | 管理员网页登录、登出、会话和凭据更新。 |
@@ -187,3 +187,10 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 - 匹配：Provider ID 会先去除首尾空白并转成小写，再按完整 ID 相等匹配；`deep` 不会命中 `deepseek`。该参数不是模型名，也不是模糊搜索。
 - 数据层：`Repo.Query` 的旧签名保留用于详情及现有调用方；`QueryWithProvider` 承载可选 Provider 条件，SQL 直接比较规范化的 `provider_id`，以便继续利用 Provider 索引。
 - 实时数据：列表缓存键包含 Provider ID；在途请求先与 LiveRegistry 快照合并，再按最新 Provider ID 过滤，避免模型解析完成后仍留在旧 Provider 的筛选结果中。
+
+### 调用统计接口
+
+- `GET /api/requests/stats?range=24h&provider=deepseek` 仅管理员可访问；`range` 允许 `24h`、`7d`、`30d`，默认 `24h`。不支持任意长的时间窗口，避免无界历史聚合。
+- 统计窗口为 `[from,to)`，按请求的 `started_at` 归属；Provider ID 可选，先去空格并转小写后完整匹配。统计不会继承列表的模型、状态或 Key 名筛选条件。
+- `requests.total_requests` 包含进行中请求；成功率分母是已结束请求（总数减 running），包括已取消请求。延迟平均值与区间分布只纳入已结束且有 `latency_ms` 的记录。分布区间为 <1 秒、1–3 秒、3–10 秒、10–30 秒、30–60 秒和 ≥60 秒。
+- Token 数据按 `analysis_json.throughput.source` 分类：`usage/upstream_usage` 为上游 usage；`llama_timings` 为本地引擎计数；其它或缺失来源归类到 `unknown_source`。旧记录不根据 Token 数值推断来源。

@@ -458,7 +458,67 @@
   function requestsListHasRows() {
     return !!$("requestsTable")?.querySelector("table td");
   }
+  function statsFmt(value) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
+  }
+  async function loadRequestStats() {
+    const el = $("requestStats");
+    if (!el) return;
+    const q = new URLSearchParams();
+    q.set("range", $("rqStatsRange")?.value || "24h");
+    const provider = $("rqProvider")?.value?.trim();
+    if (provider) q.set("provider", provider);
+    el.innerHTML = '<p class="muted small">\u6B63\u5728\u6C47\u603B\u7EDF\u8BA1\u2026</p>';
+    try {
+      const s = await api("/api/requests/stats?" + q.toString());
+      const r = s.requests || {};
+      const lat = s.latency || {};
+      const tok = s.tokens || {};
+      const actual = tok.upstream_usage || {};
+      const local = tok.llama_timings || {};
+      const unknown = tok.unknown_source || {};
+      const cards = [
+        ["\u8BF7\u6C42\u603B\u91CF", statsFmt(r.total_requests), statsFmt(r.running_requests) + " \u6761\u8FDB\u884C\u4E2D"],
+        ["\u6210\u529F\u7387", Number(r.success_rate_percent || 0).toFixed(1) + "%", statsFmt(r.success_requests) + " \u6210\u529F / " + statsFmt(r.completed_requests) + " \u5DF2\u7ED3\u675F"],
+        ["\u5931\u8D25\u8BF7\u6C42", statsFmt(r.error_requests), statsFmt(r.cancelled_requests) + " \u6761\u5DF2\u53D6\u6D88"],
+        ["\u5E73\u5747\u8017\u65F6", lat.average_ms == null ? "\u2014" : statsFmt(lat.average_ms) + " ms", statsFmt(lat.sample_count) + " \u6761\u5EF6\u8FDF\u6837\u672C"],
+        ["\u4E0A\u6E38 usage Token", statsFmt(actual.total_tokens), statsFmt(actual.requests) + " \u6761 \u00B7 \u8F93\u5165 " + statsFmt(actual.input_tokens) + " / \u8F93\u51FA " + statsFmt(actual.output_tokens)],
+        ["llama.cpp timings", statsFmt(local.total_tokens), statsFmt(local.requests) + " \u6761 \u00B7 \u8F93\u5165 " + statsFmt(local.input_tokens) + " / \u8F93\u51FA " + statsFmt(local.output_tokens)],
+        ["\u6765\u6E90\u672A\u77E5 Token", statsFmt(unknown.total_tokens), statsFmt(unknown.requests) + " \u6761 \u00B7 \u4E0D\u63A8\u6D4B\u8BA1\u8D39\u6765\u6E90"]
+      ];
+      const tiles = cards.map(([title, value, note]) =>
+        '<div class="card" style="padding:10px;min-width:0"><div class="small muted">' + esc(title) +
+        '</div><div style="font-size:22px;font-weight:650;margin:4px 0;overflow-wrap:anywhere">' + esc(value) +
+        '</div><div class="small muted">' + esc(note) + '</div></div>'
+      ).join("");
+      const buckets = Array.isArray(lat.buckets) ? lat.buckets : [];
+      const maxBucket = Math.max(1, ...buckets.map(x => Number(x.count || 0)));
+      const distribution = buckets.map(x => {
+        const count = Number(x.count || 0);
+        const width = Math.max(0, Math.min(100, count / maxBucket * 100));
+        return '<div style="display:grid;grid-template-columns:76px minmax(50px,1fr) 64px;gap:8px;align-items:center;margin:7px 0">' +
+          '<span class="small">' + esc(x.label || '') + '</span><div style="height:7px;background:var(--border,#ddd);border-radius:4px;overflow:hidden">' +
+          '<div style="height:100%;width:' + width.toFixed(1) + '%;background:var(--accent,#4f83cc)"></div></div>' +
+          '<span class="small" style="text-align:right">' + statsFmt(count) + '</span></div>';
+      }).join("");
+      const from = s.from ? new Date(s.from).toLocaleString() : "\u2014";
+      const to = s.to ? new Date(s.to).toLocaleString() : "\u2014";
+      el.innerHTML =
+        '<div class="small muted">\u7EDF\u8BA1\u533A\u95F4\uFF1A' + esc(from) + ' \u81F3 ' + esc(to) +
+        (s.provider_id ? ' \u00B7 Provider\uFF1A' + esc(s.provider_id) : ' \u00B7 \u5168\u90E8 Provider') +
+        '\u3002\u7EDF\u8BA1\u6309\u8BF7\u6C42\u5F00\u59CB\u65F6\u95F4\u5F52\u5C5E\uFF0C\u6210\u529F\u7387\u5206\u6BCD\u4E3A\u5DF2\u7ED3\u675F\u8BF7\u6C42\u3002</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin:10px 0">' + tiles + '</div>' +
+        '<div class="card" style="padding:12px"><div style="font-weight:600;margin-bottom:6px">\u5EF6\u8FDF\u5206\u5E03</div>' +
+        '<div class="small muted">\u4EC5\u7EDF\u8BA1\u5DF2\u7ED3\u675F\u4E14\u6709\u5EF6\u8FDF\u503C\u7684\u8BF7\u6C42\uFF0C\u5171 ' + statsFmt(lat.sample_count) + ' \u6761\uFF1B\u6A2A\u6761\u7528\u4E8E\u6BD4\u8F83\u5404\u533A\u95F4\u6570\u91CF\u3002</div>' +
+        (distribution || '<span class="muted small">\u6682\u65E0\u6570\u636E</span>') + '</div>' +
+        '<p class="small muted" style="margin:8px 0">Token \u53E3\u5F84\uFF1A\u4E0A\u6E38 usage \u662F\u4E0A\u6E38\u54CD\u5E94\u63D0\u4F9B\u7684 usage\uFF1Bllama.cpp timings \u662F\u672C\u5730\u5F15\u64CE\u8BA1\u6570\uFF0C\u4E0D\u7B49\u540C\u4E8E\u4F9B\u5E94\u5546\u8BA1\u8D39\u6570\u636E\uFF1B\u6765\u6E90\u672A\u77E5\u7684\u6570\u636E\u5355\u72EC\u5C55\u793A\uFF0C\u4E0D\u4F1A\u63A8\u65AD\u4E3A\u771F\u5B9E usage\u3002</p>';
+    } catch (e) {
+      el.innerHTML = '<span class="err">' + esc(e.message || '\u7EDF\u8BA1\u52A0\u8F7D\u5931\u8D25') + '</span>';
+    }
+  }
   async function loadRequests() {
+    loadRequestStats();
     const q = new URLSearchParams();
     q.set("limit", "100");
     if ($("rqModel").value) q.set("model", $("rqModel").value);
