@@ -1,0 +1,713 @@
+openapi: 3.1.0
+info:
+  title: LLM Gateway API
+  version: 0.1.0
+  summary: LLM Gateway 稳定入口的分阶段 API 契约
+  description: |
+    本规范是首阶段、部分覆盖的机器可读契约，不代表所有历史管理 API 均已描述。
+    已纳入：健康检查、公共推理入口、配置 Agent 前缀入口、调用统计及 Web Provider 管理。
+    管理操作需要有效管理员网页登录态或部署配置的管理员凭据；推理请求使用调用方 Gateway API Key。
+  x-contract-status: partial
+servers:
+  - url: /
+    description: 当前部署的 Gateway 主机
+tags:
+  - name: Inference
+    description: 对 OpenAI-compatible 与 Anthropic Messages 入口的转发
+  - name: Admin
+    description: 管理员会话保护的只读统计和 Provider 管理
+paths:
+  /health:
+    get:
+      tags: [Inference]
+      summary: 查看 Gateway 与依赖的健康状态
+      description: 远程 Provider 状态主要表示已配置；健康检查结果不等于真实供应商推理 E2E 已通过。
+      responses:
+        "200":
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/models:
+    get:
+      tags: [Inference]
+      summary: 列出当前活动 Provider 对外发布的模型
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      responses:
+        "200":
+          description: 模型目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/chat/completions:
+    post:
+      tags: [Inference]
+      summary: Chat Completions 推理
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "400":
+          $ref: "#/components/responses/InferenceError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /v1/completions:
+    post:
+      tags: [Inference]
+      summary: Completions 推理
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /v1/responses:
+    post:
+      tags: [Inference]
+      summary: Responses API 推理
+      description: 流式错误必须使用 Responses 事件形状；响应已提交后不能再更改 HTTP 状态。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /v1/messages:
+    post:
+      tags: [Inference]
+      summary: Anthropic Messages 兼容转发
+      description: 请求体限制为 32,000,000 字节；错误信封与 OpenAI 协议不同，具体兼容性取决于配置的上游。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "400":
+          $ref: "#/components/responses/InferenceError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/InferenceError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /v1/messages/count_tokens:
+    post:
+      tags: [Inference]
+      summary: 转发 Anthropic Messages Token 计数请求
+      description: Gateway 不自行计算 Anthropic Token；该路径是否可用取决于上游实现。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /{agentPrefix}/v1/models:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    get:
+      tags: [Inference]
+      summary: 列出指定 Agent 固定 Provider 的模型
+      description: agentPrefix 必须与启动配置中已启用的 Agent path_prefix 匹配；该路径不允许任意客户端选择 Provider。
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      responses:
+        "200":
+          description: 模型目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /{agentPrefix}/v1/chat/completions:
+    parameters:
+      - $ref: "#/components/parameters/AgentPrefix"
+    post:
+      tags: [Inference]
+      summary: 通过指定 Agent 执行 Chat Completions
+      security:
+        - GatewayBearer: []
+        - GatewayAPIKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/InferenceJSON"
+      responses:
+        "200":
+          $ref: "#/components/responses/InferenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/InferenceError"
+        "503":
+          $ref: "#/components/responses/InferenceError"
+        "504":
+          $ref: "#/components/responses/InferenceError"
+  /api/requests/stats:
+    get:
+      tags: [Admin]
+      summary: 查询请求、延迟和 Token 来源聚合统计
+      description: |
+        仅管理员可访问。range 仅接受 24h、7d、30d；窗口按 started_at 使用 [from,to) 计算。
+        Provider ID 是规范化后完整匹配，统计不继承请求列表的模型、状态或 Key 名称筛选。
+        Tokens 区分上游 usage、llama.cpp timings 与来源未知；该来源分类不等同于费用核算。
+      x-authentication-requirements:
+        - valid admin web session
+        - configured administrator credential
+      parameters:
+        - name: range
+          in: query
+          required: false
+          description: 固定统计窗口，默认 24h
+          schema:
+            type: string
+            enum: [24h, 7d, 30d]
+            default: 24h
+        - name: provider
+          in: query
+          required: false
+          description: Provider ID 完整匹配；忽略大小写与首尾空格
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: 聚合统计结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestStats"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/providers:
+    get:
+      tags: [Admin]
+      summary: 列出部署托管与 Web 管理的 Provider
+      description: 返回 Key 是否已配置和掩码，不返回明文或密文；部署配置 Provider 为只读。
+      x-authentication-requirements:
+        - valid admin web session
+        - configured administrator credential
+      responses:
+        "200":
+          description: Provider 目录与密钥加密能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Admin]
+      summary: 创建 Web 管理的 Provider
+      description: API Key 仅接受写入；响应不会回显密钥。ID 与部署配置冲突时拒绝覆盖。
+      x-authentication-requirements:
+        - valid admin web session
+        - configured administrator credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderMutation"
+      responses:
+        "200":
+          description: 操作完成并返回当前 Provider 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/providers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Web 管理的 Provider ID；部署托管项不可修改或删除
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+    put:
+      tags: [Admin]
+      summary: 更新 Web 管理的 Provider
+      description: 编辑时 api_key 留空表示保留既有 Key；清除 Key 必须使用单独的 clear-key 操作。
+      x-authentication-requirements:
+        - valid admin web session
+        - configured administrator credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderMutation"
+      responses:
+        "200":
+          description: 操作完成并返回当前 Provider 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
+    delete:
+      tags: [Admin]
+      summary: 删除 Web 管理的 Provider
+      description: 当前活动 Provider 不可删除；必须先切换活动上游。
+      x-authentication-requirements:
+        - valid admin web session
+        - configured administrator credential
+      responses:
+        "200":
+          description: 操作完成并返回当前 Provider 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "409":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/providers/{id}/enable:
+    $ref: "#/components/pathItems/ProviderEnable"
+  /api/admin/providers/{id}/disable:
+    $ref: "#/components/pathItems/ProviderDisable"
+  /api/admin/providers/{id}/clear-key:
+    $ref: "#/components/pathItems/ProviderClearKey"
+  /api/admin/providers/{id}/test:
+    $ref: "#/components/pathItems/ProviderTest"
+components:
+  securitySchemes:
+    GatewayBearer:
+      type: http
+      scheme: bearer
+      description: 调用方 Gateway API Key，不是上游厂商 Key，也不是管理员凭据。
+    GatewayAPIKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 与 Authorization: Bearer 等价，适用于推理入口。
+  parameters:
+    AgentPrefix:
+      name: agentPrefix
+      in: path
+      required: true
+      description: 必须匹配配置中启用的单段小写 Agent path_prefix。
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+  requestBodies:
+    InferenceJSON:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/InferencePayload"
+  responses:
+    InferenceResponse:
+      description: 上游成功响应；是否流式取决于请求中的 stream 字段及上游支持情况。
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+        text/event-stream:
+          schema:
+            type: string
+            description: 原始 SSE 事件流；流式开始后可能以协议对应的安全 error 事件收口。
+    InferenceError:
+      description: 网关或上游错误；流式响应一旦提交，错误会改用对应协议的 SSE 错误事件。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: API Key 无效、缺失或已过期；管理 API 也可能要求登录。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    RateLimited:
+      description: 调用方 Key 或 Provider RPM 超限；Provider RPM 会返回 Retry-After。
+      headers:
+        Retry-After:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    AdminError:
+      description: 管理操作失败；具体错误码随端点和冲突类型变化。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  pathItems:
+    ProviderEnable:
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      post:
+        tags: [Admin]
+        summary: 启用 Web Provider
+        x-authentication-requirements:
+          - valid admin web session
+          - configured administrator credential
+        responses:
+          "200":
+            description: 返回最新 Provider 列表
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ProviderList"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "409":
+            $ref: "#/components/responses/AdminError"
+          "503":
+            $ref: "#/components/responses/AdminError"
+    ProviderDisable:
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      post:
+        tags: [Admin]
+        summary: 停用 Web Provider
+        description: 当前活动 Provider 不可停用。
+        x-authentication-requirements:
+          - valid admin web session
+          - configured administrator credential
+        responses:
+          "200":
+            description: 返回最新 Provider 列表
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ProviderList"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "409":
+            $ref: "#/components/responses/AdminError"
+          "503":
+            $ref: "#/components/responses/AdminError"
+    ProviderClearKey:
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      post:
+        tags: [Admin]
+        summary: 显式清除 Web Provider 的 API Key
+        description: 当前活动 Provider 不可清除 Key；调用前应先切换活动 Provider。
+        x-authentication-requirements:
+          - valid admin web session
+          - configured administrator credential
+        responses:
+          "200":
+            description: 返回最新 Provider 列表
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ProviderList"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "409":
+            $ref: "#/components/responses/AdminError"
+          "503":
+            $ref: "#/components/responses/AdminError"
+    ProviderTest:
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      post:
+        tags: [Admin]
+        summary: 测试 Provider 连接
+        description: 使用模型列表端点进行轻量测试，不发起计费推理；结果应为脱敏诊断信息。
+        x-authentication-requirements:
+          - valid admin web session
+          - configured administrator credential
+        responses:
+          "200":
+            description: 连接测试结果；业务失败也可能在结果字段中报告
+            content:
+              application/json:
+                schema:
+                  type: object
+                  additionalProperties: true
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "404":
+            $ref: "#/components/responses/AdminError"
+          "409":
+            $ref: "#/components/responses/AdminError"
+          "503":
+            $ref: "#/components/responses/AdminError"
+  schemas:
+    InferencePayload:
+      type: object
+      description: 依所调用协议提供对应 JSON 请求；Gateway 会按选定 Provider/Agent 的路由规则处理模型身份。
+      additionalProperties: true
+    ModelList:
+      type: object
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              object:
+                type: string
+              owned_by:
+                type: string
+              display_name:
+                type: string
+            additionalProperties: true
+      required: [object, data]
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      description: 统一错误通常包含稳定错误码与安全 message；协议专用错误形状可能不同。
+      additionalProperties: true
+    RequestStats:
+      type: object
+      required: [range, from, to, requests, latency, tokens]
+      properties:
+        range:
+          type: string
+          enum: [24h, 7d, 30d]
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        provider_id:
+          type: string
+        requests:
+          type: object
+          required: [total_requests, completed_requests, success_requests, error_requests, cancelled_requests, running_requests, success_rate_percent]
+          properties:
+            total_requests: { type: integer, minimum: 0 }
+            completed_requests: { type: integer, minimum: 0 }
+            success_requests: { type: integer, minimum: 0 }
+            error_requests: { type: integer, minimum: 0 }
+            cancelled_requests: { type: integer, minimum: 0 }
+            running_requests: { type: integer, minimum: 0 }
+            success_rate_percent: { type: number, minimum: 0, maximum: 100 }
+        latency:
+          type: object
+          required: [sample_count, buckets]
+          properties:
+            sample_count: { type: integer, minimum: 0 }
+            average_ms:
+              type: number
+              minimum: 0
+            buckets:
+              type: array
+              items:
+                type: object
+                required: [label, count]
+                properties:
+                  label: { type: string }
+                  count: { type: integer, minimum: 0 }
+        tokens:
+          type: object
+          required: [upstream_usage, llama_timings, unknown_source, note]
+          properties:
+            upstream_usage: { $ref: "#/components/schemas/TokenSourceStats" }
+            llama_timings: { $ref: "#/components/schemas/TokenSourceStats" }
+            unknown_source: { $ref: "#/components/schemas/TokenSourceStats" }
+            note: { type: string }
+    TokenSourceStats:
+      type: object
+      required: [requests, input_tokens, output_tokens, total_tokens]
+      properties:
+        requests: { type: integer, minimum: 0 }
+        input_tokens: { type: integer, minimum: 0 }
+        output_tokens: { type: integer, minimum: 0 }
+        total_tokens: { type: integer, minimum: 0 }
+    ProviderMutation:
+      type: object
+      required: [id, enabled, base_url, default_model]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+        enabled:
+          type: boolean
+        base_url:
+          type: string
+          format: uri
+          description: 必须满足 Gateway 的 HTTPS、SSRF、私网和重定向安全校验。
+        api_key:
+          type: string
+          writeOnly: true
+          description: 编辑时留空表示保留原 Key；不会在响应中回显。
+        api_key_header:
+          type: string
+          enum: [authorization, api-key, x-api-key]
+        default_model:
+          type: string
+          minLength: 1
+          maxLength: 255
+        model_mappings:
+          type: object
+          additionalProperties:
+            type: string
+        allow_insecure_http:
+          type: boolean
+          default: false
+        allow_private_network:
+          type: boolean
+          default: false
+        max_response_bytes:
+          type: integer
+          minimum: 0
+          maximum: 536870912
+        max_concurrent_requests:
+          type: integer
+          minimum: 0
+          maximum: 64
+          default: 64
+        requests_per_minute:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          default: 0
+        request_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          default: 0
+      additionalProperties: false
+    ProviderView:
+      type: object
+      required: [id, enabled, base_url, api_key_configured, api_key_masked, default_model, source, editable]
+      properties:
+        id: { type: string }
+        enabled: { type: boolean }
+        base_url: { type: string }
+        api_key_configured: { type: boolean }
+        api_key_masked: { type: string }
+        api_key_header: { type: string }
+        default_model: { type: string }
+        model_mappings:
+          type: object
+          additionalProperties: { type: string }
+        allow_insecure_http: { type: boolean }
+        allow_private_network: { type: boolean }
+        max_response_bytes: { type: integer }
+        max_concurrent_requests: { type: integer }
+        requests_per_minute: { type: integer }
+        request_timeout_seconds: { type: integer }
+        source:
+          type: string
+          enum: [deployment, web]
+        editable: { type: boolean }
+        source_conflict: { type: boolean }
+        secret_unavailable: { type: boolean }
+      additionalProperties: true
+    ProviderList:
+      type: object
+      required: [data, encryption_available]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderView"
+        encryption_available:
+          type: boolean
+  parameters:
+    ProviderID:
+      name: id
+      in: path
+      required: true
+      description: Web 管理的 Provider ID。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64

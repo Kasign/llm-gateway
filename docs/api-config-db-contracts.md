@@ -194,3 +194,14 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 - 统计窗口为 `[from,to)`，按请求的 `started_at` 归属；Provider ID 可选，先去空格并转小写后完整匹配。统计不会继承列表的模型、状态或 Key 名筛选条件。
 - `requests.total_requests` 包含进行中请求；成功率分母是已结束请求（总数减 running），包括已取消请求。延迟平均值与区间分布只纳入已结束且有 `latency_ms` 的记录。分布区间为 <1 秒、1–3 秒、3–10 秒、10–30 秒、30–60 秒和 ≥60 秒。
 - Token 数据按 `analysis_json.throughput.source` 分类：`usage/upstream_usage` 为上游 usage；`llama_timings` 为本地引擎计数；其它或缺失来源归类到 `unknown_source`。旧记录不根据 Token 数值推断来源。
+
+
+## 6. 机器可读 OpenAPI 契约（首版范围）
+
+机器可读规范位于 [`docs/openapi.yaml`](openapi.yaml)，采用 OpenAPI 3.1.0。首版覆盖健康检查、通用推理协议入口、配置的 Agent 前缀推理入口、请求统计，以及 Web 管理 Provider 的 CRUD 与操作端点。
+
+**这是分阶段建立的契约，不是完整 API 清单。** 模型下载、运行时管理、Benchmark、API Key 管理、推理参数、Ollama 管理及其他历史管理端点仍以本文件和各自部署文档为准；在逐项核实 Handler、认证和响应结构前，不应在 OpenAPI 文件中猜测字段。当前也尚未建立 OpenAPI 与 Handler 的自动差异检查。
+
+推理端点使用调用方 Gateway API Key（`Authorization: Bearer` 或 `X-API-Key`）；管理端点要求有效的管理员网页登录态或部署配置的管理员凭据。不要把调用方 API Key、远程 Provider Key 与管理员凭据混为一谈。Provider 管理 API 的返回对象只包含 Key 是否已配置及掩码，不返回明文或密文。
+
+本地慢模型还受多个独立超时层控制：`llama.request_timeout_seconds: 0` 关闭 Gateway 本地 HTTP Client 的整体请求期限；`warm_start` 在请求等待首 Token 时发送 SSE 保活；OpenResty 的 `proxy_read_timeout` / `proxy_send_timeout` 与 Codex、Cursor 等客户端期限需独立配置。关闭 Gateway 整体时限不会屏蔽客户端断连或管理端取消。

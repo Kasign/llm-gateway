@@ -38,9 +38,9 @@
 |---|---|---|---|---|
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
-| GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 后端 CRUD/AES-GCM、前端 CRUD/bundle、部署环境变量和模型别名已实现；基础全量 CI 已通过，继续补齐活动 Provider 安全边界 | 保持环境托管只读、Web 项持久化热更新、来源 ID 冲突拒绝覆盖、Key 加密/不回显/空值保留/显式清除、活动 Provider 保护及安全连接测试。 | 自动化验证配置来源、密钥存储、回滚、动态 Registry、重启恢复、模型别名及完整前后端 bundle；真实供应商 E2E 不由 Mock CI 替代。 |
+| GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 活动 Provider 的删除、停用、清 Key 与保存时将 `enabled` 改为 false 均有后端保护代码；现有回归测试覆盖保护函数，但最新 PR Head 的 Actions 在单元测试阶段失败，尚未视为验收通过。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | 待规划 | 先定稳定的公开/管理 API、鉴权、请求/响应及错误模式，再逐模块维护契约。 | OpenAPI 与 Handler、前端客户端及 CI 契约测试一致。 |
+| GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | `docs/openapi.yaml` 首版已覆盖健康检查、推理入口、请求统计与 Web Provider 管理；范围明确为 partial，历史管理 API 与自动差异检查仍缺失。 | 按功能层逐步补齐模型/下载/运行时、API Key、Benchmark、推理参数、登录/会话接口；每个端点依照 Handler 和实际响应核对，不猜字段。 | OpenAPI 覆盖全部公开/管理 API，认证与错误模式核实完成，且有自动差异检查或契约检查。 |
 
 ## 本轮实施规则
 
@@ -126,3 +126,11 @@
 - 增加管理员聚合接口计划：固定 24h/7d/30d 时间窗口，统计请求量、成功率、平均耗时、延迟分布与 Token 来源分组；时间条件限定在 `started_at` 索引范围。
 - Token 来源区分上游 usage、llama.cpp timings 与来源未知。异步写入 `analysis_json` 可能造成短暂的 unknown_source 过渡态；旧记录未标记来源不应被猜测为实际计费 Token。
 - 已编写实现和范围测试代码并同步管理台 Bundle 与技术文档；本轮未运行测试、构建、迁移或 CI。后续统一验证 MariaDB 的 `JSON_VALID/JSON_EXTRACT` 行为、状态统计语义、窗口边界、空数据与聚合性能。
+
+
+## 2026-10-26 追加：OpenAPI 首版与当前远端状态
+
+- 当前 PR #7 Head：`6de324abd0f570800a33ad03e1ed0af7c4a86f96`（`feat: 增加调用统计与 Token 来源分析`）；PR 仍为 Open，目标 `dev` 当前 Head 为 `950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。PR #5 仍为 Open，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，Actions #156 success。
+- PR #7 当前 Head 对应自动 Actions 运行 [#40284057729](https://github.com/Kasign/llm-gateway/actions/runs/40284057729) 在单元测试步骤失败，之后的集成、race、静态检查、构建和前端 bundle 步骤被跳过。该状态不是本轮重新运行测试产生的；后续统一测试时需要一起复核。
+- 本轮未触发额外测试、构建或 Actions 重跑。已核对的慢模型配置能力已有实现：本地 `request_timeout_seconds=0` 不设 Client 整体期限，`warm_start` 提供 SSE 保活，OpenResty 示例将代理读写空闲超时设为 86400 秒；客户端自身期限仍由调用方控制。
+- 新增 `docs/openapi.yaml` 首版。其覆盖范围是有意限定的，不意味着所有管理端点都已有机器可读契约。Web Provider 的活动项禁用/清 Key 保护已能在当前源码中看到；在最新完整 CI 通过前继续将它列为待验收项。

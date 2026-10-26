@@ -689,3 +689,12 @@ GET /api/requests?limit=100&provider=deepseek
 Token 来源必须与数值分开判断。网关把 `analysis_json.throughput.source` 为 `usage/upstream_usage` 的记录归到上游 usage；`llama_timings` 代表本地 llama.cpp timings 计数，不应当成供应商计费 usage；未知或旧记录来源归入 `unknown_source`，即使有 Token 数字也不猜测来源。分析 JSON 是异步审计写入的一部分，极短时间内统计结果可能暂时把尚未写入来源标记的记录算入未知来源；之后重新查询即可看到最终分类。Token 汇总使用审计行已经记录的数字，不读取 Payload 重新解析，也不回写历史记录。
 
 管理台调用记录页增加统计窗口和聚合卡片；统计仅受时间范围与 Provider ID 过滤，不继承模型、状态和 Key 名称筛选。横条展示延迟数量区间，不伪称为精确的 p50/p95 分位数。
+
+
+## 机器可读 API 契约与版本边界
+
+当前的 [`docs/openapi.yaml`](openapi.yaml) 是首阶段机器可读契约，针对已稳定的公共推理入口、请求统计与 Web Provider 管理接口。规范标记为 partial，避免客户端误以为尚未纳入的历史管理 API 已经完成字段承诺。
+
+扩展契约时以路由注册、Handler 方法检查、实际 JSON 字段和认证辅助函数为依据；禁止仅根据前端调用或历史说明推断 API 行为。一个路径若支持多种协议（例如 OpenAI Chat、Responses 和 Anthropic Messages），需保留各自请求体与错误信封的边界。流式响应使用 `text/event-stream`；客户端收到响应头后，HTTP 状态已不可逆，契约必须说明 SSE 错误事件而非假定所有失败都能改成 JSON 错误。
+
+OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、推理参数和登录接口的请求/响应模式，再考虑自动检查。只有字段经代码核实且变更同步到规范后，才将相应端点标记为完整；当前不将该文档描述为自动生成或已与所有 Handler 校验一致。
