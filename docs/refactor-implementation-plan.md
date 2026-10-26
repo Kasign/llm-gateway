@@ -647,3 +647,10 @@ docs/                        中文架构、协议和运维文档
 - 显式启用后按 `started_at` 保留期限筛选，只清理已结束请求；仍为 `running` 的请求始终跳过。
 - 每批默认 500 条、每轮最多 10 批、每小时运行一次；每个批次使用独立事务，先删 `request_stream_events` 与 `request_payloads`，再删 `request_logs`，降低锁占用与长事务风险。
 - 后台任务停止时等待当前批次退出；数据库失败会写错误日志。已新增配置边界和 MariaDB opt-in 集成测试代码但未运行；仍待统一测试清理边界、并发写入、取消与执行耗时。
+
+
+### 任意 ID 的部署 Provider 环境文件（2026-10-26）
+
+- 主 `deploy/.env` 继续显式向 Gateway 传递现有 DeepSeek/OpenAI 示例项，兼容旧配置。
+- 新增可选 `deploy/providers.env`，由 Compose 单独注入，可以配置任意 `LLM_GATEWAY_PROVIDER_<ID>_*` 变量；默认示例全是注释，不会自动创建 Provider。
+- 这个专用文件不会将主 `.env` 中的数据库管理员密码、Redis 密码等无关凭据传进 Gateway 容器。旧部署缺少文件也不影响启动。相关部署与契约文档已同步；按统一安排未执行 Compose/测试验证。

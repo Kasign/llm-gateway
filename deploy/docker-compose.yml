@@ -19,6 +19,12 @@ services:
       - "${MODEL_HOST_DIR}:/data/models"
       - "./config.yaml:/etc/llm-gateway/config.yaml:ro"
 
+    # 独立 Provider 环境文件允许新增任意 Provider ID；文件缺失时不影响已有部署。
+    # 只把 LLM_GATEWAY_PROVIDER_<ID>_* 放进该文件，禁止把主 .env 全量传入容器。
+    env_file:
+      - path: ./providers.env
+        required: false
+
     # config.yaml 支持 ${ENV_NAME} 环境变量展开。
     environment:
       CONFIG_FILE: /etc/llm-gateway/config.yaml

@@ -32,6 +32,7 @@ Web 登录、命令行生成密码 hash、忘记密码重置：见 **[deploy/控
 ```bash
 cp .env.example .env
 cp config.example.yaml config.yaml
+cp providers.env.example providers.env
 ```
 
 填写现有 Docker network、模型目录、MariaDB root 密码、Gateway 数据库密码和 Admin API Key，再：

@@ -11,6 +11,7 @@
 cd /server-whl/docker/llm-gateway-v11/deploy
 cp .env.example .env
 cp config.example.yaml config.yaml
+cp providers.env.example providers.env
 ```
 
 3. 编辑 `.env`。等号后面不要加空格。必填：
@@ -24,6 +25,8 @@ cp config.example.yaml config.yaml
 - Web 登录见 [控制台与密码说明.md](./控制台与密码说明.md)。哈希写在 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`，`$` 要写成 `$$`。
 
 `LLM_BACKEND` 只决定数据库还没有上游记录时，第一次把 `/v1` 打到哪边。默认 `llamacpp`。
+
+3.5. 只有需要增加 DeepSeek/OpenAI 以外的自定义远程 Provider 时，才编辑 `providers.env`。它只传递 `LLM_GATEWAY_PROVIDER_<ID>_*` 字段，与主 `.env` 分开，不能把主 `.env` 整份作为容器环境文件。每个新 ID 必须在所有 YAML/环境配置中唯一。示例文件默认只有注释，不会创建 Provider。
 
 4. 编辑 `config.yaml` 里和现有容器名有关的两项，不要在这里再写一份上游地址：
 
