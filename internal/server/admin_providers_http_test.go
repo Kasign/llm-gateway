@@ -14,6 +14,77 @@ import (
 )
 
 
+
+func TestPrepareProviderConcurrencyLimitAppliesChangesAtSafeTime(t *testing.T) {
+	t.Run("lower before registry replacement", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, changedBefore, raiseAfter, err := prepareProviderConcurrencyLimit("save", true, true, limiter, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !changedBefore || raiseAfter || previous != 8 || limiter.Limit() != 2 {
+			t.Fatalf("lowering policy previous=%d before=%v after=%v limit=%d", previous, changedBefore, raiseAfter, limiter.Limit())
+		}
+		if err := limiter.SetLimit(previous); err != nil {
+			t.Fatal(err)
+		}
+		if limiter.Limit() != 8 {
+			t.Fatalf("rollback limit = %d, want 8", limiter.Limit())
+		}
+	})
+
+	t.Run("raise only after registry replacement", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, changedBefore, raiseAfter, err := prepareProviderConcurrencyLimit("save", true, true, limiter, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changedBefore || !raiseAfter || previous != 2 || limiter.Limit() != 2 {
+			t.Fatalf("raising policy previous=%d before=%v after=%v limit=%d", previous, changedBefore, raiseAfter, limiter.Limit())
+		}
+		if err := limiter.SetLimit(8); err != nil {
+			t.Fatal(err)
+		}
+		if limiter.Limit() != 8 {
+			t.Fatalf("limit after simulated Registry success = %d, want 8", limiter.Limit())
+		}
+	})
+
+	t.Run("do not raise while editing a disabled Provider", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, changedBefore, raiseAfter, err := prepareProviderConcurrencyLimit("save", true, false, limiter, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changedBefore || raiseAfter || previous != 2 || limiter.Limit() != 2 {
+			t.Fatalf("disabled edit policy previous=%d before=%v after=%v limit=%d", previous, changedBefore, raiseAfter, limiter.Limit())
+		}
+	})
+
+	t.Run("apply deferred raise when re-enabling", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, changedBefore, raiseAfter, err := prepareProviderConcurrencyLimit("enable", true, true, limiter, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changedBefore || !raiseAfter || previous != 2 || limiter.Limit() != 2 {
+			t.Fatalf("enable policy previous=%d before=%v after=%v limit=%d", previous, changedBefore, raiseAfter, limiter.Limit())
+		}
+	})
+}
+
 func TestBuildRemoteProviderReusesManagedConcurrencyLimiter(t *testing.T) {
 	limiter, err := provider.NewConcurrencyLimiter(2)
 	if err != nil {

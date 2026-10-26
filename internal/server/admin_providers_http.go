@@ -292,6 +292,33 @@ func blocksActiveProviderMutation(action, activeID, providerID string, exists, r
 	}
 }
 
+
+// prepareProviderConcurrencyLimit 约束并发上限的生效时点。
+// 降低上限立即应用；提高上限必须等 Registry 替换/注册成功，且不能在编辑禁用 Provider 时提前放宽。
+func prepareProviderConcurrencyLimit(action string, exists, enabled bool, limiter *provider.ConcurrencyLimiter, configuredLimit int) (previousLimit int, changedBeforeRegistry, raiseAfterRegistry bool, err error) {
+	if limiter == nil {
+		return 0, false, false, nil
+	}
+	if action != "enable" && !(action == "save" && exists) {
+		return limiter.Limit(), false, false, nil
+	}
+	current := limiter.Limit()
+	target := configuredLimit
+	if target == 0 {
+		target = provider.MaxOpenAICompatibleConcurrentRequests
+	}
+	if target < current {
+		if err := limiter.SetLimit(configuredLimit); err != nil {
+			return current, false, false, err
+		}
+		return current, true, false, nil
+	}
+	if target > current && (action == "enable" || enabled) {
+		return current, false, true, nil
+	}
+	return current, false, false, nil
+}
+
 func (s *Server) changeWebProvider(ctx context.Context,id string,input *providerMutationRequest,action string)error {
 	id=strings.ToLower(strings.TrimSpace(id))
 	// 与上游切换共用锁，避免检查非活动后又被并发切换为活动 Provider。
@@ -338,17 +365,17 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 		return providerErr(503, "provider_persistence_failed", "保存 Provider 配置失败，运行时配置未更新")
 	}
 
-	// 现有 Provider 的在途请求与替换后的实例共享同一个许可器。
-	// 先更新预算再原子替换 Registry，降低并发上限时立即拒绝新请求；若 Registry 更新失败则恢复旧预算。
-	limiterChanged := false
-	if action == "save" && exists && row.ConcurrencyLimiter != nil {
-		if err := row.ConcurrencyLimiter.SetLimit(row.MaxConcurrentRequests); err != nil {
-			if rollbackErr := s.persistWebProviderMap(ctx, previous); rollbackErr != nil {
-				applog.Printf("Web Provider persistence rollback failed: id=%s", id)
-			}
-			return providerErr(400, "invalid_concurrency_limit", "并发上限必须在 0 到 64 之间")
+	// 在途请求与替换后的实例共享同一个许可器。
+	// 降低上限时先收紧预算，避免旧实例在 Registry 替换前继续接收超额请求；
+	// 提高上限则推迟到 Registry 成功替换之后，避免替换失败时短暂放宽旧预算。
+	previousLimit, limiterChanged, limiterRaisePending, limitErr := prepareProviderConcurrencyLimit(
+		action, exists, row.Enabled, row.ConcurrencyLimiter, row.MaxConcurrentRequests,
+	)
+	if limitErr != nil {
+		if rollbackErr := s.persistWebProviderMap(ctx, previous); rollbackErr != nil {
+			applog.Printf("Web Provider persistence rollback failed: id=%s", id)
 		}
-		limiterChanged = true
+		return providerErr(400, "invalid_concurrency_limit", "并发上限必须在 0 到 64 之间")
 	}
 	var registryErr error
 	if s.providers==nil{registryErr=errors.New("Provider Registry unavailable")}else{
@@ -361,7 +388,7 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 	}
 	if registryErr != nil {
 		if limiterChanged {
-			if err := row.ConcurrencyLimiter.SetLimit(old.MaxConcurrentRequests); err != nil {
+			if err := row.ConcurrencyLimiter.SetLimit(previousLimit); err != nil {
 				applog.Printf("Web Provider concurrency limit rollback failed: id=%s", id)
 			}
 		}
@@ -370,6 +397,13 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 		}
 		applog.Printf("Web Provider Registry update failed: id=%s", id)
 		return providerErr(503, "provider_registry_update_failed", "更新 Provider 运行时注册表失败，已尝试回滚持久化配置")
+	}
+	if limiterRaisePending {
+		// 目标上限已由配置与 Provider 构造器验证过；只有 Registry 更新成功后才放宽预算。
+		if err := row.ConcurrencyLimiter.SetLimit(row.MaxConcurrentRequests); err != nil {
+			applog.Printf("apply Provider concurrency limit failed: id=%s", id)
+			return providerErr(503, "provider_concurrency_update_failed", "更新 Provider 并发预算失败；当前运行时保留旧上限")
+		}
 	}
 	s.webProviders=next
 	if exists && action!="delete" && row.Enabled && active==id {

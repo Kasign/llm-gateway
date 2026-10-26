@@ -7,7 +7,7 @@
 - `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
 - PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，状态 Open / 未合并。
 - PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）最新功能 Head 为 `b23aee30e5fdaa36448d49a75da472134c4acb58`；新加的跨实例并发改动触发 [Actions #40266563695](https://github.com/Kasign/llm-gateway/actions/runs/40266563695)，单测编译失败于测试断言仍引用已移除的 `requestSlots` 字段。已定位并修复该测试引用，并加强为“先占用许可，再降低上限”的回归情境；修复后的完整 CI 必须通过。PR 仍 Open，依赖 PR #5，尚未合并。
+- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）`6b7c839b48d4b4a92d932ab95e79c84fbea05c1b` 的完整 CI [#40266726738](https://github.com/Kasign/llm-gateway/actions/runs/40266726738) 已通过全部 32 步。后续复核发现并发上限提高应在 Registry 成功替换后再生效，已进入下一次功能修正；新提交必须再次跑完整 CI。PR 仍 Open，依赖 PR #5，尚未合并。
 - #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
 
 ## P1：可靠性与可观测性
@@ -82,4 +82,5 @@
 
 - 审查发现旧 Provider 已进入推理且管理台保存配置时，Registry 会切换到新 Provider 实例；若新旧实例各有独立并发许可器，在途请求和新请求会分开计数，短时间内可能超过配置的 Provider 并发上限。
 - 本批通过共享许可器解决：Web Provider 配置编辑复用既有许可器，更新 `max_concurrent_requests` 时影响旧实例与新实例；降低上限不会取消在途请求，而是拒绝新请求直至活动数回落。若 Registry 更新失败，恢复原限制并回滚持久化设置。
-- 新增 Provider 层跨实例并发回归测试和 Server 构造测试。首轮 Actions #40266563695 在编译阶段发现旧断言引用已移除字段（非生产逻辑失败）；修复后将以新 Head 的完整 Go CI、竞态测试和 bundle 检查结果验收，不以此前 HEAD 的通过结果代替。
+- 新增 Provider 层跨实例并发回归测试和 Server 构造测试。首轮 Actions #40266563695 在编译阶段发现旧断言引用已移除字段（非生产逻辑失败）；修复提交 `6b7c839` 的 Actions #40266726738 已全量通过。
+- 为防止 Provider Registry 更新失败时短暂放宽旧并发上限，降低限额在 Registry 更新前应用并可回滚，提高限额只在更新成功后应用；对禁用 Provider 的保存先保守保留现有运行时预算，重新启用时同步新上限。该顺序新增独立单元测试，待本次提交完整 CI 验收。
