@@ -66,7 +66,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | --- | --- | --- |
 | `api_keys` | 调用方 API Key、状态、过期/限流及访问策略。 | 不应存储或返回明文调用密钥。 |
 | `models` | 模型清单及运行时元数据。 | `runtime_json` 由增量结构升级补齐。 |
-| `request_logs` | 请求状态、耗时、HTTP 状态、Provider 分析字段。 | `request_url`、`upstream_http_status`、`ttft_ms` 等是兼容升级重点。 |
+| `request_logs` | 请求状态、耗时、HTTP 状态、Provider 分析字段。 | 新增可空 `provider_id`，由解析出的实际 Provider 写入；`idx_provider_started` 支持按 Provider 和时间窗口聚合。旧记录保持 NULL/空值，不根据当前活动上游反推历史 Provider。 |
 | `request_payloads` | 可选请求/响应正文及请求/上游 Header。 | 正文可能包含敏感业务内容；由日志存储设置控制。 |
 | `request_stream_events` | SSE 事件序号、时间、类型、字段和可选原始行。 | 原始流事件字段通过 `ensureColumns` 升级。 |
 | `gateway_settings` | 持久化全局活动后端及管理台可调设置。 | 不适合存储远程 Provider 密钥，也不承载 Agent 路由静态配置。 |

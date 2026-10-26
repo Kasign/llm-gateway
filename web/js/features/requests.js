@@ -23,7 +23,7 @@ export async function loadRequests() {
     $('requestsTable').innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
-          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
+          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>Provider</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
             rows
               .map((x) => {
                 const rid = String(x.request_id || '');
@@ -38,7 +38,7 @@ export async function loadRequests() {
                   x.status === 'running'
                     ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">结束</button>`
                     : '';
-                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
+                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || '—')}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
               })
               .join(''),
         );
@@ -252,6 +252,7 @@ function detailSections(j) {
   if (headerInner) add('headers', 'swap', `<section class="req-section"><h3>请求头</h3>${headerInner}</section>`);
   const p = j.request_params || {};
   const paramRows = [
+    ['Provider ID', log.provider_id || s.provider_id || '—'],
     ['客户端 model', p.model_client || s.model_client || log.model_requested || '—'],
     ['上游 model', p.model_upstream || s.model_upstream || log.model_actual || '—'],
     ['模型说明', p.model_note || ''],

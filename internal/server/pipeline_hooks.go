@@ -328,12 +328,20 @@ func (o inferenceObserver) On(ctx context.Context, ev core.Event) {
 		o.s.markCallRecorded(ctx)
 		o.onParsed(ev.State)
 	case core.StageModelResolved:
-		// 模型列展示的是实际上游 model，选定后立刻写入，不必等到请求结束。
+		// Resolver 定下的 Provider 与实际上游 model 一起写入运行中记录，避免把 Agent 流量归到全局活动上游。
+		providerID := strings.ToLower(strings.TrimSpace(ev.State.Model.ProviderID))
 		actual := strings.TrimSpace(ev.State.Model.UpstreamID)
-		o.s.livePatch(ctx, ev.State.ID, store.RequestLog{ModelActual: actual})
-		if actual != "" && o.s.audit != nil {
-			o.s.audit.PatchRequestModelActual(ev.State.ID, actual)
-			o.s.invalidateRequestListCache()
+		o.s.livePatch(ctx, ev.State.ID, store.RequestLog{ProviderID: providerID, ModelActual: actual})
+		if o.s.audit != nil {
+			if providerID != "" {
+				o.s.audit.PatchRequestProviderID(ev.State.ID, providerID)
+			}
+			if actual != "" {
+				o.s.audit.PatchRequestModelActual(ev.State.ID, actual)
+			}
+			if providerID != "" || actual != "" {
+				o.s.invalidateRequestListCache()
+			}
 		}
 	case core.StagePrepared:
 		o.s.liveSetReqBody(ev.State.ID, ev.State.Body)
@@ -351,7 +359,7 @@ func (o inferenceObserver) onParsed(st core.State) {
 	cs := o.s.callGet(st.ID)
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
-		Endpoint: st.Path, RequestURL: st.RequestURL, Method: st.Method, ModelRequested: st.ClientModel, Stream: st.Stream,
+		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, Stream: st.Stream,
 		Status: "running", StartedAt: st.Started, RequestBytes: int64(len(st.OriginalBody)),
 	}
 	if cs != nil && cs.key != nil {
@@ -512,7 +520,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	}
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
-		Endpoint: st.Path, RequestURL: st.RequestURL, Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
+		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
 		Stream: st.Stream, Status: state, HTTPStatus: gatewayStatus, UpstreamHTTPStatus: upstreamStatus, FinishedAt: &end, LatencyMS: totalMS,
 		TTFTMS: ttft, InputTokens: inTok, OutputTokens: outTok, TotalTokens: totTok,
 		ResponseBytes: respBytes, ErrorCode: code, ErrorMessage: msg,

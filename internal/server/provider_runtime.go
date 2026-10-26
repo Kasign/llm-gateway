@@ -25,6 +25,20 @@ func (s *Server) providerIDForState(st core.State) string {
 	if id := strings.ToLower(strings.TrimSpace(st.Model.ProviderID)); id != "" {
 		return id
 	}
+	// 内部调用带 ServiceModel 时，Resolver 优先使用 ServiceProviderID；
+	// 若未显式指定，就回退全局活动 Provider，而不是取 Agent 前缀。
+	if strings.TrimSpace(st.ServiceModel) != "" {
+		if id := strings.ToLower(strings.TrimSpace(st.ServiceProviderID)); id != "" {
+			return id
+		}
+		if s == nil {
+			return ""
+		}
+		return strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
+	}
+	if id := strings.ToLower(strings.TrimSpace(st.RouteProviderID)); id != "" {
+		return id
+	}
 	if id := strings.ToLower(strings.TrimSpace(st.ServiceProviderID)); id != "" {
 		return id
 	}

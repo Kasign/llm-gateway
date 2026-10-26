@@ -468,13 +468,13 @@
       const j = await api("/api/requests?" + q);
       const rows = j.data || [];
       $("requestsTable").innerHTML = !rows.length ? emptyState("\u6682\u65E0\u8BB0\u5F55") : wrapTable(
-        "<tr><th>\u65F6\u95F4</th><th>Request ID</th><th>\u5BA2\u6237\u7AEF</th><th>\u5BC6\u94A5</th><th>\u8BF7\u6C42 URL</th><th>\u6A21\u578B</th><th>\u6D41\u5F0F</th><th>\u72B6\u6001</th><th>HTTP \u7F51\u5173/\u4E0A\u6E38</th><th>TTFT</th><th>\u8017\u65F6</th><th>Token</th><th>\u4F53\u79EF</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
+        "<tr><th>\u65F6\u95F4</th><th>Request ID</th><th>\u5BA2\u6237\u7AEF</th><th>\u5BC6\u94A5</th><th>\u8BF7\u6C42 URL</th><th>Provider</th><th>\u6A21\u578B</th><th>\u6D41\u5F0F</th><th>\u72B6\u6001</th><th>HTTP \u7F51\u5173/\u4E0A\u6E38</th><th>TTFT</th><th>\u8017\u65F6</th><th>Token</th><th>\u4F53\u79EF</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
           const rid = String(x.request_id || "");
           const ridShort = rid.length > 10 ? rid.slice(0, 8) + "\u2026" : rid;
           const target = displayRequestTarget(x);
           const sz = (Number(x.request_bytes || 0) / 1024).toFixed(1) + " / " + (Number(x.response_bytes || 0) / 1024).toFixed(1) + " KB";
           const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">\u7ED3\u675F</button>` : "";
-          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
+          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || "\u2014")}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
         }).join("")
       );
     } catch (e) {
@@ -658,6 +658,7 @@
     if (headerInner) add("headers", "swap", `<section class="req-section"><h3>\u8BF7\u6C42\u5934</h3>${headerInner}</section>`);
     const p = j.request_params || {};
     const paramRows = [
+      ["Provider ID", log.provider_id || s.provider_id || "\u2014"],
       ["\u5BA2\u6237\u7AEF model", p.model_client || s.model_client || log.model_requested || "\u2014"],
       ["\u4E0A\u6E38 model", p.model_upstream || s.model_upstream || log.model_actual || "\u2014"],
       ["\u6A21\u578B\u8BF4\u660E", p.model_note || ""],

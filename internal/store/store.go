@@ -18,6 +18,7 @@ type RequestLog struct {
 	UserAgent      string     `json:"user_agent,omitempty"`
 	Endpoint       string     `json:"endpoint"`
 	RequestURL     string     `json:"request_url,omitempty"`
+	ProviderID     string     `json:"provider_id,omitempty"`
 	Method         string     `json:"method"`
 	ModelRequested string     `json:"model_requested,omitempty"`
 	ModelActual    string     `json:"model_actual,omitempty"`
@@ -91,7 +92,7 @@ func nullIfEmpty(s string) interface{} {
 const maxStreamEventsPerRequest = 2000
 
 func (r *Repo) CreateRequest(ctx context.Context, l RequestLog) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO request_logs(request_id,api_key_id,api_key_name,client_ip,client_name,user_agent,endpoint,request_url,method,model_requested,model_actual,stream,status,started_at,request_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, l.RequestID, l.APIKeyID, l.APIKeyName, l.ClientIP, l.ClientName, l.UserAgent, l.Endpoint, nullIfEmpty(l.RequestURL), l.Method, l.ModelRequested, l.ModelActual, l.Stream, l.Status, l.StartedAt, l.RequestBytes)
+	_, err := r.db.ExecContext(ctx, `INSERT INTO request_logs(request_id,api_key_id,api_key_name,client_ip,client_name,user_agent,endpoint,request_url,provider_id,method,model_requested,model_actual,stream,status,started_at,request_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, l.RequestID, l.APIKeyID, l.APIKeyName, l.ClientIP, l.ClientName, l.UserAgent, l.Endpoint, nullIfEmpty(l.RequestURL), nullIfEmpty(l.ProviderID), l.Method, l.ModelRequested, l.ModelActual, l.Stream, l.Status, l.StartedAt, l.RequestBytes)
 	return err
 }
 
@@ -108,6 +109,16 @@ func (r *Repo) PatchRequestAfterParse(ctx context.Context, requestID, modelReque
 // PatchRequestModelActual 写入网关实际发给上游的 model，不改客户端传入的 model_requested。
 func (r *Repo) PatchRequestModelActual(ctx context.Context, requestID, modelActual string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET model_actual=COALESCE(NULLIF(?,''),model_actual) WHERE request_id=?`, modelActual, requestID)
+	return err
+}
+
+// PatchRequestProviderID 覆盖请求初始阶段记录的 Provider 预估值，写入 Resolver 最终选定的 Provider。
+func (r *Repo) PatchRequestProviderID(ctx context.Context, requestID, providerID string) error {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET provider_id=? WHERE request_id=?`, providerID, requestID)
 	return err
 }
 
@@ -134,6 +145,7 @@ func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
 		model_requested=COALESCE(NULLIF(?,''),model_requested),
 		model_actual=COALESCE(NULLIF(?,''),model_actual),
 		request_url=COALESCE(NULLIF(?,''),request_url),
+		provider_id=COALESCE(NULLIF(?,''),provider_id),
 		stream=?,
 		http_status=CASE WHEN status='cancelled' THEN http_status ELSE ? END,
 		upstream_http_status=COALESCE(NULLIF(?,0),upstream_http_status),
@@ -144,7 +156,7 @@ func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
 		error_message=CASE WHEN status='cancelled' THEN error_message ELSE ? END,
 		status=CASE WHEN status='cancelled' THEN status ELSE ? END
 		WHERE request_id=?`,
-		l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.Stream,
+		l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.ProviderID, l.Stream,
 		l.HTTPStatus, l.UpstreamHTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS,
 		l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes,
 		l.ErrorCode, l.ErrorMessage, l.Status, l.RequestID)
@@ -206,7 +218,7 @@ func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, statu
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	q := `SELECT request_id,COALESCE(api_key_id,0),COALESCE(api_key_name,''),COALESCE(client_ip,''),COALESCE(client_name,''),COALESCE(user_agent,''),endpoint,COALESCE(request_url,''),method,COALESCE(model_requested,''),COALESCE(model_actual,''),stream,status,COALESCE(http_status,0),COALESCE(upstream_http_status,0),started_at,finished_at,COALESCE(latency_ms,0),ttft_ms,input_tokens,output_tokens,total_tokens,COALESCE(request_bytes,0),COALESCE(response_bytes,0),COALESCE(error_code,''),COALESCE(error_message,'') FROM request_logs WHERE 1=1`
+	q := `SELECT request_id,COALESCE(api_key_id,0),COALESCE(api_key_name,''),COALESCE(client_ip,''),COALESCE(client_name,''),COALESCE(user_agent,''),endpoint,COALESCE(request_url,''),COALESCE(provider_id,''),method,COALESCE(model_requested,''),COALESCE(model_actual,''),stream,status,COALESCE(http_status,0),COALESCE(upstream_http_status,0),started_at,finished_at,COALESCE(latency_ms,0),ttft_ms,input_tokens,output_tokens,total_tokens,COALESCE(request_bytes,0),COALESCE(response_bytes,0),COALESCE(error_code,''),COALESCE(error_message,'') FROM request_logs WHERE 1=1`
 	var args []interface{}
 	if requestID != "" {
 		q += " AND request_id=?"
@@ -235,7 +247,7 @@ func (r *Repo) Query(ctx context.Context, limit int, requestID, modelName, statu
 	var out []RequestLog
 	for rows.Next() {
 		var l RequestLog
-		if err := rows.Scan(&l.RequestID, &l.APIKeyID, &l.APIKeyName, &l.ClientIP, &l.ClientName, &l.UserAgent, &l.Endpoint, &l.RequestURL, &l.Method, &l.ModelRequested, &l.ModelActual, &l.Stream, &l.Status, &l.HTTPStatus, &l.UpstreamHTTPStatus, &l.StartedAt, &l.FinishedAt, &l.LatencyMS, &l.TTFTMS, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.RequestBytes, &l.ResponseBytes, &l.ErrorCode, &l.ErrorMessage); err != nil {
+		if err := rows.Scan(&l.RequestID, &l.APIKeyID, &l.APIKeyName, &l.ClientIP, &l.ClientName, &l.UserAgent, &l.Endpoint, &l.RequestURL, &l.ProviderID, &l.Method, &l.ModelRequested, &l.ModelActual, &l.Stream, &l.Status, &l.HTTPStatus, &l.UpstreamHTTPStatus, &l.StartedAt, &l.FinishedAt, &l.LatencyMS, &l.TTFTMS, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.RequestBytes, &l.ResponseBytes, &l.ErrorCode, &l.ErrorMessage); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

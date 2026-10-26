@@ -195,6 +195,17 @@ func (w *Writer) PatchRequestModelActual(requestID, modelActual string) {
 	})
 }
 
+// PatchRequestProviderID 将 Resolver 确定的 Provider ID 按关键审计事件顺序写入。
+func (w *Writer) PatchRequestProviderID(requestID, providerID string) {
+	if strings.TrimSpace(providerID) == "" {
+		return
+	}
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
+		return r.PatchRequestProviderID(ctx, requestID, providerID)
+	})
+}
+
 func (w *Writer) FinishRequest(l store.RequestLog) {
 	rec := l
 	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {

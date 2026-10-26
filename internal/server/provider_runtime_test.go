@@ -121,3 +121,26 @@ func TestInferenceForwarderUsesBadGatewayForUnclassifiedTransportError(t *testin
 		t.Fatalf("result status = %d, want 502", result.Status)
 	}
 }
+
+
+func TestProviderIDForStateFollowsResolverTarget(t *testing.T) {
+	s := &Server{upstream: settings.Upstream{Backend: "llamacpp"}}
+	cases := []struct {
+		name string
+		state core.State
+		want string
+	}{
+		{name: "resolved model wins", state: core.State{Model: core.ModelChoice{ProviderID: "openai"}, RouteProviderID: "deepseek"}, want: "openai"},
+		{name: "trusted agent route before active upstream", state: core.State{RouteProviderID: "deepseek"}, want: "deepseek"},
+		{name: "service provider wins for internal service model", state: core.State{ServiceModel: "internal-model", ServiceProviderID: "openai", RouteProviderID: "deepseek"}, want: "openai"},
+		{name: "service model without provider falls back to active", state: core.State{ServiceModel: "internal-model", RouteProviderID: "deepseek"}, want: "llamacpp"},
+		{name: "active provider fallback", state: core.State{}, want: "llamacpp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.providerIDForState(tc.state); got != tc.want {
+				t.Fatalf("providerIDForState() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

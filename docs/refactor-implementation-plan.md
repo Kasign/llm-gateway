@@ -717,3 +717,12 @@ docs/                        中文架构、协议和运维文档
 - 自动 CI 日志此前多次失败于 `TestProviderRPMUsageReadsWithoutIncrementing`：测试使用了带大写字母的 Provider ID，写入路径直接拼接原始测试名，读取 API 则按 Provider 契约转小写。调整测试夹具使 ID 在写入前规范化，不改生产限流逻辑，也不放宽断言。
 - 更新 Provider 列表 API 契约、管理台源码及部署 bundle；提交前源码和 bundle 完全一致。按用户要求未运行测试、构建或 CI。
 - 本次提交前 HEAD：`f09d044bebf285f562bc16c29eb30189da58afd3`；PR #5/#7 仍 Open、未合并。
+
+
+### 调用审计 Provider 身份字段（2026-10-26）
+
+- `request_logs.provider_id` 记录每条调用的 Provider ID，与 `model_requested`、`model_actual` 分开保存，避免不同供应商使用同名模型时无法按来源统计延迟、成功率和 Token 用量。
+- 请求创建时先记可信路由/活动上游的候选 ID；`StageModelResolved` 收到 Resolver 的实际选择后以最终 Provider ID 覆盖，并更新实时看板；请求结束时再次补全。Agent 固定 Provider、内部 ServiceModel、全局活动 Provider 按 Resolver 优先级区分，不能只读取全局活动 Provider。
+- 新库在 `request_logs` 创建 `provider_id` 及 `idx_provider_started(provider_id, started_at)`；旧库通过 `ensureColumns` 增量添加，重复列/索引错误按 MariaDB 契约忽略。既有历史记录不伪造来源，保持空值。
+- 调用记录列表与详情新增 Provider ID 展示；同步前端源码和 `web/static/dist/app.js`。新增 Provider ID 选择优先级测试代码，但按用户要求未运行测试、迁移或构建。
+- 实施前核实 HEAD：`f981d38e66f3d2c0c4eb3906432f13432a867798`；PR #5/#7 均 Open、未合并。
