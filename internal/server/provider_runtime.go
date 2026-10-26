@@ -35,15 +35,23 @@ func (s *Server) providerIDForState(st core.State) string {
 
 func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProviderConfig, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if s == nil || s.cfg == nil {
+	if s == nil || s.cfg == nil { return config.OpenAICompatibleProviderConfig{}, false }
+	// 部署配置（包括禁用项）优先占有 ID，Web 项绝不覆盖。
+	for _, item := range s.cfg.Providers.OpenAICompatible {
+		if strings.EqualFold(item.ID, id) { return item, item.Enabled }
+	}
+	s.providerConfigMu.RLock()
+	item, ok := s.webProviders[id]
+	s.providerConfigMu.RUnlock()
+	if !ok || !item.Enabled || item.SourceConflict || item.SecretUnavailable {
 		return config.OpenAICompatibleProviderConfig{}, false
 	}
-	for _, item := range s.cfg.Providers.OpenAICompatible {
-		if item.Enabled && strings.EqualFold(item.ID, id) {
-			return item, true
-		}
-	}
-	return config.OpenAICompatibleProviderConfig{}, false
+	return config.OpenAICompatibleProviderConfig{
+		ID:item.ID, Enabled:item.Enabled, BaseURL:item.BaseURL, APIKey:item.APIKey,
+		APIKeyHeader:item.APIKeyHeader, DefaultModel:item.DefaultModel, ModelMappings:cloneStringMap(item.ModelMappings),
+		AllowInsecureHTTP:item.AllowInsecureHTTP, AllowPrivateNetwork:item.AllowPrivateNetwork,
+		MaxResponseBytes:item.MaxResponseBytes, MaxConcurrentRequests:item.MaxConcurrentRequests,
+	}, true
 }
 
 func (s *Server) isConfiguredProvider(id string) bool {
@@ -95,19 +103,21 @@ func (s *Server) activeProviderStatus(ctx context.Context) (backend, status stri
 // availableBackends 仅暴露安全配置的元数据，不返回 API Key。
 func (s *Server) availableBackends() []map[string]interface{} {
 	out := []map[string]interface{}{
-		{"id": "llamacpp", "label": "llama.cpp", "kind": "local", "base_url": s.baseURLForBackend("llamacpp")},
-		{"id": "ollama", "label": "Ollama", "kind": "local", "base_url": s.baseURLForBackend("ollama")},
+		{"id":"llamacpp","label":"llama.cpp","kind":"local","base_url":s.baseURLForBackend("llamacpp"),"source":"deployment","editable":false},
+		{"id":"ollama","label":"Ollama","kind":"local","base_url":s.baseURLForBackend("ollama"),"source":"deployment","editable":false},
 	}
-	if s != nil && s.cfg != nil {
-		for _, item := range s.cfg.Providers.OpenAICompatible {
-			if !item.Enabled {
-				continue
-			}
-			out = append(out, map[string]interface{}{
-				"id": item.ID, "label": item.ID, "kind": "remote", "base_url": item.BaseURL,
-				"default_model": item.DefaultModel, "api_key_configured": item.APIKey != "",
-			})
-		}
+	if s == nil || s.cfg == nil { return out }
+	for _, item := range s.cfg.Providers.OpenAICompatible {
+		if !item.Enabled { continue }
+		out = append(out, map[string]interface{}{"id":item.ID,"label":item.ID,"kind":"remote","base_url":item.BaseURL,"default_model":item.DefaultModel,"api_key_configured":item.APIKey!="","source":"deployment","editable":false})
+	}
+	s.providerConfigMu.RLock()
+	rows := make([]managedProvider,0,len(s.webProviders))
+	for _, row := range s.webProviders { rows = append(rows,row) }
+	s.providerConfigMu.RUnlock()
+	for _, row := range rows {
+		if !row.Enabled || row.SourceConflict || row.SecretUnavailable { continue }
+		out = append(out,map[string]interface{}{"id":row.ID,"label":row.ID,"kind":"remote","base_url":row.BaseURL,"default_model":row.DefaultModel,"api_key_configured":row.APIKeyCiphertext!=""||row.APIKey!="","source":"web","editable":true})
 	}
 	return out
 }

@@ -65,7 +65,9 @@ func (s *Server) resolveProxyModelTargetForUpstream(ctx context.Context, active 
 		if modelID == "" {
 			return zero, &core.Error{Status: 503, Code: "no_proxy_model", Message: "未配置远程 Provider 默认模型"}
 		}
-		return proxyModelTarget{ProviderID: providerID, Hint: modelID, ModelKey: modelID, UpstreamID: modelID}, nil
+		upstreamModelID := modelID
+		if mapped := strings.TrimSpace(remote.ModelMappings[modelID]); mapped != "" { upstreamModelID = mapped }
+		return proxyModelTarget{ProviderID: providerID, Hint: modelID, ModelKey: modelID, UpstreamID: upstreamModelID}, nil
 	}
 	hint := s.configuredProxyModelHintForUpstream(active)
 	adopted := false

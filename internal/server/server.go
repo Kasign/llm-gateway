@@ -61,6 +61,10 @@ type Server struct {
 	upstreamChangeMu sync.Mutex   // 串行化管理员切换与请求触发的模型自动采纳。
 	localClientsMu   sync.Mutex   // 保护各本地 Provider 的稳定 HTTP 客户端缓存。
 	localClients     map[string]localClientEntry
+	providerConfigMu sync.RWMutex
+	webProviders map[string]managedProvider
+	providerEncryptionKey []byte
+	providerEncryptionKeyErr error
 	// —— 上游配置 ——
 	upstream     settings.Upstream // 当前生效的上游配置（管理员在后台改的，优先级高）
 	fileUpstream settings.Upstream // 配置文件里的默认上游配置（管理员没改时用这个）
@@ -136,6 +140,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 6. 从数据库加载管理员在后台保存的上游设置（如果有的话，覆盖配置文件的默认值）
 	srv.pipe = srv.newInferencePipeline()
 	srv.runs = newRunCancels()
+	srv.loadWebProviders(context.Background())
 	srv.initUpstreamFromDB(context.Background())
 	// 7. 加载网页登录状态（从数据库恢复上次的登录会话）
 	srv.loadWebLoginState(context.Background())
@@ -252,6 +257,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/backend/unload-all", s.backendUnloadAllAPI)    // 卸载所有已加载模型
 	mux.HandleFunc("/api/admin/backend/upstream-models", s.upstreamModelsAPI) // 查看上游有哪些模型
 	mux.HandleFunc("/api/admin/backend", s.backendAPI)                        // 读取/修改上游后端配置
+	mux.HandleFunc("/api/admin/providers", s.adminProvidersAPI)
+	mux.HandleFunc("/api/admin/providers/", s.adminProviderActionAPI)
 
 	// —— 管理 API：运行时管理（控制 llama.cpp 加载哪个模型）——
 	mux.HandleFunc("/api/admin/runtime/preview", s.runtimePreviewAPI) // 预览运行时状态
