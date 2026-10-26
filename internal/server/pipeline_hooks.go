@@ -333,13 +333,9 @@ func (o inferenceObserver) On(ctx context.Context, ev core.Event) {
 		actual := strings.TrimSpace(ev.State.Model.UpstreamID)
 		o.s.livePatch(ctx, ev.State.ID, store.RequestLog{ProviderID: providerID, ModelActual: actual})
 		if o.s.audit != nil {
-			if providerID != "" {
-				o.s.audit.PatchRequestProviderID(ev.State.ID, providerID)
-			}
-			if actual != "" {
-				o.s.audit.PatchRequestModelActual(ev.State.ID, actual)
-			}
 			if providerID != "" || actual != "" {
+				// Provider 与上游模型由同一条审计更新持久化，避免并发负载下重复占用关键队列。
+				o.s.audit.PatchRequestResolution(ev.State.ID, providerID, actual)
 				o.s.invalidateRequestListCache()
 			}
 		}
@@ -366,8 +362,8 @@ func (o inferenceObserver) onParsed(st core.State) {
 		logItem.APIKeyID = cs.key.ID
 		logItem.APIKeyName = cs.key.Name
 	}
+	// CreateRequest 已写入从请求解析得到的 model_requested 与 stream，无需紧接着重复 UPDATE。
 	o.s.audit.CreateRequest(logItem)
-	o.s.audit.PatchRequestAfterParse(st.ID, st.ClientModel, st.Stream)
 	o.s.liveStart(context.Background(), logItem)
 	// 请求头只在观察者里记。主流程和 Forward 不改。
 	o.s.captureRequestHeaders(st)

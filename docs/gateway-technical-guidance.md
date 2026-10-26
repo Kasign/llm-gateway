@@ -728,3 +728,9 @@ OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、�
 `llama.request_timeout_seconds` 显式设置为 `0` 表示不添加 Gateway 整体请求 Deadline；旧配置未指定时仍使用兼容默认值。Benchmark 与普通推理必须遵守同一语义，不能将零秒交给 `context.WithTimeout`，因为那会立刻使 Context 进入超时状态。
 
 目前 Benchmark 使用可选时限 Context：正数创建带 Deadline 的 Context，0 创建仅继承父 Context 的可取消 Context。这样长 prefill / 首 Token 等待不会被零秒配置误取消，同时用户发出的停止信号仍然可中断模型加载和推理。该改动不影响 Codex、Cursor 等客户端自身设置的等待时限；客户端断开后父请求链的取消语义仍需要保持。
+
+## 高负载下的请求生命周期审计写入
+
+一次请求创建记录时，`CreateRequest` 已直接写入已解析的 `model_requested`、`stream` 和候选 Provider。不要再对相同字段执行无意义的紧邻 UPDATE。Resolver 确定路由后，Provider ID 与实际上游模型通过一条关键审计更新一起持久化；这样可在在途记录查询中保持来源一致，同时减少单 Worker 队列的 SQL 次数。请求结束时，`FinishRequest` 仍是最终权威状态与指标更新。
+
+审计队列保持有界，非关键分析数据在队列压力下仍可丢弃并计入指标；关键生命周期任务不能因为冗余数据库更新被不必要地放大。Gateway 负载验收必须同时检查 HTTP 响应、持久化行数、终态、Provider ID 和实际模型字段，不能只看吞吐，也不能通过扩大队列或降低断言来掩盖审计丢失。

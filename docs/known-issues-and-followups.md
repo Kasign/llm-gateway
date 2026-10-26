@@ -171,3 +171,10 @@
 - 失败点是 `web/js/providers-entry.js:60` 的表格 HTML 拼接字符串在 `actions` 之后少了结束引号，Node.js 报 `SyntaxError: Invalid or unexpected token`。这是管理台 Provider 模块的语法缺陷，不是 Go 或 MariaDB 问题。
 - 修正后将源码原样复制到 `web/static/dist/providers-admin.js`。按 `web/package.json` 的 build 脚本约定，该部署文件就是源文件的直接副本；无需改动无关的 `app.js` bundle。
 - 按统一回归安排，不手动启动 Node/Go 测试；提交的新 Head 由完整 GitHub Actions 验证。通过前仍视为待验收。
+
+## 2026-10-26 追加：Actions #210 暴露的审计队列写放大
+
+- [Actions #210](https://github.com/Kasign/llm-gateway/actions/runs/40288357563) 的单测和 MariaDB 审计积压测试通过；Gateway 负载请求本身全部成功且达到了 200 req/s，但审计验收发现仅 9,146/12,192 条 request_logs，Writer 累计丢弃约 35,000 个排队任务。失败日志显示大量 `normal_capacity_reserved` 与 `queue_full`，不是 HTTP 请求错误或数据库字段异常。
+- 根因是一次已解析请求被多次重复写审计：`CreateRequest` 已写入 `model_requested` 和 `stream`，随后仍重复 `PatchRequestAfterParse`；Resolver 又将 Provider ID 与实际模型拆为两条关键 UPDATE。持续负载下这些重复任务放大了单 Worker 的数据库写入压力并压满有界队列。
+- 本次改为：创建请求时一次写入解析字段；Resolver 实际 Provider 与上游模型合并为一条关键 UPDATE。生命周期仍保留 Create、Resolver 更新和 Finish 三个顺序边界；Finish 继续写入最终 Provider/model/状态与耗时，LiveRegistry 仍立即更新在途请求视图。负载测试新增 Provider 精确归属断言，不降低原有 12,192 行、成功状态与模型匹配断言。
+- 当前修复待最新 Head 的自动 Actions 验收。未手动运行 Go 测试或本地负载测试；不会以调大队列、减少请求量或放宽断言作为修复。

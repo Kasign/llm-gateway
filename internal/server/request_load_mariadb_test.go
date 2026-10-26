@@ -937,18 +937,19 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 
 	verifyCtx, cancelVerify := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancelVerify()
-	var persisted, successful, modelMatched int
+	var persisted, successful, modelMatched, providerMatched int
 	err = db.QueryRowContext(verifyCtx,
-		"SELECT COUNT(*), COALESCE(SUM(status='success'),0), COALESCE(SUM(model_actual='integration-model'),0) FROM request_logs WHERE api_key_name=?",
-		keyName).Scan(&persisted, &successful, &modelMatched)
+		"SELECT COUNT(*), COALESCE(SUM(status='success'),0), COALESCE(SUM(model_actual='integration-model'),0), COALESCE(SUM(provider_id='loadtest'),0) FROM request_logs WHERE api_key_name=?",
+		keyName).Scan(&persisted, &successful, &modelMatched, &providerMatched)
 	if err != nil {
 		t.Fatalf("query persisted audit results: %v", err)
 	}
 	// expectedTotalRequests 已覆盖突发与稳态两个阶段。
 
-	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests {
-		t.Fatalf("audit rows = %d, successful = %d, correct model = %d; want %d for each", persisted, successful, modelMatched, expectedTotalRequests)
+	if persisted != expectedTotalRequests || successful != expectedTotalRequests || modelMatched != expectedTotalRequests || providerMatched != expectedTotalRequests {
+		t.Fatalf("audit rows = %d, successful = %d, correct model = %d, correct provider = %d; want %d for each",
+			persisted, successful, modelMatched, providerMatched, expectedTotalRequests)
 	}
-	t.Logf("MariaDB audit drain after burst + sustained load: persisted=%d/%d successful=%d model_matched=%d drain_duration=%s",
-		persisted, expectedTotalRequests, successful, modelMatched, drainDuration.Round(time.Millisecond))
+	t.Logf("MariaDB audit drain after burst + sustained load: persisted=%d/%d successful=%d model_matched=%d provider_matched=%d drain_duration=%s",
+		persisted, expectedTotalRequests, successful, modelMatched, providerMatched, drainDuration.Round(time.Millisecond))
 }

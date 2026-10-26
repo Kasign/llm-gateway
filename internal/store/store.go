@@ -123,6 +123,20 @@ func (r *Repo) PatchRequestProviderID(ctx context.Context, requestID, providerID
 	return err
 }
 
+// PatchRequestResolution 合并写入 Resolver 实际选定的 Provider 与上游模型，减少同一请求的重复更新。
+func (r *Repo) PatchRequestResolution(ctx context.Context, requestID, providerID, modelActual string) error {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	modelActual = strings.TrimSpace(modelActual)
+	if providerID == "" && modelActual == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE request_logs SET
+		provider_id=COALESCE(NULLIF(?,''),provider_id),
+		model_actual=COALESCE(NULLIF(?,''),model_actual)
+		WHERE request_id=?`, providerID, modelActual, requestID)
+	return err
+}
+
 // MarkCancelled 只把仍为 running 的记录改成 cancelled，不改 stream 和 token。
 // 返回是否更新到一行。已经结束的记录不会被覆盖。
 func (r *Repo) MarkCancelled(ctx context.Context, id string, finished time.Time, latencyMS int64, message string) (bool, error) {

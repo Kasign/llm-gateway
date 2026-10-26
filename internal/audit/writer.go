@@ -206,6 +206,18 @@ func (w *Writer) PatchRequestProviderID(requestID, providerID string) {
 	})
 }
 
+// PatchRequestResolution 用一个关键队列任务同时更新实际 Provider 与上游模型，保持两项归属一致。
+func (w *Writer) PatchRequestResolution(requestID, providerID, modelActual string) {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	modelActual = strings.TrimSpace(modelActual)
+	if providerID == "" && modelActual == "" {
+		return
+	}
+	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
+		return r.PatchRequestResolution(ctx, requestID, providerID, modelActual)
+	})
+}
+
 func (w *Writer) FinishRequest(l store.RequestLog) {
 	rec := l
 	w.enqueueCritical(func(ctx context.Context, r *store.Repo) error {
