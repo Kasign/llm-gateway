@@ -857,3 +857,10 @@ docs/                        中文架构、协议和运维文档
 - 将 Ollama Library tag 与可用 Backend 的已知 JSON 字段从泛型对象升级为显式属性；运行时快照/目录卡片/动态推理参数仍允许扩展字段。
 - 第二轮高风险 Review 覆盖请求取消与 Finish 竞态、SSE 响应已提交后错误处理、审计 FIFO/排队丢弃指标、管理员认证与 Provider 共享并发许可器。当前未发现需在此批引入新的运行时代码改动的问题；仍须靠当前完整 CI 验收。
 - 当前 OpenAPI 仍为 partial。后续重点是建立 Handler 路由与 OpenAPI path 自动对账，避免新增管理端点时只靠人工台账；此项先在回归通过后按独立功能规划。
+
+## 17. OpenAPI 路径集合自动对账
+
+- 将 `POST /api/requests/{id}/cancel` 的实际 Handler 契约补齐到 OpenAPI，明确取消在途请求、收口遗留运行记录及 409 竞争状态。
+- 新增 Python 标准库脚本读取 Go 路由注册和 OpenAPI 顶层 paths，并用明确、可审查的映射展开动态 Go 前缀路由；把该检查放到 Actions 的前置步骤，尽早发现路由漏文档。
+- 对账采用双向集合比较，同时发现漏写 path 和已删除路由留下的旧 path。动态路由系列不使用通配忽略，而用显式路径清单映射。
+- 该门禁只证明路径键对应，不等于 JSON Schema/HTTP method/response code 自动验证；OpenAPI 继续保持 partial。先待 Actions #215 对 `dba3892` 的完整回归结束，再推送该批候选提交。

@@ -43,6 +43,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 校验路由与 OpenAPI paths
+        run: python3 scripts/check_openapi_routes.py
+
       - name: 配置 Go
         uses: actions/setup-go@v5
         with:

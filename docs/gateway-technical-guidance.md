@@ -760,3 +760,9 @@ Provider 更新复用共享 `ConcurrencyLimiter`，因此限额的应用时点�
 Agent 前缀路由复用同一套鉴权、请求限流、Pipeline 与审计，同时使用启动配置中的固定 Provider，不允许请求体自行选择 Provider。OpenAPI 现在覆盖 Agent 的 models、Chat Completions、Completions、Responses、Anthropic Messages 和 Messages count_tokens 路径；不同协议仍保留各自的请求和错误信封边界。
 
 Ollama Library tags 的稳定字段包括 tag、full_name，以及可选的 size/context/input；Backend 查看接口的 available_backends 是对象数组，包含 id、label、kind、base_url、source 和 editable，可选字段包括 default_model、RPM 与 Key 是否已配置。契约优先明确这些稳定字段，只有运行时快照和目录搜索卡片等确实动态的结构才使用扩展对象。
+
+## 路由注册与 OpenAPI 路径对账
+
+CI 执行 `scripts/check_openapi_routes.py`，把 `Server.Handler` 中的字面路由注册与 `docs/openapi.yaml` 的顶层 path keys 对比。对于 Go ServeMux 前缀和 handler 内部 path parsing，脚本维护显式动态路由族映射，包括模型动作、请求详情/取消、Provider 操作、Benchmark 与 API Key 动作；Agent 固定 Provider 路由则按支持的公共推理协议展开。
+
+该脚本的目标是防止新增/删除路由时漏改 OpenAPI 路径集合。它不是 OpenAPI 解析器，也不会声称验证 Handler 所有方法、状态码或 JSON 字段与 Schema 一致；这些仍需按功能修改和 Review 时同步。动态路由模式若变化，必须更新脚本的映射规则，避免用简单忽略规则绕过路径缺口。

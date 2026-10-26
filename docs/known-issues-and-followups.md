@@ -211,3 +211,10 @@
 - 对 Ollama Library tags 明确 tag/full_name/size/context/input 字段；对 available_backends 明确 id/label/kind/base_url/source/editable 及可选运行信息，不再只用无字段对象表达已知稳定返回内容。
 - 修正 OpenAPI 3.1 时间字段的空值建模，并避免在与 Handler 兼容的推理参数 reset body 上使用过严的 additionalProperties=false。
 - 高风险代码 Review 复核了请求生命周期结束状态、响应已提交后的状态保持、审计 FIFO/有界队列、管理员会话与 Provider 运行时预算；本轮未发现需要额外扩大代码变更范围的阻塞项。Actions #214 尚在执行，本批修正先暂存为候选提交，待该轮回归结束后再推送，避免两个完整 CI 重叠。
+
+## 2026-10-26 追加：将 OpenAPI 路由覆盖检查纳入 CI
+
+- 源码路由复核发现 `POST /api/requests/{id}/cancel` 已实现，但 OpenAPI 之前只列了详情 GET 路径。本批补充取消接口的请求方法、管理员认证、200/400/401/409 响应和遗留 running 记录收口说明。
+- 新增标准库 Python 脚本 `scripts/check_openapi_routes.py`，从 Server.Handler 解析字面路由，使用明确的动态前缀映射核对模型/请求详情与取消/Provider/Benchmark/API Key 族，以及 Agent 公共协议路径；CI 新增一步运行该检查。
+- 对账范围是路径集合，不是完整的 Handler JSON Schema 等价性。后续仍应将每个新增 operation 的方法、状态码和字段契约与 Handler Review 结合；本功能不把 OpenAPI 的 partial 状态改为 complete。
+- 候选提交已准备，但 Actions #215（Head `dba3892`）尚未结束；不会在当前完整回归期间更新远程分支，避免 CI 重叠。
