@@ -70,6 +70,20 @@ func TestPrepareProviderConcurrencyLimitAppliesChangesAtSafeTime(t *testing.T) {
 		}
 	})
 
+	t.Run("do not lower the live budget while editing a disabled Provider", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, changedBefore, raiseAfter, err := prepareProviderConcurrencyLimit("save", true, false, limiter, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changedBefore || raiseAfter || previous != 8 || limiter.Limit() != 8 {
+			t.Fatalf("disabled edit changed runtime budget: previous=%d before=%v after=%v limit=%d", previous, changedBefore, raiseAfter, limiter.Limit())
+		}
+	})
+
 	t.Run("apply deferred raise when re-enabling", func(t *testing.T) {
 		limiter, err := provider.NewConcurrencyLimiter(2)
 		if err != nil {

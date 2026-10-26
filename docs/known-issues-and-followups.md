@@ -190,3 +190,10 @@
 - 统计聚合查询失败时原实现把底层数据库错误直接放入 HTTP 500 的 `message`，可能泄漏表/列名或数据库驱动细节。本批改为服务端记录具体错误、对调用方返回稳定的 `database_error` 和通用中文提示，并增加回归测试确认诊断文本不进入响应正文。
 - 核对实际 Handler 后修正 `docs/openapi.yaml`：`POST /api/admin/providers` 的成功状态为 201；`DELETE /api/admin/providers/{id}` 为 204 且无响应正文。没有更改业务状态码，也没有更改 Key 或 Provider 管理权限。
 - 该批为 API 错误边界与契约同步，待当前 Head 的完整 Actions 完成后再推送，避免与当前回归重叠。
+
+## 2026-10-26 追加：Provider 热更新的并发预算窗口
+
+- Review 发现当前更新流程先持久化配置，再降低共享 `ConcurrencyLimiter`。这在两步之间留下一个短窗口：新配置尚未应用到 Registry 前，旧 Provider 仍能按较高旧上限接收新请求。
+- 同时，纯 helper 对“编辑已停用 Provider”只覆盖提高上限情形，未覆盖降低上限；现有逻辑可能改动仍被旧在途请求共享的 limiter。
+- 修复方式：降低上限前置到持久化之前，MariaDB 保存失败时回滚旧预算；提高上限仍延后到 Registry 替换成功后。编辑已停用 Provider 不改变当前运行时预算，重新启用时才根据已保存的新配置应用限额。
+- 增加禁用 Provider 降低上限边界的回归测试，保留现有 Registry 失败回滚与活动 Provider 保护。代码与测试已写，待整组提交触发的完整 CI 验收；未手动运行测试。

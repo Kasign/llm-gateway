@@ -740,3 +740,9 @@ OpenAPI 的后续阶段应补齐 API Key、模型/下载/运行时/Benchmark、�
 请求统计接口在 MariaDB 聚合查询失败时，服务端日志保留实际错误用于排障，但 API 只返回稳定的 `database_error` 错误码与通用提示，不直接暴露驱动错误、表/列信息或数据库诊断文本。新增管理 API 时应区分运维日志和调用方错误契约。
 
 Web Provider 管理端点的成功状态也需要与 Handler 一致：`POST /api/admin/providers` 创建成功返回 `201 Created`；`DELETE /api/admin/providers/{id}` 删除成功返回 `204 No Content`，不附带响应正文。OpenAPI 必须反映实际状态码与空正文语义，避免客户端依赖不存在的响应体。
+
+## Provider 并发预算热更新的顺序约束
+
+Provider 更新复用共享 `ConcurrencyLimiter`，因此限额的应用时点影响正在执行的旧实例。降低上限时必须在持久化配置前收紧准入；如果 MariaDB 保存失败，立即将许可器恢复到原上限。若 Registry 替换失败，既要恢复许可器，也要回滚持久化配置。提高上限则只创建待处理动作，必须在 Registry 替换成功后应用，避免失败窗口内短暂放宽预算。
+
+编辑已停用 Provider 时只保存期望配置，不应改写可能仍被旧在途请求共享的运行时许可器；重新启用时，再按降低前置、提高后置的规则应用新预算。相关顺序需要有测试覆盖，不能只测试独立的并发许可器方法而忽略配置持久化与 Registry 操作之间的窗口。
