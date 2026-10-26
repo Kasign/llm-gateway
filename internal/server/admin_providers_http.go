@@ -37,6 +37,7 @@ type managedProvider struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
+	ConcurrencyLimiter *provider.ConcurrencyLimiter `json:"-"`
 	APIKey string `json:"-"`
 	SourceConflict bool `json:"-"`
 	SecretUnavailable bool `json:"-"`
@@ -133,11 +134,20 @@ func (s *Server) loadWebProviders(ctx context.Context) {
 		}
 		row.SourceConflict=s.deploymentProviderID(row.ID)
 		if row.SourceConflict {applog.Printf("Web Provider ID conflicts with deployment config; refusing override: id=%s",row.ID);s.webProviders[row.ID]=row;continue}
-		if row.Enabled&&!row.SecretUnavailable {
-			remote,e:=s.buildRemoteProvider(row)
-			if e!=nil {applog.Printf("stored Web Provider failed validation; not registered: id=%s",row.ID);row.SecretUnavailable=true
-			} else if s.providers==nil {row.SourceConflict=true
-			} else if e=s.providers.Register(row.ID,func()provider.Provider{return remote});e!=nil {applog.Printf("stored Web Provider registration failed: id=%s",row.ID);row.SourceConflict=true}
+		if row.Enabled && !row.SecretUnavailable {
+			remote, buildErr := s.buildRemoteProvider(row)
+			if buildErr != nil {
+				applog.Printf("stored Web Provider failed validation; not registered: id=%s", row.ID)
+				row.SecretUnavailable = true
+			} else {
+				row.ConcurrencyLimiter = remote.ConcurrencyLimiter()
+				if s.providers == nil {
+					row.SourceConflict = true
+				} else if registerErr := s.providers.Register(row.ID, func() provider.Provider { return remote }); registerErr != nil {
+					applog.Printf("stored Web Provider registration failed: id=%s", row.ID)
+					row.SourceConflict = true
+				}
+			}
 		}
 		s.webProviders[row.ID]=row
 	}
@@ -150,6 +160,7 @@ func (s *Server) buildRemoteProvider(row managedProvider) (*provider.OpenAICompa
 		ID:row.ID,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,
 		AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,
 		MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,
+		RequestLimiter:row.ConcurrencyLimiter,
 	})
 }
 
@@ -183,7 +194,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 	}
 	row.ModelMappings=mappings
 	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")}
-	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable}
+	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable;row.ConcurrencyLimiter=old.ConcurrencyLimiter}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))
 		if err!=nil{return managedProvider{},providerErr(503,"provider_encryption_unavailable","尚未配置有效的 Provider 密钥加密密钥，无法保存 API Key")}
@@ -311,11 +322,34 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 	if (action=="enable"||action=="clear-key")&&row.SecretUnavailable{return providerErr(409,"provider_key_unavailable","Provider Key 无法解密；请重新填写 Key 或执行显式清除")}
 	if action=="enable"||action=="clear-key"{if _,err:=s.buildRemoteProvider(row);err!=nil{return providerErr(400,"invalid_provider_config","Provider 配置校验失败")}}
 	var runtimeProvider *provider.OpenAICompatibleProvider
-	if action!="delete"&&row.Enabled {
-		var err error;runtimeProvider,err=s.buildRemoteProvider(row)
-		if err!=nil{return providerErr(400,"invalid_provider_config","Provider 配置校验失败；请确认 Key 可解密并检查安全配置")}
+	if action != "delete" && row.Enabled {
+		var err error
+		runtimeProvider, err = s.buildRemoteProvider(row)
+		if err != nil {
+			return providerErr(400, "invalid_provider_config", "Provider 配置校验失败；请确认 Key 可解密并检查安全配置")
+		}
+		if row.ConcurrencyLimiter == nil {
+			row.ConcurrencyLimiter = runtimeProvider.ConcurrencyLimiter()
+			next[id] = row
+		}
 	}
-	if err:=s.persistWebProviderMap(ctx,next);err!=nil{applog.Printf("persist Web Provider settings failed: id=%s",id);return providerErr(503,"provider_persistence_failed","保存 Provider 配置失败，运行时配置未更新")}
+	if err := s.persistWebProviderMap(ctx, next); err != nil {
+		applog.Printf("persist Web Provider settings failed: id=%s", id)
+		return providerErr(503, "provider_persistence_failed", "保存 Provider 配置失败，运行时配置未更新")
+	}
+
+	// 现有 Provider 的在途请求与替换后的实例共享同一个许可器。
+	// 先更新预算再原子替换 Registry，降低并发上限时立即拒绝新请求；若 Registry 更新失败则恢复旧预算。
+	limiterChanged := false
+	if action == "save" && exists && row.ConcurrencyLimiter != nil {
+		if err := row.ConcurrencyLimiter.SetLimit(row.MaxConcurrentRequests); err != nil {
+			if rollbackErr := s.persistWebProviderMap(ctx, previous); rollbackErr != nil {
+				applog.Printf("Web Provider persistence rollback failed: id=%s", id)
+			}
+			return providerErr(400, "invalid_concurrency_limit", "并发上限必须在 0 到 64 之间")
+		}
+		limiterChanged = true
+	}
 	var registryErr error
 	if s.providers==nil{registryErr=errors.New("Provider Registry unavailable")}else{
 		switch {
@@ -325,10 +359,17 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 		case row.Enabled:registryErr=s.providers.Register(id,func()provider.Provider{return runtimeProvider})
 		}
 	}
-	if registryErr!=nil {
-		if e:=s.persistWebProviderMap(ctx,previous);e!=nil{applog.Printf("Web Provider persistence rollback failed: id=%s",id)}
-		applog.Printf("Web Provider Registry update failed: id=%s",id)
-		return providerErr(503,"provider_registry_update_failed","更新 Provider 运行时注册表失败，已尝试回滚持久化配置")
+	if registryErr != nil {
+		if limiterChanged {
+			if err := row.ConcurrencyLimiter.SetLimit(old.MaxConcurrentRequests); err != nil {
+				applog.Printf("Web Provider concurrency limit rollback failed: id=%s", id)
+			}
+		}
+		if e := s.persistWebProviderMap(ctx, previous); e != nil {
+			applog.Printf("Web Provider persistence rollback failed: id=%s", id)
+		}
+		applog.Printf("Web Provider Registry update failed: id=%s", id)
+		return providerErr(503, "provider_registry_update_failed", "更新 Provider 运行时注册表失败，已尝试回滚持久化配置")
 	}
 	s.webProviders=next
 	if exists && action!="delete" && row.Enabled && active==id {

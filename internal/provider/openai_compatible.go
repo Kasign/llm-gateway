@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/core"
@@ -40,6 +41,76 @@ const (
 
 // OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
 // 私网访问和明文 HTTP 均默认关闭；只有管理员明确配置后才放行。
+// ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
+// Web 配置热更新会替换 Provider 实例，但仍在执行的请求必须继续占用同一份预算。
+type ConcurrencyLimiter struct {
+	mu     sync.Mutex
+	active int
+	limit  int
+}
+
+// NewConcurrencyLimiter 创建有界的并发许可器；0 表示默认上限。
+func NewConcurrencyLimiter(maxConcurrentRequests int) (*ConcurrencyLimiter, error) {
+	limiter := &ConcurrencyLimiter{}
+	if err := limiter.SetLimit(maxConcurrentRequests); err != nil {
+		return nil, err
+	}
+	return limiter, nil
+}
+
+// SetLimit 更新并发预算。降低上限时不会取消在途请求，只会拒绝新请求，直到活动数降至上限以下。
+func (l *ConcurrencyLimiter) SetLimit(maxConcurrentRequests int) error {
+	if l == nil {
+		return fmt.Errorf("provider concurrency limiter is nil")
+	}
+	if maxConcurrentRequests < 0 || maxConcurrentRequests > MaxOpenAICompatibleConcurrentRequests {
+		return fmt.Errorf("provider max_concurrent_requests must be between 0 and %d", MaxOpenAICompatibleConcurrentRequests)
+	}
+	if maxConcurrentRequests == 0 {
+		maxConcurrentRequests = defaultOpenAICompatibleMaxConcurrentRequests
+	}
+	l.mu.Lock()
+	l.limit = maxConcurrentRequests
+	l.mu.Unlock()
+	return nil
+}
+
+// TryAcquire 使用 fail-fast 策略获得一个并发许可。
+func (l *ConcurrencyLimiter) TryAcquire() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.active >= l.limit {
+		return false
+	}
+	l.active++
+	return true
+}
+
+// Release 释放一个此前取得的并发许可。
+func (l *ConcurrencyLimiter) Release() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	if l.active > 0 {
+		l.active--
+	}
+	l.mu.Unlock()
+}
+
+// Limit 返回当前有效上限，供诊断和单元测试使用。
+func (l *ConcurrencyLimiter) Limit() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.limit
+}
+
 type OpenAICompatibleConfig struct {
 	ID                  string
 	BaseURL             string
@@ -50,6 +121,8 @@ type OpenAICompatibleConfig struct {
 	MaxResponseBytes    int64
 	// MaxConcurrentRequests 为此 Provider 的最大并发推理数；0 使用默认值 64。
 	MaxConcurrentRequests int
+	// RequestLimiter 可用于同一 Provider 的热更新实例共享并发预算；nil 时会创建独立许可器。
+	RequestLimiter *ConcurrencyLimiter
 }
 
 // OpenAICompatibleProvider 负责 OpenAI-compatible JSON 与 SSE 传输，不负责 Gateway 鉴权/模型路由。
@@ -60,7 +133,7 @@ type OpenAICompatibleProvider struct {
 	apiKeyHeader        string
 	allowPrivateNetwork bool
 	maxResponseBytes    int64
-	requestSlots        chan struct{}
+	requestLimiter      *ConcurrencyLimiter
 	client              *http.Client
 }
 
@@ -138,6 +211,13 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 	if maxResponseBytes > maxRemoteResponseLimit {
 		return nil, fmt.Errorf("provider max_response_bytes must not exceed %d bytes (512 MiB)", maxRemoteResponseLimit)
 	}
+	requestLimiter := cfg.RequestLimiter
+	if requestLimiter == nil {
+		requestLimiter, err = NewConcurrencyLimiter(maxConcurrentRequests)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &OpenAICompatibleProvider{
 		id:                  id,
 		baseURL:             base,
@@ -145,12 +225,20 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 		apiKeyHeader:        apiKeyHeader,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		maxResponseBytes:    maxResponseBytes,
-		requestSlots:        make(chan struct{}, maxConcurrentRequests),
+		requestLimiter:      requestLimiter,
 		client:              newRestrictedHTTPClientWithResolver(cfg.AllowPrivateNetwork, resolver),
 	}, nil
 }
 
 func (p *OpenAICompatibleProvider) ID() string { return p.id }
+
+// ConcurrencyLimiter 返回该 Provider 正在使用的共享并发预算。
+func (p *OpenAICompatibleProvider) ConcurrencyLimiter() *ConcurrencyLimiter {
+	if p == nil {
+		return nil
+	}
+	return p.requestLimiter
+}
 
 func (p *OpenAICompatibleProvider) Capabilities() Capabilities {
 	return Capabilities{Protocol: "openai-compatible", ChatCompletions: true, Streaming: true}
@@ -274,21 +362,21 @@ func (p *OpenAICompatibleProvider) acquireRequestSlot(ctx context.Context) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	select {
-	case p.requestSlots <- struct{}{}:
-		return nil
-	default:
+	if p == nil || p.requestLimiter == nil || !p.requestLimiter.TryAcquire() {
 		return &core.Error{
-			Status: http.StatusServiceUnavailable,
-			Code: "provider_concurrency_limit",
+			Status:  http.StatusServiceUnavailable,
+			Code:    "provider_concurrency_limit",
 			Message: "upstream provider concurrency limit reached",
 		}
 	}
+	return nil
 }
 
-// releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放许可。
+// releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放共享许可。
 func (p *OpenAICompatibleProvider) releaseRequestSlot() {
-	<-p.requestSlots
+	if p != nil && p.requestLimiter != nil {
+		p.requestLimiter.Release()
+	}
 }
 
 // TestConnection 通过当前 Provider 的安全 HTTP Client 请求 /v1/models。

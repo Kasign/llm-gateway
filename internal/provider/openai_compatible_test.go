@@ -1621,6 +1621,86 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 	}
 }
 
+
+func TestOpenAICompatibleProviderSharesConcurrencyLimitAcrossReplacement(t *testing.T) {
+	started := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	var upstreamRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := upstreamRequests.Add(1)
+		if count == 1 {
+			started <- struct{}{}
+			<-releaseFirst
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"ok"}`)
+	}))
+	defer server.Close()
+
+	oldProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 2})
+	sharedLimiter := oldProvider.ConcurrencyLimiter()
+	if err := sharedLimiter.SetLimit(1); err != nil {
+		t.Fatal(err)
+	}
+	newProvider := testRemoteProvider(t, server, OpenAICompatibleConfig{
+		MaxConcurrentRequests: 1,
+		RequestLimiter:        sharedLimiter,
+	})
+	forward := func(target *OpenAICompatibleProvider) (core.Result, error, int) {
+		writer := httptest.NewRecorder()
+		result, err := target.Forward(context.Background(), InferenceCall{
+			Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			Path: "/v1/chat/completions", Body: []byte(`{"model":"test"}`), ModelID: "test",
+		})
+		return result, err, writer.Code
+	}
+	type outcome struct {
+		result core.Result
+		err    error
+		code   int
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		result, err, code := forward(oldProvider)
+		firstDone <- outcome{result: result, err: err, code: code}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(releaseFirst)
+		t.Fatal("first request did not reach the upstream")
+	}
+
+	second, secondErr, _ := forward(newProvider)
+	if secondErr == nil {
+		close(releaseFirst)
+		t.Fatal("replacement Provider must share the occupied concurrency budget")
+	}
+	status, code, _ := core.Unpack(secondErr)
+	if status != http.StatusServiceUnavailable || code != "provider_concurrency_limit" ||
+		second.Status != http.StatusServiceUnavailable || second.UpstreamStatus != 0 {
+		close(releaseFirst)
+		t.Fatalf("replacement overload result=%+v error=%d/%s, want 503/0 provider concurrency limit", second, status, code)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		close(releaseFirst)
+		t.Fatalf("overloaded replacement reached upstream: %d requests, want 1", got)
+	}
+	close(releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || first.code != http.StatusOK {
+		t.Fatalf("old in-flight request did not finish normally: result=%+v err=%v writer=%d", first.result, first.err, first.code)
+	}
+	third, thirdErr, thirdCode := forward(newProvider)
+	if thirdErr != nil || third.Status != http.StatusOK || third.UpstreamStatus != http.StatusOK || thirdCode != http.StatusOK {
+		t.Fatalf("replacement Provider did not acquire released budget: result=%+v err=%v writer=%d", third, thirdErr, thirdCode)
+	}
+	if got := upstreamRequests.Load(); got != 2 {
+		t.Fatalf("upstream received %d requests after release, want 2", got)
+	}
+}
+
 func TestOpenAICompatibleProviderWritesSafeSSEErrorWhenLimitReachedAfterCommit(t *testing.T) {
 	started := make(chan struct{}, 1)
 	chunkSeen := make(chan struct{}, 1)
@@ -1742,7 +1822,7 @@ func TestNewOpenAICompatibleProviderValidatesConcurrencyLimit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cap(p.requestSlots) != tc.want {
+			if p.requestLimiter.Limit() != tc.want {
 				t.Fatalf("effective concurrency = %d, want %d", cap(p.requestSlots), tc.want)
 			}
 		})

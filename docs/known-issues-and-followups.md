@@ -7,7 +7,7 @@
 - `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
 - PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，状态 Open / 未合并。
 - PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）当前 Head 为 `393b14b45a0483e4ab0452acf4c8d283b2567ae5`。Actions [运行 40262917490](https://github.com/Kasign/llm-gateway/actions/runs/40262917490) 对该 Head 全量通过；PR 仍 Open，依赖 PR #5，未合并。新安全边界修复提交后必须重新运行 CI。
+- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）已推进至 Head `a4051ccba34f31ccfdfdbfd3861e086918f484f7`；Actions [运行 40263338398](https://github.com/Kasign/llm-gateway/actions/runs/40263338398) 对该 Head 全量通过。PR 仍 Open，依赖 PR #5，尚未合并。当前继续审查 Web Provider 热更新与并发许可的生命周期。
 - #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
 
 ## P1：可靠性与可观测性
@@ -28,7 +28,7 @@
 
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
-| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Actions #158 已通过；等待 PR #5 合并后重定向 base 复验 | 新增 `max_concurrent_requests`（默认值与上限均为 64）与 fail-fast 503；过载时不发起上游请求，依赖 PR #5 的 `UpstreamStatus` 契约保证上游状态为空。流式已提交时追加安全 SSE error。 | PR #7 的单测、配置范围、race 和完整 CI 已通过；PR #5 合并、PR #7 base 切回 `dev` 后再次完整 CI 通过即关闭。 |
+| GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | 限流、fail-fast 503、JSON/SSE 与配置范围已由 PR #7 CI 验证；等待 PR #5 合并后重定向 base 复验 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 同实例与替换实例共享并发预算；降低上限时不接受超过新预算的新请求；旧请求结束后许可正常释放；完整 CI/race 通过。PR #5 合并且 PR #7 base 回到最新 `dev` 后再次完整 CI 通过。 |
 | GW-GOV-002 | 当前 RPM 主要按调用方 Key 进行固定窗口计数，尚未提供远程 Provider 独立的并发/速率组合或 Token 预算。 | 待设计 | 在 GW-GOV-001 完成后，依据真实需求决定是否增加 Provider RPM、令牌预算和排队策略；不要与调用方 Key RPM 混为一谈。 | 有明确优先级、失败策略、Redis 不可用行为与多 Agent 隔离测试。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
@@ -76,4 +76,10 @@
 - 工作分支 Head 为 `393b14b45a0483e4ab0452acf4c8d283b2567ae5`；dev 仍为 `950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。PR #5（Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`）和 PR #7 均为 Open / 未合并。
 - Actions `40262917490` 对应 Head `393b14b`，所有步骤成功：单测、MariaDB 审计积压、60 秒 Gateway 负载、429/503、TCP 恢复、DNS、SSE 中断、TLS 握手中断、race、性能基线、go vet、Go build 及前端 bundle 校验。
 - 当前审查发现活动 Provider 清 Key 与通过保存表单设置 `enabled=false` 两条路径未命中此前的删除/停用保护。修复与回归测试正在集中提交；修复后的完整 CI 尚未完成前，不关闭 Provider 管理安全验收。
-- 历史 Actions `40262338624` 在 HTTP 请求全部成功的情况下审计行数仅 10556/12192；之后的 `40262766329` 和 `40262917490` 已通过完整负载/审计检查。保留原计数断言，不降低标准。
+- 历史 Actions `40262338624` 在 HTTP 请求全部成功的情况下审计行数仅 10556/12192；之后的 `40262766329`、`40262917490` 和最新基线 `40263338398` 已通过完整负载/审计检查。保留原计数断言，不降低标准。
+
+## 2026-10-26 追加：Provider 热更新与并发预算
+
+- 审查发现旧 Provider 已进入推理且管理台保存配置时，Registry 会切换到新 Provider 实例；若新旧实例各有独立并发许可器，在途请求和新请求会分开计数，短时间内可能超过配置的 Provider 并发上限。
+- 本批通过共享许可器解决：Web Provider 配置编辑复用既有许可器，更新 `max_concurrent_requests` 时影响旧实例与新实例；降低上限不会取消在途请求，而是拒绝新请求直至活动数回落。若 Registry 更新失败，恢复原限制并回滚持久化设置。
+- 新增 Provider 层跨实例并发回归测试和 Server 构造测试。当前代码已提交，必须以新 Head 的完整 Go CI、竞态测试和 bundle 检查结果验收；此前 Actions 通过不能代替本批验收。

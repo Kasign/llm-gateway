@@ -9,8 +9,28 @@ import (
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
 )
+
+
+func TestBuildRemoteProviderReusesManagedConcurrencyLimiter(t *testing.T) {
+	limiter, err := provider.NewConcurrencyLimiter(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{}
+	remote, err := server.buildRemoteProvider(managedProvider{
+		ID: "remote", Enabled: true, BaseURL: "https://provider.example/v1", DefaultModel: "model",
+		MaxConcurrentRequests: 2, ConcurrencyLimiter: limiter,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote.ConcurrencyLimiter() != limiter {
+		t.Fatal("Web Provider rebuild must reuse the shared concurrency limiter")
+	}
+}
 
 func TestProviderAPIKeyEncryptionRoundTripAndRejectsWrongKey(t *testing.T) {
 	key := bytes.Repeat([]byte{0x4a}, 32)
