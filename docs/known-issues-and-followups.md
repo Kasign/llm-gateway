@@ -155,3 +155,12 @@
 - 修正 `runBenchmark` 对 `llama.request_timeout_seconds: 0` 的处理，避免将零秒传给 `context.WithTimeout` 导致任务立刻超时。
 - 新增可选时限 Context helper，0 表示无整体 Deadline，但仍继承用户停止/父 Context 取消；正数时限保持既有行为。
 - 已新增针对 0、正数和父 Context 取消传播的回归测试代码。未手动运行测试；推送后 GitHub Actions 由仓库配置自动触发，状态以最新 Head 对应运行记录为准。
+
+## 2026-10-26 当前 CI 阻塞与分支整合计划（Actions #208）
+
+- 重新核实的 PR #7 工作分支 Head：`bd41c549511c700df2b3ba44cb64ca9ef5f1b4f8`；PR #7 仍 Open，目标为 `dev`（`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`）。PR #5 的 TCP 恢复测试仍 Open、未合并，因此 PR #7 不能先于 PR #5 合并。
+- 最新对应 CI 为 [Actions #208](https://github.com/Kasign/llm-gateway/actions/runs/40286112907)，结论 failure，失败于单元测试步骤；后续 MariaDB 审计积压、负载/故障注入、race、性能、静态检查、构建与前端 bundle 步骤均被跳过。这是自动触发的 CI 结果，本轮未手动执行测试。
+- 阻塞 1：`internal/server/provider_runtime_test.go` 的 `core.State` 测试字面量将 `RouteProviderID`、`ServiceModel`、`ServiceProviderID` 放在顶层。它们属于嵌入的 `core.Request`；修正测试为 `State{Request: core.Request{...}}`，不改生产类型。
+- 阻塞 2：`internal/audit/writer_mariadb_test.go` 直接创建的 `request_logs` 夹具漏掉 `provider_id`，且 `CREATE TABLE IF NOT EXISTS` 不会补齐复用测试库中的旧表。夹具应定义该字段，并用 `INFORMATION_SCHEMA.COLUMNS` 检查、必要时补列；保留原有 500 条持久化断言，不改生产迁移逻辑。
+- 当前修复作为一个逻辑提交，连同本台账及实施计划一起更新；不手动运行测试，提交后以新 Head 对应的 GitHub Actions 统一验证，不沿用旧 Head 的成功结果。
+- 分支策略：先处理并合入 PR #5；随后把 PR #7 对齐最新 `dev`，重新检查最终差异与完整 CI，再决定合并。旧的并发分支 `feat/provider-concurrency-limits` 以及 PR #1–#4 的已合并功能分支暂不删除，待确认内容已包含在目标分支、并发分支没有独有提交后再清理；不强推、不改写历史。默认分支 `main` 与开发基线 `dev` 的关系另行确认，不在本次变更中修改。

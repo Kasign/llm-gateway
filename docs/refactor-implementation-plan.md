@@ -779,3 +779,32 @@ docs/                        中文架构、协议和运维文档
 - 代码核实发现普通推理配置允许 `request_timeout_seconds: 0` 禁用整体时限，但 Benchmark 后台任务仍无条件执行 `context.WithTimeout(..., 0)`，使任务立即到期。
 - 新增共享的可选时限 Context helper；正数才创建 Deadline，0 改为可取消但不设 Deadline 的 Context。用户取消任务仍经父 Context 传播。
 - 补充了零值、正值和父 Context 取消的回归测试代码；遵从统一测试安排，本次未运行测试、构建或重跑 Actions。
+
+## 9. 最新执行状态与回归闸门（2026-10-26）
+
+> 本节作为当前进度的权威更新；前文中标注为“最新通过”的旧 Head 和 CI 记录均为历史结果，不代表当前工作分支已通过回归。
+
+### 当前基线
+
+- 开发基线 `dev`：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
+- PR #7 工作分支 `feat/provider-concurrency-limits-stacked` 当前 Head（修复前）：`bd41c549511c700df2b3ba44cb64ca9ef5f1b4f8`。
+- PR #5 TCP 恢复测试仍为 Open / 未合并；PR #7 依赖 PR #5 提供的 `core.Result.UpstreamStatus` 契约，不应提前合并。
+- 当前 Head 的 [Actions #208](https://github.com/Kasign/llm-gateway/actions/runs/40286112907) 在单元测试阶段失败，后续集成和构建步骤被跳过。本轮没有手动运行测试。
+
+### 先完成当前 CI 阻塞
+
+1. 在 `provider_runtime_test.go` 的 `core.State` 测试构造中，把路由和服务模型字段放入嵌入的 `core.Request`；不修改生产结构体以迁就测试。
+2. 修正 MariaDB 审计测试夹具：新表直接定义 `provider_id`，同时对复用的旧测试表进行字段存在性检查并仅在缺失时补列；不降低请求行数与队列排空断言。
+3. 在同一个逻辑提交中更新问题台账和本计划。按用户统一回归的安排，不手动运行本地测试；提交触发的新 Actions 将负责全量测试、MariaDB、并发/故障、race、性能、静态检查、Go 构建与前端 bundle 检查。新运行完成前状态保持“待验收”。
+
+### 当前功能组之后的顺序
+
+1. 收口 Provider 管理与运行时预算：验证 Registry 更新失败的配置回滚、活动 Provider 禁用/清 Key 保护，以及热更新期间共享并发许可器的预算语义；保留配置来源边界和密钥不回显。
+2. 收口请求观测与 API 契约：核对统计与 Token 来源口径、请求日志 Provider 筛选、审计队列指标，以及 OpenAPI 已覆盖/未覆盖端点；后续增加契约差异检查前先完成端点清单。
+3. 功能冻结后进行一次整体代码审查，重点检查请求取消/结束顺序、SSE 状态已提交后的错误语义、超时传播、密钥脱敏、MariaDB 迁移和前端源码/bundle 同步。此阶段只登记与修复实质问题，不为了形式重复跑局部测试。
+4. 分支整合采用两次完整回归闸门：A）当前完整功能组提交后，以对应 Head 的 Actions 为准；B）PR #5 合入最新 `dev`、PR #7 与目标基线的最终差异确认后，再完整回归一次。PR #7 未通过最终回归前不合并。
+5. 清理已合并的旧分支前，逐个比对内容是否已进入目标分支；旧 PR #6 对应的 `feat/provider-concurrency-limits` 先确认所有独有提交已被 PR #7 覆盖。保留 `main` 和 `dev`，默认分支策略另外决策。
+
+### 进度口径
+
+本轮仅修改两个测试夹具及同步文档，没有手动执行测试或构建。新 CI 完成前，不将这些修复记为已验收；真实供应商 E2E、公网反向代理链路和生产容量验证仍属于部署环境验收，不由 loopback Mock CI 替代。

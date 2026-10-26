@@ -131,10 +131,19 @@ func TestProviderIDForStateFollowsResolverTarget(t *testing.T) {
 		state core.State
 		want string
 	}{
-		{name: "resolved model wins", state: core.State{Model: core.ModelChoice{ProviderID: "openai"}, RouteProviderID: "deepseek"}, want: "openai"},
-		{name: "trusted agent route before active upstream", state: core.State{RouteProviderID: "deepseek"}, want: "deepseek"},
-		{name: "service provider wins for internal service model", state: core.State{ServiceModel: "internal-model", ServiceProviderID: "openai", RouteProviderID: "deepseek"}, want: "openai"},
-		{name: "service model without provider falls back to active", state: core.State{ServiceModel: "internal-model", RouteProviderID: "deepseek"}, want: "llamacpp"},
+		{name: "resolved model wins", state: core.State{
+			Request: core.Request{RouteProviderID: "deepseek"},
+			Model:   core.ModelChoice{ProviderID: "openai"},
+		}, want: "openai"},
+		{name: "trusted agent route before active upstream", state: core.State{
+			Request: core.Request{RouteProviderID: "deepseek"},
+		}, want: "deepseek"},
+		{name: "service provider wins for internal service model", state: core.State{
+			Request: core.Request{ServiceModel: "internal-model", ServiceProviderID: "openai", RouteProviderID: "deepseek"},
+		}, want: "openai"},
+		{name: "service model without provider falls back to active", state: core.State{
+			Request: core.Request{ServiceModel: "internal-model", RouteProviderID: "deepseek"},
+		}, want: "llamacpp"},
 		{name: "active provider fallback", state: core.State{}, want: "llamacpp"},
 	}
 	for _, tc := range cases {

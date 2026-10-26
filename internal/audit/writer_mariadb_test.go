@@ -57,6 +57,7 @@ func TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites(t *testing.T) {
 		"method VARCHAR(16) NOT NULL," +
 		"model_requested VARCHAR(255) NULL," +
 		"model_actual VARCHAR(1024) NULL," +
+		"provider_id VARCHAR(64) NULL," +
 		"stream TINYINT(1) NOT NULL DEFAULT 0," +
 		"status VARCHAR(32) NOT NULL DEFAULT 'running'," +
 		"http_status SMALLINT UNSIGNED NULL," +
@@ -77,6 +78,18 @@ func TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites(t *testing.T) {
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 	if _, err := db.ExecContext(connectCtx, createRequestLogsSQL); err != nil {
 		t.Fatalf("准备 request_logs 测试表失败: %v", err)
+	}
+
+	// CREATE TABLE IF NOT EXISTS 不会修补复用测试库中的旧表；确保字段存在，避免测试依赖执行顺序。
+	var providerIDColumnCount int
+	if err := db.QueryRowContext(connectCtx, `SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'request_logs' AND COLUMN_NAME = 'provider_id'`).Scan(&providerIDColumnCount); err != nil {
+		t.Fatalf("检查 request_logs.provider_id 字段失败: %v", err)
+	}
+	if providerIDColumnCount == 0 {
+		if _, err := db.ExecContext(connectCtx, "ALTER TABLE request_logs ADD COLUMN provider_id VARCHAR(64) NULL"); err != nil {
+			t.Fatalf("补齐 request_logs.provider_id 测试字段失败: %v", err)
+		}
 	}
 
 	const (
