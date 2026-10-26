@@ -54,25 +54,34 @@ func TestChangeWebProviderRejectsDeploymentManagedIDIncludingDisabled(t *testing
 	}
 }
 
-func TestChangeWebProviderCannotDisableOrDeleteActiveProvider(t *testing.T) {
-	for _, action := range []string{"disable", "delete"} {
-		t.Run(action, func(t *testing.T) {
+func TestChangeWebProviderProtectsActiveProviderFromBecomingUnavailable(t *testing.T) {
+	actions := []struct {
+		name   string
+		action string
+		input  *providerMutationRequest
+	}{
+		{name: "disable", action: "disable"},
+		{name: "delete", action: "delete"},
+		{name: "clear-key", action: "clear-key"},
+		{name: "edit-disabled", action: "save", input: &providerMutationRequest{ID: "remote", Enabled: false}},
+	}
+	for _, tc := range actions {
+		t.Run(tc.name, func(t *testing.T) {
 			s := &Server{
 				cfg: &config.Config{},
-				upstream: settings.Upstream{Backend:"remote"},
+				upstream: settings.Upstream{Backend: "remote"},
 				webProviders: map[string]managedProvider{
-					"remote": {ID:"remote", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model"},
+					"remote": {ID: "remote", Enabled: true, BaseURL: "https://example.invalid/v1", DefaultModel: "model"},
 				},
 			}
-			err := s.changeWebProvider(context.Background(), "remote", nil, action)
+			err := s.changeWebProvider(context.Background(), "remote", tc.input, tc.action)
 			var managedErr *providerManagementError
-			if !errors.As(err, &managedErr) || managedErr.status != 409 {
-				t.Fatalf("active Provider %s should return 409, got %v", action, err)
+			if !errors.As(err, &managedErr) || managedErr.status != 409 || managedErr.code != "active_provider" {
+				t.Fatalf("active Provider %s should return 409/active_provider, got %v", tc.action, err)
 			}
 		})
 	}
 }
-
 func TestChangeWebProviderRejectsCreateWhenStaleUpstreamPointsAtNewID(t *testing.T) {
 	s := &Server{cfg:&config.Config{}, upstream:settings.Upstream{Backend:"orphan"}}
 	err := s.changeWebProvider(context.Background(), "orphan", &providerMutationRequest{

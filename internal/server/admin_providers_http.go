@@ -266,6 +266,21 @@ func (s *Server) adminProviderActionAPI(w http.ResponseWriter,r *http.Request) {
 	jsonError(w,405,"method_not_allowed","请求方法不受支持")
 }
 
+func blocksActiveProviderMutation(action, activeID, providerID string, exists, requestedEnabled bool) bool {
+	if activeID == "" || !strings.EqualFold(strings.TrimSpace(activeID), strings.TrimSpace(providerID)) {
+		return false
+	}
+	switch action {
+	case "delete", "disable", "clear-key":
+		return true
+	case "save":
+		// 编辑表单同样不能通过启用状态复选框绕过活动 Provider 的保护。
+		return exists && !requestedEnabled
+	default:
+		return false
+	}
+}
+
 func (s *Server) changeWebProvider(ctx context.Context,id string,input *providerMutationRequest,action string)error {
 	id=strings.ToLower(strings.TrimSpace(id))
 	// 与上游切换共用锁，避免检查非活动后又被并发切换为活动 Provider。
@@ -276,7 +291,10 @@ func (s *Server) changeWebProvider(ctx context.Context,id string,input *provider
 	if !exists&&action!="save"{return providerErr(404,"provider_not_found","Web Provider 不存在")}
 	active:=strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
 	if action=="save" && !exists && active==id { return providerErr(409,"provider_would_activate","当前上游配置仍指向该 ID；请先切换到其他后端，再创建同 ID Provider，避免新建即激活") }
-	if (action=="delete"||action=="disable")&&active==id{return providerErr(409,"active_provider","请先切换到其他活动 Provider，再停用或删除当前 Provider")}
+	requestedEnabled := input != nil && input.Enabled
+if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
+		return providerErr(409, "active_provider", "请先切换到其他活动 Provider，再停用、清除 Key 或删除当前 Provider；编辑保存也不能禁用当前活动 Provider")
+	}
 	previous:=cloneManagedProviderMap(s.webProviders);next:=cloneManagedProviderMap(s.webProviders);var row managedProvider
 	switch action {
 	case "delete":delete(next,id)

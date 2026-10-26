@@ -7,7 +7,7 @@
 - `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
 - PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`，状态 Open / 未合并。
 - PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限](https://github.com/Kasign/llm-gateway/pull/7)）当前 Head 为 `9cd736b8b377822dcefebf15b2752fa97d4ba190`，对应最新 [Actions #167](https://github.com/Kasign/llm-gateway/actions/runs/40260312832)，全量作业成功；代码 Head `0647b6a` 的 [Actions #166](https://github.com/Kasign/llm-gateway/actions/runs/40259993963) 32/32 步骤通过。PR 仍依赖 PR #5，尚未合并。
+- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）当前 Head 为 `393b14b45a0483e4ab0452acf4c8d283b2567ae5`。Actions [运行 40262917490](https://github.com/Kasign/llm-gateway/actions/runs/40262917490) 对该 Head 全量通过；PR 仍 Open，依赖 PR #5，未合并。新安全边界修复提交后必须重新运行 CI。
 - #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
 
 ## P1：可靠性与可观测性
@@ -22,7 +22,7 @@
 | GW-OBS-003 | 管理台轮询对 DB/CPU/推理热路径的影响仍需实测；短期缓存不等于完整负载证明。 | 待基准 | 对照无轮询、常态轮询和高频轮询，测量 DB 查询量、延迟分位数、CPU 与缓存命中率。 | 同一 Go 版本和相近 Runner 下重复采样；定义预算与刷新频率；不凭单次抖动设置阈值。 |
 | GW-NET-001 | TLS 握手中断、连接池陈旧连接及公网代理链路的覆盖不相同。 | TLS 握手中断由 Actions #166 验收通过；陈旧 Keep-Alive 恢复专项新增，待 CI；公网反代/路由待部署环境验收 | 区分故障注入：TLS 在握手前关闭；陈旧连接先建立成功响应，再由服务端清空空闲连接，第二次请求必须成功并建立替代 TCP 连接。公网链路不能由 loopback 代替。 | 陈旧连接测试在完整 CI/race 通过，第二次请求成功且请求/连接计数满足预期；公网项另附环境、时间与脱敏日志。 |
 
-| GW-NET-002 | Provider Transport 复用的 Keep-Alive 连接可能被 NAT、反向代理或上游空闲超时提前关闭，当前没有单独的连接池恢复回归测试。 | 已新增确定性 httptest，待 Actions 验收 | 首次请求成功后，测试服务端关闭所有空闲客户端连接。POST 推理不能盲目重试（上游可能已经执行）；允许陈旧连接上的单次请求返回经分类的 502，但下一次新请求必须在短 Context 超时内成功，且 TCP 计数证明替代连接已建立。不得使用公网依赖、放宽超时或吞掉失败。 | 新增专项通过，且 race、go vet、Go build 与前端 bundle 完整 CI 通过。 |
+| GW-NET-002 | Provider Transport 复用的 Keep-Alive 连接可能被 NAT、反向代理或上游空闲超时提前关闭。 | 陈旧连接恢复用例已纳入完整 Actions；当前 Head 的 #172 运行全量通过 | 首次请求成功后关闭空闲连接；不得盲目重试可能已执行的 POST；允许当前请求映射安全 502，但下一次请求必须建立替代 TCP 连接并成功。 | 当前完整 Actions 的 race、静态检查、Go build 和 bundle 均通过；公网反代和真实供应商链路仍单独验收。 |
 
 ## P1：运行治理
 
@@ -38,7 +38,7 @@
 |---|---|---|---|---|
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
-| GW-PROV-UI-001 | Web 管理台尚不能完整新增/编辑多个远程上游 Provider，且无法通过 `.env` 统一预置多家服务配置。 | 已纳入阶段 4 计划，设计已细化，尚未实施 | 环境预置同时兼容现有 YAML + `${ENV}` 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 前缀变量；环境项只读、Web 项入库并动态生效；来源冲突拒绝覆盖；Web Key 加密持久化且 API 永不回显明文。UI 支持增删改/启停/测试连接/默认模型及映射。 | 配置来源、重复 ID、AES-GCM Key 存储、掩码/保留/清除、URL/SSRF、模型列表测试、活动 Provider 删除保护、动态 Registry 更新/回滚、重启恢复及多 Provider 隔离都有自动化测试；UI/后端契约、bundle 和完整 CI 通过。 |
+| GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 后端 CRUD/AES-GCM、前端 CRUD/bundle、部署环境变量和模型别名已实现；基础全量 CI 已通过，继续补齐活动 Provider 安全边界 | 保持环境托管只读、Web 项持久化热更新、来源 ID 冲突拒绝覆盖、Key 加密/不回显/空值保留/显式清除、活动 Provider 保护及安全连接测试。 | 自动化验证配置来源、密钥存储、回滚、动态 Registry、重启恢复、模型别名及完整前后端 bundle；真实供应商 E2E 不由 Mock CI 替代。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
 | GW-API-001 | API/配置/数据库契约盘点已建立，但尚未维护完整机器可读 OpenAPI 及自动差异检查。 | 待规划 | 先定稳定的公开/管理 API、鉴权、请求/响应及错误模式，再逐模块维护契约。 | OpenAPI 与 Handler、前端客户端及 CI 契约测试一致。 |
 
@@ -67,6 +67,13 @@
 
 - 已增加 Web Provider 管理 API 与 AES-GCM 密文持久化，不回显 Key；配置来源冲突拒绝覆盖；编辑空 Key 保留旧值，显式清除为单独动作；停用/删除活动 Provider 返回 409。
 - 已加入多 Provider 环境前缀配置、模型 ID 映射和安全连接测试；`/v1/models` 返回活动 Provider 别名，实际推理走映射后的上游 ID。
-- 尚未关闭：新增安全/管理 API 测试、前端 CRUD 页面、独立部署 bundle、Compose 环境透传、最新 CI 全量通过与配置回滚/并发边界测试。
+- 尚未关闭：活动 Provider 的清 Key 和编辑禁用保护已发现遗漏，当前功能组会补齐并复跑 CI；持久化回滚与 Registry 并发边界仍需继续审查。前端 CRUD、独立 Provider bundle、DeepSeek/OpenAI 模型映射 Compose 透传均已提交。
 
 - 边界补充：创建 Provider 时若当前活动上游仍指向该 ID，将返回 409；模型别名仅对显式映射项生效，未知模型保持原默认上游行为。环境变量示例提供可选 `MODEL_MAPPINGS_JSON`，Compose 对 DeepSeek/OpenAI 显式透传。
+
+## 2026-10-26 最新复核（提交 393b14b 之后）
+
+- 工作分支 Head 为 `393b14b45a0483e4ab0452acf4c8d283b2567ae5`；dev 仍为 `950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。PR #5（Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232`）和 PR #7 均为 Open / 未合并。
+- Actions `40262917490` 对应 Head `393b14b`，所有步骤成功：单测、MariaDB 审计积压、60 秒 Gateway 负载、429/503、TCP 恢复、DNS、SSE 中断、TLS 握手中断、race、性能基线、go vet、Go build 及前端 bundle 校验。
+- 当前审查发现活动 Provider 清 Key 与通过保存表单设置 `enabled=false` 两条路径未命中此前的删除/停用保护。修复与回归测试正在集中提交；修复后的完整 CI 尚未完成前，不关闭 Provider 管理安全验收。
+- 历史 Actions `40262338624` 在 HTTP 请求全部成功的情况下审计行数仅 10556/12192；之后的 `40262766329` 和 `40262917490` 已通过完整负载/审计检查。保留原计数断言，不降低标准。

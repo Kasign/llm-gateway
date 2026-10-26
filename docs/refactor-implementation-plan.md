@@ -609,18 +609,26 @@ docs/                        中文架构、协议和运维文档
 
 ## 2026-10-26 最新基线与接下来的执行顺序
 
-- 重新核实的工作分支 HEAD：`9cd736b8b377822dcefebf15b2752fa97d4ba190`；远程 `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。
+- 重新核实的远程 `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`；工作分支已推进，当前 Head 及 Actions 状态以文末最新核验记录为准。
 - PR #5（TCP 故障恢复）和 PR #7（Provider 并发上限）均为 Open、未合并。PR #7 仍基于 PR #5 的契约；#5 合并之前不单独合并 #7。
 - 最新 [Actions #167](https://github.com/Kasign/llm-gateway/actions/runs/40260312832) 在 HEAD `9cd736b` 成功；Actions #166 的 32 步 CI 还验证了 race、性能、go vet、Go build、前端 bundle 与 TLS 握手中断。所有结果均为 CI/Mock 层，不等于真实供应商 E2E。
 - 可靠性收尾顺序：陈旧 Keep-Alive 连接关闭后的自动重拨专项（本轮新增测试，待新 CI 证明）；补充日志/Payload 保留策略的安全设计（默认禁用破坏性清理）；建立管理台轮询与 DB/CPU/延迟影响的可复现基准。公网代理/跨网络路由仍需部署环境验收。
-- 随后按一个完整功能组实施 `GW-PROV-UI-001`：部署 YAML 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 预置项只读；Web 项持久化并动态生效；跨来源同 ID 拒绝覆盖；Key 使用独立 AES-GCM 密钥加密存储、API 永不回显；保留/清除 Key 分开操作；模型别名映射接入路由和 `/v1/models`；保留旧 YAML 行为。添加 Provider 不自动切换活动上游。
+- `GW-PROV-UI-001` 的首轮实现已提交：部署 YAML 和 `LLM_GATEWAY_PROVIDER_<ID>_*` 预置项只读；Web 项持久化并动态生效；跨来源同 ID 拒绝覆盖；Key 使用独立 AES-GCM 密钥加密存储、API 永不回显；保留/清除 Key 分开操作；模型别名映射接入路由和 `/v1/models`；保留旧 YAML 行为。添加 Provider 不自动切换活动上游。当前继续补齐活动 Provider 清 Key 与编辑禁用的边界保护。
 - 不强推、不改写历史；按完整功能组提交。每一组须在 CI 中跑完 Go 单测、race、go vet、构建与前端 bundle，失败查看日志后修复，不削弱断言。
 
 
 ## 2026-10-26 Provider 多来源管理执行更新
 
-- 后端已有基础实现：Registry 原子替换/注销、Web Provider 持久化、AES-256-GCM 密钥加密、部署来源冲突保护、多 Provider 环境预置、可选 `model_mappings` 与连接测试接口。
-- 当前仍需完成的验收：后端所有 CI 项目确认通过、Web Provider 管理界面与独立部署 bundle、env 示例及 Compose 显式变量透传、完整安全与 API 测试。真实供应商 E2E 未执行，不得声明通过。
+- 后端与前端首轮功能已实现：Registry 更新、Web Provider 持久化、AES-256-GCM 密钥加密、部署来源冲突保护、多 Provider 环境预置、可选 `model_mappings`、连接测试接口与 CRUD 部署 bundle。
+- 当前 393b14b 的 Actions `40262917490` 全量 CI 已通过，覆盖后端测试、负载/故障注入、race、go vet、构建和前端 bundle。发现活动 Provider 清 Key/编辑禁用保护遗漏，修复后必须重新跑完整 CI；真实供应商 E2E 未执行，不得声明通过。
 
 
 - 模型路由补充：远程 Provider 只有明确配置的公开别名才覆盖客户端 model；未知 model 仍回退管理台默认值，保留既有兼容。创建新 Provider 若活动上游仍指向同 ID 则拒绝，避免残留上游设置造成创建后隐式激活。
+
+## 2026-10-26 最新基线与安全收敛
+
+- `dev` HEAD：`950f91fe42505b493f9dd4124dbcf30f2b6e4e7a`。当前工作分支提交：`393b14b45a0483e4ab0452acf4c8d283b2567ae5`。PR #5/#7 均 Open、未合并；PR #7 继续依赖 PR #5，不得先合并。
+- 当前基线 Actions `40262917490` 已全量通过，包括单测、MariaDB 审计积压、Gateway 负载、429/503、TCP、DNS、SSE、TLS、race、性能、go vet、Go 构建和前端 bundle。下一次提交会触发新验收，不能沿用基线成功标记。
+- 安全保护要覆盖所有会使活动 Provider 不可用的操作：删除、停用、显式清 Key，以及编辑保存为 `enabled=false`。必须先检查活动上游并返回 409，且发生在数据库持久化和 Registry 更新之前。
+- 已有测试覆盖来源冲突、活动 Provider 的删除/停用、空 Key 保留、密钥加解密及 API 不回显；本轮将扩展活动 Provider 回归矩阵到清 Key 和编辑禁用。
+- `.env` 和 Compose 已提供 DeepSeek/OpenAI 默认模型、并发参数和 `MODEL_MAPPINGS_JSON` 显式透传；YAML + `${ENV}` 保持兼容。真实供应商 E2E、公网反代与生产部署验收仍未完成。
