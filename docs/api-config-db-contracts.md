@@ -163,3 +163,4 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 - YAML 与 `.env` 预置项只读。部署 ID（含禁用项）仍占用该 ID；Web 创建/编辑遇到冲突拒绝覆盖。停用/删除当前活动 Provider 返回 409；新增 Provider 不改变活动上游。
 - `model_mappings` 为公开 ID -> 上游真实 ID。`/v1/models` 仅返回活动 Provider 的可用别名并执行现有模型 ACL；推理转发使用映射后的上游 ID。未配置映射时，旧 YAML 的默认模型行为不变。
 - 连接测试复用生产 Provider 构造器和现有 SSRF/HTTPS/禁止重定向策略，4 秒超时、最多读取 1 MiB，只返回模型 ID 与脱敏错误。
+- 连接测试允许检查已停用的 Web Provider，但 ID 来源冲突或密文不可解密的记录不会被测试路由接管；部署项仍通过 `?source=deployment` 显式指定。

@@ -332,10 +332,29 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 		row,err:=s.validateProviderInput(in,nil,id);if err!=nil{writeProviderManagementError(w,err);return};row.APIKey=key
 		cfg=config.OpenAICompatibleProviderConfig{ID:row.ID,Enabled:true,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,DefaultModel:row.DefaultModel,ModelMappings:cloneStringMap(row.ModelMappings),AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests}
 	} else {
-		if r.URL.Query().Get("source")=="deployment" {
-			for _,item:=range s.cfg.Providers.OpenAICompatible{if strings.EqualFold(item.ID,id){cfg=item;break}}
-		} else if c,ok:=s.remoteProviderConfig(id);ok {cfg=c}
-		if cfg.ID==""{jsonError(w,404,"provider_not_found","Provider 不存在或不可用");return}
+		if r.URL.Query().Get("source") == "deployment" {
+			for _, item := range s.cfg.Providers.OpenAICompatible {
+				if strings.EqualFold(item.ID, id) { cfg = item; break }
+			}
+		} else {
+			// 连接测试也允许测试已停用的 Web Provider；只读取运行时内存，不回显 Key。
+			s.providerConfigMu.RLock()
+			row, ok := s.webProviders[id]
+			s.providerConfigMu.RUnlock()
+			if ok && !row.SourceConflict && !row.SecretUnavailable {
+				cfg = config.OpenAICompatibleProviderConfig{
+					ID: row.ID, Enabled: row.Enabled, BaseURL: row.BaseURL, APIKey: row.APIKey,
+					APIKeyHeader: row.APIKeyHeader, DefaultModel: row.DefaultModel,
+					ModelMappings: cloneStringMap(row.ModelMappings),
+					AllowInsecureHTTP: row.AllowInsecureHTTP, AllowPrivateNetwork: row.AllowPrivateNetwork,
+					MaxResponseBytes: row.MaxResponseBytes, MaxConcurrentRequests: row.MaxConcurrentRequests,
+				}
+			}
+		}
+		if cfg.ID == "" {
+			jsonError(w,404,"provider_not_found","Provider 不存在或不可用")
+			return
+		}
 	}
 	remote,err:=provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{ID:cfg.ID,BaseURL:cfg.BaseURL,APIKey:cfg.APIKey,APIKeyHeader:cfg.APIKeyHeader,AllowInsecureHTTP:cfg.AllowInsecureHTTP,AllowPrivateNetwork:cfg.AllowPrivateNetwork,MaxResponseBytes:cfg.MaxResponseBytes,MaxConcurrentRequests:cfg.MaxConcurrentRequests})
 	if err!=nil{jsonError(w,400,"invalid_provider_config","Provider 配置校验失败；请检查 HTTPS、URL 与网络访问策略");return}

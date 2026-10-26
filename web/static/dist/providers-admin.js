@@ -46,7 +46,9 @@
       const source = deployment ? '部署配置 · 只读' : 'Web · 可编辑';
       const status = row.source_conflict ? 'ID 冲突' : row.secret_unavailable ? 'Key 不可解密' : (row.enabled ? '已启用' : '已停用');
       const statusClass = row.source_conflict || row.secret_unavailable ? 'provider-state-bad' : (row.enabled ? 'provider-state-on' : 'provider-state-off');
-      let actions = '<button class="btn sm ghost" data-action="test" data-id="' + esc(row.id) + '">测试</button>';
+      let actions = row.source_conflict
+        ? '<span class="muted">来源冲突，拒绝操作</span>'
+        : '<button class="btn sm ghost" data-action="test" data-id="' + esc(row.id) + '">测试</button>';
       if (!deployment && !row.source_conflict) {
         actions += ' <button class="btn sm ghost" data-action="edit" data-id="' + esc(row.id) + '">编辑</button>';
         actions += row.enabled
