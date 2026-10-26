@@ -262,8 +262,8 @@ func TestExpandConfigEnvPreservesPlainScalarTypes(t *testing.T) {
 	t.Setenv("LLM_GATEWAY_TEST_NUMERIC_STRING", "0")
 
 	raw := `request_timeout_seconds: ${LLM_GATEWAY_TEST_TIMEOUT_ZERO}
-  enabled: ${LLM_GATEWAY_TEST_BOOLEAN}
-  api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
+enabled: ${LLM_GATEWAY_TEST_BOOLEAN}
+api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
 `
 	expanded := expandConfigEnv(raw)
 	var decoded struct {
