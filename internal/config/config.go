@@ -88,7 +88,10 @@ type Config struct {
 		Verbose            bool  `yaml:"verbose"`
 		StorePayload       bool  `yaml:"store_payload"`
 		StoreStreamRaw     bool  `yaml:"store_stream_raw"`
-		StoreStreamPreview bool  `yaml:"store_stream_preview"`
+		StoreStreamPreview       bool `yaml:"store_stream_preview"`
+		RetentionDays            int  `yaml:"retention_days"`
+		RetentionBatchSize       int  `yaml:"retention_batch_size"`
+		RetentionIntervalSeconds int  `yaml:"retention_interval_seconds"`
 	} `yaml:"logging"`
 }
 
@@ -342,6 +345,38 @@ func (c *Config) normalizeLlamaRequestTimeout() error {
 	return nil
 }
 
+const (
+	defaultRetentionBatchSize       = 500
+	maxRetentionBatchSize           = 5000
+	defaultRetentionIntervalSeconds = 3600
+	minRetentionIntervalSeconds     = 60
+	maxRetentionIntervalSeconds     = 86400
+	maxRetentionDays                = 36500
+)
+
+// normalizeLogRetention 只有明确设置正数保留天数才启用清理；默认永不主动删除历史请求。
+func (c *Config) normalizeLogRetention() error {
+	if c == nil {
+		return errors.New("config is required")
+	}
+	if c.Logging.RetentionDays < 0 || c.Logging.RetentionDays > maxRetentionDays {
+		return fmt.Errorf("logging.retention_days must be between 0 and %d (0 disables automatic cleanup)", maxRetentionDays)
+	}
+	if c.Logging.RetentionBatchSize <= 0 {
+		c.Logging.RetentionBatchSize = defaultRetentionBatchSize
+	}
+	if c.Logging.RetentionBatchSize > maxRetentionBatchSize {
+		return fmt.Errorf("logging.retention_batch_size must not exceed %d", maxRetentionBatchSize)
+	}
+	if c.Logging.RetentionIntervalSeconds <= 0 {
+		c.Logging.RetentionIntervalSeconds = defaultRetentionIntervalSeconds
+	}
+	if c.Logging.RetentionIntervalSeconds < minRetentionIntervalSeconds || c.Logging.RetentionIntervalSeconds > maxRetentionIntervalSeconds {
+		return fmt.Errorf("logging.retention_interval_seconds must be between %d and %d", minRetentionIntervalSeconds, maxRetentionIntervalSeconds)
+	}
+	return nil
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -381,6 +416,9 @@ func Load(path string) (*Config, error) {
 		c.Database.MigrationFile = "/app/migrations/001_init.sql"
 	}
 	if err := c.normalizeLlamaRequestTimeout(); err != nil {
+		return nil, err
+	}
+	if err := c.normalizeLogRetention(); err != nil {
 		return nil, err
 	}
 	c.Llama.Backend = strings.ToLower(strings.TrimSpace(c.Llama.Backend))

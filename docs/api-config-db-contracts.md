@@ -46,7 +46,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限、并发上限与整体请求时限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID；`request_timeout_seconds` 为 0 时保留既有 Context 与响应头超时行为，非 0 时限制完整 JSON/SSE 请求时长。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |
-| `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；生产环境必须明确评估隐私与磁盘代价。 |
+| `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储、请求历史保留策略 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；`retention_days=0` 时永不自动删除历史数据，正数则按保留天数分批清理已结束请求。批次默认 500、每轮最多 10 批，默认每小时运行一次；仍在运行的请求不清理。 |
 
 ### 环境变量解析
 
@@ -166,3 +166,7 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 - `model_mappings` 为公开 ID -> 上游真实 ID。`/v1/models` 仅返回活动 Provider 的可用别名并执行现有模型 ACL；推理转发使用映射后的上游 ID。未配置映射时，旧 YAML 的默认模型行为不变。
 - 连接测试复用生产 Provider 构造器和现有 SSRF/HTTPS/禁止重定向策略，4 秒超时、最多读取 1 MiB，只返回模型 ID 与脱敏错误。
 - 连接测试允许检查已停用的 Web Provider，但 ID 来源冲突或密文不可解密的记录不会被测试路由接管；部署项仍通过 `?source=deployment` 显式指定。
+
+### 请求历史保留配置
+
+`logging.retention_days` 默认为 `0`，表示完全禁用自动清理，兼容旧部署并保护历史记录。设为正数后，以请求开始时间计算保留期限，只删除已结束请求；在途状态 `running` 不删除。每批默认处理 500 条，每轮最多 10 批，每小时运行一次；每批单独事务删除 `request_stream_events`、`request_payloads` 和 `request_logs`。允许的配置范围为保留天数 0–36500、批次 1–5000、周期 60–86400 秒。清理工作由后台任务执行，日志会记录失败和实际删除数量；自动清理不承诺能替代数据库备份。

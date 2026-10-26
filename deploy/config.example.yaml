@@ -64,6 +64,12 @@ logging:
   # 流事件默认只保存类型、字段、字节数与时间；以下两项会保留原始内容，应谨慎开启。
   store_stream_raw: false
   store_stream_preview: false
+  # 默认不自动删除历史请求。设为正数后，只清理超期且已结束的请求。
+  retention_days: 0
+  # 每个小事务最多处理的请求数；清理进程每轮最多执行 10 个批次。
+  retention_batch_size: 500
+  # 自动清理间隔，单位秒（60–86400）。
+  retention_interval_seconds: 3600
 
 
 # 远程 OpenAI-compatible Provider（可选）。需要启用时，将 openai_compatible: [] 替换为下面的列表。
