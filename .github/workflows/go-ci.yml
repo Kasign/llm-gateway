@@ -170,6 +170,12 @@ jobs:
 
       - name: 校验前端语法与关键功能字段
         run: |
+          node --check web/js/providers-entry.js
+          node --check web/static/dist/providers-admin.js
+          cmp -s web/js/providers-entry.js web/static/dist/providers-admin.js
+          grep -q 'api_key_ciphertext' internal/server/admin_providers_http.go
+          grep -q 'clear-key' web/js/providers-entry.js
+          grep -q 'model_mappings' web/static/dist/providers-admin.js
           node --check web/static/dist/app.js
           node --check /tmp/llm-gateway-admin.js
           # 直接比较 CI 从当前源码生成的 bundle 与已提交部署产物，防止漏提交或提交过期的 dist。

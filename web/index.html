@@ -51,6 +51,7 @@
       <button type="button" data-tab="keys"><span class="dot"></span>服务密钥</button>
       <button type="button" data-tab="requests"><span class="dot"></span>调用记录</button>
       <button type="button" data-tab="benchmark"><span class="dot"></span>性能测试</button>
+      <button type="button" data-tab="providers"><span class="dot"></span>远程 Provider</button>
     </nav>
     <div class="sidebar-bottom">
       <div class="sidebar-account">
@@ -100,6 +101,41 @@
           </div>
           <div id="dashRecentRequests"></div>
         </div>
+      </section>
+
+      <!-- Remote providers -->
+      <section id="providers" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>远程 Provider</h2><p>部署 YAML / .env 托管项只读；Web 项可动态新增、编辑和管理。新增 Provider 不会自动切换当前上游。</p></div>
+            <div class="mm-toolbar"><button type="button" class="btn sm ghost" id="providerRefresh">刷新</button><button type="button" class="btn sm" id="providerCreate">新增 Provider</button></div>
+          </div>
+          <div id="providerStatus" class="msg muted" role="status">尚未加载 Provider 列表。</div>
+          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table></div>
+        </div>
+        <div class="card" id="providerEditorCard" hidden>
+          <div class="card-head"><div><h2 id="providerEditorTitle">新增 Provider</h2><p>Key 留空表示保留原值；要删除已保存的 Key，请使用单独的“清除 Key”操作。</p></div><button type="button" class="btn sm ghost" id="providerCancel">取消</button></div>
+          <form id="providerForm" class="provider-form">
+            <div class="provider-grid">
+              <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._-]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；保存后不可修改。</small></div>
+              <div class="field"><label for="providerBaseURL">Base URL</label><input id="providerBaseURL" name="base_url" type="url" placeholder="https://api.example.com/v1" required></div>
+              <div class="field"><label for="providerDefaultModel">默认模型 ID</label><input id="providerDefaultModel" name="default_model" required maxlength="255"></div>
+              <div class="field"><label for="providerApiKey">API Key</label><input id="providerApiKey" name="api_key" type="password" autocomplete="new-password" placeholder="新增时填写；编辑留空保留旧 Key"><small id="providerKeyHelp">Key 仅发送到服务端一次加密保存，API 不回传密钥内容。</small></div>
+              <div class="field"><label for="providerApiKeyHeader">API Key Header</label><select id="providerApiKeyHeader" name="api_key_header"><option value="authorization">Authorization: Bearer</option><option value="api-key">api-key</option><option value="x-api-key">x-api-key</option></select></div>
+              <div class="field"><label for="providerConcurrency">最大并发请求数（0 使用默认值）</label><input id="providerConcurrency" name="max_concurrent_requests" type="number" min="0" max="64" value="64" required></div>
+              <div class="field"><label for="providerMaxResponse">最大响应体字节数（0 使用默认值）</label><input id="providerMaxResponse" name="max_response_bytes" type="number" min="0" step="1" value="0" required></div>
+              <div class="field"><label for="providerEnabled">启用状态</label><select id="providerEnabled" name="enabled"><option value="true">启用</option><option value="false">停用</option></select></div>
+            </div>
+            <div class="field"><label for="providerMappings">模型 ID 映射（JSON 对象，可选）</label><textarea id="providerMappings" name="model_mappings" rows="4" placeholder='{"public-chat":"vendor-chat","public-reasoner":"vendor-reasoner"}'></textarea><small>客户端使用左侧公开 ID，Gateway 转发时使用右侧上游 ID；最多 128 项。</small></div>
+            <div class="provider-checks">
+              <label><input type="checkbox" id="providerAllowPrivate"> 允许访问私网地址（谨慎启用）</label>
+              <label><input type="checkbox" id="providerAllowHTTP"> 允许不安全 HTTP（非生产环境）</label>
+            </div>
+            <div class="provider-actions"><button type="button" class="btn ghost" id="providerTestDraft">测试当前填写配置</button><button type="submit" class="btn" id="providerSave">保存配置</button></div>
+            <div id="providerEditorStatus" class="msg muted" role="status" hidden></div>
+          </form>
+        </div>
+        <p class="muted provider-footnote">安全提示：连接测试限时 4 秒，自动禁止重定向并执行 SSRF / HTTPS 校验。当前活动 Provider 不能直接停用或删除；请先切换到其他上游。</p>
       </section>
 
       <!-- Local models -->
@@ -384,5 +420,6 @@
 </div>
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 <script src="/static/dist/app.js"></script>
+<script src="/static/dist/providers-admin.js"></script>
 </body>
 </html>
