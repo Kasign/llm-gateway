@@ -288,3 +288,23 @@ func TestLocalRegistryWithBackendClientUsesMatchingClient(t *testing.T) {
 		t.Fatalf("clients were not selected by their own Provider IDs: llama=%q ollama=%q", llamaClient.path, ollamaClient.path)
 	}
 }
+
+
+func TestRegistryReplaceAndUnregisterPreserveResolvedProviderInstances(t *testing.T) {
+	r := NewRegistry()
+	oldProvider := NewLocalHTTPProvider("remote-test", Capabilities{Protocol: "old"}, &fakeHTTPClient{})
+	newProvider := NewLocalHTTPProvider("remote-test", Capabilities{Protocol: "new"}, &fakeHTTPClient{})
+	if err := r.Register("remote-test", func() Provider { return oldProvider }); err != nil {
+		t.Fatal(err)
+	}
+	inFlight, err := r.Resolve("remote-test")
+	if err != nil { t.Fatal(err) }
+	if err := r.Replace("REMOTE-TEST", func() Provider { return newProvider }); err != nil { t.Fatal(err) }
+	current, err := r.Resolve("remote-test")
+	if err != nil { t.Fatal(err) }
+	if current.Capabilities().Protocol != "new" { t.Fatalf("new request protocol = %q, want new", current.Capabilities().Protocol) }
+	if inFlight.Capabilities().Protocol != "old" { t.Fatalf("resolved Provider changed unexpectedly: %q", inFlight.Capabilities().Protocol) }
+	if err := r.Unregister("remote-test"); err != nil { t.Fatal(err) }
+	if _, err := r.Resolve("remote-test"); !errors.Is(err, ErrProviderNotFound) { t.Fatalf("Resolve after unregister = %v, want ErrProviderNotFound", err) }
+	if err := r.Unregister("llamacpp"); err == nil { t.Fatal("built-in Provider must not be unregistered") }
+}

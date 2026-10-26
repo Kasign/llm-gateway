@@ -250,6 +250,50 @@ func (r *Registry) ResolveLocalModelManager(id string) (LocalModelManager, bool)
 	return manager, ok
 }
 
+
+// Replace 原子替换现有 Provider 的工厂。已经取得旧实例的请求/SSE 不受影响。
+func (r *Registry) Replace(id string, factory Factory) error {
+	if r == nil {
+		return errors.New("provider registry is nil")
+	}
+	key := normalizeID(id)
+	if key == "" || factory == nil {
+		return errors.New("provider ID and factory are required")
+	}
+	if key == "llamacpp" || key == "ollama" {
+		return fmt.Errorf("built-in Provider %q cannot be replaced through remote management", key)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.factories[key]; !exists {
+		return fmt.Errorf("%w: %s", ErrProviderNotFound, key)
+	}
+	r.factories[key] = factory
+	return nil
+}
+
+// Unregister 原子移除远程 Provider 的新请求入口；已经解析的旧实例可以完成当前请求。
+func (r *Registry) Unregister(id string) error {
+	if r == nil {
+		return errors.New("provider registry is nil")
+	}
+	key := normalizeID(id)
+	if key == "" {
+		return errors.New("provider ID is required")
+	}
+	if key == "llamacpp" || key == "ollama" {
+		return fmt.Errorf("built-in Provider %q cannot be unregistered", key)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.factories[key]; !exists {
+		return fmt.Errorf("%w: %s", ErrProviderNotFound, key)
+	}
+	delete(r.factories, key)
+	delete(r.managers, key)
+	return nil
+}
+
 func (r *Registry) Resolve(id string) (Provider, error) {
 	if r == nil {
 		return nil, errors.New("provider registry is nil")
