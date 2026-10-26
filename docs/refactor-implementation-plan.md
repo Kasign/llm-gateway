@@ -699,3 +699,12 @@ docs/                        中文架构、协议和运维文档
 - 同步 1Panel 部署说明，列明本地模型客户端整体时限为 0 时只取消 Gateway 客户端整体 deadline，不能覆盖 OpenResty 或 Codex/Cursor 客户端期限；同时提示只有在确认真实代理来源后才应设置 `server.trusted_proxies`。
 - 本功能组仅修改部署样例和文档；按用户要求未运行测试、Compose 检查或 CI。需要在实际 1Panel/OpenResty 容器网络中部署确认 DNS 解析与 SSE 流式行为。
 - 提交前远程基线：`6962c7f84d8d30444424734ec510e89aa9c59dad`；PR #5/#7 均为 Open、未合并，PR #7 继续依赖 PR #5。
+
+
+### Provider 并发实时占用展示（2026-10-26）
+
+- Provider 管理列表复用现有手动刷新请求，增加并发许可使用数、有效上限与剩余槽位；不另起轮询，也不将只读统计用于限流判定。
+- 观测计数来自同一进程内共享的 `ConcurrencyLimiter`。Web Provider 即使在热更新或停用后仍有旧请求在途，也优先读取原有共享 limiter；部署来源从 Registry 获取当前运行时 limiter。若运行实例不可用，UI 显示为不可用而不是伪报 0。
+- API 契约明确计数是当前 Gateway 进程的瞬时快照，多副本部署下不代表全局并发；RPM 仍通过 Redis 单独计算，二者不会混用。
+- 新增并发快照回归测试代码；同步管理台源码与 `web/static/dist/providers-admin.js`、表头、列数和契约文档。按用户要求未运行测试或构建；需要统一验证 Go 测试、前端 bundle 字节一致性以及热更新/并发请求场景。
+- 提交前远程基线：`808fd9f8b399b8ac87885d6e876a935107740a5d`；PR #5/#7 仍 Open、未合并。

@@ -29,7 +29,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 下载与基准测试 | `/api/downloads*`、`/api/benchmark*` | 下载任务、Benchmark 状态和结果。 |
 | 请求审计 | `/api/requests*` | 请求记录筛选与详情。 |
 | API Key 管理 | `/api/admin/keys*` | 创建、修改、禁用、轮换、删除、过期时间、RPM、模型 ACL。 |
-| 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。
+| 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。列表同时返回 RPM 用量和当前 Gateway 进程的并发占用快照；快照通过原有刷新请求更新，不使用额外后台轮询，多副本环境下不代表全局并发总数。
 | Web 登录 | `/api/auth/*` | 管理员网页登录、登出、会话和凭据更新。 |
 
 路由注册层只统一包裹 Request ID、调用记录和 Panic Recovery；管理 API 的具体鉴权由各 Handler/认证辅助逻辑执行，审查新的管理路由时需要单独确认认证与 CSRF 边界，不要把“已注册在 `/api/admin` 下”误当成自动获得统一授权。

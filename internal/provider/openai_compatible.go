@@ -101,6 +101,16 @@ func (l *ConcurrencyLimiter) Release() {
 	l.mu.Unlock()
 }
 
+// Active 返回当前仍占用并发许可的请求数，用于管理面只读观测。
+func (l *ConcurrencyLimiter) Active() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.active
+}
+
 // Limit 返回当前有效上限，供诊断和单元测试使用。
 func (l *ConcurrencyLimiter) Limit() int {
 	if l == nil {
