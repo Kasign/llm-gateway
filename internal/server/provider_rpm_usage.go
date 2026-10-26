@@ -16,63 +16,93 @@ func (s *Server) listManagedProviderViewsWithRPMUsage(ctx context.Context) []map
 		return views
 	}
 	attachProviderConcurrencyUsage(s, views)
-
-	limits := make(map[string]int, len(views))
-	ids := make([]string, 0, len(views))
+	rpmLimits := make(map[string]int, len(views))
+	tokenLimits := make(map[string]int64, len(views))
+	rpmIDs := make([]string, 0, len(views))
+	tokenIDs := make([]string, 0, len(views))
 	for _, view := range views {
 		id, _ := view["id"].(string)
 		rpm, _ := view["requests_per_minute"].(int)
-		view["requests_per_minute_used"] = 0
-		view["requests_per_minute_remaining"] = 0
+		tokenBudget, _ := view["token_budget_per_day"].(int64)
+		view["requests_per_minute_used"] = int64(0)
+		view["requests_per_minute_remaining"] = int64(0)
 		view["requests_per_minute_reset_seconds"] = 0
 		view["requests_per_minute_usage_available"] = rpm <= 0
-		if rpm <= 0 || id == "" {
+		view["token_budget_per_day_used"] = int64(0)
+		view["token_budget_per_day_remaining"] = int64(0)
+		view["token_budget_per_day_reset_seconds"] = 0
+		view["token_budget_per_day_usage_available"] = tokenBudget <= 0
+		if id == "" {
 			continue
 		}
-		limits[id] = rpm
-		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		return views
+		if rpm > 0 {
+			rpmLimits[id] = rpm
+			rpmIDs = append(rpmIDs, id)
+		}
+		if tokenBudget > 0 {
+			tokenLimits[id] = tokenBudget
+			tokenIDs = append(tokenIDs, id)
+		}
 	}
 	now := time.Now().UTC()
-	nextWindow := now.Truncate(time.Minute).Add(time.Minute)
-	resetSeconds := int((nextWindow.Sub(now) + time.Second - 1) / time.Second)
+	nextMinute := now.Truncate(time.Minute).Add(time.Minute)
+	minuteReset := int((nextMinute.Sub(now) + time.Second - 1) / time.Second)
+	nextDay := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+	dayReset := int((nextDay.Sub(now) + time.Second - 1) / time.Second)
 	for _, view := range views {
 		if rpm, _ := view["requests_per_minute"].(int); rpm > 0 {
-			view["requests_per_minute_reset_seconds"] = resetSeconds
+			view["requests_per_minute_reset_seconds"] = minuteReset
+		}
+		if budget, _ := view["token_budget_per_day"].(int64); budget > 0 {
+			view["token_budget_per_day_reset_seconds"] = dayReset
 		}
 	}
 	if s == nil || s.limiter == nil {
 		return views
 	}
-
-	// 管理台列表不应等待 Redis 默认网络超时；预算执行路径仍使用真实请求上下文。
+	// 管理台只读快照限时查询 Redis，失败不影响 Provider 管理或请求准入。
 	usageCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
 	defer cancel()
-	counts, err := s.limiter.ProviderRPMUsage(usageCtx, ids, now)
-	if err != nil {
-		return views
+	if len(rpmIDs) > 0 {
+		if counts, err := s.limiter.ProviderRPMUsage(usageCtx, rpmIDs, now); err == nil {
+			for _, view := range views {
+				id, _ := view["id"].(string)
+				rpm, limited := rpmLimits[id]
+				if !limited {
+					continue
+				}
+				used := counts[id]
+				remaining := int64(rpm) - used
+				if remaining < 0 {
+					remaining = 0
+				}
+				view["requests_per_minute_used"] = used
+				view["requests_per_minute_remaining"] = remaining
+				view["requests_per_minute_usage_available"] = true
+			}
+		}
 	}
-	for _, view := range views {
-		id, _ := view["id"].(string)
-		rpm, limited := limits[id]
-		if !limited {
-			continue
+	if len(tokenIDs) > 0 {
+		if counts, err := s.limiter.ProviderTokenBudgetUsage(usageCtx, tokenIDs, now); err == nil {
+			for _, view := range views {
+				id, _ := view["id"].(string)
+				limit, limited := tokenLimits[id]
+				if !limited {
+					continue
+				}
+				used := counts[id]
+				remaining := limit - used
+				if remaining < 0 {
+					remaining = 0
+				}
+				view["token_budget_per_day_used"] = used
+				view["token_budget_per_day_remaining"] = remaining
+				view["token_budget_per_day_usage_available"] = true
+			}
 		}
-		used := counts[id]
-		remaining := int64(rpm) - used
-		if remaining < 0 {
-			remaining = 0
-		}
-		view["requests_per_minute_used"] = used
-		view["requests_per_minute_remaining"] = remaining
-		view["requests_per_minute_usage_available"] = true
 	}
 	return views
 }
-
 type providerConcurrencyReporter interface {
 	ConcurrencyLimiter() *provider.ConcurrencyLimiter
 }

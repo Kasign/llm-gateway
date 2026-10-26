@@ -29,7 +29,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、Token 预算与排队策略尚未全部齐全。 | Provider RPM 的限流语义随完整 Actions #222/#224 通过；Token 预算与排队仍待设计 | `requests_per_minute=0` 默认禁用；正数在请求级 ACL 之后、WarmStart/上游前按 Provider ID 使用 Redis UTC 固定分钟窗口计数。多个 API Key 和 Agent 共享 Provider 额度；超过上限返回 429，Redis 不可用时 fail-closed 返回 503。本地 llama.cpp/Ollama 不受该远程 Provider 限额影响。 | 统一测试 Redis 计数隔离、429/503 审计、动态 Web 配置更新与多 Agent 共用额度；Token 预算与排队另行评审。 |
+| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与排队策略尚未全部齐全。 | RPM 已由完整 Actions #222/#224 复验；每日 Token 预算本批进入代码，等待新 Head CI。排队策略仍待设计 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。无可信 usage 时保守保留预占。 | 最新 Actions 通过预算边界、跨日隔离、真实 usage 结算和动态 Web 配置；另行设计队列公平性、最大长度、等待超时、请求取消和 Redis 失效语义。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -250,3 +250,11 @@
 新增 `GET /api/admin/retention/status`。在管理员鉴权后返回保留配置与进程内聚合指标，包括最近执行状态、执行次数、成功/失败次数、执行时间/耗时、删除行数、累计删除量和稳定失败代码。完整 Actions #225（34/34 步）已通过。
 
 该接口只读取内存状态，设置 `Cache-Control: no-store`；原始数据库异常只进入 Gateway 服务日志。计数在进程重启后清零；外部监控器可轮询 `last_run_status`/`failure_count`，Gateway 本身不推送告警。此功能和 OpenAPI 契约已合入 `dev` 并由完整 Actions #225 验证通过。
+
+
+## 2026-10-26 Provider 每日 Token 预算实现增量
+
+- 为远程 Provider 增加 `token_budget_per_day`，0 默认关闭；YAML、`LLM_GATEWAY_PROVIDER_<ID>_TOKEN_BUDGET_PER_DAY` 与 Web CRUD 统一支持该字段，管理台显示当前 UTC 日桶的已用/预占、余额和重置倒计时。
+- Redis Lua 实现每日预算原子预占和结算；多个 API Key 与 Agent 按 Provider ID 共享额度。准入估算为请求体 UTF-8 字节数加单次输出上限，属于保护性估算，不是供应商 tokenizer。只有可信供应商 usage 会用于最终结算。
+- 无可信 usage 的已出网上游请求保留预占到 UTC 日桶过期，避免在供应商可能已计费时错误退款。实际用量超过估算时会按上游真实数记账，已开始的请求无法被事后撤回。
+- 本批新增 Go 配置/环境变量、Redis 预算集成用例、输出 Token 限制用例、Web UI、Compose 白名单、OpenAPI 和中文文档；不手动运行测试，以本批提交后的 GitHub Actions 作为自动化验证。

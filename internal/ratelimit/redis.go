@@ -31,6 +31,31 @@ end
 return current
 `)
 
+// reserveProviderTokenBudgetScript 原子预占每日 Token 预算，避免并发请求同时越额。
+var reserveProviderTokenBudgetScript = redis.NewScript(`
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+local reserved = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+if reserved <= 0 or current + reserved > limit then
+  return "0|" .. current
+end
+local next = redis.call("INCRBY", KEYS[1], reserved)
+if redis.call("TTL", KEYS[1]) < 0 then
+  redis.call("EXPIRE", KEYS[1], ARGV[3])
+end
+return "1|" .. next
+`)
+
+// settleProviderTokenBudgetScript 将保守预占校正为供应商报告的真实 Token。
+var settleProviderTokenBudgetScript = redis.NewScript(`
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+local delta = tonumber(ARGV[1])
+local next = current + delta
+if next < 0 then next = 0 end
+redis.call("SET", KEYS[1], next, "EX", ARGV[2])
+return next
+`)
+
 // rateLimitBucketKey 保持既有 UTC 固定分钟窗口的 key 格式。
 func rateLimitBucketKey(key string, now time.Time) string {
 	bucket := now.UTC().Format("200601021504")
@@ -195,6 +220,118 @@ func (l *Limiter) ProviderRPMUsage(ctx context.Context, providerIDs []string, no
 		count, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("parse Provider RPM counter")
+		}
+		usage[ids[i]] = count
+	}
+	return usage, nil
+}
+
+
+// 每个 UTC 日桶保留 48 小时，使跨日结束的在途请求仍可结算。
+const providerTokenBudgetTTLSeconds = 172800
+
+func normalizeTokenBudgetProviderID(raw string) (string, error) {
+	id := strings.ToLower(strings.TrimSpace(raw))
+	if id == "" || len(id) > 64 || strings.ContainsAny(id, ":{} /") || strings.Contains(id, "\\") || strings.ContainsAny(id, "\r\n\t") {
+		return "", fmt.Errorf("invalid Provider ID for token budget")
+	}
+	return id, nil
+}
+
+func providerTokenBudgetBucket(now time.Time) string {
+	return now.UTC().Format("20060102")
+}
+
+func providerTokenBudgetKey(providerID, bucket string) string {
+	return fmt.Sprintf("llmgw:provider_tokens:%s:%s", providerID, bucket)
+}
+
+// ReserveProviderTokens 使用 UTC 自然日固定窗口原子预占；超限不修改当前计数。
+func (l *Limiter) ReserveProviderTokens(ctx context.Context, providerID string, dailyLimit, reserveTokens int64, now time.Time) (bucket string, used int64, allowed bool, err error) {
+	id, err := normalizeTokenBudgetProviderID(providerID)
+	if err != nil {
+		return "", 0, false, err
+	}
+	if l == nil || l.r == nil {
+		return "", 0, false, fmt.Errorf("Redis token budget is not configured")
+	}
+	if dailyLimit <= 0 || reserveTokens <= 0 {
+		return "", 0, false, fmt.Errorf("invalid Provider token budget reservation")
+	}
+	bucket = providerTokenBudgetBucket(now)
+	raw, err := reserveProviderTokenBudgetScript.Run(
+		ctx, l.r, []string{providerTokenBudgetKey(id, bucket)},
+		reserveTokens, dailyLimit, providerTokenBudgetTTLSeconds,
+	).Text()
+	if err != nil {
+		return "", 0, false, err
+	}
+	parts := strings.Split(raw, "|")
+	if len(parts) != 2 {
+		return "", 0, false, fmt.Errorf("invalid Redis token budget result")
+	}
+	allowed = parts[0] == "1"
+	used, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || used < 0 {
+		return "", 0, false, fmt.Errorf("invalid Redis token budget counter")
+	}
+	return bucket, used, allowed, nil
+}
+
+// SettleProviderTokens 将预占值替换为可信用量；传入旧日期桶，可在 UTC 跨日后完成结算。
+func (l *Limiter) SettleProviderTokens(ctx context.Context, providerID, bucket string, reservedTokens, actualTokens int64) error {
+	id, err := normalizeTokenBudgetProviderID(providerID)
+	if err != nil {
+		return err
+	}
+	if l == nil || l.r == nil {
+		return fmt.Errorf("Redis token budget is not configured")
+	}
+	if _, err := time.Parse("20060102", bucket); err != nil {
+		return fmt.Errorf("invalid Provider token budget day")
+	}
+	if reservedTokens <= 0 || actualTokens < 0 {
+		return fmt.Errorf("invalid Provider token budget settlement")
+	}
+	delta := actualTokens - reservedTokens
+	return settleProviderTokenBudgetScript.Run(
+		ctx, l.r, []string{providerTokenBudgetKey(id, bucket)},
+		delta, providerTokenBudgetTTLSeconds,
+	).Err()
+}
+
+// ProviderTokenBudgetUsage 只读查询当前 UTC 日桶已用与预占 Token，不递增计数。
+func (l *Limiter) ProviderTokenBudgetUsage(ctx context.Context, providerIDs []string, now time.Time) (map[string]int64, error) {
+	usage := make(map[string]int64, len(providerIDs))
+	if len(providerIDs) == 0 {
+		return usage, nil
+	}
+	if l == nil || l.r == nil {
+		return nil, fmt.Errorf("Redis token budget is not configured")
+	}
+	ids := make([]string, 0, len(providerIDs))
+	keys := make([]string, 0, len(providerIDs))
+	bucket := providerTokenBudgetBucket(now)
+	for _, rawID := range providerIDs {
+		id, err := normalizeTokenBudgetProviderID(rawID)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		keys = append(keys, providerTokenBudgetKey(id, bucket))
+	}
+	values, err := l.r.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	for i, value := range values {
+		if value == nil {
+			usage[ids[i]] = 0
+			continue
+		}
+		count, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
+		if err != nil || count < 0 {
+			return nil, fmt.Errorf("parse Provider token budget counter")
 		}
 		usage[ids[i]] = count
 	}

@@ -132,10 +132,11 @@ func TestProviderAPIKeyEncryptionRoundTripAndRejectsWrongKey(t *testing.T) {
 
 func TestSafeProviderViewNeverExposesPlaintextOrCiphertext(t *testing.T) {
 	s := &Server{}
-	view := s.safeProviderView(managedProvider{ID:"remote", Enabled:true, APIKey:"plaintext-secret", APIKeyCiphertext:"v1:ciphertext-secret"}, "web", true)
+	view := s.safeProviderView(managedProvider{ID:"remote", Enabled:true, APIKey:"plaintext-secret", APIKeyCiphertext:"v1:ciphertext-secret", TokenBudgetPerDay:250000}, "web", true)
 	raw, err := json.Marshal(view); if err != nil { t.Fatal(err) }
 	text := string(raw)
 	for _, forbidden := range []string{"plaintext-secret","ciphertext-secret","api_key_ciphertext",`"api_key"`} { if strings.Contains(text,forbidden) { t.Fatalf("Provider view leaked %q: %s",forbidden,text) } }
+	if view["token_budget_per_day"] != int64(250000) { t.Fatalf("safe view token budget = %#v, want 250000", view["token_budget_per_day"]) }
 	if view["api_key_configured"] != true { t.Fatal("safe view should disclose whether a key exists") }
 }
 

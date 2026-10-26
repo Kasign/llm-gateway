@@ -197,8 +197,8 @@ docs/                        中文架构、协议和运维文档
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Provider 预置/Web 管理、独立 Key、模型映射、并发与 RPM 已在 PR #7 合入；真实供应商端到端及真实公网故障注入仍待用户控制的凭据/部署环境。 |
-| 阶段 4.5：配置来源治理 | 进行中 | 82% | 配置矩阵、Go YAML 字段校验、YAML 模板路径/静态值对账、环境变量与 Compose 注入门禁已完成；MariaDB/Redis 地址已移到 `.env`，并以 Compose 默认值兼容旧 `.env`。YAML、环境 Provider 和 Web Provider 的 ID 冲突保护已在代码中存在；剩余为逐项 Review 默认值与旧部署行为，确认没有重复维护入口。 |
-| 阶段 5：运行治理与 CI | 进行中 | 88% | 配置契约、OpenAPI operation 元数据、保留状态 API 和此前日志/Provider 功能的 Actions #222–#225 均 34/34 步通过，覆盖 Go 单测、MariaDB 审计积压、Gateway 负载/故障注入、race、性能、go vet、构建与前端 Bundle。剩余事项集中为真实供应商/公网部署验收，以及 Token 预算和排队的设计决策；不再将早期已被后续成功回归覆盖的审计负载失败列为当前阻塞。 |
+| 阶段 4.5：配置来源治理 | 进行中 | 88% | 配置矩阵、Go YAML 字段校验、模板路径/静态值对账、环境变量与 Compose 注入门禁已完成；MariaDB/Redis 地址统一移入 `.env`，旧 `.env` 仍有 Compose 默认回退。YAML、环境 Provider 和 Web Provider 冲突保护已有代码；每日 Token 预算配置、Redis 预占/结算与 UI 观测本批进入实现，待最新 Actions。 |
+| 阶段 5：运行治理与 CI | 进行中 | 88% | Actions #222–#226 的配置契约、OpenAPI 元数据、保留状态 API、Go 单测、MariaDB 审计负载、race、性能、构建和前端 Bundle 均通过。每日 Token 预算正在作为独立功能组接入；真实供应商/公网验收与队列策略设计仍待。 |
 
 ### 已核实的历史 CI 问题
 
@@ -211,7 +211,7 @@ docs/                        中文架构、协议和运维文档
 1. **完成配置来源治理的最后一轮 Review**：目前 `.env`、`config.yaml`、`providers.env`、Web/数据库配置和 Go 默认值已有职责矩阵与 CI 静态门禁。代码确认 YAML/环境重复 Provider ID 在加载校验阶段失败，Web Provider 与部署配置 ID 冲突时拒绝覆盖。下一步核对默认值、旧 `.env` 兼容回退和敏感字段错误输出；在用户部署环境验证之前不删除 `config.yaml` 或强行迁移配置目录。
 2. **请求日志保留功能**：`GET /api/admin/retention/status` 已加入 `dev`，返回启用状态、最近执行状态、耗时、删除行数和失败计数；不访问数据库、不回显原始错误，指标在进程重启后清零。完整 Actions #225 已通过，真实部署后的轮询/告警接入仍需由运维环境配置。
 3. **收口 OpenAPI 字段级契约**：当前 `docs/openapi.yaml` 有 63 个字面路径模板和 72 个 HTTP operation；Agent 路由前缀展开后，CI 对 67 个运行时路由路径做双向对账。operationId、summary、responses、security 元数据门禁已通过；后续在碰到具体 Handler 时继续补请求/响应 Schema，不把静态路径检查说成完整语义验证。
-4. **推进尚未实现的运行治理功能**：Provider Token 预算和排队策略仍为待设计，先明确预算维度、usage 来源可信度、过载响应、排队公平性、请求取消与超时，再实现代码；不能把上游 usage 缺失时的估算伪装成真实计费数据。
+4. **推进尚未实现的运行治理功能**：Provider 每日 Token 预算正在实现，待本批 CI 验证；请求排队策略仍待设计，先明确公平性、队列上限、等待超时、取消移除、Redis 失效语义和请求已经提交响应后的行为。
 5. **需要用户环境的项目单独验收**：真实供应商 E2E、真实公网 OpenResty 路由和生产故障恢复需要用户自己的供应商密钥与部署环境。自动重试/故障转移、Agent 级独立访问策略和 Agent 配置热更新仍是显式延后项，先做风险设计，不为填进度表而贸然实现。
 6. 每完成一个完整功能组，同步中文设计说明与问题台账，按功能合并提交；以对应最新 HEAD 的 GitHub Actions 作为自动化验收依据，不重复手动触发小范围测试。
 
@@ -932,3 +932,12 @@ docs/                        中文架构、协议和运维文档
 在现有分批删除逻辑上增加管理员只读 API `GET /api/admin/retention/status`，公开最近运行状态、耗时、删除量、成功/失败计数和稳定失败代码，支持外部监控器轮询。指标只存当前进程内，重启后计数归零；原始数据库错误只写服务日志，不经 API 返回。此功能不增加通知服务，也不声称主动推送告警。
 
 同时同步 OpenAPI 响应结构及状态契约测试。完整 Actions #225（运行 `40303724984`，34/34 步）通过，包含新增 Go 状态聚合单测、路由/OpenAPI 检查、配置契约、全套集成负载、race、构建和前端 Bundle。
+
+
+## 2026-10-26 Provider 每日 Token 预算（第一版）
+
+- 新增远程 Provider `token_budget_per_day`，并支持 YAML、任意 ID 环境预置及 Web 管理台配置；0 代表关闭，正数在 UTC 自然日内对同一 Provider 的所有调用方和 Agent 共享。
+- 准入前按请求体 UTF-8 字节数与单次最大输出 Token 数做估算预占。Redis Lua 原子预占处理并发；预算启用时，若可用额度更低，会尽量收紧本次输出上限。估算不等于第三方 tokenizer 或计费；真实 usage 超出预占时会记入真实值并影响后续请求。
+- 有可信供应商 usage 时按真实总 Token（或 input+output）结算并释放预占差额；没有可信 usage 的已出网上游请求会保守保留预占直到日桶过期。不会把 llama timings 或估算值冒充供应商计费 Token。
+- 新增 Redis UTC 日桶预占/结算用例、输出上限字段用例、Web 配置和用量展示、环境变量白名单、OpenAPI 和中文配置说明。本批未手动运行测试，等待新 Head GitHub Actions。
+- 排队策略仍独立待设计，需要另外评审公平性、队列上限、等待超时、取消移除、Redis 故障策略和 SSE 提交边界。

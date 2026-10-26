@@ -2315,6 +2315,12 @@ components:
           minimum: 0
           maximum: 100000
           default: 0
+        token_budget_per_day:
+          type: integer
+          minimum: 0
+          maximum: 1000000000000
+          default: 0
+          description: 每个 UTC 自然日的 Provider Token 预算；0 表示关闭。
         request_timeout_seconds:
           type: integer
           minimum: 0
@@ -2340,6 +2346,11 @@ components:
         max_response_bytes: { type: integer }
         max_concurrent_requests: { type: integer }
         requests_per_minute: { type: integer }
+        token_budget_per_day: { type: integer, minimum: 0, maximum: 1000000000000 }
+        token_budget_per_day_used: { type: integer, format: int64 }
+        token_budget_per_day_remaining: { type: integer, format: int64 }
+        token_budget_per_day_reset_seconds: { type: integer }
+        token_budget_per_day_usage_available: { type: boolean }
         request_timeout_seconds: { type: integer }
         source:
           type: string

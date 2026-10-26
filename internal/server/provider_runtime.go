@@ -68,6 +68,7 @@ func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProvide
 		MaxResponseBytes:item.MaxResponseBytes, MaxConcurrentRequests:item.MaxConcurrentRequests,
 		RequestTimeoutSeconds:item.RequestTimeoutSeconds,
 		RequestsPerMinute:item.RequestsPerMinute,
+		TokenBudgetPerDay:item.TokenBudgetPerDay,
 	}, true
 }
 
@@ -126,7 +127,7 @@ func (s *Server) availableBackends() []map[string]interface{} {
 	if s == nil || s.cfg == nil { return out }
 	for _, item := range s.cfg.Providers.OpenAICompatible {
 		if !item.Enabled { continue }
-		out = append(out, map[string]interface{}{"id":item.ID,"label":item.ID,"kind":"remote","base_url":item.BaseURL,"default_model":item.DefaultModel,"requests_per_minute":item.RequestsPerMinute,"api_key_configured":item.APIKey!="","source":"deployment","editable":false})
+		out = append(out, map[string]interface{}{"id":item.ID,"label":item.ID,"kind":"remote","base_url":item.BaseURL,"default_model":item.DefaultModel,"requests_per_minute":item.RequestsPerMinute,"token_budget_per_day":item.TokenBudgetPerDay,"api_key_configured":item.APIKey!="","source":"deployment","editable":false})
 	}
 	s.providerConfigMu.RLock()
 	rows := make([]managedProvider,0,len(s.webProviders))

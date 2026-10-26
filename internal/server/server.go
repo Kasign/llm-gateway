@@ -103,6 +103,8 @@ type Server struct {
 	requestRetentionWG        sync.WaitGroup
 	requestRetentionStatusMu  sync.RWMutex
 	requestRetentionStatus    requestRetentionRuntimeStatus
+	tokenBudgetMu sync.Mutex
+	tokenBudgetReservations map[string]providerTokenBudgetReservation
 	calls      sync.Map         // request id -> *callState
 }
 

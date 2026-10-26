@@ -42,6 +42,14 @@ func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code
 			retryAfter = 1
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	} else if code == "provider_token_budget_exceeded" {
+		now := time.Now().UTC()
+		nextDay := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+		retryAfter := int((nextDay.Sub(now) + time.Second - 1) / time.Second)
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 	}
 	if isAnthropicMessagesRequestPath(rawPath) {
 		w.Header().Set("Content-Type", "application/json")

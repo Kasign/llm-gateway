@@ -59,8 +59,9 @@ func (s *Server) newInferencePipeline() *core.Pipeline {
 			s.mutateSanitize,
 			s.mutateInferenceParams,
 			s.mutateResponsesBridge,
+			s.mutateProviderTokenBudget,
 		},
-		Guard:     []core.Guard{s.guardModelReady},
+		Guard:     []core.Guard{s.providerTokenBudgetGuard(), s.guardModelReady},
 		WarmStart: s.warmStart,
 		Forward:   inferenceForwarder{s},
 		Observe:   inferenceObserver{s},
@@ -529,6 +530,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	if tokenSrc == "usage" {
 		tokenSrc = "upstream_usage"
 	}
+	o.s.finishProviderTokenBudget(st.ID, !st.UpstreamStart.IsZero(), tokenSrc, inTok, outTok, totTok)
 	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,

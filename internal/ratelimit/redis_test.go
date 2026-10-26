@@ -125,3 +125,71 @@ func TestProviderRPMUsageReadsWithoutIncrementing(t *testing.T) {
 		t.Fatalf("read unexpectedly incremented counter: usage=%d", usage[providerID])
 	}
 }
+
+
+func TestProviderTokenBudgetReservesAndSettlesAtomically(t *testing.T) {
+	limiter := newRedisTestLimiter(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 26, 10, 30, 0, 0, time.UTC)
+	id := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+
+	bucket, used, allowed, err := limiter.ReserveProviderTokens(ctx, id, 1000, 700, now)
+	if err != nil {
+		t.Fatalf("ReserveProviderTokens: %v", err)
+	}
+	if !allowed || used != 700 || bucket != "20261026" {
+		t.Fatalf("first reservation = bucket %q, used %d, allowed %v", bucket, used, allowed)
+	}
+	_, used, allowed, err = limiter.ReserveProviderTokens(ctx, id, 1000, 400, now)
+	if err != nil {
+		t.Fatalf("second ReserveProviderTokens: %v", err)
+	}
+	if allowed || used != 700 {
+		t.Fatalf("over-budget reservation = used %d, allowed %v; want 700/false", used, allowed)
+	}
+	if err := limiter.SettleProviderTokens(ctx, id, bucket, 700, 250); err != nil {
+		t.Fatalf("SettleProviderTokens: %v", err)
+	}
+	usage, err := limiter.ProviderTokenBudgetUsage(ctx, []string{id}, now)
+	if err != nil {
+		t.Fatalf("ProviderTokenBudgetUsage: %v", err)
+	}
+	if usage[id] != 250 {
+		t.Fatalf("settled usage = %d, want 250", usage[id])
+	}
+}
+
+func TestProviderTokenBudgetUsesUTCDateBuckets(t *testing.T) {
+	limiter := newRedisTestLimiter(t)
+	ctx := context.Background()
+	id := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	beforeMidnight := time.Date(2026, 10, 26, 23, 59, 59, 0, time.UTC)
+	afterMidnight := beforeMidnight.Add(2 * time.Second)
+
+	bucket, used, allowed, err := limiter.ReserveProviderTokens(ctx, id, 1000, 100, beforeMidnight)
+	if err != nil || !allowed || used != 100 || bucket != "20261026" {
+		t.Fatalf("before UTC midnight = %q/%d/%v err=%v", bucket, used, allowed, err)
+	}
+	usage, err := limiter.ProviderTokenBudgetUsage(ctx, []string{id}, afterMidnight)
+	if err != nil {
+		t.Fatalf("ProviderTokenBudgetUsage after midnight: %v", err)
+	}
+	if usage[id] != 0 {
+		t.Fatalf("next UTC day started with usage %d, want 0", usage[id])
+	}
+}
+
+func TestProviderTokenBudgetRejectsSingleReservationAboveLimit(t *testing.T) {
+	limiter := newRedisTestLimiter(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 26, 10, 30, 0, 0, time.UTC)
+	id := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+
+	_, used, allowed, err := limiter.ReserveProviderTokens(ctx, id, 100, 101, now)
+	if err != nil {
+		t.Fatalf("oversized reservation should be a normal budget denial, got error: %v", err)
+	}
+	if allowed || used != 0 {
+		t.Fatalf("oversized reservation used/allowed=%d/%v, want 0/false", used, allowed)
+	}
+}

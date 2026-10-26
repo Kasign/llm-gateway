@@ -6,7 +6,7 @@ import (
 )
 
 func TestApplyProviderEnvironmentLoadsMultipleProvidersAndMappings(t *testing.T) {
-	keys := []string{"LLM_GATEWAY_PROVIDER_ALPHA_ENABLED", "LLM_GATEWAY_PROVIDER_ALPHA_BASE_URL", "LLM_GATEWAY_PROVIDER_ALPHA_API_KEY", "LLM_GATEWAY_PROVIDER_ALPHA_DEFAULT_MODEL", "LLM_GATEWAY_PROVIDER_ALPHA_MODEL_MAPPINGS_JSON", "LLM_GATEWAY_PROVIDER_ALPHA_REQUEST_TIMEOUT_SECONDS", "LLM_GATEWAY_PROVIDER_ALPHA_REQUESTS_PER_MINUTE", "LLM_GATEWAY_PROVIDER_BETA_BASE_URL", "LLM_GATEWAY_PROVIDER_BETA_DEFAULT_MODEL"}
+	keys := []string{"LLM_GATEWAY_PROVIDER_ALPHA_ENABLED", "LLM_GATEWAY_PROVIDER_ALPHA_BASE_URL", "LLM_GATEWAY_PROVIDER_ALPHA_API_KEY", "LLM_GATEWAY_PROVIDER_ALPHA_DEFAULT_MODEL", "LLM_GATEWAY_PROVIDER_ALPHA_MODEL_MAPPINGS_JSON", "LLM_GATEWAY_PROVIDER_ALPHA_REQUEST_TIMEOUT_SECONDS", "LLM_GATEWAY_PROVIDER_ALPHA_REQUESTS_PER_MINUTE", "LLM_GATEWAY_PROVIDER_ALPHA_TOKEN_BUDGET_PER_DAY", "LLM_GATEWAY_PROVIDER_BETA_BASE_URL", "LLM_GATEWAY_PROVIDER_BETA_DEFAULT_MODEL"}
 	for _, key := range keys { t.Setenv(key, "") }
 	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_ENABLED", "true")
 	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_BASE_URL", "https://api.alpha.example/v1")
@@ -15,6 +15,7 @@ func TestApplyProviderEnvironmentLoadsMultipleProvidersAndMappings(t *testing.T)
 	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_MODEL_MAPPINGS_JSON", `{"public-chat":"alpha-real-model"}`)
 	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_REQUEST_TIMEOUT_SECONDS", "900")
 	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_REQUESTS_PER_MINUTE", "35")
+	t.Setenv("LLM_GATEWAY_PROVIDER_ALPHA_TOKEN_BUDGET_PER_DAY", "250000")
 	t.Setenv("LLM_GATEWAY_PROVIDER_BETA_BASE_URL", "https://api.beta.example/v1")
 	t.Setenv("LLM_GATEWAY_PROVIDER_BETA_DEFAULT_MODEL", "beta-chat")
 	var cfg Config
@@ -23,6 +24,7 @@ func TestApplyProviderEnvironmentLoadsMultipleProvidersAndMappings(t *testing.T)
 	if cfg.Providers.OpenAICompatible[0].ID != "alpha" || cfg.Providers.OpenAICompatible[0].ModelMappings["public-chat"] != "alpha-real-model" { t.Fatalf("alpha config not loaded: %+v", cfg.Providers.OpenAICompatible[0]) }
 	if cfg.Providers.OpenAICompatible[0].RequestTimeoutSeconds != 900 { t.Fatalf("alpha timeout=%d, want 900", cfg.Providers.OpenAICompatible[0].RequestTimeoutSeconds) }
 	if cfg.Providers.OpenAICompatible[0].RequestsPerMinute != 35 { t.Fatalf("alpha requests_per_minute=%d, want 35", cfg.Providers.OpenAICompatible[0].RequestsPerMinute) }
+	if cfg.Providers.OpenAICompatible[0].TokenBudgetPerDay != 250000 { t.Fatalf("alpha token_budget_per_day=%d, want 250000", cfg.Providers.OpenAICompatible[0].TokenBudgetPerDay) }
 	if cfg.Providers.OpenAICompatible[1].ID != "beta" { t.Fatalf("beta Provider ID=%q", cfg.Providers.OpenAICompatible[1].ID) }
 }
 

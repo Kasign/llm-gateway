@@ -10,6 +10,9 @@ import (
 
 const MaxProviderRequestsPerMinute = 100000
 
+// MaxProviderTokenBudgetPerDay 是单个远程 Provider 的 UTC 每日 Token 预算上限；0 表示关闭。
+const MaxProviderTokenBudgetPerDay int64 = 1000000000000
+
 // OpenAICompatibleProviderConfig 从 deploy/config.yaml 读取，API Key 应通过环境变量注入。
 // 远程凭据不写入 gateway_settings，切换当前后端只保存 Provider ID 与模型 ID。
 type OpenAICompatibleProviderConfig struct {
@@ -24,8 +27,9 @@ type OpenAICompatibleProviderConfig struct {
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
 	MaxConcurrentRequests int `yaml:"max_concurrent_requests"`
-	RequestsPerMinute      int `yaml:"requests_per_minute"`
-	RequestTimeoutSeconds  int `yaml:"request_timeout_seconds"`
+	RequestsPerMinute      int   `yaml:"requests_per_minute"`
+	TokenBudgetPerDay      int64 `yaml:"token_budget_per_day"`
+	RequestTimeoutSeconds  int   `yaml:"request_timeout_seconds"`
 }
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -68,6 +72,9 @@ func (c *Config) validateProviderConfigs() error {
 		}
 		if item.RequestsPerMinute < 0 || item.RequestsPerMinute > MaxProviderRequestsPerMinute {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): requests_per_minute must be between 0 and %d", i, item.ID, MaxProviderRequestsPerMinute)
+		}
+		if item.TokenBudgetPerDay < 0 || item.TokenBudgetPerDay > MaxProviderTokenBudgetPerDay {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): token_budget_per_day must be between 0 and %d", i, item.ID, MaxProviderTokenBudgetPerDay)
 		}
 		if !item.Enabled {
 			continue
