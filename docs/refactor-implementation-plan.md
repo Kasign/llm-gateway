@@ -808,3 +808,11 @@ docs/                        中文架构、协议和运维文档
 ### 进度口径
 
 本轮仅修改两个测试夹具及同步文档，没有手动执行测试或构建。新 CI 完成前，不将这些修复记为已验收；真实供应商 E2E、公网反向代理链路和生产容量验证仍属于部署环境验收，不由 loopback Mock CI 替代。
+
+## 10. 最新执行增量：Provider 管理台语法修复
+
+- Actions #209（Head `b36451e612d7e6a4bdf68535d33e9794604f0690`）验证了此前 CI 阻塞已解除：Go 单测、MariaDB 审计负载、Gateway 故障注入、TCP/DNS/SSE/TLS、race、性能、go vet、Go build 均通过。
+- 最终前端契约检查仍失败：`web/js/providers-entry.js:60` 表格 HTML 拼接字符串少了结尾引号，导致 Node.js 语法检查失败。
+- 本功能组仅修正这一处语法并同步 `web/static/dist/providers-admin.js`，其余功能不随意扩展；部署 bundle 必须与源码字节一致。
+- 未手动运行本地测试/构建。新 Head 的完整 Actions 是本次验收闸门；成功后才进入 Provider 管理功能收口和整体 review。
+- 分支纪律不变：当前不清理旧分支；PR #5 先于 PR #7 合入。PR #5 合并后核对 PR #7 与最新 `dev` 的差异，完成第二次完整回归后再讨论 PR #7 合并。

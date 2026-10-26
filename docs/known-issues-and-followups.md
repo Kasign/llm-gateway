@@ -164,3 +164,10 @@
 - 阻塞 2：`internal/audit/writer_mariadb_test.go` 直接创建的 `request_logs` 夹具漏掉 `provider_id`，且 `CREATE TABLE IF NOT EXISTS` 不会补齐复用测试库中的旧表。夹具应定义该字段，并用 `INFORMATION_SCHEMA.COLUMNS` 检查、必要时补列；保留原有 500 条持久化断言，不改生产迁移逻辑。
 - 当前修复作为一个逻辑提交，连同本台账及实施计划一起更新；不手动运行测试，提交后以新 Head 对应的 GitHub Actions 统一验证，不沿用旧 Head 的成功结果。
 - 分支策略：先处理并合入 PR #5；随后把 PR #7 对齐最新 `dev`，重新检查最终差异与完整 CI，再决定合并。旧的并发分支 `feat/provider-concurrency-limits` 以及 PR #1–#4 的已合并功能分支暂不删除，待确认内容已包含在目标分支、并发分支没有独有提交后再清理；不强推、不改写历史。默认分支 `main` 与开发基线 `dev` 的关系另行确认，不在本次变更中修改。
+
+## 2026-10-26 追加：Actions #209 暴露的 Provider 管理台语法错误
+
+- [Actions #209](https://github.com/Kasign/llm-gateway/actions/runs/40287645485) 对 Head `b36451e612d7e6a4bdf68535d33e9794604f0690` 的单测、MariaDB 审计积压、Gateway 并发与故障注入、TCP/DNS/SSE/TLS 故障、race、性能基线、go vet、Go 构建及管理台主入口构建均通过；最后的“校验前端语法与关键功能字段”失败。
+- 失败点是 `web/js/providers-entry.js:60` 的表格 HTML 拼接字符串在 `actions` 之后少了结束引号，Node.js 报 `SyntaxError: Invalid or unexpected token`。这是管理台 Provider 模块的语法缺陷，不是 Go 或 MariaDB 问题。
+- 修正后将源码原样复制到 `web/static/dist/providers-admin.js`。按 `web/package.json` 的 build 脚本约定，该部署文件就是源文件的直接副本；无需改动无关的 `app.js` bundle。
+- 按统一回归安排，不手动启动 Node/Go 测试；提交的新 Head 由完整 GitHub Actions 验证。通过前仍视为待验收。
