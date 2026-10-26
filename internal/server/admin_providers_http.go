@@ -312,7 +312,7 @@ func (s *Server) changeWebProvider(ctx context.Context,id string,input *provider
 		return providerErr(503,"provider_registry_update_failed","更新 Provider 运行时注册表失败，已尝试回滚持久化配置")
 	}
 	s.webProviders=next
-	if action!="delete"&&row.Enabled&&active==id {
+	if exists && action!="delete" && row.Enabled && active==id {
 		s.upstreamMu.Lock()
 		if strings.EqualFold(s.upstream.Backend,id){s.upstream.BaseURL=row.BaseURL;if strings.TrimSpace(s.upstream.ModelName)==""{s.upstream.ModelName=row.DefaultModel}}
 		s.upstreamMu.Unlock()

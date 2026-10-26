@@ -97,6 +97,16 @@ func (s *Server) resolveInference(ctx context.Context, st core.State) (core.Mode
 		s.rememberTarget(st.ID, target)
 		return choiceFromTarget(target), nil
 	}
+	// 远程 Provider 配置了公开别名时，尊重请求中的已知别名；未知值继续沿用网关默认模型，保持旧客户端行为。
+	if requested := strings.TrimSpace(st.ClientModel); requested != "" {
+		if remote, ok := s.remoteProviderConfig(active.Backend); ok {
+			if upstreamID := strings.TrimSpace(remote.ModelMappings[requested]); upstreamID != "" {
+				target := proxyModelTarget{ProviderID: active.Backend, Hint: requested, ModelKey: requested, UpstreamID: upstreamID}
+				s.rememberTarget(st.ID, target)
+				return choiceFromTarget(target), nil
+			}
+		}
+	}
 	t, err := s.resolveProxyModelTargetForUpstream(ctx, active)
 	if err != nil {
 		return core.ModelChoice{}, err
