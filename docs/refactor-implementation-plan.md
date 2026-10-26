@@ -2,7 +2,7 @@
 
 > 目标分支：`dev`
 > 初始计划基线：`e9e55286a4d3d2cba4d76df212280b8547065267`
-> 状态：阶段 1 日志可靠性与阶段 4 Provider 扩展继续推进；PR #5/#7 已合并，合并后审计负载 CI 失败已登记；新增阶段 4.5 配置来源治理计划。
+> 状态：配置治理基础门禁、OpenAPI operation 元数据校验和请求日志保留状态 API 已合入 dev；Actions #222–#225 均完整通过。日常开发继续以 dev 为唯一集成目标，真实供应商 E2E 与公网部署验证仍依赖用户环境。
 
 ## 当前状态快照（2026-10-26）
 
@@ -10,7 +10,7 @@
 
 - 本轮配置治理开始前的 `dev` HEAD：`f89d064bc0b31478079e71631cbe23a18db139af`；本批在该基线上形成一个完整功能提交，默认分支 `main` 保持独立。
 - PR #5（TCP 连接拒绝与恢复）和 PR #7（远程 Provider 并发与管理能力）已分别于 2026-10-26 合并至 `dev`。PR #6 是重复的 Provider 并发功能分支，已关闭且未合并；当前已核实的 PR 列表中没有开放 PR。
-- 合并提交上的 Actions [40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 曾因审计行数不足而失败；配置治理第一批提交 `efd2c310` 的完整 Actions [40301496847](https://github.com/Kasign/llm-gateway/actions/runs/40301496847) 随后 34/34 步通过，包括 Gateway 审计负载、故障注入、race、Go 静态检查、构建和前端 Bundle。数据库/Redis 地址改为环境变量的提交 `26209f03` 对应 Actions [40302076802](https://github.com/Kasign/llm-gateway/actions/runs/40302076802) 在本次记录时仍在执行，不提前宣称通过。
+- 合并提交上的 Actions [40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 曾出现审计行数不足的失败；随后配置契约提交 [#222](https://github.com/Kasign/llm-gateway/actions/runs/40301496847)、配置地址迁移 [#223](https://github.com/Kasign/llm-gateway/actions/runs/40302076802)、OpenAPI operation 门禁 [#224](https://github.com/Kasign/llm-gateway/actions/runs/40302664234) 与保留状态 API [#225](https://github.com/Kasign/llm-gateway/actions/runs/40303724984) 均通过完整 Actions，分别为 34/34 步。后续验证以最新 HEAD 对应运行结果为准。
 - 历史功能/测试分支可以暂时保留；已确认的 PR #1–#5、#7 功能已进入 `dev`，不会重复合并。后续以 `dev` 作为唯一日常集成目标，只有独立的大型功能或紧急修复才短期开新分支并及时合回。
 
 ## 1. 重构目标
@@ -197,7 +197,8 @@ docs/                        中文架构、协议和运维文档
 | 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
 | 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
 | 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Provider 预置/Web 管理、独立 Key、模型映射、并发与 RPM 已在 PR #7 合入；真实供应商端到端及真实公网故障注入仍待用户控制的凭据/部署环境。 |
-| 阶段 4.5：配置来源治理 | 进行中 | 75% | 配置矩阵、Go YAML 字段校验、模板路径/静态值对账、YAML 环境变量注入及 Provider 环境字段门禁已进入 `dev`；数据库/Redis 地址已移至 `.env` 注入，保留旧 `.env` 的 Compose 默认回退。Web/数据库 Provider 冲突与热更新边界、完整旧部署兼容仍需统一 Review。 |\n| 阶段 5：运行治理与 CI | 进行中 | 85% | `efd2c310` 的完整 Actions #222（34/34 步）通过，包含配置契约、单测、MariaDB 审计积压、Gateway 负载/故障注入、race、性能、go vet、构建和前端 Bundle；`26209f03` 的配置地址迁移对应 Actions #223 尚在执行。旧的审计负载失败记录保留作历史问题，不覆盖后续成功回归事实。历史分支不作为当前阻塞，日常开发统一回到 `dev`。 |
+| 阶段 4.5：配置来源治理 | 进行中 | 82% | 配置矩阵、Go YAML 字段校验、YAML 模板路径/静态值对账、环境变量与 Compose 注入门禁已完成；MariaDB/Redis 地址已移到 `.env`，并以 Compose 默认值兼容旧 `.env`。YAML、环境 Provider 和 Web Provider 的 ID 冲突保护已在代码中存在；剩余为逐项 Review 默认值与旧部署行为，确认没有重复维护入口。 |
+| 阶段 5：运行治理与 CI | 进行中 | 88% | 配置契约、OpenAPI operation 元数据、保留状态 API 和此前日志/Provider 功能的 Actions #222–#225 均 34/34 步通过，覆盖 Go 单测、MariaDB 审计积压、Gateway 负载/故障注入、race、性能、go vet、构建与前端 Bundle。剩余事项集中为真实供应商/公网部署验收，以及 Token 预算和排队的设计决策；不再将早期已被后续成功回归覆盖的审计负载失败列为当前阻塞。 |
 
 ### 已核实的历史 CI 问题
 
@@ -207,12 +208,12 @@ docs/                        中文架构、协议和运维文档
 
 ### 下一步
 
-1. **已完成当前契约盘点**：新增 `docs/api-config-db-contracts.md`，覆盖公开/管理 API 分组、Provider/Agent 配置与生效边界、数据库表/迁移机制、错误和流式状态语义；README 已添加入口。该文档说明当前代码事实与风险，不替代 OpenAPI。
-2. **运行治理当前功能组**：远程 Provider 并发限制、审计队列只读指标、DNS 故障审计语义、响应已提交后的 SSE 中断和本地 TLS 握手中断均已由代码 Head `0647b6ae` 的 Actions #166 完整验收。PR #5 与 PR #7 已分别合并到 `dev`；合并后最新 CI 运行 40298422463 的 Gateway 审计负载验收失败，列为下一次统一回归的首要问题。Web 多 Provider 管理已在 PR #7 进入 `dev`；下一阶段新增配置来源治理，连接池陈旧连接、Payload 保留策略及真实供应商验收仍在问题台账中。
-3. 对 OpenAI-compatible Provider 做真实供应商及 DNS、连接超时、429/5xx 故障注入，核验错误映射与凭据边界。
-4. 只有在明确需求后再增加同一 Agent 多模型别名/映射、Agent 级访问策略和配置热更新；不允许任意客户端 model 值越权改变 Provider。
-5. 当前不实现自动重试/故障转移：Provider 的 Retryable 仅是错误元数据，Pipeline 每请求调用一次 Forwarder。未来若引入重试/切换，必须先证明客户端响应尚未提交并确认请求幂等；SSE 首个字节写出后禁止重试或切换上游。
-6. 每完成一个有边界的功能组，更新本文并按功能提交；提交后以当前 HEAD 对应 Actions 为验收依据。
+1. **完成配置来源治理的最后一轮 Review**：目前 `.env`、`config.yaml`、`providers.env`、Web/数据库配置和 Go 默认值已有职责矩阵与 CI 静态门禁。代码确认 YAML/环境重复 Provider ID 在加载校验阶段失败，Web Provider 与部署配置 ID 冲突时拒绝覆盖。下一步核对默认值、旧 `.env` 兼容回退和敏感字段错误输出；在用户部署环境验证之前不删除 `config.yaml` 或强行迁移配置目录。
+2. **请求日志保留功能**：`GET /api/admin/retention/status` 已加入 `dev`，返回启用状态、最近执行状态、耗时、删除行数和失败计数；不访问数据库、不回显原始错误，指标在进程重启后清零。完整 Actions #225 已通过，真实部署后的轮询/告警接入仍需由运维环境配置。
+3. **收口 OpenAPI 字段级契约**：当前 `docs/openapi.yaml` 有 63 个字面路径模板和 72 个 HTTP operation；Agent 路由前缀展开后，CI 对 67 个运行时路由路径做双向对账。operationId、summary、responses、security 元数据门禁已通过；后续在碰到具体 Handler 时继续补请求/响应 Schema，不把静态路径检查说成完整语义验证。
+4. **推进尚未实现的运行治理功能**：Provider Token 预算和排队策略仍为待设计，先明确预算维度、usage 来源可信度、过载响应、排队公平性、请求取消与超时，再实现代码；不能把上游 usage 缺失时的估算伪装成真实计费数据。
+5. **需要用户环境的项目单独验收**：真实供应商 E2E、真实公网 OpenResty 路由和生产故障恢复需要用户自己的供应商密钥与部署环境。自动重试/故障转移、Agent 级独立访问策略和 Agent 配置热更新仍是显式延后项，先做风险设计，不为填进度表而贸然实现。
+6. 每完成一个完整功能组，同步中文设计说明与问题台账，按功能合并提交；以对应最新 HEAD 的 GitHub Actions 作为自动化验收依据，不重复手动触发小范围测试。
 
 ### 已验收功能组：请求级 Provider 固定
 
@@ -906,7 +907,7 @@ docs/                        中文架构、协议和运维文档
 
 ## 2026-10-26 配置治理第一批：模板对账与环境变量契约门禁
 
-- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS。后续提交将 DB/Redis 地址也改为环境变量引用，Compose 继续提供 `Mariadb` 与 `Redis:6379` 默认回退以兼容已有 .env；配置检查器不再允许两份 YAML 存在任何未登记静态值差异。
+- 将 deploy/config.yaml 的有效字段路径与 config.example.yaml 对齐，补入日志保留默认值与 agents: []，并将本地请求超时改为引用 LLAMA_REQUEST_TIMEOUT_SECONDS；DB/Redis 地址也已改为环境变量引用，Compose 继续提供 `Mariadb` 与 `Redis:6379` 默认回退以兼容已有 .env；配置检查器不允许两份 YAML 存在未登记静态值差异。
 - 新增 scripts/check_config_contract.go，使用现有 yaml.v3 依赖反射检查 YAML 字段是否存在于 Go 配置结构，比较两份 YAML 的有效字段路径与静态默认值，校验 YAML 环境变量在 .env.example 声明并由 Compose 白名单注入，同时对账 Provider 环境变量解析器、示例文件与 DeepSeek/OpenAI Compose 字段。
 - 将配置契约检查加入 GitHub Actions；新增 docs/configuration-matrix.md 作为配置主维护入口清单，并更新中文配置说明、README、问题台账与本计划。
 - 按本轮约定没有手动运行测试或重放负载。提交后需查看新 Head 对应 Actions；真实部署兼容、Provider 跨来源冲突、慢模型超时和审计负载仍留在统一回归清单中。
@@ -917,17 +918,17 @@ docs/                        中文架构、协议和运维文档
 
 - 将 `database.host` 与 `redis.addr` 改为引用 `LLM_GATEWAY_DB_HOST`、`LLM_GATEWAY_REDIS_ADDR`，并在主 `.env.example` 和 Compose 显式环境白名单中声明。
 - Compose 对已有 `.env` 缺少这两个新变量的部署继续回退到 `Mariadb` 与 `Redis:6379`；因此旧环境不需要立即补变量即可沿用既有容器名。新安装可按实际 Docker network 内的容器名称修改示例值。
-- 配置契约检查不再保留 `database.host` / `redis.addr` 两个差异例外；两份 YAML 的静态字段和值必须完全一致。该增量对应 Actions #40302076802，提交时尚未完成，待 GitHub Actions 自动验证。
+- 配置契约检查不再保留 `database.host` / `redis.addr` 两个差异例外；两份 YAML 的静态字段和值必须完全一致。完整 Actions #223（运行 `40302076802`，34/34 步）已通过。
 
 
 ## 2026-10-26 OpenAPI operation 元数据门禁
 
-- `docs/openapi.yaml` 当前 66 条路径包含 71 个 HTTP operation。本批为所有 operation 添加唯一、稳定的 `operationId`，方便 SDK 生成和管理 API 的引用。
-- `scripts/check_openapi_routes.py` 在原有路径双向对账之外，新增 operationId 唯一性、summary、responses 和显式 security 检查；健康检查和登录是仅有的公开操作，其余 operation 必须有安全契约。
+- `docs/openapi.yaml` 当前包含 63 个字面路径模板与 72 个 HTTP operation；四条配置 Agent 前缀展开后，CI 核对 67 个运行时路由路径。所有 operation 都有唯一、稳定的 `operationId`，方便 SDK 生成和管理 API 的引用。
+- `scripts/check_openapi_routes.py` 在原有路径双向对账之外，新增 operationId 唯一性、summary、responses 和显式 security 检查；健康检查和登录是仅有的公开操作，其余 operation 必须有安全契约。完整 Actions #224（运行 `40302664234`，34/34 步）已通过。
 - 该门禁确保 operation 元数据完整，但不宣称所有 JSON Schema 已与 Go Handler 序列化完全等价；字段级契约继续依实际 Handler 与响应类型分批对照。
 
 ## 2026-10-26 请求日志保留可观测性
 
 在现有分批删除逻辑上增加管理员只读 API `GET /api/admin/retention/status`，公开最近运行状态、耗时、删除量、成功/失败计数和稳定失败代码，支持外部监控器轮询。指标只存当前进程内，重启后计数归零；原始数据库错误只写服务日志，不经 API 返回。此功能不增加通知服务，也不声称主动推送告警。
 
-同时同步 OpenAPI 响应结构及状态契约测试。本提交后的验证依赖 GitHub Actions，不手动运行测试。
+同时同步 OpenAPI 响应结构及状态契约测试。完整 Actions #225（运行 `40303724984`，34/34 步）通过，包含新增 Go 状态聚合单测、路由/OpenAPI 检查、配置契约、全套集成负载、race、构建和前端 Bundle。

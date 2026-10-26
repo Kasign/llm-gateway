@@ -200,9 +200,9 @@ Provider 级 RPM 超限返回 HTTP 429，错误码为 `provider_rate_limit_excee
 
 ### operationId 元数据门禁（2026-10-26）
 
-OpenAPI 为 66 条路径下的 71 个 HTTP operation 分配唯一 operationId。CI 检查 operationId 不重复，且每个 operation 都有 summary 和 responses；除 `GET /health`、`POST /api/auth/login` 外，每个 operation 必须显式声明 security。健康检查和登录是有意公开的操作，不应通过伪造认证要求来消除检查告警。
+OpenAPI 当前包含 63 个字面路径模板和 72 个 HTTP operation。Agent 前缀映射展开后，路由门禁核对 67 个运行时路由路径。CI 检查 operationId 不重复，且每个 operation 都有 summary 和 responses；除 `GET /health`、`POST /api/auth/login` 外，每个 operation 必须显式声明 security。健康检查和登录是有意公开的操作，不应通过伪造认证要求来消除检查告警。
 
-该检查与路径双向对账共同构成路由/operation 的静态门禁；它不保证每个 JSON Schema 的字段、可空性和 Go Handler 序列化完全相同。字段契约仍以 Handler、实际响应结构和功能 Review 为依据。
+请求日志保留状态接口已添加到该契约范围，并由完整 Actions #225 验证。该检查与路径双向对账共同构成路由/operation 的静态门禁；它不保证每个 JSON Schema 的字段、可空性和 Go Handler 序列化完全相同。字段契约仍以 Handler、实际响应结构和功能 Review 为依据。
 
 
 机器可读规范位于 [`docs/openapi.yaml`](openapi.yaml)，采用 OpenAPI 3.1.0。首版覆盖健康检查、通用推理协议入口、配置的 Agent 前缀推理入口、请求统计，以及 Web 管理 Provider 的 CRUD 与操作端点。
