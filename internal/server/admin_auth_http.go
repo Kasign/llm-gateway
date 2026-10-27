@@ -61,72 +61,80 @@ func (s *Server) adminAuthorized(ctx context.Context, r *http.Request) bool {
 }
 
 func (s *Server) authStatusAPI(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        jsonError(w, 405, "method_not_allowed", "GET required")
-        return
-    }
-    snap := s.currentWebLoginSnapshot()
-    w.Header().Set("Cache-Control", "no-store")
-    _ = json.NewEncoder(w).Encode(map[string]interface{}{"password_enabled": snap.PasswordEnabled})
+	if r.Method != http.MethodGet {
+		jsonError(w, 405, "method_not_allowed", "GET required")
+		return
+	}
+	snap := s.currentWebLoginSnapshot()
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]interface{}{"password_enabled": snap.PasswordEnabled})
 }
 
 func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        jsonError(w, 405, "method_not_allowed", "POST required")
-        return
-    }
-    cfgUser, cfgHash, revision, ok := s.effectiveWebLogin()
-    if !ok {
-        jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
-        return
-    }
-    snap := s.currentWebLoginSnapshot()
-    ip := clientIP(r, s.trustedProxyRanges)
-    allowed, _, err := s.limiter.Allow(r.Context(), "login:"+ip, 12)
-    if err != nil {
-        jsonError(w, 503, "rate_limit_unavailable", err.Error())
-        return
-    }
-    if !allowed {
-        applog.Printf("admin login rate limited: ip=%s", ip)
-        jsonError(w, 429, "too_many_attempts", "too many login attempts, try again later")
-        return
-    }
-    var in struct {
-        Password string `json:"password"`
-    }
-    if r.Body != nil && r.ContentLength != 0 {
-        if json.NewDecoder(r.Body).Decode(&in) != nil {
-            jsonError(w, 400, "invalid_request", "invalid JSON body")
-            return
-        }
-    }
-    if snap.PasswordEnabled {
-        if !adminuser.WebLoginConfigured(cfgUser, cfgHash) {
-            jsonError(w, 503, "login_not_configured", "密码保护已启用，但未配置有效密码")
-            return
-        }
-        if !adminuser.CheckPassword(cfgHash, in.Password) {
-            applog.Printf("admin login failed: password mismatch from=%s", ip)
-            jsonError(w, 401, "invalid_credentials", "密码错误")
-            return
-        }
-    }
-    token, err := adminuser.NewSessionToken()
-    if err != nil {
-        jsonError(w, 500, "session_error", err.Error())
-        return
-    }
-    if err := s.limiter.SetSession(r.Context(), token, cfgUser, revision, s.sessionTTL()); err != nil {
-        jsonError(w, 503, "session_unavailable", err.Error())
-        return
-    }
-    applog.Printf("admin login ok: password_enabled=%t from=%s", snap.PasswordEnabled, ip)
-    _ = json.NewEncoder(w).Encode(map[string]interface{}{
-        "token": token,
-        "user": map[string]interface{}{"username": cfgUser},
-    })
+	if r.Method != http.MethodPost {
+		jsonError(w, 405, "method_not_allowed", "POST required")
+		return
+	}
+
+	// 同一份快照提供开关、密码哈希和会话版本，避免并发修改时混用新旧状态。
+	snap := s.currentWebLoginSnapshot()
+	cfgUser := strings.TrimSpace(snap.Username)
+	if cfgUser == "" {
+		jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
+		return
+	}
+
+	ip := clientIP(r, s.trustedProxyRanges)
+	allowed, _, err := s.limiter.Allow(r.Context(), "login:"+ip, 12)
+	if err != nil {
+		jsonError(w, 503, "rate_limit_unavailable", err.Error())
+		return
+	}
+	if !allowed {
+		applog.Printf("admin login rate limited: ip=%s", ip)
+		jsonError(w, 429, "too_many_attempts", "too many login attempts, try again later")
+		return
+	}
+
+	var in struct {
+		Password string `json:"password"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			jsonError(w, 400, "invalid_request", "invalid JSON body")
+			return
+		}
+	}
+
+	if snap.PasswordEnabled {
+		if !adminuser.WebLoginConfigured(cfgUser, snap.PasswordHash) {
+			jsonError(w, 503, "login_not_configured", "密码保护已启用，但未配置有效密码")
+			return
+		}
+		if !adminuser.CheckPassword(snap.PasswordHash, in.Password) {
+			applog.Printf("admin login failed: password mismatch from=%s", ip)
+			jsonError(w, 401, "invalid_credentials", "密码错误")
+			return
+		}
+	}
+
+	token, err := adminuser.NewSessionToken()
+	if err != nil {
+		jsonError(w, 500, "session_error", err.Error())
+		return
+	}
+	if err := s.limiter.SetSession(r.Context(), token, cfgUser, snap.Revision, s.sessionTTL()); err != nil {
+		jsonError(w, 503, "session_unavailable", err.Error())
+		return
+	}
+
+	applog.Printf("admin login ok: password_enabled=%t from=%s", snap.PasswordEnabled, ip)
+	writeJSON(w, map[string]interface{}{
+		"token": token,
+		"user":  map[string]interface{}{"username": cfgUser},
+	})
 }
+
 func (s *Server) authLogoutAPI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, 405, "method_not_allowed", "POST required")
@@ -181,78 +189,89 @@ func (s *Server) authCredentialsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authCredentialsPut(w http.ResponseWriter, r *http.Request) {
-    _, token, ok := s.adminSessionFromRequest(r.Context(), r)
-    if !ok {
-        jsonError(w, 401, "web_session_required", "修改密码设置需要网页登录会话")
-        return
-    }
-    cfgUser, _, _, ok := s.effectiveWebLogin()
-    if !ok {
-        jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
-        return
-    }
-    current := s.currentWebLoginSnapshot()
-    var in struct {
-        CurrentPassword string `json:"current_password"`
-        NewPassword string `json:"new_password"`
-        PasswordEnabled *bool `json:"password_enabled"`
-    }
-    if json.NewDecoder(r.Body).Decode(&in) != nil {
-        jsonError(w, 400, "invalid_request", "invalid JSON body")
-        return
-    }
-    targetEnabled := current.PasswordEnabled
-    if in.PasswordEnabled != nil {
-        targetEnabled = *in.PasswordEnabled
-    }
-    if current.PasswordEnabled && !adminuser.CheckPassword(current.PasswordHash, in.CurrentPassword) {
-        applog.Printf("password settings rejected: current password mismatch from=%s", clientIP(r, s.trustedProxyRanges))
-        jsonError(w, 401, "invalid_credentials", "当前密码错误")
-        return
-    }
-    if !current.PasswordEnabled && targetEnabled && strings.TrimSpace(in.NewPassword) == "" {
-        jsonError(w, 400, "password_required", "开启密码保护时必须设置新密码")
-        return
-    }
-    if !targetEnabled && strings.TrimSpace(in.NewPassword) != "" {
-        jsonError(w, 400, "invalid_request", "关闭密码保护时请清空新密码输入框")
-        return
-    }
-    newHash := current.PasswordHash
-    if strings.TrimSpace(in.NewPassword) != "" {
-        hash, err := adminuser.HashPassword(in.NewPassword)
-        if err != nil {
-            jsonError(w, 400, "invalid_password", err.Error())
-            return
-        }
-        newHash = hash
-    }
-    if targetEnabled && !adminuser.WebLoginConfigured(cfgUser, newHash) {
-        jsonError(w, 400, "password_required", "启用密码保护需要有效密码")
-        return
-    }
-    if targetEnabled == current.PasswordEnabled && newHash == current.PasswordHash {
-        jsonError(w, 400, "no_change", "没有需要保存的更改")
-        return
-    }
-    nextRevision := current.Revision + 1
-    next := webLoginSnapshot{
-        Username: webAdminIdentity,
-        PasswordHash: newHash,
-        PasswordEnabled: targetEnabled,
-        Revision: nextRevision,
-    }
-    if err := s.persistWebLogin(r.Context(), next); err != nil {
-        jsonError(w, 500, "save_failed", err.Error())
-        return
-    }
-    if err := s.limiter.SetSession(r.Context(), token, webAdminIdentity, nextRevision, s.sessionTTL()); err != nil {
-        jsonError(w, 503, "session_unavailable", err.Error())
-        return
-    }
-    applog.Printf("web password settings updated: password_enabled=%t from=%s", targetEnabled, clientIP(r, s.trustedProxyRanges))
-    _ = json.NewEncoder(w).Encode(map[string]interface{}{
-        "user": map[string]interface{}{"username": webAdminIdentity},
-        "password_enabled": targetEnabled,
-    })
+	// 密码设置只能串行修改，避免并发请求基于旧版本覆盖对方的新值。
+	s.webLoginMutationMu.Lock()
+	defer s.webLoginMutationMu.Unlock()
+
+	_, token, ok := s.adminSessionFromRequest(r.Context(), r)
+	if !ok {
+		jsonError(w, 401, "web_session_required", "修改密码设置需要网页登录会话")
+		return
+	}
+
+	current := s.currentWebLoginSnapshot()
+	cfgUser := strings.TrimSpace(current.Username)
+	if cfgUser == "" {
+		jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
+		return
+	}
+
+	var in struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		PasswordEnabled *bool  `json:"password_enabled"`
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil {
+		jsonError(w, 400, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	targetEnabled := current.PasswordEnabled
+	if in.PasswordEnabled != nil {
+		targetEnabled = *in.PasswordEnabled
+	}
+	if current.PasswordEnabled && !adminuser.CheckPassword(current.PasswordHash, in.CurrentPassword) {
+		applog.Printf("password settings rejected: current password mismatch from=%s", clientIP(r, s.trustedProxyRanges))
+		jsonError(w, 401, "invalid_credentials", "当前密码错误")
+		return
+	}
+	if !current.PasswordEnabled && targetEnabled && strings.TrimSpace(in.NewPassword) == "" {
+		jsonError(w, 400, "password_required", "开启密码保护时必须设置新密码")
+		return
+	}
+	if !targetEnabled && strings.TrimSpace(in.NewPassword) != "" {
+		jsonError(w, 400, "invalid_request", "关闭密码保护时请清空新密码输入框")
+		return
+	}
+
+	newHash := current.PasswordHash
+	if strings.TrimSpace(in.NewPassword) != "" {
+		hash, err := adminuser.HashPassword(in.NewPassword)
+		if err != nil {
+			jsonError(w, 400, "invalid_password", err.Error())
+			return
+		}
+		newHash = hash
+	}
+	if targetEnabled && !adminuser.WebLoginConfigured(cfgUser, newHash) {
+		jsonError(w, 400, "password_required", "启用密码保护需要有效密码")
+		return
+	}
+	if targetEnabled == current.PasswordEnabled && newHash == current.PasswordHash {
+		jsonError(w, 400, "no_change", "没有需要保存的更改")
+		return
+	}
+
+	nextRevision := current.Revision + 1
+	next := webLoginSnapshot{
+		Username:        webAdminIdentity,
+		PasswordHash:    newHash,
+		PasswordEnabled: targetEnabled,
+		Revision:        nextRevision,
+	}
+	if err := s.persistWebLogin(r.Context(), next); err != nil {
+		jsonError(w, 500, "save_failed", err.Error())
+		return
+	}
+	if err := s.limiter.SetSession(r.Context(), token, webAdminIdentity, nextRevision, s.sessionTTL()); err != nil {
+		jsonError(w, 503, "session_unavailable", err.Error())
+		return
+	}
+
+	applog.Printf("web password settings updated: password_enabled=%t from=%s", targetEnabled, clientIP(r, s.trustedProxyRanges))
+	writeJSON(w, map[string]interface{}{
+		"user":             map[string]interface{}{"username": webAdminIdentity},
+		"password_enabled": targetEnabled,
+	})
 }
+

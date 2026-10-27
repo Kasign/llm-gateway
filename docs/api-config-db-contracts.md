@@ -39,7 +39,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 配置区 | 核心字段/用途 | 生效边界 |
 | --- | --- | --- |
 | `server` | `host`、`port`、`trusted_proxies` | 代理转发头只信任明确配置的代理来源。 |
-| `auth` | Admin API Key、用户名/密码或密码哈希、会话 TTL | 管理员凭据与调用方推理 API Key 是两套身份。 |
+| `auth` | Admin API Key、控制台密码哈希、会话 TTL | 管理 API Key、控制台登录会话与调用方推理 API Key 是不同凭据域。Web 密码保护开关保存在 `gateway_settings.web_admin_login`。 |
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、请求时限、模型数、warm-start | `LLAMA_REQUEST_TIMEOUT_SECONDS` 控制本地推理客户端的整体请求时限；显式设为 `0` 时不设客户端整体时限，适合慢速本地模型，调用方取消仍然有效。旧配置未填写时继续默认 3600 秒；正整数上限 604800 秒。全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
@@ -218,10 +218,10 @@ OpenAPI 当前包含 63 个字面路径模板和 72 个 HTTP operation。Agent �
 
 `docs/openapi.yaml` 已增加调用方 API Key CRUD、启用/禁用/轮换，以及控制台登录、会话查询、注销与凭据更新端点。
 
-- 调用方 Gateway Key 用于访问 `/v1/*`；它与管理员会话 Token、`X-Admin-Key` 和远程 Provider 的供应商 Key 不同。管理员请求支持 Bearer 管理会话或 `X-Admin-Key`；修改控制台用户名/密码只允许 Web 登录会话。
+- 调用方 Gateway Key 用于访问 `/v1/*`；它与管理员会话 Token、`X-Admin-Key` 和远程 Provider 的供应商 Key 不同。管理员请求支持 Bearer 管理会话或 `X-Admin-Key`；修改控制台密码与密码保护开关只允许使用 Web 登录会话。
 - `POST /api/admin/keys` 和 `POST /api/admin/keys/{id}/rotate` 会返回一次明文调用方 Key。数据库仅保存摘要，列表和元数据响应不含明文或哈希；轮换后旧 Key 立即失效。
 - 管理会话由 `POST /api/auth/login` 建立，Token 在后续请求通过 `Authorization: Bearer` 发送，不是浏览器 Cookie。登录按客户端 IP 进行限流；Web 会话的服务端有效性还依赖 Redis 会话记录及登录凭据版本。
-- `PUT /api/auth/credentials` 需要当前密码；新用户名或密码留空表示保留当前值。修改后会更新凭据版本并更新当前会话版本，其他旧版本会话不再有效。
+- `PUT /api/auth/credentials` 仅接受 Web 登录会话。保护已开启时，修改密码或关闭保护必须验证当前密码；从关闭状态开启保护时必须提交新密码。开关、密码哈希和版本号保存到现有 `gateway_settings.web_admin_login` JSON 记录；写入成功后更新当前会话版本，其他旧版本会话失效。旧记录没有 `password_enabled` 字段时，按有效旧密码哈希推断为开启，以兼容原有部署。
 - 规范对以上接口记录了实际响应结构与状态码，但管理端点的错误详情仍共用宽泛的安全错误 Schema。下一步需逐个梳理模型、下载、运行时、Benchmark 和推理参数管理 API，再考虑自动契约差异检查。
 
 

@@ -430,6 +430,8 @@ function initPasswordToggles() {
     try {
       const response = await api("/api/auth/credentials");
       passwordProtectionAtLoad = response.password_enabled !== false;
+      passwordProtectionEnabled = passwordProtectionAtLoad;
+      updateLoginModeUI();
       const toggle = $("accountPasswordEnabled");
       if (toggle) toggle.checked = passwordProtectionAtLoad;
       if (status) {
