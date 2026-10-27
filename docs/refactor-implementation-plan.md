@@ -958,3 +958,10 @@ docs/                        中文架构、协议和运维文档
 - 复核管理 API 后，统计接口的数据库失败已使用通用 `database_error` 响应并将原始原因只写服务端日志；Provider 创建/删除 Handler 分别返回 `201 Created` 与无正文的 `204 No Content`，已有单测覆盖统计错误脱敏。
 - 新增 `scripts/check_openapi_contracts.py`，在 CI 前置阶段核验 Provider 配置/用量 Schema 的关键字段和范围、创建/删除响应正文边界及统计接口稳定错误封套。同步补齐 ProviderView 中已由 Handler 返回但先前未显式声明的并发使用指标。
 - 本门禁只覆盖高风险子集；`x-contract-status: partial` 保留，不声称已完成所有 Handler 的全字段 Schema 对账。后续逐步扩展到请求统计 Token 来源、请求日志 Provider 筛选与取消端点。
+
+
+## 2026-10-27 FIFO 队列截止时刻复审修正
+
+- 完成第一轮 FIFO 队列提交的完整 Actions 后，复审发现定时器与并发许可同时就绪时存在边界窗口：等待 goroutine 若延迟恢复，可能在 deadline 之后接受许可。
+- deadline 改为在等待项进入队列时固定，并为每个 waiter 记录实际许可发放时间；ready 和 timeout 分支都检查时间戳。晚到许可会退还并计为一次队列超时，父请求取消仍优先返回 Context 错误。
+- 新增锁竞争确定性回归用例覆盖晚到许可，不修改既有 FIFO、队列容量、取消和故障注入语义。该补丁提交后的完整 Actions 是本轮验收闸门。

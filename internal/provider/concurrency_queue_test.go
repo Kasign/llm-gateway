@@ -102,3 +102,55 @@ func TestConcurrencyLimiterQueueRejectsFullAndTimesOut(t *testing.T) {
 	if got:=limiter.QueueDepth();got!=0 { t.Fatalf("queue depth after timeout = %d, want 0",got) }
 	limiter.Release()
 }
+
+
+func TestConcurrencyLimiterQueueRejectsGrantAfterDeadline(t *testing.T) {
+	limiter, err := NewConcurrencyLimiter(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := limiter.SetQueueLimit(1); err != nil {
+		t.Fatal(err)
+	}
+	if !limiter.TryAcquire() {
+		t.Fatal("expected initial active request to acquire the slot")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- limiter.Acquire(context.Background(), 60*time.Millisecond)
+	}()
+	waitForConcurrencyQueueDepth(t, limiter, 1)
+
+	// Hold the limiter lock past the wait deadline. A release then grants the
+	// queued waiter after its deadline, while its goroutine cannot observe the
+	// timer until the lock is released. This makes the timeout/grant race deterministic.
+	limiter.mu.Lock()
+	time.Sleep(100 * time.Millisecond)
+	if limiter.active <= 0 {
+		limiter.mu.Unlock()
+		t.Fatal("expected an active request to release")
+	}
+	limiter.active--
+	limiter.dispatchWaitersLocked()
+	limiter.mu.Unlock()
+
+	select {
+	case err := <-done:
+		status, code, _ := core.Unpack(err)
+		if status != 503 || code != "provider_queue_timeout" {
+			t.Fatalf("late grant result = %d/%s, want 503/provider_queue_timeout", status, code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late-granted request did not return")
+	}
+	if got := limiter.Active(); got != 0 {
+		t.Fatalf("active slots after late-grant timeout = %d, want 0", got)
+	}
+	if got := limiter.QueueDepth(); got != 0 {
+		t.Fatalf("queue depth after late-grant timeout = %d, want 0", got)
+	}
+	if got := limiter.QueueTimeouts(); got != 1 {
+		t.Fatalf("queue timeout counter = %d, want 1", got)
+	}
+}

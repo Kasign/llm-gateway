@@ -29,7 +29,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入。 | Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过；队列逻辑、取消/超时、竞态和前端 Bundle 均已验收，真实供应商与公网链路仍待部署环境回归。 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。排队默认关闭（`max_queue_size=0`），启用后进程内 FIFO、有界 1024，支持 Context 取消及 503 超时/满队列错误；不将它与 Redis RPM 或 Token 预算混为一套状态。 | CI 对逻辑与构建验收通过；真实用量差异、慢模型及反向代理端到端行为保留在统一部署回归。 |
+| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入。 | 队列第一批 Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过；代码复审随后修正了超时与许可同时就绪的窄竞争，并增加确定性回归用例，新 Head Actions 待验收；真实供应商与公网链路仍待部署环境回归。 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。排队默认关闭（`max_queue_size=0`），启用后进程内 FIFO、有界 1024，支持 Context 取消及 503 超时/满队列错误；不将它与 Redis RPM 或 Token 预算混为一套状态。 | CI 对逻辑与构建验收通过；真实用量差异、慢模型及反向代理端到端行为保留在统一部署回归。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -271,3 +271,11 @@
 - Provider 创建 Handler 返回 `201 Created`，删除返回无正文的 `204 No Content`；OpenAPI 对应成功响应保持一致。
 - 新增标准库脚本 `scripts/check_openapi_contracts.py`，检查 Provider mutation/view 的并发、队列、RPM、每日 Token 和超时字段/范围，以及创建、删除、统计失败响应的关键契约，并加入 Actions 前置门禁。
 - 这是字段级覆盖的起点，不代表整个 OpenAPI 与 Go Handler 已完全等价；`x-contract-status: partial` 继续保留。Provider 队列功能对应 Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过。
+
+
+## 2026-10-27 FIFO 等待超时边界复审
+
+- 复审发现：如果等待定时器已触发，但 goroutine 因调度/锁竞争尚未恢复，而并发许可在截止时刻后被发放，原逻辑可能把晚到许可当成成功。
+- 现在在等待项入队时确定 deadline，并记录每个许可真实发放时间；ready 与 timeout 同时就绪时，严格以发放时间判定。超时后到达的许可会立即归还、唤醒后续等待者并记录一次队列超时。
+- 新增确定性测试：测试持有许可器互斥锁跨过队列截止时刻，再发放许可，验证 503 `provider_queue_timeout`、活动许可归零及队列/超时指标正确。
+- 本修复为小范围时序修正；本次不手动运行测试，等待新 Head Actions 完整回归。 

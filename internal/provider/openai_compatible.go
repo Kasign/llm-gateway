@@ -49,8 +49,9 @@ const (
 
 // concurrencyWaiter 表示进入 Provider FIFO 等待队列的单个请求。
 type concurrencyWaiter struct {
-	ready   chan struct{}
-	granted bool
+	ready     chan struct{}
+	granted   bool
+	grantedAt time.Time
 }
 
 // ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算与等待队列。
@@ -182,6 +183,7 @@ func (l *ConcurrencyLimiter) dispatchWaitersLocked() {
 		l.waiters[0] = nil
 		l.waiters = l.waiters[1:]
 		waiter.granted = true
+		waiter.grantedAt = time.Now()
 		l.active++
 		close(waiter.ready)
 	}
@@ -198,14 +200,22 @@ func (l *ConcurrencyLimiter) removeWaiterLocked(target *concurrencyWaiter) bool 
 	}
 	return false
 }
-func (l *ConcurrencyLimiter) releaseGrantedWaiter(waiter *concurrencyWaiter) {
-	l.mu.Lock()
+func (l *ConcurrencyLimiter) releaseGrantedWaiterLocked(waiter *concurrencyWaiter) {
 	if waiter.granted {
 		waiter.granted = false
 		if l.active > 0 { l.active-- }
 		l.dispatchWaitersLocked()
 	}
+}
+
+func (l *ConcurrencyLimiter) releaseGrantedWaiter(waiter *concurrencyWaiter) {
+	l.mu.Lock()
+	l.releaseGrantedWaiterLocked(waiter)
 	l.mu.Unlock()
+}
+
+func providerQueueWaitTimeoutError() error {
+	return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_queue_timeout", Message: "upstream provider queue wait timed out"}
 }
 
 // Acquire 获取 Provider 并发许可；关闭队列时立即拒绝，启用后使用有界 FIFO 等待。
@@ -231,32 +241,63 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 		l.mu.Unlock()
 		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_queue_full", Message: "upstream provider waiting queue is full"}
 	}
+	if waitTimeout <= 0 {
+		waitTimeout = time.Duration(DefaultOpenAICompatibleQueueWaitTimeoutSeconds) * time.Second
+	}
+	// Deadline 在等待项入队时确定；即使等待 goroutine 调度延迟，也不能在超时后接受新许可。
+	waitDeadline := time.Now().Add(waitTimeout)
 	waiter := &concurrencyWaiter{ready: make(chan struct{})}
 	l.waiters = append(l.waiters, waiter)
 	l.mu.Unlock()
 
-	if waitTimeout <= 0 { waitTimeout = time.Duration(DefaultOpenAICompatibleQueueWaitTimeoutSeconds) * time.Second }
-	waitCtx, cancel := context.WithTimeout(ctx, waitTimeout)
+	waitCtx, cancel := context.WithDeadline(ctx, waitDeadline)
 	defer cancel()
 	select {
 	case <-waiter.ready:
-		if err := ctx.Err(); err != nil { l.releaseGrantedWaiter(waiter); return err }
+		l.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			l.releaseGrantedWaiterLocked(waiter)
+			l.mu.Unlock()
+			return err
+		}
+		if !waiter.grantedAt.Before(waitDeadline) {
+			l.releaseGrantedWaiterLocked(waiter)
+			l.queueTimeouts++
+			l.rejected++
+			l.mu.Unlock()
+			return providerQueueWaitTimeoutError()
+		}
+		l.mu.Unlock()
 		return nil
 	case <-waitCtx.Done():
 		l.mu.Lock()
 		if waiter.granted {
-			if ctx.Err() == nil { l.mu.Unlock(); return nil }
-			waiter.granted = false
-			if l.active > 0 { l.active-- }
-			l.dispatchWaitersLocked()
+			if err := ctx.Err(); err != nil {
+				l.releaseGrantedWaiterLocked(waiter)
+				l.mu.Unlock()
+				return err
+			}
+			// 定时器和许可同时就绪时，以真实发放许可的时刻判定是否超时。
+			if waiter.grantedAt.Before(waitDeadline) {
+				l.mu.Unlock()
+				return nil
+			}
+			l.releaseGrantedWaiterLocked(waiter)
+			l.queueTimeouts++
+			l.rejected++
 			l.mu.Unlock()
-			return ctx.Err()
+			return providerQueueWaitTimeoutError()
 		}
 		removed := l.removeWaiterLocked(waiter)
-		if removed && ctx.Err() == nil { l.queueTimeouts++; l.rejected++ }
+		if removed && ctx.Err() == nil {
+			l.queueTimeouts++
+			l.rejected++
+		}
 		l.mu.Unlock()
-		if err := ctx.Err(); err != nil { return err }
-		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_queue_timeout", Message: "upstream provider queue wait timed out"}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return providerQueueWaitTimeoutError()
 	}
 }
 
