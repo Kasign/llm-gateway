@@ -125,7 +125,7 @@ def validate_openapi_operations() -> set[str]:
             has_summary = True
         if re.match(r"^      responses:\s*$", line):
             has_responses = True
-        if re.match(r"^      security:\s*$", line):
+        if re.match(r"^      security:(?:\s*\[\])?\s*(?:#.*)?$", line):
             has_security = True
     flush()
 
