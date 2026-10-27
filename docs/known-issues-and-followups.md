@@ -4,12 +4,12 @@
 
 ## 当前基线
 
-- 最近通过的代码基线：`f8ce61fb901c7c9c7376d981ee9100b1e61619e4`；Actions [#253](https://github.com/Kasign/llm-gateway/actions/runs/40449023684) 全部通过，约 2 分钟。随后文档整理提交的 Actions 仍在运行；本次安全修复以新 Head 的结果为准。
+- 本批修改前最近通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`；Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过。当前收尾修改由新 Head 的 Actions 单独验收，不用旧 Head 的绿色结果代替。
 - 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
 - Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
 - Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
 - CI 基于 Mock 与测试数据库；真实供应商、生产代理和 1Panel 部署需单独验收，不能标记为 CI 已覆盖。
-- 本轮整体 Review 另外确认：Redis 限流器失败时，原始底层错误曾被写入调用方响应和请求审计；当前提交改用稳定通用文案，服务端日志保留故障诊断。待新 Head 的 Actions 验证。
+- Redis 限流器、模型 ID 解析和本地模型就绪失败的对外错误文案已收敛；Actions #256 已验证该基线。新发现的真实缺陷是显式设置 `llama.request_timeout_seconds: 0` 仍被代理层强制改成一小时，已纳入本批最小修复与回归覆盖。
 
 ## P1：可靠性与可观测性
 
@@ -45,11 +45,11 @@
 
 ## 当前执行范围
 
-1. 先完成一次聚焦整体 Review：配置来源/旧部署兼容、凭据脱敏、慢模型超时与取消、SSE 状态边界、源码与部署 Bundle 同步。
-2. 只修复能够从代码或实际结果明确确认的问题；生产代码、必要回归覆盖和中文文档按逻辑功能集中提交。
-3. 不再把完整 OpenAPI 字段对账、目录迁移、重试/故障转移或 Agent 权限扩展作为当前必须完成事项。
-4. 不重复运行小范围手工测试。每个完整提交由仓库 Actions 自动验证；用户统一进行真实供应商与生产部署验收。
-5. 失败回滚跨越数据库与内存 Registry 时，记录实际失败边界与补偿结果；不宣称跨系统事务绝对原子。
+1. Provider 热更新已完成最后一轮静态审查：没有确认正常配置路径可触发的 setter 失败，不增加额外回滚框架或重复测试。
+2. 修复显式零整体超时被代理层提升为一小时的问题，并为实际代理 Context 增加零值/正值回归测试。配置未指定时仍由配置加载逻辑应用既有的一小时默认值。
+3. 密钥脱敏、Provider 超时、取消与 SSE 提交边界已进行静态 Review；前端源码与部署 Bundle 由 Actions 中的构建后差异检查验证。
+4. 代码级验收依新 Head 的完整 GitHub Actions。真实供应商 E2E、公网 OpenResty 与 1Panel 部署验收依赖用户环境，单独记录，不与 Mock CI 混为一谈。
+5. 继续暂缓自动重试/故障转移、Agent 权限体系、全量 OpenAPI 对账及目录迁移；只有确认缺陷或明确产品需求才重新纳入范围。
 
 ## 2026-10-23 执行记录：并发上限功能与基线依赖
 
@@ -389,3 +389,11 @@
 - 已改为固定错误文案 `rate limiter unavailable`；HTTP 503 与错误码 `rate_limit_unavailable` 保持不变，详细错误仅保留在服务端日志。
 - 同轮还收紧了模型解析失败与本地模型加载失败的调用方消息，避免将上游控制 API 的原始错误透传；原有稳定错误码和 HTTP 状态不变。
 - 当前 Head 的自动化验收待完成；此修复不替代真实部署中 Redis 故障处理验收。
+
+## 2026-10-27 热更新与整体 Review 收尾
+
+- `dev` 在本批修改前为 `62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`，Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过；当前代码变更仍以新 Head 的 Actions 结果验收。
+- Provider 热更新：正常输入在保存前校验并发、队列范围；运行时构造还会校验并发范围；降低额度的前置应用有回滚路径，提高额度在 Registry 更新后才应用。没有发现可由有效配置触发的 setter 错误，不为理论异常扩大事务实现。
+- 配置兼容 Review 发现 `proxyRequestContext` 将显式 `request_timeout_seconds: 0` 误当作缺省值并强加一小时 Deadline，与配置加载、示例和文档的语义冲突。本批改为复用可选超时 helper：显式 0 不增加整体 Deadline，父 Context 的取消仍传播；未设置该项时仍由 `Config.Load` 维持旧的一小时默认值。
+- 本批只增加代理 Context 的零值/正值回归覆盖；未重复运行手工测试。CI 构建检查保留前端源码和 `web/static/dist` Bundle 一致性门禁。
+- 真实 Provider、慢模型经公网反向代理的实际超时/断连表现，以及 1Panel 部署仍未由这次代码审查或 CI 验收；继续作为用户环境验收项。

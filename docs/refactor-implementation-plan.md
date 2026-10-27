@@ -2,15 +2,16 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 最近完整 CI 基线：`f8ce61fb901c7c9c7376d981ee9100b1e61619e4`（Actions [#253](https://github.com/Kasign/llm-gateway/actions/runs/40449023684)，五个 Job 全部通过，约 2 分钟）。
+> 本批修改前最近通过的 CI 基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`（Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753)，全部通过）。
 
 ## 当前状态快照（2026-10-27）
 
-- 最近通过的代码基线：`f8ce61fb901c7c9c7376d981ee9100b1e61619e4`，Actions [#253](https://github.com/Kasign/llm-gateway/actions/runs/40449023684) 全部通过；随后仅有文档整理提交，当前安全修复由新 Head 的 Actions 统一验证。
+- 本批修改前最近通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`，Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过；当前收尾提交的代码级结果以新 Head 的 Actions 为准。
 - 当前没有开放 PR。保持 `dev` 为唯一集成分支，不强推、不改写历史。
-- 多 Provider 管理、密钥加密与脱敏、模型映射、并发/FIFO 队列、RPM/Token 预算、审计、流式错误处理和配置契约门禁均已实现。
-- 本轮静态复审了 Provider 热更新路径：修改流程持有上游变更锁与 Provider 配置锁；新旧实例共享并发/排队许可器；降低预算先收紧并在持久化/Registry 失败时尝试回滚，提高预算延后到 Registry 更新后生效。输入与运行时构造均校验容量范围；未发现可确认的生产逻辑缺陷。
-- 聚焦整体 Review 已确认三处推理错误消息应避免透传底层细节：Redis 限流器失败、上游模型 ID 解析失败、本地模型就绪失败。对外文案改为稳定通用消息并保留现有错误码；服务端日志保留必要排查信息。配置/旧部署兼容、慢模型取消与 SSE、源码和部署 Bundle 检查仍按同一范围收尾。
+- 多 Provider 管理、密钥加密与脱敏、模型映射、并发/FIFO 队列、RPM/Token 预算、审计、流式错误处理和高风险配置/API 契约门禁均已实现。
+- Provider 热更新最后一轮审查没有发现正常有效配置能触发的 setter 失败；保持现有最小补偿顺序，不增加额外回滚框架。
+- 整体 Review 发现并修复一个配置语义缺陷：显式 `llama.request_timeout_seconds: 0` 原先被代理层强制转换为一小时 Deadline。本批让其真正表示“不增加整体时限”，同时保留未配置时的一小时默认和父 Context 取消语义，并增加定向回归覆盖。
+- 密钥脱敏、慢模型 Context 传递、取消线性化与提交响应头后的 SSE 错误边界已按代码路径复审；前端源码与部署 Bundle 的同步由 CI 构建后 diff 门禁验证。
 - 真实供应商、公网 OpenResty 和 1Panel 验收依赖用户的凭据与部署环境；CI Mock 通过不代表生产验收完成。
 - 暂缓全面目录迁移、全量 OpenAPI 字段对账、自动重试/故障转移及 Agent 权限/热更新扩展；除非出现明确需求或已证实问题，否则不进入当前工作范围。
 
@@ -28,29 +29,12 @@
 6. 不一次性搬迁全部目录。只有某个阶段确实需要时才调整结构。
 7. 中文文档说明目标、边界、运维和设计原因；公共接口与复杂并发逻辑添加必要中文注释，不添加逐行废话注释。
 
-建议目标目录（按阶段逐步形成，不要求一次性迁移）：
-
-```text
-cmd/gateway/                 启动、依赖组装、关闭顺序
-internal/core/               与基础设施无关的流程编排
-internal/application/        鉴权后用例、路由策略、请求生命周期
-internal/provider/           Provider 接口、能力声明、错误类型
-internal/provider/llamacpp/  llama.cpp 适配器
-internal/provider/ollama/    Ollama 适配器
-internal/provider/openai/    OpenAI-compatible 适配器
-internal/protocol/           协议规范化、SSE 与错误映射
-internal/auth/               调用方凭据与模型 ACL
-internal/observability/      计时、指标、请求事件
-internal/audit/              有界异步日志队列与生命周期
-internal/store/              持久化接口与 MariaDB 实现
-internal/model/              Gateway 模型目录与本地文件信息分离
-internal/settings/           配置加载、校验和默认值
-internal/server/             HTTP 边界与管理 API
-migrations/                  数据库迁移
-docs/                        中文架构、协议和运维文档
-```
+目录迁移建议仅作早期设计背景，不作为当前执行清单。本轮保持现有目录；只有能够消除已确认问题或显著降低具体功能维护成本时，才在对应功能组内调整。
 
 ## 3. 分阶段计划
+
+> 以下阶段记录保留为设计历史与验收参考；是否继续实施以“当前状态快照”和文末收尾记录为准。未明确列入当前执行范围的事项不自动成为待开发任务。
+
 
 ### 阶段 0：基线核验与行为清单
 状态：进行中。
@@ -1069,3 +1053,11 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - `AuditMetricsEnvelope.data` 改为引用 `AuditMetrics`，将队列深度/容量、所有丢弃分类、写入成功/失败、丢弃率和排队等待耗时显式化，并将 Go `audit.StatsSnapshot` JSON tags 纳入契约检查。
 - `GET /api/admin/retention/status` 改为引用 `RequestRetentionStatus` / `RequestRetentionRuntimeStatus`，并对照 Go 的静态配置响应和进程内运行指标结构，覆盖最近执行状态、失败代码、耗时与删除计数。
 - 该门禁继续保持字段级、分阶段覆盖；不会把只读内存指标描述为持久化或跨实例状态。
+
+## 31. 热更新 Review 与慢模型超时语义收口（2026-10-27）
+
+- 本批修改前 `dev` 为 `62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`，Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过。
+- 热更新复核未发现有效配置可触发的并发/队列 setter 错误。继续使用现有范围校验、降低前置收紧、提高延后生效和失败补偿顺序，不引入额外事务抽象。
+- 修复代理请求上下文把显式 0 超时误解释为一小时的缺陷。改为复用 `contextWithOptionalTimeout`；Config.Load 仍负责将“未指定”规范化为一小时，因此不破坏旧配置默认行为；显式 0 不增加 Deadline，父 Context 取消仍有效。
+- 增加 `proxyRequestContext` 零值与正值回归用例。未手动重复运行测试；由新 Head 的自动化 Actions 覆盖。
+- 本轮代码级 Review 的剩余验收仅保留真实供应商、慢模型公网反代和 1Panel 部署；目录迁移、全量 OpenAPI 对账、重试/故障转移和 Agent 权限扩展继续暂缓。

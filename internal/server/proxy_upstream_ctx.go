@@ -3,24 +3,15 @@ package server
 import (
 	"context"
 	"strings"
-	"time"
 )
 
-func (s *Server) llamaRequestTimeout() time.Duration {
-	sec := s.cfg.Llama.RequestTimeout
-	if sec <= 0 {
-		sec = 3600
-	}
-	return time.Duration(sec) * time.Second
-}
-
-// proxyRequestContext 跟随客户端连接，并受网关请求超时限制。
-// 客户端断开、管理端结束、超时都会取消这次上游请求。
+// proxyRequestContext 跟随客户端连接，并应用配置中的整体请求时限。
+// 配置为 0 时不新增整体 Deadline；客户端断开和管理端取消仍会中止上游请求。
 func (s *Server) proxyRequestContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	return context.WithTimeout(parent, s.llamaRequestTimeout())
+	return contextWithOptionalTimeout(parent, s.cfg.Llama.RequestTimeout)
 }
 
 func proxyPathIsResponses(path string) bool {
