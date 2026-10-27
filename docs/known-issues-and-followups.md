@@ -4,11 +4,12 @@
 
 ## 当前基线
 
-- `dev` 当前 Head：`064017e8eebfba15fbad63daccc4f2fb8cde9683`；Actions [#251](https://github.com/Kasign/llm-gateway/actions/runs/40447916241) 全部通过，约 2 分钟。
+- 最近通过的代码基线：`f8ce61fb901c7c9c7376d981ee9100b1e61619e4`；Actions [#253](https://github.com/Kasign/llm-gateway/actions/runs/40449023684) 全部通过，约 2 分钟。随后文档整理提交的 Actions 仍在运行；本次安全修复以新 Head 的结果为准。
 - 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
 - Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
 - Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
 - CI 基于 Mock 与测试数据库；真实供应商、生产代理和 1Panel 部署需单独验收，不能标记为 CI 已覆盖。
+- 本轮整体 Review 另外确认：Redis 限流器失败时，原始底层错误曾被写入调用方响应和请求审计；当前提交改用稳定通用文案，服务端日志保留故障诊断。待新 Head 的 Actions 验证。
 
 ## P1：可靠性与可观测性
 
@@ -29,7 +30,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入。 | 队列第一批 Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过；代码复审随后修正了超时与许可同时就绪的窄竞争，并增加确定性回归用例，新 Head Actions 待验收；真实供应商与公网链路仍待部署环境回归。 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。排队默认关闭（`max_queue_size=0`），启用后进程内 FIFO、有界 1024，支持 Context 取消及 503 超时/满队列错误；不将它与 Redis RPM 或 Token 预算混为一套状态。 | CI 对逻辑与构建验收通过；真实用量差异、慢模型及反向代理端到端行为保留在统一部署回归。 |
+| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入。 | Provider RPM、每日 Token 预算与有界 FIFO 队列已由后续完整 CI 覆盖；真实供应商用量与公网链路仍待部署环境验收。 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。排队默认关闭（`max_queue_size=0`），启用后进程内 FIFO、有界 1024，支持 Context 取消及 503 超时/满队列错误；不将它与 Redis RPM 或 Token 预算混为一套状态。 | CI 对逻辑与构建验收通过；真实用量差异、慢模型及反向代理端到端行为保留在统一部署回归。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -380,3 +381,10 @@
 - 将 `GET /api/admin/audit/metrics` 的 `data` 从泛化 object 改为 `AuditMetrics`，完整声明队列容量、写入/丢弃计数、丢弃率和排队等待耗时；CI 对照 `audit.StatsSnapshot` 的 JSON tags。
 - 将 `GET /api/admin/retention/status` 的 `data` 改为 `RequestRetentionStatus`，并以 `RequestRetentionRuntimeStatus` 描述最近运行状态、成功/失败计数、删除量和稳定失败代码；CI 对照两种 Go 响应结构的 JSON tags。
 - 两个接口均为只读内存快照，原始数据库错误或请求正文不会从这些状态对象泄露。
+
+
+## 2026-10-27 限流器故障响应脱敏
+
+- `serveInference` 原先在 Redis 限流器失败时，将 `err.Error()` 同时传给客户端响应和请求审计，可能泄露内部连接或依赖诊断。
+- 已改为固定错误文案 `rate limiter unavailable`；HTTP 503 与错误码 `rate_limit_unavailable` 保持不变，详细错误仅保留在服务端日志。
+- 当前 Head 的自动化验收待完成；此修复不替代真实部署中 Redis 故障处理验收。
