@@ -128,8 +128,8 @@ jobs:
       - name: 静态检查
         run: go vet ./...
 
-  gateway-load:
-    name: Gateway 负载与故障注入
+  gateway-steady-load:
+    name: Gateway 稳态负载与审计持久化
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -182,6 +182,46 @@ jobs:
           path: /tmp/gateway-request-load.txt
           if-no-files-found: error
           retention-days: 30
+
+
+  gateway-faults:
+    name: Gateway 故障注入与恢复验证
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REDIS_TEST_ADDR: 127.0.0.1:6379
+      MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-test-password
+          MARIADB_DATABASE: llm_gateway_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Gateway 上游延迟与 429/503 故障注入
         run: |

@@ -4,8 +4,8 @@
 
 ## 当前基线
 
-- 当前 `dev` HEAD：`064f5c9b20ae8fa633b762606ccd53fdeca39b22`，提交 `docs(api): align request cancellation response contract`。
-- 最新 Actions [#242](https://github.com/Kasign/llm-gateway/actions/runs/40444955557) 全部通过，四个并行 Job 覆盖配置/API 与前端、Go 测试/race/vet、Gateway 负载故障注入、Go/Docker 构建；总耗时约 2 分 03 秒。
+- 上一完整 CI 基线：`747bdba7319da9f4b993e4bb1b9a0584abe73e05`，提交 `test(provider): cover FIFO queue budget rollback`；Actions [#243](https://github.com/Kasign/llm-gateway/actions/runs/40445517048) 四个并行 Job 全部通过。
+- Actions #241/#242 已证明四个并行 Job 可用；最新完整基线 #243（Head `747bdba`）同样全部通过，总耗时约 2 分 10 秒。慢点集中在同一个 Job 内串行执行稳态负载与多组故障注入。
 - CI 并行化前 Actions #240 约 4 分 10 秒；并行后的 #241/#242 约 2 分钟，墙钟时间接近减半。npm 与 Buildx 缓存、同 ref 过期 CI 取消均已启用。
 - 最近功能提交对应的 Actions #237–#242 均已通过；#239 的 Provider Token 预算预占回滚修复完整运行 37/37 步通过。
 - PR #5 与 PR #7 已合并至 `dev`；当前没有开放 PR。保持不强推、不改写历史。
@@ -326,3 +326,9 @@
 
 - 新增 `TestPrepareProviderQueueLimitAppliesChangesAtSafeTime`，覆盖队列容量缩小时前置应用并可回滚、扩大延后到 Registry 更新后、已停用 Provider 编辑不修改运行时许可器、重新启用时延后放宽，以及越界容量拒绝且不更改当前值。
 - 这是热更新事务的回归覆盖，不改变运行时队列策略；FIFO 状态仍局限于单个 Gateway 进程，不代表多副本全局排队。
+
+## 2026-10-27 CI 稳态负载与故障注入并行化
+
+- Actions #241/#242/#243 已确认四个主 Job 并行后总时长约 2 分钟；其中 Gateway Job 仍把 60 秒稳态负载、故障注入和连接/DNS/SSE 恢复测试串行执行。
+- 已将稳态负载与故障注入拆成两个独立并行 Job。MariaDB 审计积压用例和 12,000 次/目标 200 req/s 稳态负载保留在前者；429/503、TCP 拒绝与恢复、DNS、已提交 SSE 后断流、Provider TLS 握手测试与原有 Artifact 保留在后者。
+- 该拆分额外启动一套独立 Redis/MariaDB 服务，预期以少量 Runner/容器成本缩短墙钟时间；提速幅度以新 Head Actions 实测为准，不通过删减真实负载/故障覆盖提速。

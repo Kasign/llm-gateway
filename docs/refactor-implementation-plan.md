@@ -2,11 +2,11 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 最近完整 CI Head：`064f5c9b20ae8fa633b762606ccd53fdeca39b22`（Actions [#242](https://github.com/Kasign/llm-gateway/actions/runs/40444955557)，四个并行 Job 全部通过，约 2 分 03 秒）。
+> 上一完整 CI 基线：`747bdba7319da9f4b993e4bb1b9a0584abe73e05`（Actions [#243](https://github.com/Kasign/llm-gateway/actions/runs/40445517048)，四个并行 Job 全部通过，约 2 分 10 秒）。本批进一步将稳态负载与故障注入拆成并行 Job。
 
 ## 当前状态快照（2026-10-27）
 
-- 最近完整 CI 的 Head 为 `064f5c9`，包括 OpenAPI 取消端点 405 契约修正；配置/API 与前端、Go 测试/race/vet、Gateway 负载/故障注入、Go/Docker 构建均通过。
+- 最近完整 CI 的前一 Head `747bdba`（Actions #243）已验证队列热更新回归、配置/API 与前端、Go 测试/race/vet、Gateway 负载/故障注入、Go/Docker 构建均通过。
 - CI 已拆为四个并行 Job，并启用 npm 缓存、Buildx GitHub Actions 层缓存，以及同一 ref 的过期运行取消。Actions #241 约 2 分 05 秒、#242 约 2 分 03 秒；相比串行 Actions #240 约 4 分 10 秒，墙钟时间接近减半。
 - 已合入的最近功能包括：本地 GGUF 清单与运行时状态隔离、部署 Provider FIFO 参数透传、Token 预算按实际出站 dispatch 结算、高风险 OpenAPI/Go 字段对账与请求取消状态契约。
 - 当前没有开放 PR。保持非强制更新、不改写历史；按完整功能组集中提交，避免小改动反复触发完整 CI。
@@ -1031,3 +1031,9 @@ docs/                        中文架构、协议和运维文档
 
 - 并发预算已有安全应用顺序测试，队列容量的同类 helper 之前没有等价覆盖。新增测试覆盖缩小前置应用并可回滚、扩大延后应用、已停用 Provider 编辑不修改活动许可器、重新启用后延后放宽，以及容量越界拒绝。
 - 该批只补热更新事务的回归覆盖，不改变队列策略；FIFO 队列仍是单 Gateway 进程内状态，不代表多副本全局排队。
+
+## 22. CI 稳态负载与故障注入并行化（2026-10-27）
+
+- 前三轮并行工作流均全量通过，墙钟耗时约 2 分钟；检查分 Job 步骤发现 Gateway Job 内仍串行执行 60 秒、12,000 请求的稳态负载，再依次执行多组故障注入。
+- 将其拆为 `gateway-steady-load` 与 `gateway-faults` 两个并行 Job，保留 MariaDB 审计积压、完整稳态负载、429/503、TCP、DNS、已提交 SSE 后断流、TLS 握手及所有 Artifact。
+- 两个 Job 各自启动 Redis/MariaDB 测试服务，因此会增加少量 Runner 资源使用。目标是降低等待墙钟时间，而不是减少必要验证；合并前比较新 Actions 实测时间与所有 Job 结果。
