@@ -297,10 +297,10 @@ func TestRootConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("unset %s: %v", key, err)
 		}
-		key, value := key, value
+		restoreKey, restoreValue := key, value
 		t.Cleanup(func() {
-			if err := os.Setenv(key, value); err != nil {
-				t.Errorf("restore %s: %v", key, err)
+			if err := os.Setenv(restoreKey, restoreValue); err != nil {
+				t.Errorf("restore %s: %v", restoreKey, err)
 			}
 		})
 	}

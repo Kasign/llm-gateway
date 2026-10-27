@@ -973,3 +973,9 @@ docs/                        中文架构、协议和运维文档
 - 环境变量展开针对完整、未加引号的 `${VAR}` 标量恢复 YAML 原生整数/布尔/null 标签，避免 `LLAMA_REQUEST_TIMEOUT_SECONDS=0` 被按字符串解码；带引号的值仍强制保持字符串，避免数字型密码或 Key 被意外转换。
 - CI 已包含静态配置契约、根目录 Compose 渲染与 Release 镜像构建步骤。当前提交的 GitHub Actions 运行状态尚未从状态接口取得，不能用之前 Head 的绿色结果代替；实际 1Panel 容器网络、已有本地配置迁移、慢模型 SSE 和公网反向代理仍需部署环境验收。
 - 后续工作按原计划继续：完成 Provider 热更新与配置回滚的高风险 Review，逐项检查 OpenAPI 与管理 Handler 的字段/状态码契约，再做一次集中代码 Review。真实供应商凭据及生产请求不在 CI Mock 测试的证明范围内。
+
+## 2026-10-27 根目录配置加载回归的 CI 修复
+
+- 新增的 `TestRootConfigLoadsWithZeroLocalRequestTimeout` 首轮 Actions 在 Go 编译阶段失败，唯一诊断为 `expandenv_test.go` 中闭包捕获写成重复短变量声明（`no new variables on left side of :=`），不涉及生产配置解析。
+- 已将闭包副本改为独立变量名，保留清理阶段恢复原 Provider 环境变量的目的；静态配置契约和根目录 Compose 检查在该次 Actions 中均已通过，单元测试失败导致后续步骤被跳过。
+- 修复后的新 Head 需要重新执行完整 Actions。只有新 Head 全量通过后，才将根目录实际配置加载与超时零值回归标为验收完成。
