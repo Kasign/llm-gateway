@@ -226,7 +226,7 @@ async function loadMmBackendPills(){
 }
 /** 网关模型 + 上游 runtime 快照：列表/大小/加载态统一从此读取，避免各 Tab 各拉一套逻辑 */
 const modelHub={
-  rows:[],runtime:null,catalogById:new Map(),rowsLoaded:false,rowsError:'',runtimeError:'',_inflight:null,
+  rows:[],runtime:null,catalogById:new Map(),rowsLoaded:false,rowsError:'',runtimeError:'',runtimeWarning:'',_inflight:null,
   async refresh(opts={}){
     if(opts.force)this._inflight=null;
     if(this._inflight)return this._inflight;
@@ -242,9 +242,11 @@ const modelHub={
         if(runtimeResult.status==='fulfilled'){
           this.runtime=runtimeResult.value;
           this.runtimeError='';
+          this.runtimeWarning=[this.runtime?.upstream_warning,this.runtime?.catalog_warning].filter(Boolean).join('；');
         }else{
           this.runtime=null;
           this.runtimeError='当前推理后端运行状态暂不可用；本地模型清单仍可独立查看。';
+          this.runtimeWarning='';
         }
         this._reindexRuntime();
       })
@@ -267,6 +269,11 @@ const modelHub={
     const baseB=b.includes('/')?b.split('/').pop():b;
     return baseA===b||baseB===a||baseA===baseB;
   },
+  _samePath(a,b){
+    a=String(a||'').trim().replace(/\\/g,'/').toLowerCase();
+    b=String(b||'').trim().replace(/\\/g,'/').toLowerCase();
+    return Boolean(a&&b&&(a===b||a.endsWith('/'+b)||b.endsWith('/'+a)));
+  },
   keysForRow(row){
     const out=new Set();
     const add=v=>{
@@ -280,33 +287,79 @@ const modelHub={
     if(row.local_path)add(row.local_path);
     return out;
   },
-  runtimeItemForRow(row){
+  _runtimeMatchesRow(item,row){
+    if(!item||!row)return false;
+    if(item.path&&row.local_path){
+      if(this._samePath(item.path,row.local_path))return true;
+      if(item.path.startsWith('/')&&String(row.local_path).startsWith('/'))return false;
+    }
     const keys=this.keysForRow(row);
+    for(const k of keys){if(String(item.id||'')===k||this._idMatch(item.id,k))return true;}
+    return false;
+  },
+  runtimeItemForRow(row){
+    if(row?._runtime)return row._runtime;
     for(const [id,item] of this.catalogById){
-      for(const k of keys){if(this._idMatch(id,k))return item;}
+      if(this._runtimeMatchesRow(item,row))return item;
     }
     return null;
   },
+  tableRows(){
+    const rows=(this.rows||[]).map(row=>({...row,_managed:true,_runtime:this.runtimeItemForRow(row)}));
+    for(const item of (this.runtime?.catalog||[])){
+      if(rows.some(row=>this._runtimeMatchesRow(item,row)))continue;
+      rows.push({
+        model_key:'',display_name:item.display_name||item.id,filename:item.display_name||item.id,
+        local_path:item.path||'',size_bytes:Number(item.disk_bytes||0),status:item.status||'unknown',
+        quantization:item.quantization||'',upstream_name:item.id,_managed:false,_runtime:item,
+      });
+    }
+    return rows;
+  },
   diskBytes(row){
-    const db=Number(row.disk_bytes??row.size_bytes??0);
-    if(db>0)return db;
     const it=this.runtimeItemForRow(row);
-    return it?Number(it.disk_bytes||0):0;
+    if(it&&Number(it.disk_bytes)>0)return Number(it.disk_bytes);
+    const db=Number(row.disk_bytes??row.size_bytes??0);
+    return db>0?db:0;
   },
   loadState(row){
-    const st=String(row.status||'').toLowerCase();
+    const dbStatus=String(row.status||'').toLowerCase();
     const rt=this.runtimeItemForRow(row);
+    const downloadStates=['downloading','download_failed','download_cancelled'];
     if(rt){
-      const rs=String(rt.status||'').toLowerCase()||(rt.loaded?'loaded':'');
-      if(rs)return rs;
+      const status=String(rt.status||'unknown').toLowerCase();
+      if(status&&status!=='unknown')return status;
       if(rt.loaded)return 'loaded';
+      if(downloadStates.includes(dbStatus))return dbStatus;
+      return 'unknown';
     }
-    return st||'unloaded';
+    return downloadStates.includes(dbStatus)?dbStatus:'unknown';
   },
 };
 
 function modelsNavActive(){
   return $('models-local')?.classList.contains('active')||$('models-download')?.classList.contains('active')||$('models-inference')?.classList.contains('active');
+}
+async function refreshLlamaModels(){
+  const btn=$('btnRefreshLlamaModels');
+  const msg=$('ggufMsg');
+  if(btn){btn.disabled=true;btn.setAttribute('aria-busy','true');}
+  if(msg)msg.textContent='正在刷新 Router 注册目录与共享磁盘清单…';
+  try{
+    await api('/api/admin/runtime/refresh',{method:'POST'});
+    await modelHub.refresh({force:true});
+    renderRuntimeCatalog();
+    renderGatewayModelTable();
+    if(msg)msg.innerHTML='<span class="ok">模型目录已刷新</span>';
+    await loadOllamaLibrary();
+  }catch(e){
+    if(msg)msg.innerHTML='<span class="err">'+esc(e.message)+'</span>';
+    await modelHub.refresh({force:true}).catch(()=>{});
+    renderRuntimeCatalog();
+    renderGatewayModelTable();
+  }finally{
+    if(btn){btn.disabled=false;btn.removeAttribute('aria-busy');}
+  }
 }
 async function loadLocalModelsPanel(){
   await Promise.all([loadMmBackendPills(),modelHub.refresh()]);
@@ -478,26 +531,35 @@ async function refreshAll(){
 }
 
 function findActiveRuntimeItem(j){
-  const active=String(j.active_model||'').trim();
-  const loaded=j.loaded||[];
+  const loaded=Array.isArray(j.loaded)?j.loaded:[];
   if(!loaded.length)return null;
-  if(active){
-    const hit=loaded.find(x=>{
-      const id=String(x.id||'');
-      return id===active||id.startsWith(active+':')||active.startsWith(id+':')||active.startsWith(id);
-    });
+  const actual=String(j.active_model||'').trim();
+  const route=String(j.gateway_model||'').trim();
+  for(const target of [actual,route]){
+    if(!target)continue;
+    const hit=loaded.find(x=>String(x.id||'')===target||(x.id&&target&&modelHub._idMatch(x.id,target)));
     if(hit)return hit;
   }
-  return loaded.find(x=>x.active)||loaded[0];
+  return loaded.length===1?loaded[0]:null;
 }
 function ggufLoadLabel(st){
-  const s=String(st||'').toLowerCase();
-  if(s==='loaded'||s==='loading'||s==='sleeping')return '已加载';
-  return '未加载';
+  const s=String(st||'unknown').toLowerCase();
+  if(s==='loaded')return '已加载';
+  if(s==='sleeping')return '已加载（休眠）';
+  if(s==='loading')return '加载中';
+  if(s==='unloaded')return '已注册，未加载';
+  if(s==='not_registered')return '磁盘存在，尚未注册';
+  if(s==='downloading')return '下载中';
+  if(s==='download_failed')return '下载失败';
+  if(s==='download_cancelled')return '下载已取消';
+  return '无法确认';
 }
 function ggufLoadPill(st){
-  const on=ggufLoadLabel(st)==='已加载';
-  return `<span class="pill ${on?'pill-loaded':'pill-unloaded'}">${esc(ggufLoadLabel(st))}</span>`;
+  const s=String(st||'unknown').toLowerCase();
+  const cls=['loaded','sleeping'].includes(s)?'pill-loaded':
+    s==='loading'||s==='downloading'?'pill-running':
+    s==='unloaded'?'pill-unloaded':'pill-warn';
+  return `<span class="pill ${cls}">${esc(ggufLoadLabel(st))}</span>`;
 }
 function runtimeMetricCell(label,value,sub){
   const v=String(value||'').trim()||'—';
@@ -507,11 +569,7 @@ function runtimeMetricCell(label,value,sub){
 }
 function runtimeOverviewMeta(j,activeItem){
   if(!activeItem)return '';
-  const cat=(j.catalog||[]).find(c=>{
-    const id=String(c?.id||'');
-    const aid=String(activeItem.id||'');
-    return id&&aid&&(id===aid||id.startsWith(aid+':')||aid.startsWith(id+':'));
-  });
+  const cat=(j.catalog||[]).find(c=>String(c?.id||'')===String(activeItem.id||''));
   const merged={...cat,...activeItem};
   const ollamaSub=ollamaCatalogSubtitle(merged);
   if(ollamaSub)return ollamaSub;
@@ -534,26 +592,28 @@ function renderRuntimeOverview(){
   }
   const backend=String(j.backend||'llamacpp').toLowerCase();
   const backendLabel=backend==='ollama'?'Ollama':'llama.cpp';
-  const activeModel=String(j.active_model||'').trim()||(findActiveRuntimeItem(j)?.id||'');
+  const loaded=Array.isArray(j.loaded)?j.loaded:[];
+  const configured=String(j.gateway_model||'').trim();
   const activeItem=findActiveRuntimeItem(j);
+  const activeModel=String(activeItem?.id||'').trim();
   const typeLine=runtimeOverviewMeta(j,activeItem);
-  const disk=Number(activeItem?.disk_bytes||j.disk_bytes_est||0);
-  const vram=Number(activeItem?.vram_bytes||j.loaded_vram_bytes||0);
-  const ram=Number(activeItem?.ram_bytes||j.loaded_ram_bytes||0);
-  const hasLoad=Boolean(activeModel||activeItem);
-  if(!hasLoad){
+  const disk=Number(activeItem?.disk_bytes||0);
+  const vram=Number(activeItem?.vram_bytes||0);
+  const ram=Number(activeItem?.ram_bytes||0);
+  if(!loaded.length){
     const idleHint=backend==='ollama'
       ?'在下方 <strong>Ollama模型</strong> 中选择条目并点击「加载」'
       :'在下方 <strong>Llama 模型（GGUF）</strong> 中选择条目并点击「加载」';
-    el.innerHTML=
-      '<div class="runtime-hero runtime-hero-idle">'+
-      '<div class="runtime-hero-icon" aria-hidden="true"></div>'+
-      '<div class="runtime-hero-copy">'+
-      '<p class="runtime-hero-title">暂无模型在内存中</p>'+
-      '<p class="runtime-hero-desc">'+idleHint+'</p>'+
-      '</div></div>';
+    const routeHint=configured?'<p class="runtime-hero-desc">Gateway 默认目标：<code>'+esc(configured)+'</code>（当前未确认加载）</p>':'';
+    el.innerHTML='<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">暂无模型在内存中</p><p class="runtime-hero-desc">'+idleHint+'</p>'+routeHint+'</div></div>';
+  }else if(!activeItem){
+    const names=loaded.map(x=>'<code>'+esc(x.id||'未知模型')+'</code> '+ggufLoadPill(x.status)).join('、');
+    const routeHint=configured?'<p class="runtime-hero-desc">Gateway 默认目标：<code>'+esc(configured)+'</code>；该目标不在当前已加载清单中。</p>':'';
+    el.innerHTML='<div class="runtime-hero runtime-hero-live"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-loaded">内存中 '+loaded.length+' 个模型</span><span class="pill pill-backend">'+esc(backendLabel)+'</span></div><div class="runtime-hero-desc">'+names+'</div>'+routeHint+'</div></div>';
   }else{
     const displayName=activeModel||'—';
+    const status=String(activeItem.status||'loaded').toLowerCase();
+    const stateLabel=status==='sleeping'?'已加载（休眠）':status==='loading'?'加载中':'已加载';
     const metrics=[];
     if(typeLine)metrics.push(runtimeMetricCell('规格',typeLine,''));
     if(disk>0)metrics.push(runtimeMetricCell('文件大小',fmtSize(disk),''));
@@ -561,22 +621,15 @@ function renderRuntimeOverview(){
       if(vram>0)metrics.push(runtimeMetricCell('显存',fmtSize(vram),''));
       if(ram>0)metrics.push(runtimeMetricCell('内存',fmtSize(ram),''));
     }
-    const metricsHtml=metrics.length
-      ?'<div class="runtime-hero-metrics">'+metrics.join('')+'</div>'
-      :'';
-    el.innerHTML=
-      '<div class="runtime-hero runtime-hero-live'+(metrics.length?'':' runtime-hero-live-compact')+'">'+
-      '<div class="runtime-hero-main">'+
-      '<div class="runtime-hero-badges"><span class="pill pill-running">运行中</span><span class="pill pill-backend">'+esc(backendLabel)+'</span></div>'+
-      '<span class="runtime-model-pill" title="'+esc(displayName)+'">'+esc(displayName)+'</span>'+
-      '</div>'+
-      metricsHtml+
-      '</div>';
+    const metricsHtml=metrics.length?'<div class="runtime-hero-metrics">'+metrics.join('')+'</div>':'';
+    const routeHint=configured&&modelHub._idMatch(configured,displayName)?'':'<p class="runtime-hero-desc">Gateway 默认目标：<code>'+esc(configured||'未配置')+'</code></p>';
+    el.innerHTML='<div class="runtime-hero runtime-hero-live'+(metrics.length?'':' runtime-hero-live-compact')+'"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-loaded">'+stateLabel+'</span><span class="pill pill-backend">'+esc(backendLabel)+'</span></div><span class="runtime-model-pill" title="'+esc(displayName)+'">'+esc(displayName)+'</span>'+routeHint+'</div>'+metricsHtml+'</div>';
   }
   if(noteEl){
-    noteEl.innerHTML=j.hot_unload_supported===false
-      ?'<span class="warn">'+esc(j.unload_note||'当前 llama 可能不支持热卸载')+'</span>'
-      :'';
+    const notices=[];
+    if(j.hot_unload_supported===false)notices.push(j.unload_note||'当前 llama.cpp 不支持热加载/卸载其它模型');
+    if(modelHub.runtimeWarning)notices.push(modelHub.runtimeWarning);
+    noteEl.innerHTML=notices.map(x=>'<span class="warn">'+esc(x)+'</span>').join(' ');
   }
 }
 function backendLabel(id, backends=[]) {
@@ -1145,34 +1198,57 @@ async function installModel(){
   }
 }
 
+function llamaCatalogSourceLabel(item,managed){
+  const source=String(item?.source||'').split('+').filter(Boolean);
+  const labels=[];
+  if(source.includes('router'))labels.push('Router 注册');
+  if(source.includes('disk'))labels.push('共享磁盘');
+  if(source.includes('gateway'))labels.push('Gateway 登记');
+  if(source.includes('upstream'))labels.push('当前上游');
+  if(!labels.length&&managed)labels.push('Gateway 登记');
+  return labels.join(' + ')||'未确认来源';
+}
 function renderGatewayModelTable(){
   const el=$('modelTable');if(!el)return;
-  const rows=modelHub.rows||[];
+  const rows=modelHub.tableRows();
   const warnings=$('modelHubWarnings');
   if(warnings){
     const notices=[];
     if(modelHub.rowsError)notices.push('<span class="err">'+esc(modelHub.rowsError)+'</span>');
     if(modelHub.runtimeError)notices.push('<span class="warn">'+esc(modelHub.runtimeError)+'</span>');
+    if(modelHub.runtimeWarning)notices.push('<span class="warn">'+esc(modelHub.runtimeWarning)+'</span>');
     warnings.innerHTML=notices.join('<br>');
     warnings.hidden=!notices.length;
   }
-  el.innerHTML=!rows.length?(modelHub.rowsError?'':emptyState('暂无 Llama 模型，请在「模型下载」安装 GGUF')):wrapTable(
-    '<tr><th>模型名称</th><th>模型键</th><th>大小</th><th>状态</th><th>操作</th></tr>'+
+  el.innerHTML=!rows.length?(modelHub.rowsError?'':emptyState('暂无 GGUF 模型；请检查共享模型目录或从「模型下载」安装')):wrapTable(
+    '<tr><th>模型名称</th><th>来源</th><th>模型 ID / 键</th><th>大小</th><th>状态</th><th>操作</th></tr>'+
     rows.map(x=>{
-    const st=modelHub.loadState(x);
-    const name=String(x.display_name||x.model_key||'').trim();
-    const sizeBytes=modelHub.diskBytes(x);
-    return `<tr>
-    <td>${esc(name)}${x.quantization?'<div class="small muted">'+esc(x.quantization)+'</div>':''}</td>
-    <td><code>${esc(x.model_key)}</code></td>
-    <td class="tabular-nums">${fmtSize(sizeBytes)}</td>
-    <td>${ggufLoadPill(st)}</td>
-    <td><div class="td-actions">
-      ${inferButtonHtml('llamacpp','load',{modelKey:x.model_key,title:`Llama 模型 · 加载 · ${x.model_key}`,label:'加载'})}
-      ${inferButtonHtml('llamacpp','unload',{modelKey:x.model_key,title:`Llama 模型 · 卸载 · ${x.model_key}`,confirmMsg:'从 llama.cpp 卸载 '+x.model_key+'？',label:'卸载'})}
-      <button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=${JSON.stringify(x.model_key)}>删除</button>
-    </div></td></tr>`;
-  }).join(''));
+      const rt=x._runtime||modelHub.runtimeItemForRow(x);
+      const managed=x._managed===true;
+      const modelKey=String(x.model_key||'').trim();
+      const modelId=String(rt?.id||x.upstream_name||x.filename||x.local_path||'').trim();
+      const name=String(x.display_name||rt?.display_name||x.filename||modelId||modelKey).trim();
+      const st=modelHub.loadState(x);
+      const sizeBytes=modelHub.diskBytes(x);
+      const routerMode=Boolean(modelHub.runtime?.hot_unload_supported);
+      const canOperate=Boolean(rt?.registered&&routerMode&&!modelHub.runtimeError);
+      const loadButton=canOperate&&!rt.loaded&&st!=='loading'
+        ?inferButtonHtml('llamacpp','load',{modelId,modelKey,title:'Llama 模型 · 加载 · '+(modelId||modelKey),label:'加载'})
+        :'';
+      const unloadButton=canOperate&&rt.loaded
+        ?inferButtonHtml('llamacpp','unload',{modelId,modelKey,title:'Llama 模型 · 卸载 · '+(modelId||modelKey),confirmMsg:'从 llama.cpp 卸载 '+(modelId||modelKey)+'？',label:'卸载'})
+        :'';
+      const deleteButton=managed&&modelKey
+        ?'<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key='+JSON.stringify(modelKey)+'>删除</button>'
+        :'';
+      const defaultPill=rt?.active?' <span class="pill pill-active">Gateway 默认</span>':'';
+      return '<tr><td>'+esc(name)+(x.quantization?'<div class="small muted">'+esc(x.quantization)+'</div>':'')+defaultPill+'</td>'+
+        '<td>'+esc(llamaCatalogSourceLabel(rt,managed))+'</td>'+
+        '<td><code>'+esc(modelKey||modelId||'—')+'</code></td>'+
+        '<td class="tabular-nums">'+fmtSize(sizeBytes)+'</td>'+
+        '<td>'+ggufLoadPill(st)+'</td>'+
+        '<td><div class="td-actions">'+loadButton+unloadButton+deleteButton+'</div></td></tr>';
+    }).join(''));
 }
 async function loadModels(){
   await modelHub.refresh();

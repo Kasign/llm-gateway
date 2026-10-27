@@ -482,14 +482,22 @@ func (s *Server) InferenceUnloadAll(ctx context.Context, backend string) error {
 // InferenceRefreshRegistry rescans upstream model registry (e.g. GET /models?reload=1).
 func (s *Server) InferenceRefreshRegistry(ctx context.Context, backend string) (json.RawMessage, error) {
 	b, err := normalizeInferenceBackend(backend)
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
 	client, _, err := s.adminClientForBackend(b)
-	if err != nil {
-		return nil, err
+	if err != nil { return nil, err }
+	var body json.RawMessage
+	if b == "llamacpp" {
+		router, _ := client.HasRouter(ctx)
+		if router { body, err = client.Refresh(ctx) } else { body, err = client.List(ctx) }
+		s.mu.Lock()
+		s.llamaRouter = nil
+		s.mu.Unlock()
+	} else {
+		body, err = client.Refresh(ctx)
 	}
-	return client.Refresh(ctx)
+	if err != nil { return nil, err }
+	s.invalidateAdminRuntimeCaches()
+	return body, nil
 }
 
 // OllamaPullModel pulls a model tag into Ollama (disk), blocking until complete.

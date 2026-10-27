@@ -779,3 +779,14 @@ Gateway 的查询顺序为：
 4. `Client.ListModelIDs` 与运行时快照共用这套优先级，避免管理台看得到模型、加载候选却无法解析同一个模型 ID。
 
 部署核对时，`LLAMA_CPP_BASE_URL` 应指向 llama.cpp 服务根地址；若要列出模型目录，建议以 Router 模式运行并配置正确的模型缓存或 `--models-dir`。单模型模式只承诺展示当前加载的模型，不应视为磁盘上的完整 GGUF 清单。自动测试覆盖接口选择与状态解析，但真实容器挂载目录仍需在部署环境确认。
+
+
+## llama.cpp 全模型清单和实际加载状态
+
+管理台 GGUF 列表合并三类数据：llama.cpp Router 的 `GET /models`、Gateway 共享目录中的磁盘 GGUF、Gateway 数据库登记项。Router 目录提供注册 ID 和实时状态；磁盘扫描补齐未登记文件；数据库补充模型键、展示名和下载状态。扫描不读取权重内容，递归扫描子目录、排除 `mmproj*.gguf`，并将多分片模型合并。
+
+Router 空 `data` 数组仍代表 Router 模式；模型状态以实时上游为准，数据库历史 `loaded` 不参与推断。磁盘存在但 Router 未注册的文件显示为「仅磁盘，尚未注册」；上游不可达时显示为「无法确认」。
+
+`active_model` 表示实际上游确认加载的模型；`gateway_model` 表示 Gateway 默认路由目标。Router 可以同时驻留多个模型，因此两者不能混为同一状态。单模型模式下其它 GGUF 仍展示，但不虚报可以热切换。
+
+「刷新模型目录」调用 `POST /api/admin/runtime/refresh`：Router 模式会请求 `GET /models?reload=1` 并清除 Gateway 快照缓存；单模型模式只检查当前 `/v1/models`。动态加载其它模型需要 llama.cpp 以 Router 模式启动并正确配置 `--models-dir`/缓存目录。

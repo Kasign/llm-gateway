@@ -287,6 +287,7 @@ func (s *Server) Handler() http.Handler {
 
 	// —— 管理 API：运行时管理（控制 llama.cpp 加载哪个模型）——
 	mux.HandleFunc("/api/admin/runtime/preview", s.runtimePreviewAPI) // 预览运行时状态
+	mux.HandleFunc("/api/admin/runtime/refresh", s.runtimeRefreshAPI) // 显式重扫 llama.cpp 模型目录
 	mux.HandleFunc("/api/admin/runtime/unload", s.runtimeUnloadAPI)   // 卸载当前模型
 	mux.HandleFunc("/api/admin/runtime/select", s.runtimeSelectAPI)   // 选择/加载指定模型
 	mux.HandleFunc("/api/admin/runtime", s.runtimeAPI)                // 读取运行时状态

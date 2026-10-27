@@ -12,17 +12,22 @@ import (
 
 // CatalogItem describes one upstream model (installed or loaded).
 type CatalogItem struct {
-	ID         string `json:"id"`
-	Loaded     bool   `json:"loaded"`
-	Running    bool   `json:"running,omitempty"`
-	Active     bool   `json:"active"`
-	Status     string `json:"status,omitempty"`
+	ID            string `json:"id"`
+	DisplayName   string `json:"display_name,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Loaded        bool   `json:"loaded"`
+	Running       bool   `json:"running,omitempty"`
+	Active        bool   `json:"active"`
+	Status        string `json:"status,omitempty"`
 	DiskBytes     int64  `json:"disk_bytes,omitempty"`
 	VRAMBytes     int64  `json:"vram_bytes,omitempty"`
 	RAMBytes      int64  `json:"ram_bytes,omitempty"`
 	MemoryNote    string `json:"memory_note,omitempty"`
 	Quantization  string `json:"quantization,omitempty"`
 	ParameterSize string `json:"parameter_size,omitempty"`
+	Registered    bool   `json:"registered,omitempty"`
+	DiskPresent   bool   `json:"disk_present,omitempty"`
+	Source        string `json:"source,omitempty"`
 }
 
 // RuntimeSnapshot 是当前上游的一次快照：目录列表 + 已加载列表 + 合计显存/内存。
@@ -259,6 +264,7 @@ func (c *Client) llamacppRuntime(ctx context.Context, activeModel string, rescan
 	var resp struct {
 		Data []struct {
 			ID     string          `json:"id"`
+			Path   string          `json:"path"`
 			Size   int64           `json:"size"`
 			Status json.RawMessage `json:"status"`
 			Meta   json.RawMessage `json:"meta"`
@@ -274,8 +280,9 @@ func (c *Client) llamacppRuntime(ctx context.Context, activeModel string, rescan
 		}
 		st := parseLlamaStatus(item.Status)
 		if fromOpenAIModels {
-			// /v1/models 只返回当前加载的模型，不提供 Router 的 status 字段。
 			st = llamaStatusParsed{display: "loaded", inMemory: true, running: true}
+		} else if len(item.Status) == 0 || string(item.Status) == "null" {
+			st = llamaStatusParsed{display: "unknown"}
 		}
 		disk := item.Size
 		if disk <= 0 {
@@ -284,13 +291,16 @@ func (c *Client) llamacppRuntime(ctx context.Context, activeModel string, rescan
 		if disk <= 0 {
 			disk = parseLlamaStatusDisk(item.Status)
 		}
+		displayName := strings.TrimSpace(item.ID)
+		if item.Path != "" { displayName = filepath.Base(item.Path) }
+		source := "router"
+		registered := true
+		if fromOpenAIModels { source = "upstream"; registered = false }
 		ci := CatalogItem{
-			ID:        item.ID,
-			Loaded:    st.inMemory,
-			Status:    st.display,
-			Active:    activeModel != "" && ModelIDMatch(item.ID, activeModel),
-			Running:   st.running,
-			DiskBytes: disk,
+			ID:item.ID, DisplayName:displayName, Path:item.Path,
+			Loaded:st.inMemory, Status:st.display,
+			Active:activeModel!="" && ModelIDMatch(item.ID,activeModel), Running:st.running, DiskBytes:disk,
+			Registered:registered, Source:source,
 		}
 		if st.vram > 0 {
 			ci.VRAMBytes = st.vram

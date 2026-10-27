@@ -1182,7 +1182,35 @@
   function modelsNavActive() {
     return $("models-local")?.classList.contains("active") || $("models-download")?.classList.contains("active") || $("models-inference")?.classList.contains("active");
   }
-  async function loadLocalModelsPanel() {
+  async async function refreshLlamaModels() {
+    const btn = $("btnRefreshLlamaModels");
+    const msg = $("ggufMsg");
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+    }
+    if (msg) msg.textContent = "\u6b63\u5728\u5237\u65b0 Router \u6ce8\u518c\u76ee\u5f55\u4e0e\u5171\u4eab\u78c1\u76d8\u6e05\u5355\u2026";
+    try {
+      await api("/api/admin/runtime/refresh", { method: "POST" });
+      await modelHub.refresh({ force: true });
+      renderRuntimeCatalog();
+      renderGatewayModelTable();
+      if (msg) msg.innerHTML = '<span class="ok">\u6a21\u578b\u76ee\u5f55\u5df2\u5237\u65b0</span>';
+      await loadOllamaLibrary();
+    } catch (e) {
+      if (msg) msg.innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+      await modelHub.refresh({ force: true }).catch(() => {
+      });
+      renderRuntimeCatalog();
+      renderGatewayModelTable();
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.removeAttribute("aria-busy");
+      }
+    }
+  }
+  function loadLocalModelsPanel() {
     await Promise.all([loadMmBackendPills(), modelHub.refresh()]);
     renderRuntimeCatalog();
     renderGatewayModelTable();
@@ -1377,26 +1405,33 @@
     }
   }
   function findActiveRuntimeItem(j) {
-    const active = String(j.active_model || "").trim();
-    const loaded = j.loaded || [];
+    const loaded = Array.isArray(j.loaded) ? j.loaded : [];
     if (!loaded.length) return null;
-    if (active) {
-      const hit = loaded.find((x) => {
-        const id = String(x.id || "");
-        return id === active || id.startsWith(active + ":") || active.startsWith(id + ":") || active.startsWith(id);
-      });
+    const actual = String(j.active_model || "").trim();
+    const route = String(j.gateway_model || "").trim();
+    for (const target of [actual, route]) {
+      if (!target) continue;
+      const hit = loaded.find((x) => String(x.id || "") === target || x.id && target && modelHub._idMatch(x.id, target));
       if (hit) return hit;
     }
-    return loaded.find((x) => x.active) || loaded[0];
+    return loaded.length === 1 ? loaded[0] : null;
   }
   function ggufLoadLabel(st) {
-    const s = String(st || "").toLowerCase();
-    if (s === "loaded" || s === "loading" || s === "sleeping") return "\u5DF2\u52A0\u8F7D";
-    return "\u672A\u52A0\u8F7D";
+    const s = String(st || "unknown").toLowerCase();
+    if (s === "loaded") return "\u5df2\u52a0\u8f7d";
+    if (s === "sleeping") return "\u5df2\u52a0\u8f7d\uff08\u4f11\u7720\uff09";
+    if (s === "loading") return "\u52a0\u8f7d\u4e2d";
+    if (s === "unloaded") return "\u5df2\u6ce8\u518c\uff0c\u672a\u52a0\u8f7d";
+    if (s === "not_registered") return "\u78c1\u76d8\u5b58\u5728\uff0c\u5c1a\u672a\u6ce8\u518c";
+    if (s === "downloading") return "\u4e0b\u8f7d\u4e2d";
+    if (s === "download_failed") return "\u4e0b\u8f7d\u5931\u8d25";
+    if (s === "download_cancelled") return "\u4e0b\u8f7d\u5df2\u53d6\u6d88";
+    return "\u65e0\u6cd5\u786e\u8ba4";
   }
   function ggufLoadPill(st) {
-    const on = ggufLoadLabel(st) === "\u5DF2\u52A0\u8F7D";
-    return `<span class="pill ${on ? "pill-loaded" : "pill-unloaded"}">${esc(ggufLoadLabel(st))}</span>`;
+    const s = String(st || "unknown").toLowerCase();
+    const cls = ["loaded", "sleeping"].includes(s) ? "pill-loaded" : s === "loading" || s === "downloading" ? "pill-running" : s === "unloaded" ? "pill-unloaded" : "pill-warn";
+    return `<span class="pill ${cls}">${esc(ggufLoadLabel(st))}</span>`;
   }
   function runtimeMetricCell(label, value, sub) {
     const v = String(value || "").trim() || "\u2014";
@@ -1404,11 +1439,7 @@
   }
   function runtimeOverviewMeta(j, activeItem) {
     if (!activeItem) return "";
-    const cat = (j.catalog || []).find((c) => {
-      const id = String(c?.id || "");
-      const aid = String(activeItem.id || "");
-      return id && aid && (id === aid || id.startsWith(aid + ":") || aid.startsWith(id + ":"));
-    });
+    const cat = (j.catalog || []).find((c) => String(c?.id || "") === String(activeItem.id || ""));
     const merged = { ...cat, ...activeItem };
     const ollamaSub = ollamaCatalogSubtitle(merged);
     if (ollamaSub) return ollamaSub;
@@ -1425,36 +1456,48 @@
     const j = modelHub.runtime || {};
     const noteEl = $("runtimeUnloadNote");
     if (modelHub.runtimeError) {
-      el.innerHTML = '<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">\u8FD0\u884C\u65F6\u72B6\u6001\u6682\u4E0D\u53EF\u7528</p><p class="runtime-hero-desc">\u5DF2\u767B\u8BB0\u7684\u672C\u5730\u6A21\u578B\u4ECD\u53EF\u67E5\u770B\u548C\u7BA1\u7406\uFF1B\u8BF7\u68C0\u67E5\u5F53\u524D\u540E\u7AEF\u5730\u5740\u53CA\u670D\u52A1\u72B6\u6001\u540E\u5237\u65B0\u3002</p></div></div>';
+      el.innerHTML = '<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">\u8fd0\u884c\u65f6\u72b6\u6001\u6682\u4e0d\u53ef\u7528</p><p class="runtime-hero-desc">\u5df2\u767b\u8bb0\u7684\u672c\u5730\u6a21\u578b\u4ecd\u53ef\u67e5\u770b\u548c\u7ba1\u7406\uff1b\u8bf7\u68c0\u67e5\u5f53\u524d\u540e\u7aef\u5730\u5740\u53ca\u670d\u52a1\u72b6\u6001\u540e\u5237\u65b0\u3002</p></div></div>';
       if (noteEl) noteEl.innerHTML = "";
       return;
     }
     const backend = String(j.backend || "llamacpp").toLowerCase();
     const backendLabel3 = backend === "ollama" ? "Ollama" : "llama.cpp";
-    const activeModel = String(j.active_model || "").trim() || (findActiveRuntimeItem(j)?.id || "");
+    const loaded = Array.isArray(j.loaded) ? j.loaded : [];
+    const configured = String(j.gateway_model || "").trim();
     const activeItem = findActiveRuntimeItem(j);
+    const activeModel = String(activeItem?.id || "").trim();
     const typeLine = runtimeOverviewMeta(j, activeItem);
-    const disk = Number(activeItem?.disk_bytes || j.disk_bytes_est || 0);
-    const vram = Number(activeItem?.vram_bytes || j.loaded_vram_bytes || 0);
-    const ram = Number(activeItem?.ram_bytes || j.loaded_ram_bytes || 0);
-    const hasLoad = Boolean(activeModel || activeItem);
-    if (!hasLoad) {
-      const idleHint = backend === "ollama" ? "\u5728\u4E0B\u65B9 <strong>Ollama\u6A21\u578B</strong> \u4E2D\u9009\u62E9\u6761\u76EE\u5E76\u70B9\u51FB\u300C\u52A0\u8F7D\u300D" : "\u5728\u4E0B\u65B9 <strong>Llama \u6A21\u578B\uFF08GGUF\uFF09</strong> \u4E2D\u9009\u62E9\u6761\u76EE\u5E76\u70B9\u51FB\u300C\u52A0\u8F7D\u300D";
-      el.innerHTML = '<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">\u6682\u65E0\u6A21\u578B\u5728\u5185\u5B58\u4E2D</p><p class="runtime-hero-desc">' + idleHint + "</p></div></div>";
+    const disk = Number(activeItem?.disk_bytes || 0);
+    const vram = Number(activeItem?.vram_bytes || 0);
+    const ram = Number(activeItem?.ram_bytes || 0);
+    if (!loaded.length) {
+      const idleHint = backend === "ollama" ? "\u5728\u4e0b\u65b9 <strong>Ollama\u6a21\u578b</strong> \u4e2d\u9009\u62e9\u6761\u76ee\u5e76\u70b9\u51fb\u300c\u52a0\u8f7d\u300d" : "\u5728\u4e0b\u65b9 <strong>Llama \u6a21\u578b\uff08GGUF\uff09</strong> \u4e2d\u9009\u62e9\u6761\u76ee\u5e76\u70b9\u51fb\u300c\u52a0\u8f7d\u300d";
+      const routeHint = configured ? '<p class="runtime-hero-desc">Gateway \u9ed8\u8ba4\u76ee\u6807\uff1a<code>' + esc(configured) + "</code>\uff08\u5f53\u524d\u672a\u786e\u8ba4\u52a0\u8f7d\uff09</p>" : "";
+      el.innerHTML = '<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">\u6682\u65e0\u6a21\u578b\u5728\u5185\u5b58\u4e2d</p><p class="runtime-hero-desc">' + idleHint + "</p>" + routeHint + "</div></div>";
+    } else if (!activeItem) {
+      const names = loaded.map((x) => '<code>' + esc(x.id || "\u672a\u77e5\u6a21\u578b") + "</code> " + ggufLoadPill(x.status)).join("\u3001");
+      const routeHint = configured ? '<p class="runtime-hero-desc">Gateway \u9ed8\u8ba4\u76ee\u6807\uff1a<code>' + esc(configured) + "</code>\uff1b\u8be5\u76ee\u6807\u4e0d\u5728\u5f53\u524d\u5df2\u52a0\u8f7d\u6e05\u5355\u4e2d\u3002</p>" : "";
+      el.innerHTML = '<div class="runtime-hero runtime-hero-live"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-loaded">\u5185\u5b58\u4e2d ' + loaded.length + ' \u4e2a\u6a21\u578b</span><span class="pill pill-backend">' + esc(backendLabel3) + '</span></div><div class="runtime-hero-desc">' + names + "</div>" + routeHint + "</div></div>";
     } else {
       const displayName = activeModel || "\u2014";
+      const status = String(activeItem.status || "loaded").toLowerCase();
+      const stateLabel = status === "sleeping" ? "\u5df2\u52a0\u8f7d\uff08\u4f11\u7720\uff09" : status === "loading" ? "\u52a0\u8f7d\u4e2d" : "\u5df2\u52a0\u8f7d";
       const metrics = [];
-      if (typeLine) metrics.push(runtimeMetricCell("\u89C4\u683C", typeLine, ""));
-      if (disk > 0) metrics.push(runtimeMetricCell("\u6587\u4EF6\u5927\u5C0F", fmtSize(disk), ""));
+      if (typeLine) metrics.push(runtimeMetricCell("\u89c4\u683c", typeLine, ""));
+      if (disk > 0) metrics.push(runtimeMetricCell("\u6587\u4ef6\u5927\u5c0f", fmtSize(disk), ""));
       if (backend !== "ollama") {
-        if (vram > 0) metrics.push(runtimeMetricCell("\u663E\u5B58", fmtSize(vram), ""));
-        if (ram > 0) metrics.push(runtimeMetricCell("\u5185\u5B58", fmtSize(ram), ""));
+        if (vram > 0) metrics.push(runtimeMetricCell("\u663e\u5b58", fmtSize(vram), ""));
+        if (ram > 0) metrics.push(runtimeMetricCell("\u5185\u5b58", fmtSize(ram), ""));
       }
       const metricsHtml = metrics.length ? '<div class="runtime-hero-metrics">' + metrics.join("") + "</div>" : "";
-      el.innerHTML = '<div class="runtime-hero runtime-hero-live' + (metrics.length ? "" : " runtime-hero-live-compact") + '"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-running">\u8FD0\u884C\u4E2D</span><span class="pill pill-backend">' + esc(backendLabel3) + '</span></div><span class="runtime-model-pill" title="' + esc(displayName) + '">' + esc(displayName) + "</span></div>" + metricsHtml + "</div>";
+      const routeHint = configured && modelHub._idMatch(configured, displayName) ? "" : '<p class="runtime-hero-desc">Gateway \u9ed8\u8ba4\u76ee\u6807\uff1a<code>' + esc(configured || "\u672a\u914d\u7f6e") + "</code></p>";
+      el.innerHTML = '<div class="runtime-hero runtime-hero-live' + (metrics.length ? "" : " runtime-hero-live-compact") + '"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-loaded">' + stateLabel + '</span><span class="pill pill-backend">' + esc(backendLabel3) + '</span></div><span class="runtime-model-pill" title="' + esc(displayName) + '">' + esc(displayName) + "</span>" + routeHint + "</div>" + metricsHtml + "</div>";
     }
     if (noteEl) {
-      noteEl.innerHTML = j.hot_unload_supported === false ? '<span class="warn">' + esc(j.unload_note || "\u5F53\u524D llama \u53EF\u80FD\u4E0D\u652F\u6301\u70ED\u5378\u8F7D") + "</span>" : "";
+      const notices = [];
+      if (j.hot_unload_supported === false) notices.push(j.unload_note || "\u5f53\u524d llama.cpp \u4e0d\u652f\u6301\u70ed\u52a0\u8f7d/\u5378\u8f7d\u5176\u5b83\u6a21\u578b");
+      if (modelHub.runtimeWarning) notices.push(modelHub.runtimeWarning);
+      noteEl.innerHTML = notices.map((x) => '<span class="warn">' + esc(x) + "</span>").join(" ");
     }
   }
   function backendLabel2(id, backends = []) {
@@ -1977,33 +2020,50 @@
       $("filesMsg").innerHTML = '<span class="err">' + esc(msg.includes("\u5DF2\u5B58\u5728") ? msg : "\u5B89\u88C5\u5931\u8D25\uFF1A" + msg) + "</span>";
     }
   }
+  function llamaCatalogSourceLabel(item, managed) {
+    const source = String(item?.source || "").split("+").filter(Boolean);
+    const labels = [];
+    if (source.includes("router")) labels.push("Router \u6ce8\u518c");
+    if (source.includes("disk")) labels.push("\u5171\u4eab\u78c1\u76d8");
+    if (source.includes("gateway")) labels.push("Gateway \u767b\u8bb0");
+    if (source.includes("upstream")) labels.push("\u5f53\u524d\u4e0a\u6e38");
+    if (!labels.length && managed) labels.push("Gateway \u767b\u8bb0");
+    return labels.join(" + ") || "\u672a\u786e\u8ba4\u6765\u6e90";
+  }
   function renderGatewayModelTable() {
     const el = $("modelTable");
     if (!el) return;
-    const rows = modelHub.rows || [];
+    const rows = modelHub.tableRows();
     const warnings = $("modelHubWarnings");
     if (warnings) {
       const notices = [];
       if (modelHub.rowsError) notices.push('<span class="err">' + esc(modelHub.rowsError) + "</span>");
       if (modelHub.runtimeError) notices.push('<span class="warn">' + esc(modelHub.runtimeError) + "</span>");
+      if (modelHub.runtimeWarning) notices.push('<span class="warn">' + esc(modelHub.runtimeWarning) + "</span>");
       warnings.innerHTML = notices.join("<br>");
       warnings.hidden = !notices.length;
     }
-    el.innerHTML = !rows.length ? modelHub.rowsError ? "" : emptyState("\u6682\u65E0 Llama \u6A21\u578B\uFF0C\u8BF7\u5728\u300C\u6A21\u578B\u4E0B\u8F7D\u300D\u5B89\u88C5 GGUF") : wrapTable(
-      "<tr><th>\u6A21\u578B\u540D\u79F0</th><th>\u6A21\u578B\u952E</th><th>\u5927\u5C0F</th><th>\u72B6\u6001</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
+    el.innerHTML = !rows.length ? modelHub.rowsError ? "" : emptyState("\u6682\u65e0 GGUF \u6a21\u578b\uff1b\u8bf7\u68c0\u67e5\u5171\u4eab\u6a21\u578b\u76ee\u5f55\u6216\u4ece\u300c\u6a21\u578b\u4e0b\u8f7d\u300d\u5b89\u88c5") : wrapTable(
+      "<tr><th>\u6a21\u578b\u540d\u79f0</th><th>\u6765\u6e90</th><th>\u6a21\u578b ID / \u952e</th><th>\u5927\u5c0f</th><th>\u72b6\u6001</th><th>\u64cd\u4f5c</th></tr>" + rows.map((x) => {
+        const rt = x._runtime || modelHub.runtimeItemForRow(x);
+        const managed = x._managed === true;
+        const modelKey = String(x.model_key || "").trim();
+        const modelId = String(rt?.id || x.upstream_name || x.filename || x.local_path || "").trim();
+        const name = String(x.display_name || rt?.display_name || x.filename || modelId || modelKey).trim();
         const st = modelHub.loadState(x);
-        const name = String(x.display_name || x.model_key || "").trim();
         const sizeBytes = modelHub.diskBytes(x);
-        return `<tr>
-    <td>${esc(name)}${x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : ""}</td>
-    <td><code>${esc(x.model_key)}</code></td>
-    <td class="tabular-nums">${fmtSize(sizeBytes)}</td>
-    <td>${ggufLoadPill(st)}</td>
-    <td><div class="td-actions">
-      ${inferButtonHtml("llamacpp", "load", { modelKey: x.model_key, title: `Llama \u6A21\u578B \xB7 \u52A0\u8F7D \xB7 ${x.model_key}`, label: "\u52A0\u8F7D" })}
-      ${inferButtonHtml("llamacpp", "unload", { modelKey: x.model_key, title: `Llama \u6A21\u578B \xB7 \u5378\u8F7D \xB7 ${x.model_key}`, confirmMsg: "\u4ECE llama.cpp \u5378\u8F7D " + x.model_key + "\uFF1F", label: "\u5378\u8F7D" })}
-      <button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=${JSON.stringify(x.model_key)}>\u5220\u9664</button>
-    </div></td></tr>`;
+        const routerMode = Boolean(modelHub.runtime?.hot_unload_supported);
+        const canOperate = Boolean(rt?.registered && routerMode && !modelHub.runtimeError);
+        const loadButton = canOperate && !rt.loaded && st !== "loading" ? inferButtonHtml("llamacpp", "load", { modelId, modelKey, title: "Llama \u6a21\u578b \u00b7 \u52a0\u8f7d \u00b7 " + (modelId || modelKey), label: "\u52a0\u8f7d" }) : "";
+        const unloadButton = canOperate && rt.loaded ? inferButtonHtml("llamacpp", "unload", { modelId, modelKey, title: "Llama \u6a21\u578b \u00b7 \u5378\u8f7d \u00b7 " + (modelId || modelKey), confirmMsg: "\u4ece llama.cpp \u5378\u8f7d " + (modelId || modelKey) + "\uff1f", label: "\u5378\u8f7d" }) : "";
+        const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=' + JSON.stringify(modelKey) + '>\u5220\u9664</button>' : "";
+        const defaultPill = rt?.active ? ' <span class="pill pill-active">Gateway \u9ed8\u8ba4</span>' : "";
+        return "<tr><td>" + esc(name) + (x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : "") + defaultPill + "</td>" +
+          "<td>" + esc(llamaCatalogSourceLabel(rt, managed)) + "</td>" +
+          "<td><code>" + esc(modelKey || modelId || "\u2014") + "</code></td>" +
+          '<td class="tabular-nums">' + fmtSize(sizeBytes) + "</td>" +
+          "<td>" + ggufLoadPill(st) + "</td>" +
+          '<td><div class="td-actions">' + loadButton + unloadButton + deleteButton + "</div></td></tr>";
       }).join("")
     );
   }
@@ -2751,97 +2811,96 @@
       syncTopbarRefresh();
       $("models-local")?.addEventListener("click", handleInferClick);
       modelHub = {
-        rows: [],
-        runtime: null,
-        catalogById: /* @__PURE__ */ new Map(),
-        rowsLoaded: false,
-        rowsError: "",
-        runtimeError: "",
-        _inflight: null,
+        rows: [], runtime: null, catalogById: /* @__PURE__ */ new Map(),
+        rowsLoaded: false, rowsError: "", runtimeError: "", runtimeWarning: "", _inflight: null,
         async refresh(opts = {}) {
           if (opts.force) this._inflight = null;
           if (this._inflight) return this._inflight;
           this._inflight = Promise.allSettled([api("/api/models"), api("/api/admin/runtime")]).then(([modelsResult, runtimeResult]) => {
             if (modelsResult.status === "fulfilled" && Array.isArray(modelsResult.value?.data)) {
-              this.rows = modelsResult.value.data;
-              this.rowsLoaded = true;
-              this.rowsError = "";
+              this.rows = modelsResult.value.data; this.rowsLoaded = true; this.rowsError = "";
             } else {
-              this.rowsError = this.rowsLoaded ? "\u672C\u5730\u6A21\u578B\u6E05\u5355\u5237\u65B0\u5931\u8D25\uFF0C\u5F53\u524D\u5C55\u793A\u4E0A\u6B21\u6210\u529F\u8BFB\u53D6\u7684\u6570\u636E\uFF1B\u8BF7\u68C0\u67E5\u6570\u636E\u5E93\u8FDE\u63A5\u540E\u5237\u65B0\u3002" : "\u672C\u5730\u6A21\u578B\u6E05\u5355\u8BFB\u53D6\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u5173\u6570\u636E\u5E93\u8FDE\u63A5\u540E\u5237\u65B0\u3002";
+              this.rowsError = this.rowsLoaded ? "\u672c\u5730\u6a21\u578b\u6e05\u5355\u5237\u65b0\u5931\u8d25\uff0c\u5f53\u524d\u5c55\u793a\u4e0a\u6b21\u6210\u529f\u8bfb\u53d6\u7684\u6570\u636e\uff1b\u8bf7\u68c0\u67e5\u6570\u636e\u5e93\u8fde\u63a5\u540e\u5237\u65b0\u3002" : "\u672c\u5730\u6a21\u578b\u6e05\u5355\u8bfb\u53d6\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u5173\u6570\u636e\u5e93\u8fde\u63a5\u540e\u5237\u65b0\u3002";
             }
             if (runtimeResult.status === "fulfilled") {
-              this.runtime = runtimeResult.value;
-              this.runtimeError = "";
+              this.runtime = runtimeResult.value; this.runtimeError = "";
+              this.runtimeWarning = [this.runtime?.upstream_warning, this.runtime?.catalog_warning].filter(Boolean).join("\uff1b");
             } else {
-              this.runtime = null;
-              this.runtimeError = "\u5F53\u524D\u63A8\u7406\u540E\u7AEF\u8FD0\u884C\u72B6\u6001\u6682\u4E0D\u53EF\u7528\uFF1B\u672C\u5730\u6A21\u578B\u6E05\u5355\u4ECD\u53EF\u72EC\u7ACB\u67E5\u770B\u3002";
+              this.runtime = null; this.runtimeError = "\u5f53\u524d\u63a8\u7406\u540e\u7aef\u8fd0\u884c\u72b6\u6001\u6682\u4e0d\u53ef\u7528\uff1b\u672c\u5730\u6a21\u578b\u6e05\u5355\u4ecd\u53ef\u72ec\u7acb\u67e5\u770b\u3002"; this.runtimeWarning = "";
             }
             this._reindexRuntime();
-          }).finally(() => {
-            this._inflight = null;
-          });
+          }).finally(() => { this._inflight = null; });
           return this._inflight;
         },
         _reindexRuntime() {
           this.catalogById = /* @__PURE__ */ new Map();
           const rt = this.runtime || {};
-          for (const x of [...rt.catalog || [], ...rt.loaded || []]) {
-            if (x && x.id && !this.catalogById.has(x.id)) this.catalogById.set(x.id, x);
-          }
+          for (const x of [...rt.catalog || [], ...rt.loaded || []]) if (x && x.id && !this.catalogById.has(x.id)) this.catalogById.set(x.id, x);
         },
-        _stripGguf(s) {
-          return String(s || "").replace(/\.gguf$/i, "");
-        },
+        _stripGguf(s) { return String(s || "").replace(/\.gguf$/i, ""); },
         _idMatch(a, b) {
-          a = this._stripGguf(a);
-          b = this._stripGguf(b);
+          a = this._stripGguf(a); b = this._stripGguf(b);
           if (!a || !b) return false;
           if (a === b) return true;
           const baseA = a.includes("/") ? a.split("/").pop() : a;
           const baseB = b.includes("/") ? b.split("/").pop() : b;
           return baseA === b || baseB === a || baseA === baseB;
         },
+        _samePath(a, b) {
+          a = String(a || "").trim().replace(/\\/g, "/").toLowerCase();
+          b = String(b || "").trim().replace(/\\/g, "/").toLowerCase();
+          return Boolean(a && b && (a === b || a.endsWith("/" + b) || b.endsWith("/" + a)));
+        },
         keysForRow(row) {
           const out = /* @__PURE__ */ new Set();
-          const add = (v) => {
-            v = String(v || "").trim();
-            if (!v) return;
-            out.add(v);
-            out.add(this._stripGguf(v));
-            if (v.includes("/")) out.add(v.split("/").pop());
-          };
-          add(row.model_key);
-          add(row.upstream_name);
-          add(row.upstream_llamacpp_id);
-          add(row.llama_model_name);
-          add(row.filename);
+          const add = (v) => { v = String(v || "").trim(); if (!v) return; out.add(v); out.add(this._stripGguf(v)); if (v.includes("/")) out.add(v.split("/").pop()); };
+          add(row.model_key); add(row.upstream_name); add(row.upstream_llamacpp_id); add(row.llama_model_name); add(row.filename);
           if (row.local_path) add(row.local_path);
           return out;
         },
-        runtimeItemForRow(row) {
-          const keys = this.keysForRow(row);
-          for (const [id, item] of this.catalogById) {
-            for (const k of keys) {
-              if (this._idMatch(id, k)) return item;
-            }
+        _runtimeMatchesRow(item, row) {
+          if (!item || !row) return false;
+          if (item.path && row.local_path) {
+            if (this._samePath(item.path, row.local_path)) return true;
+            if (item.path.startsWith("/") && String(row.local_path).startsWith("/")) return false;
           }
+          const keys = this.keysForRow(row);
+          for (const k of keys) if (String(item.id || "") === k || this._idMatch(item.id, k)) return true;
+          return false;
+        },
+        runtimeItemForRow(row) {
+          if (row?._runtime) return row._runtime;
+          for (const [id, item] of this.catalogById) if (this._runtimeMatchesRow(item, row)) return item;
           return null;
         },
+        tableRows() {
+          const rows = (this.rows || []).map((row) => ({ ...row, _managed: true, _runtime: this.runtimeItemForRow(row) }));
+          for (const item of this.runtime?.catalog || []) {
+            if (rows.some((row) => this._runtimeMatchesRow(item, row))) continue;
+            rows.push({ model_key: "", display_name: item.display_name || item.id, filename: item.display_name || item.id, local_path: item.path || "",
+              size_bytes: Number(item.disk_bytes || 0), status: item.status || "unknown", quantization: item.quantization || "",
+              upstream_name: item.id, _managed: false, _runtime: item });
+          }
+          return rows;
+        },
         diskBytes(row) {
-          const db = Number(row.disk_bytes ?? row.size_bytes ?? 0);
-          if (db > 0) return db;
           const it = this.runtimeItemForRow(row);
-          return it ? Number(it.disk_bytes || 0) : 0;
+          if (it && Number(it.disk_bytes) > 0) return Number(it.disk_bytes);
+          const db = Number(row.disk_bytes ?? row.size_bytes ?? 0);
+          return db > 0 ? db : 0;
         },
         loadState(row) {
-          const st = String(row.status || "").toLowerCase();
+          const dbStatus = String(row.status || "").toLowerCase();
           const rt = this.runtimeItemForRow(row);
+          const downloadStates = ["downloading", "download_failed", "download_cancelled"];
           if (rt) {
-            const rs = String(rt.status || "").toLowerCase() || (rt.loaded ? "loaded" : "");
-            if (rs) return rs;
+            const status = String(rt.status || "unknown").toLowerCase();
+            if (status && status !== "unknown") return status;
             if (rt.loaded) return "loaded";
+            if (downloadStates.includes(dbStatus)) return dbStatus;
+            return "unknown";
           }
-          return st || "unloaded";
+          return downloadStates.includes(dbStatus) ? dbStatus : "unknown";
         }
       };
       backendProbeInFlight = false;

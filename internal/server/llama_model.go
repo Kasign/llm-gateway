@@ -224,14 +224,25 @@ func (s *Server) loadLlamaCppUpstreamWithClient(ctx context.Context, client *lla
 	}
 
 	if !router {
-		applog.Infof("loadLlamaCpp: single-model server, skip POST /models/load (hint=%q)", upstreamHint)
-		if upstreamHint != "" {
-			return upstreamHint, nil
+		// 非 Router 服务只能使用当前已加载模型；不能把跳过加载请求伪装成切换成功。
+		ids, listErr := client.ListModelIDs(ctx)
+		if listErr != nil {
+			return "", fmt.Errorf("当前 llama.cpp 未启用 Router，且无法确认当前已加载模型：%w", listErr)
 		}
-		if gw != nil {
-			return s.resolveLlamaModel(ctx, gw), nil
+		for _, loadedID := range ids {
+			match := upstreamHint != "" && llama.ModelIDMatch(loadedID, upstreamHint)
+			if !match && gw != nil {
+				match = s.modelMatchesUpstreamID(gw, loadedID)
+			}
+			if match {
+				applog.Infof("loadLlamaCpp: single-model server already serves %q; no switch requested", loadedID)
+				return loadedID, nil
+			}
 		}
-		return "", nil
+		if len(ids) == 0 {
+			return "", fmt.Errorf("当前 llama.cpp 为单模型模式且没有可确认的已加载模型，不能把目标 %q 记为加载成功；如需动态加载其它模型，请以 Router 模式启动并配置 --models-dir", upstreamHint)
+		}
+		return "", fmt.Errorf("当前 llama.cpp 为单模型模式，实际加载的是 %q，不能切换到 %q；如需动态加载其它模型，请以 Router 模式启动并配置 --models-dir", strings.Join(ids, ", "), upstreamHint)
 	}
 
 	_, _ = client.Refresh(ctx)

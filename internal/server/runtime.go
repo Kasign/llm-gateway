@@ -59,6 +59,20 @@ func (s *Server) runtimePreviewAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+// runtimeRefreshAPI 显式刷新 llama.cpp Router 注册目录；普通页面轮询不触发重扫。
+func (s *Server) runtimeRefreshAPI(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) { return }
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+		return
+	}
+	if _, err := s.InferenceRefreshRegistry(r.Context(), "llamacpp"); err != nil {
+		jsonError(w, http.StatusBadGateway, "runtime_refresh_failed", err.Error())
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "backend": "llamacpp"})
+}
+
 func (s *Server) runtimeAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
@@ -185,91 +199,61 @@ func (s *Server) runtimeSelectAPI(w http.ResponseWriter, r *http.Request) {
 	applog.Infof("runtime select: model_id=%q backend=%s", res.LoadedAs, backend)
 }
 
+func llamaLoadedModelForHint(loaded []llama.CatalogItem, configured string) string {
+	configured = strings.TrimSpace(configured)
+	for _, item := range loaded {
+		if configured != "" && llama.ModelIDMatch(item.ID, configured) { return item.ID }
+	}
+	if len(loaded) == 1 { return strings.TrimSpace(loaded[0].ID) }
+	return ""
+}
+
 func (s *Server) buildLlamacppRuntimeSnapshot(ctx context.Context) (map[string]interface{}, error) {
 	list, err := s.InferenceList(ctx, "llamacpp", false)
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
 	snap := list.Snapshot
-	if snap == nil {
-		return nil, fmt.Errorf("empty llamacpp upstream snapshot")
-	}
+	if snap == nil { return nil, fmt.Errorf("empty llamacpp upstream snapshot") }
 	baseURL := list.BaseURL
 	client, _, err := s.llamacppAdminClient()
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
+
+	ms := list.GatewayModels
+	configuredModel := strings.TrimSpace(s.activeModelHintForBackend("llamacpp"))
+	catalogWarning := s.mergeLlamacppCatalog(snap, ms, list.CatalogSource == "upstream")
+	actualLoadedModel := llamaLoadedModelForHint(snap.Loaded, configuredModel)
 
 	var gatewayModelKey string
-	ms := list.GatewayModels
-	for _, m := range ms {
-		if strings.EqualFold(m.Status, "loaded") {
-			gatewayModelKey = m.ModelKey
-			break
+	if actualLoadedModel != "" {
+		for _, m := range ms {
+			if s.modelMatchesUpstreamID(&m, actualLoadedModel) { gatewayModelKey = m.ModelKey; break }
 		}
 	}
-	if gatewayModelKey == "" {
-		for _, m := range ms {
-			resolved := s.resolveLlamaModel(ctx, &m)
-			if resolved != "" && (resolved == snap.ActiveModel || strings.TrimSuffix(resolved, ".gguf") == strings.TrimSuffix(snap.ActiveModel, ".gguf")) {
-				gatewayModelKey = m.ModelKey
-				break
-			}
-		}
+	if gatewayModelKey == "" && configuredModel != "" {
+		if gw := s.gatewayModelForUpstreamID(ctx, configuredModel); gw != nil { gatewayModelKey = gw.ModelKey }
 	}
 
 	var activeItem *llama.CatalogItem
 	for i := range snap.Loaded {
-		if snap.Loaded[i].ID == snap.ActiveModel || snap.Loaded[i].Active {
+		if actualLoadedModel != "" && llama.ModelIDMatch(snap.Loaded[i].ID, actualLoadedModel) {
 			activeItem = &snap.Loaded[i]
 			break
 		}
 	}
-	if activeItem == nil && len(snap.Loaded) > 0 {
-		activeItem = &snap.Loaded[0]
-	}
-
 	var diskEstimate int64
-	if activeItem != nil && activeItem.DiskBytes > 0 {
-		diskEstimate = activeItem.DiskBytes
-	} else {
-		for _, m := range ms {
-			if m.ModelKey == gatewayModelKey {
-				diskEstimate = model.CachedDiskBytes(&m)
-			}
-			if diskEstimate > 0 {
-				break
-			}
-		}
-	}
-
+	if activeItem != nil { diskEstimate = activeItem.DiskBytes }
 	hotUnload, _ := client.HasRouter(ctx)
-	activeModel := strings.TrimSpace(snap.ActiveModel)
-	if activeModel == "" {
-		activeModel = activeModelIDFromSnapshot(snap, "llamacpp")
-	}
-	if activeModel == "" {
-		activeModel = s.activeModelHintForBackend("llamacpp")
-	}
-	if gatewayModelKey == "" && activeModel != "" {
-		if gw := s.gatewayModelForUpstreamID(ctx, activeModel); gw != nil {
-			gatewayModelKey = gw.ModelKey
-		}
-	}
 	out := map[string]interface{}{
-		"backend":              "llamacpp",
-		"base_url":             baseURL,
-		"active_model":         activeModel,
-		"gateway_model_key":    gatewayModelKey,
-		"loaded":               snap.Loaded,
-		"catalog":              snap.Catalog,
-		"loaded_vram_bytes":    snap.LoadedVRAM,
-		"loaded_ram_bytes":     snap.LoadedRAM,
-		"disk_bytes_est":       diskEstimate,
-		"hot_unload_supported": hotUnload,
+		"backend": "llamacpp", "base_url": baseURL,
+		// active_model 只表示实际上游已加载模型；Gateway 默认路由目标单独返回。
+		"active_model": actualLoadedModel, "gateway_model": configuredModel, "gateway_model_key": gatewayModelKey,
+		"loaded": snap.Loaded, "catalog": snap.Catalog, "catalog_source": list.CatalogSource,
+		"loaded_vram_bytes": snap.LoadedVRAM, "loaded_ram_bytes": snap.LoadedRAM,
+		"disk_bytes_est": diskEstimate, "hot_unload_supported": hotUnload,
 	}
+	if list.UpstreamWarning != "" { out["upstream_warning"] = list.UpstreamWarning }
+	if catalogWarning != "" { out["catalog_warning"] = catalogWarning }
 	if !hotUnload {
-		out["unload_note"] = "当前 llama.cpp 可能为单模型进程：Gateway「卸载」不会删磁盘，但可能无法热释放权重，需 router 模式或重启推理容器"
+		out["unload_note"] = "当前 llama.cpp 为单模型模式：本页仍显示共享磁盘中的 GGUF，但不能在进程内切换其它模型；需要 Router 模式和 --models-dir 才能动态加载"
 	} else {
 		out["unload_note"] = "卸载仅释放推理内存/显存，不删除磁盘上的 GGUF"
 	}

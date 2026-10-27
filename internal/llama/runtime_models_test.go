@@ -85,3 +85,16 @@ func TestLlamacppRuntimePrefersNonEmptyRouterCatalog(t *testing.T) {
 		t.Fatalf("/v1/models called %d times despite non-empty router catalog", openAIListCalls)
 	}
 }
+
+func TestHasRouterRecognizesEmptyRouterCatalog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" { http.NotFound(w, r); return }
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer srv.Close()
+	client := New(srv.URL, 2*time.Second, "llamacpp", "")
+	got, err := client.HasRouter(context.Background())
+	if err != nil { t.Fatalf("HasRouter: %v", err) }
+	if !got { t.Fatal("empty /models catalog must still identify Router mode") }
+}

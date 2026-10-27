@@ -404,3 +404,12 @@
 - 处理：优先使用包含有效模型 ID 的 Router 全量目录；目录为空或无有效 ID 时再查 OpenAI 兼容接口。`/v1/models` 返回的模型按其协议语义标记为已加载，避免缺失 Router `status` 字段时显示为未加载。模型候选 ID 的 `Client.ListModelIDs` 复用相同的回退逻辑。
 - 新增 `internal/llama/runtime_models_test.go`：覆盖 Router 空目录时从 `/v1/models` 发现模型、加载状态正确，以及 Router 有目录时不被单模型响应覆盖。未手动运行测试，按用户安排交由后续统一验证。
 - CI 阻塞仍单独记录：Actions #257 的所有 Job 均在实际步骤前失败，当前没有足够证据将其归类为代码缺陷，也未确认是否为 GitHub Hosted Runner 配额/权限问题。
+
+
+## 2026-10-27：llama.cpp 全模型目录与实时加载状态
+
+- GGUF 管理表统一合并 Router 注册目录、Gateway 共享磁盘目录和 Gateway 数据库登记项。磁盘扫描只读取文件元数据，递归扫描子目录、忽略 `mmproj*.gguf`，多分片模型合并为一条逻辑记录。
+- `active_model` 只表示上游实时报告已加载的模型；`gateway_model` 独立表示 Gateway 当前默认路由目标。数据库历史 `status=loaded` 不再作为实时证据。
+- 新增管理员 POST `/api/admin/runtime/refresh` 作为显式目录刷新入口；刷新会请求 Router 重扫并清空快照缓存。空 `/models` 列表仍可识别为 Router。
+- 非 Router 单模型服务不再将跳过 `POST /models/load` 的目标伪装成加载成功；只有 `/v1/models` 确认目标已加载时才接受请求，否则返回 Router 模式限制。
+- 新增磁盘分片扫描与空 Router 检测回归用例。本批未手动运行测试或构建；Actions #257/#258 均在作业步骤开始前失败，代码仍待完整 CI 验收。

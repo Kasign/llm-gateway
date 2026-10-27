@@ -905,6 +905,32 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/AdminError"
+  /api/admin/runtime/refresh:
+    post:
+      operationId: postApiAdminRuntimeRefresh
+      tags: [Admin]
+      summary: 刷新 llama.cpp 模型目录
+      description: Router 模式下重新扫描注册目录并清除运行时缓存；单模型模式只查询当前模型，不虚报动态加载能力。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      responses:
+        "200":
+          description: 模型目录刷新完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, backend]
+                properties:
+                  success: { type: boolean, const: true }
+                  backend: { type: string, const: llamacpp }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
   /api/admin/runtime/preview:
     get:
       operationId: getApiAdminRuntimePreview
