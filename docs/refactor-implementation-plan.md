@@ -2,11 +2,11 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 上一完整 CI 基线：`747bdba7319da9f4b993e4bb1b9a0584abe73e05`（Actions [#243](https://github.com/Kasign/llm-gateway/actions/runs/40445517048)，四个并行 Job 全部通过，约 2 分 10 秒）。本批进一步将稳态负载与故障注入拆成并行 Job。
+> 最近完整 CI 基线：`5946e529ec213f41561452417af6dbd797282d2c`（Actions [#246](https://github.com/Kasign/llm-gateway/actions/runs/40446504395)，五个并行 Job 全部通过，约 1 分 58 秒）。
 
 ## 当前状态快照（2026-10-27）
 
-- 最近完整 CI 的前一 Head `747bdba`（Actions #243）已验证队列热更新回归、配置/API 与前端、Go 测试/race/vet、Gateway 负载/故障注入、Go/Docker 构建均通过。
+- 最近完整 CI Head `5946e52`（Actions #246）验证 RequestLog 与 RequestDetail 摘要/耗时字段契约，以及配置/API、Go 测试/race/vet、负载故障注入、Docker 构建均通过。
 - CI 已拆为四个并行 Job，并启用 npm 缓存、Buildx GitHub Actions 层缓存，以及同一 ref 的过期运行取消。Actions #241 约 2 分 05 秒、#242 约 2 分 03 秒；相比串行 Actions #240 约 4 分 10 秒，墙钟时间接近减半。
 - 已合入的最近功能包括：本地 GGUF 清单与运行时状态隔离、部署 Provider FIFO 参数透传、Token 预算按实际出站 dispatch 结算、高风险 OpenAPI/Go 字段对账与请求取消状态契约。
 - 当前没有开放 PR。保持非强制更新、不改写历史；按完整功能组集中提交，避免小改动反复触发完整 CI。
@@ -1049,3 +1049,8 @@ docs/                        中文架构、协议和运维文档
 - 将 `RequestDetail.summary` 和 `RequestDetail.timing` 从泛化 object 改为共享、可复用的 `RequestSummary` / `RequestTiming` Schema，列出请求身份/状态、模型与 Provider、请求体积、延迟、TTFT、生成阶段和 Token 来源等稳定字段。
 - 扩展 `scripts/check_openapi_contracts.py`，从 `buildRequestSummary`、`buildRequestTiming`、`buildRequestDetail`、`applyHarvestToTiming` 提取 map 键，并在 CI 中验证每个字段都有 Schema 定义。
 - 正文与 Header、分析结果、SSE 事件仍是条件字段；这是一项针对详情接口的可维护性门禁，不代表所有 API 已完全 Schema 等价。
+
+## 25. RequestDetail 分析与 SSE 事件 Schema 对账（2026-10-27）
+
+- `RequestDetail.analysis` 引用 `RequestAnalysis`，其阶段耗时和吞吐子对象分别引用 `RequestPhaseMS`、`RequestThroughput`；`stream_events.items` 引用 `StreamEvent`，避免管理台分析/流事件长期停留在任意 object。
+- 扩展契约脚本，对照 Go 分析 DTO 和持久化流事件 DTO 的 JSON tags；条件正文/Headers 不标记为必需字段，避免将配置关闭时不存在的数据误写进契约。

@@ -2620,6 +2620,57 @@ components:
         token_source: { type: string }
         token_source_label: { type: string }
       additionalProperties: false
+    RequestAnalysis:
+      type: object
+      description: 从请求阶段日志或流式事件计算出的分析数据。
+      required: [phases_ms, throughput]
+      properties:
+        phases_ms:
+          $ref: "#/components/schemas/RequestPhaseMS"
+        throughput:
+          $ref: "#/components/schemas/RequestThroughput"
+        summary:
+          type: array
+          items: { type: string }
+      additionalProperties: false
+    RequestPhaseMS:
+      type: object
+      required: [total_ms, prep_ms, model_load_ms, upstream_ms, gateway_before_infer_ms]
+      properties:
+        total_ms: { type: integer, format: int64, minimum: 0 }
+        prep_ms: { type: integer, format: int64, minimum: 0 }
+        model_load_ms: { type: integer, format: int64, minimum: 0 }
+        upstream_ms: { type: integer, format: int64, minimum: 0 }
+        time_to_upstream_headers_ms: { type: integer, format: int64, minimum: 0 }
+        time_to_first_byte_ms: { type: integer, format: int64, minimum: 0 }
+        ttft_ms: { type: integer, format: int64, minimum: 0 }
+        ttft_content_ms: { type: integer, format: int64, minimum: 0 }
+        thinking_ms: { type: integer, format: int64, minimum: 0 }
+        content_generation_ms: { type: integer, format: int64, minimum: 0 }
+        prefill_until_first_ms: { type: integer, format: int64, minimum: 0 }
+        gateway_before_infer_ms: { type: integer, format: int64, minimum: 0 }
+      additionalProperties: false
+    RequestThroughput:
+      type: object
+      properties:
+        output_tokens_per_sec: { type: number, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        generation_window_ms: { type: integer, format: int64, minimum: 0 }
+        source: { type: string }
+        note: { type: string }
+      additionalProperties: false
+    StreamEvent:
+      type: object
+      required: [seq, at_ms, kind]
+      properties:
+        seq: { type: integer, minimum: 0 }
+        at_ms: { type: integer, format: int64, minimum: 0 }
+        kind: { type: string }
+        field: { type: string }
+        delta_len: { type: integer, minimum: 0 }
+        preview: { type: string }
+        raw_line: { type: string }
+      additionalProperties: false
     RequestDetail:
       type: object
       required: [log, summary, timing, diagnosis]
@@ -2635,16 +2686,14 @@ components:
           type: array
           items: { type: string }
         analysis:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/RequestAnalysis"
         payload:
           type: object
           additionalProperties: { type: string }
         stream_events:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: "#/components/schemas/StreamEvent"
       additionalProperties: true
     AuditMetricsEnvelope:
       type: object

@@ -4,9 +4,9 @@
 
 ## 当前基线
 
-- 上一完整 CI 基线：`747bdba7319da9f4b993e4bb1b9a0584abe73e05`，提交 `test(provider): cover FIFO queue budget rollback`；Actions [#243](https://github.com/Kasign/llm-gateway/actions/runs/40445517048) 四个并行 Job 全部通过。
+- 最近完整 CI 基线：`5946e529ec213f41561452417af6dbd797282d2c`，提交 `docs(api): define request detail summary timing schema`；Actions [#246](https://github.com/Kasign/llm-gateway/actions/runs/40446504395) 五个并行 Job 全部通过。
 - Actions #241/#242 已证明四个并行 Job 可用；最新完整基线 #243（Head `747bdba`）同样全部通过，总耗时约 2 分 10 秒。慢点集中在同一个 Job 内串行执行稳态负载与多组故障注入。
-- CI 并行化前 Actions #240 约 4 分 10 秒；并行后的 #241/#242 约 2 分钟，墙钟时间接近减半。npm 与 Buildx 缓存、同 ref 过期 CI 取消均已启用。
+- CI 并行化前 Actions #240 约 4 分 10 秒；拆分稳态负载/故障注入后的 #244 约 1 分 52 秒，#245 约 1 分 54 秒，#246 约 1 分 58 秒。墙钟时间约缩短 50% 以上；npm/Buildx 缓存与过期运行取消已启用。
 - 最近功能提交对应的 Actions #237–#242 均已通过；#239 的 Provider Token 预算预占回滚修复完整运行 37/37 步通过。
 - PR #5 与 PR #7 已合并至 `dev`；当前没有开放 PR。保持不强推、不改写历史。
 - CI 使用 Mock、Redis 和 MariaDB；不能据此宣称真实供应商 E2E、公网反向代理或生产容量已验收。
@@ -344,3 +344,8 @@
 - 请求详情中的 `summary` 与 `timing` 原先仅声明为任意 object；现在分别引用 `RequestSummary` 和 `RequestTiming`，明确稳定的状态、模型、请求大小、耗时、TTFT 与 Token 来源字段。
 - 高风险 OpenAPI 门禁从 `buildRequestSummary`、`buildRequestTiming`、`buildRequestDetail` 和 `applyHarvestToTiming` 中提取 map 键，并检查每个稳定字段都有 Schema 定义；新增字段需要同步更新契约，避免管理台显示字段无文档。
 - 动态正文、请求/上游 Header、分析内容和流式事件仍按配置与请求结果有条件出现，本次不将它们误标为必填。
+
+## 2026-10-27 请求详情分析与流事件 DTO 契约
+
+- 将 `RequestDetail.analysis` 与 `stream_events.items` 从泛化 object 改为 `RequestAnalysis` / `StreamEvent` Schema，明确阶段耗时、吞吐、Token 来源和流事件字段。
+- 高风险契约门禁现对照 `request_analysis.go` 中 `RequestAnalysis`、`RequestPhaseMS`、`RequestThroughput` 与 `store.StreamEvent` 的 JSON tags；详情正文、Headers 与分析备注仍按保存策略动态出现。

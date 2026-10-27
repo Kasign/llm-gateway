@@ -18,6 +18,7 @@ MODEL_STRUCT_FILE = ROOT / "internal" / "model" / "model.go"
 GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
 STORE_REQUEST_LOG_FILE = ROOT / "internal" / "store" / "store.go"
 REQUEST_DETAIL_SOURCE_FILE = ROOT / "internal" / "server" / "request_detail.go"
+REQUEST_ANALYSIS_FILE = ROOT / "internal" / "server" / "request_analysis.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 
@@ -97,6 +98,7 @@ def validate(
     request_cancel_handler: str,
     store_request_log: str,
     request_detail_source: str,
+    request_analysis_source: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -254,6 +256,56 @@ def validate(
             "cancelRequestAPI status/body behavior must match the OpenAPI contract",
         )
 
+        # RequestDetail nested analysis/stream DTOs must match their Go structs.
+        require(
+            re.search(
+                r'(?m)^        analysis:\n          \$ref:[ \t]*"#/components/schemas/RequestAnalysis"',
+                request_detail_schema,
+            ) is not None,
+            "RequestDetail.analysis must reference RequestAnalysis",
+        )
+        require(
+            re.search(
+                r'(?ms)^        stream_events:\n          type: array\n          items:\n            \$ref:[ \t]*"#/components/schemas/StreamEvent"',
+                request_detail_schema,
+            ) is not None,
+            "RequestDetail.stream_events.items must reference StreamEvent",
+        )
+        for type_name in ("RequestAnalysis", "RequestPhaseMS", "RequestThroughput"):
+            schema = schema_block(source, type_name)
+            pattern = r"(?ms)^type " + re.escape(type_name) + r" struct \{(.*?)^\}"
+            declaration = re.search(pattern, request_analysis_source)
+            if declaration is None:
+                raise ValueError(f"internal/server/request_analysis.go: type {type_name} struct not found")
+            fields = {
+                tag
+                for tag in re.findall(r'json:"([^",]+)', declaration.group(1))
+                if tag and tag != "-",
+            }
+            for field in sorted(fields):
+                try:
+                    schema_field_block(schema, field)
+                except ValueError:
+                    errors.append(f"{type_name}: missing Go JSON field {field!r}")
+
+        stream_event_schema = schema_block(source, "StreamEvent")
+        stream_event_decl = re.search(
+            r"(?ms)^type StreamEvent struct \{(.*?)^\}",
+            store_request_log,
+        )
+        if stream_event_decl is None:
+            raise ValueError("internal/store/store.go: type StreamEvent struct not found")
+        stream_event_fields = {
+            tag
+            for tag in re.findall(r'json:"([^",]+)', stream_event_decl.group(1))
+            if tag and tag != "-",
+        }
+        for field in sorted(stream_event_fields):
+            try:
+                schema_field_block(stream_event_schema, field)
+            except ValueError:
+                errors.append(f"StreamEvent: missing Go JSON field {field!r}")
+
         # RequestList and RequestDetail.log expose store.RequestLog JSON.
         request_log_schema = schema_block(source, "RequestLog")
         request_list_schema = schema_block(source, "RequestList")
@@ -384,6 +436,7 @@ def main() -> int:
         request_cancel_handler = REQUEST_CANCEL_HANDLER_FILE.read_text(encoding="utf-8")
         store_request_log = STORE_REQUEST_LOG_FILE.read_text(encoding="utf-8")
         request_detail_source = REQUEST_DETAIL_SOURCE_FILE.read_text(encoding="utf-8")
+        request_analysis_source = REQUEST_ANALYSIS_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -394,6 +447,7 @@ def main() -> int:
             request_cancel_handler,
             store_request_log,
             request_detail_source,
+            request_analysis_source,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
@@ -409,7 +463,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "/api/models GatewayModel fields, RequestLog fields, and RequestDetail summary/timing fields."
+        "/api/models GatewayModel fields, RequestLog fields, RequestDetail summary/timing fields, RequestAnalysis fields, and StreamEvent fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "
