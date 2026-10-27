@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 本批修改前最近通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`；Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过。当前收尾修改由新 Head 的 Actions 单独验收，不用旧 Head 的绿色结果代替。
+- 最近一次完整通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`；Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过。当前 `dev` 起始 Head 为 `3b895d9b8c70af30af350d332566381a47b27f1c`；Actions [#257](https://github.com/Kasign/llm-gateway/actions/runs/40456414099) 在两次尝试中均有 5 个 Job 在实际步骤开始前立即失败，无法据此判断代码通过/失败；不把 #256 的旧绿色结果代替当前验收。
 - 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
 - Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
 - Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
@@ -397,3 +397,10 @@
 - 配置兼容 Review 发现 `proxyRequestContext` 将显式 `request_timeout_seconds: 0` 误当作缺省值并强加一小时 Deadline，与配置加载、示例和文档的语义冲突。本批改为复用可选超时 helper：显式 0 不增加整体 Deadline，父 Context 的取消仍传播；未设置该项时仍由 `Config.Load` 维持旧的一小时默认值。
 - 本批只增加代理 Context 的零值/正值回归覆盖；未重复运行手工测试。CI 构建检查保留前端源码和 `web/static/dist` Bundle 一致性门禁。
 - 真实 Provider、慢模型经公网反向代理的实际超时/断连表现，以及 1Panel 部署仍未由这次代码审查或 CI 验收；继续作为用户环境验收项。
+
+## 2026-10-27：llama.cpp 模型列表兼容性修复
+
+- 根因：`llamacppRuntime` 和 `Client.List` 仅在 `GET /models` 请求失败时回退到 `GET /v1/models`；若 Router 列表返回 HTTP 200 但 `data` 为空/无有效 ID，单模型模式的已加载模型不会被查询，界面可能把空目录当成完整结果。
+- 处理：优先使用包含有效模型 ID 的 Router 全量目录；目录为空或无有效 ID 时再查 OpenAI 兼容接口。`/v1/models` 返回的模型按其协议语义标记为已加载，避免缺失 Router `status` 字段时显示为未加载。模型候选 ID 的 `Client.ListModelIDs` 复用相同的回退逻辑。
+- 新增 `internal/llama/runtime_models_test.go`：覆盖 Router 空目录时从 `/v1/models` 发现模型、加载状态正确，以及 Router 有目录时不被单模型响应覆盖。未手动运行测试，按用户安排交由后续统一验证。
+- CI 阻塞仍单独记录：Actions #257 的所有 Job 均在实际步骤前失败，当前没有足够证据将其归类为代码缺陷，也未确认是否为 GitHub Hosted Runner 配额/权限问题。

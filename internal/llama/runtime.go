@@ -251,16 +251,9 @@ func (c *Client) llamacppRuntime(ctx context.Context, activeModel string, rescan
 	if rescanDisk {
 		_, _ = c.get(ctx, "/models?reload=1")
 	}
-	b, errModels := c.get(ctx, "/models")
-	if errModels != nil {
-		var errV1 error
-		b, errV1 = c.get(ctx, "/v1/models")
-		if errV1 != nil {
-			return nil, fmt.Errorf(
-				"无法从 llama.cpp 拉取模型列表（router 用 GET /models，OpenAI 兼容用 GET /v1/models；/models: %v；/v1/models: %v）",
-				errModels, errV1,
-			)
-		}
+	b, fromOpenAIModels, err := c.listLlamaModels(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var resp struct {
@@ -280,6 +273,10 @@ func (c *Client) llamacppRuntime(ctx context.Context, activeModel string, rescan
 			continue
 		}
 		st := parseLlamaStatus(item.Status)
+		if fromOpenAIModels {
+			// /v1/models 只返回当前加载的模型，不提供 Router 的 status 字段。
+			st = llamaStatusParsed{display: "loaded", inMemory: true, running: true}
+		}
 		disk := item.Size
 		if disk <= 0 {
 			disk = parseLlamaMetaDisk(item.Meta)

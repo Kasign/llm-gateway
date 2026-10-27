@@ -1061,3 +1061,10 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - 修复代理请求上下文把显式 0 超时误解释为一小时的缺陷。改为复用 `contextWithOptionalTimeout`；Config.Load 仍负责将“未指定”规范化为一小时，因此不破坏旧配置默认行为；显式 0 不增加 Deadline，父 Context 取消仍有效。
 - 增加 `proxyRequestContext` 零值与正值回归用例。未手动重复运行测试；由新 Head 的自动化 Actions 覆盖。
 - 本轮代码级 Review 的剩余验收仅保留真实供应商、慢模型公网反代和 1Panel 部署；目录迁移、全量 OpenAPI 对账、重试/故障转移和 Agent 权限扩展继续暂缓。
+
+## 32. llama.cpp 模型发现空列表与单模型回退
+
+- 当前功能组：修复 Router `/models` 在 HTTP 200 下返回空列表时不尝试 `/v1/models` 的缺口；统一运行时快照和 `ListModelIDs` 的模型发现优先级，并把兼容接口返回的当前模型正确标记为已加载。
+- 保留边界：Router 返回有效非空目录时不额外请求并覆盖它；有效空目录且兼容接口不可用时保留空目录，避免将“没有可用模型”误报成协议错误。
+- 回归覆盖已添加，未手动跑测试/构建。由于前一个 Head 的 Actions #257 两次均在 Job 步骤启动前失败，本批新 Head 的 CI 完成前仍属于待验收。
+- 生产环境后续只需确认两件事：Gateway 容器实际访问的 `LLAMA_CPP_BASE_URL` 是否指向正确服务根路径，以及 llama.cpp 单模型/Router 启动模式与模型目录挂载是否符合预期。不要再为没有复现证据的情况扩展模型目录抽象。

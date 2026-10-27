@@ -766,3 +766,16 @@ Ollama Library tags 的稳定字段包括 tag、full_name，以及可选的 size
 CI 执行 `scripts/check_openapi_routes.py`，把 `Server.Handler` 中的字面路由注册与 `docs/openapi.yaml` 的顶层 path keys 对比。对于 Go ServeMux 前缀和 handler 内部 path parsing，脚本维护显式动态路由族映射，包括模型动作、请求详情/取消、Provider 操作、Benchmark 与 API Key 动作；Agent 固定 Provider 路由则按支持的公共推理协议展开。
 
 该脚本的目标是防止新增/删除路由时漏改 OpenAPI 路径集合。它不是 OpenAPI 解析器，也不会声称验证 Handler 所有方法、状态码或 JSON 字段与 Schema 一致；这些仍需按功能修改和 Review 时同步。动态路由模式若变化，必须更新脚本的映射规则，避免用简单忽略规则绕过路径缺口。
+
+## llama.cpp 模型目录发现：Router 与单模型模式
+
+管理台的运行时目录和模型加载候选不应只把 HTTP 状态码 200 当作“已成功发现模型”。llama.cpp 的 Router `GET /models` 用于枚举目录中的模型（包括未加载模型）；OpenAI 兼容 `GET /v1/models` 返回当前加载模型的信息，适合非 Router 单模型服务，但不是全目录清单。
+
+Gateway 的查询顺序为：
+
+1. 优先采用 `/models` 返回的、至少包含一个非空 `data[].id` 的目录，保留 Router 的加载状态和目录元数据。
+2. 当 `/models` 请求失败、响应结构无效或目录为空时，尝试 `/v1/models`。只要兼容接口有有效响应就解析；该接口返回的模型应显示为已加载，因为它代表当前推理实例。
+3. 如果 Router 返回合法空目录，而兼容接口不可用，则保留合法空目录；只有两个端点均无法提供有效模型列表时才返回发现错误。这样既避免空结果吞掉单模型实例，也不会把 Router 中真实的未加载模型误标成已加载。
+4. `Client.ListModelIDs` 与运行时快照共用这套优先级，避免管理台看得到模型、加载候选却无法解析同一个模型 ID。
+
+部署核对时，`LLAMA_CPP_BASE_URL` 应指向 llama.cpp 服务根地址；若要列出模型目录，建议以 Router 模式运行并配置正确的模型缓存或 `--models-dir`。单模型模式只承诺展示当前加载的模型，不应视为磁盘上的完整 GGUF 清单。自动测试覆盖接口选择与状态解析，但真实容器挂载目录仍需在部署环境确认。

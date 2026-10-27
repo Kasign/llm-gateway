@@ -195,6 +195,58 @@ func (c *Client) ServiceKind(ctx context.Context) string {
 	return ""
 }
 
+// llamaModelListInfo 校验 OpenAI 兼容模型列表结构，并判断是否至少含一个有效模型 ID。
+func llamaModelListInfo(body []byte) (valid bool, hasIDs bool) {
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Data == nil {
+		return false, false
+	}
+	for _, item := range resp.Data {
+		if strings.TrimSpace(item.ID) != "" {
+			return true, true
+		}
+	}
+	// data: [] 是有效的空列表；data 缺失或为 null 则不是有效模型目录响应。
+	return true, false
+}
+
+// listLlamaModels 优先使用 Router 的全量目录；目录为空或响应无效时，再尝试单模型服务的 /v1/models。
+func (c *Client) listLlamaModels(ctx context.Context) (json.RawMessage, bool, error) {
+	modelsBody, modelsErr := c.get(ctx, "/models")
+	if modelsErr == nil {
+		valid, hasIDs := llamaModelListInfo(modelsBody)
+		if valid && hasIDs {
+			return modelsBody, false, nil
+		}
+		if !valid {
+			modelsErr = fmt.Errorf("/models 响应未包含有效的 data 模型列表")
+		}
+	}
+
+	v1Body, v1Err := c.get(ctx, "/v1/models")
+	if v1Err == nil {
+		valid, _ := llamaModelListInfo(v1Body)
+		if valid {
+			// /v1/models 表示当前加载的模型；即使结果为空，它仍是有效的兼容响应。
+			return v1Body, true, nil
+		}
+		v1Err = fmt.Errorf("/v1/models 响应未包含有效的 data 模型列表")
+	}
+
+	if modelsErr == nil {
+		// Router 的空目录是合法状态；如果兼容接口不可用，保留原始空目录而不是伪造错误。
+		return modelsBody, false, nil
+	}
+	return nil, false, fmt.Errorf(
+		"无法从 llama.cpp 拉取模型列表（router 用 GET /models，OpenAI 兼容用 GET /v1/models；/models: %v；/v1/models: %v）",
+		modelsErr, v1Err,
+	)
+}
+
 func (c *Client) List(ctx context.Context) (json.RawMessage, error) {
 	if c.IsOllama() {
 		if err := c.ensureOllamaDaemon(ctx); err != nil {
@@ -202,11 +254,8 @@ func (c *Client) List(ctx context.Context) (json.RawMessage, error) {
 		}
 		return c.get(ctx, "/api/tags")
 	}
-	b, err := c.get(ctx, "/models")
-	if err == nil {
-		return b, nil
-	}
-	return c.get(ctx, "/v1/models")
+	body, _, err := c.listLlamaModels(ctx)
+	return body, err
 }
 
 func (c *Client) ListModelIDs(ctx context.Context) ([]string, error) {
