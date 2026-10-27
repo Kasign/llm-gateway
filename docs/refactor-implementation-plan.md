@@ -1012,3 +1012,10 @@ docs/                        中文架构、协议和运维文档
 - 保留 Redis/MariaDB 覆盖、队列/预算回归、故障注入、Race、Compose、前端 Bundle 比对和 Release 镜像构建。MariaDB 专项审计测试在全套 `go test ./...` 之外仍保留于负载 Job，便于查看独立诊断和产物。
 - 加入同一 ref 的过期工作流取消策略、Node npm 缓存及 Buildx GitHub Actions 层缓存。性能目标是让独立耗时阶段并行，而不是减少必要的回归范围。
 - 后续比较本次完整 Actions 的总时长与分 Job 耗时；若 GitHub Runner/服务启动成为瓶颈，再按实测结果调整并行度。
+
+## 20. 请求日志筛选与取消端点响应契约（2026-10-27）
+
+- `cancelRequestAPI` 对非 POST 方法明确返回 405，但 `docs/openapi.yaml` 漏记该状态码；已补齐稳定 AdminError 响应。
+- 扩展 `scripts/check_openapi_contracts.py`，要求取消操作具备 200/400/401/405/409 响应定义，并检查 Handler 的方法校验、400/409 分支与成功响应关键字段。
+- 对 `GET /api/requests` 的 Provider 筛选做跨层对账，检查 OpenAPI 将其声明为字符串 query 参数，且 Go Handler 确实读取并传入日志合并查询。
+- 这项检查不等于对所有 RequestList/RequestDetail 动态字段进行全量 Schema 生成或等价性验证。

@@ -314,3 +314,9 @@
 - 删除独立重复的 MariaDB 审计用例步骤（该用例仍在完整 `go test ./...` 中执行，并在负载 Job 保留专项运行），避免基础测试重复消耗 Runner。
 - Docker 镜像使用 Buildx GitHub Actions 层缓存，Node/npm 启用依赖缓存；同一分支新提交会取消过期 CI，防止排队中的旧 HEAD 持续占用 Runner。
 - 此变更的实际提速幅度以新工作流运行时间为准。并行 Job 会增加同时启动的 Runner/数据库服务，不减少关键验证覆盖，也不声称能加速用户本地模型的真实推理耗时。
+
+## 2026-10-27 请求日志筛选与取消 API 契约补强
+
+- 复核发现 `POST /api/requests/{id}/cancel` Handler 会对非 POST 返回 `405 method_not_allowed`，但 OpenAPI 未声明 405，客户端契约与真实 Handler 不完整。
+- 已补齐 OpenAPI 405 响应，并扩展高风险契约检查器：核对取消端点的 200/400/401/405/409 状态集合、405 错误封套，以及 Handler 实际的 POST/状态码分支。
+- 同时核对 `GET /api/requests` 的 `provider` 字符串查询参数确实在 Handler 中传入合并日志查询，而非只有文档声明。该门禁仅覆盖此请求日志 API 子集，完整 Go/OpenAPI 字段对账仍分阶段推进。

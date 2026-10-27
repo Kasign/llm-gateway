@@ -16,6 +16,8 @@ PROVIDER_HANDLER_FILE = ROOT / "internal" / "server" / "admin_providers_http.go"
 REQUEST_STATS_FILE = ROOT / "internal" / "server" / "request_stats.go"
 MODEL_STRUCT_FILE = ROOT / "internal" / "model" / "model.go"
 GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
+REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
+REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -89,6 +91,8 @@ def validate(
     stats_handler: str,
     model_struct: str,
     gateway_model_ops: str,
+    request_list_handler: str,
+    request_cancel_handler: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -201,6 +205,51 @@ def validate(
             "request statistics DB diagnostics must remain in server-side logs",
         )
 
+        # Keep the request-list Provider filter synchronized with the actual Handler.
+        request_list_operation = operation_block(source, "/api/requests", "get")
+        provider_parameter = re.search(
+            r"(?ms)^        - name: provider\n          in: query\n.*?^          schema: \{ type: string \}",
+            request_list_operation,
+        )
+        require(
+            provider_parameter is not None,
+            "GET /api/requests must document the Provider query filter as a string",
+        )
+        request_list_impl = go_function(
+            request_list_handler, "func (s *Server) requestsAPI("
+        )
+        require(
+            'r.URL.Query().Get("provider")' in request_list_impl
+            and "queryRequestLogsMerged" in request_list_impl,
+            "requestsAPI must pass the Provider query filter into merged request-log lookup",
+        )
+
+        # Cancel API must document all stable status classes returned by the Handler.
+        cancel_operation = operation_block(
+            source, "/api/requests/{id}/cancel", "post"
+        )
+        for status in ("200", "400", "401", "405", "409"):
+            try:
+                response_block(cancel_operation, status)
+            except ValueError as exc:
+                errors.append(f"POST /api/requests/{{id}}/cancel: {exc}")
+        cancel_method_error = response_block(cancel_operation, "405")
+        require(
+            "#/components/responses/AdminError" in cancel_method_error,
+            "POST /api/requests/{id}/cancel 405 must use AdminError",
+        )
+        cancel_handler = go_function(
+            request_cancel_handler, "func (s *Server) cancelRequestAPI("
+        )
+        require(
+            "r.Method != http.MethodPost" in cancel_handler
+            and "http.StatusMethodNotAllowed" in cancel_handler
+            and "http.StatusBadRequest" in cancel_handler
+            and "http.StatusConflict" in cancel_handler
+            and '"cancelled": true' in cancel_handler,
+            "cancelRequestAPI status/body behavior must match the OpenAPI contract",
+        )
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -255,8 +304,16 @@ def main() -> int:
         stats_handler = REQUEST_STATS_FILE.read_text(encoding="utf-8")
         model_struct = MODEL_STRUCT_FILE.read_text(encoding="utf-8")
         gateway_model_ops = GATEWAY_MODEL_OPS_FILE.read_text(encoding="utf-8")
+        request_list_handler = REQUEST_LIST_HANDLER_FILE.read_text(encoding="utf-8")
+        request_cancel_handler = REQUEST_CANCEL_HANDLER_FILE.read_text(encoding="utf-8")
         errors = validate(
-            source, provider_handler, stats_handler, model_struct, gateway_model_ops
+            source,
+            provider_handler,
+            stats_handler,
+            model_struct,
+            gateway_model_ops,
+            request_list_handler,
+            request_cancel_handler,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
@@ -271,6 +328,7 @@ def main() -> int:
     print(
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
+        "request-list Provider filtering, request-cancel status contract, "
         "and /api/models GatewayModel field coverage."
     )
     print(

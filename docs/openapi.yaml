@@ -926,6 +926,8 @@ paths:
           $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
         "409":
           description: 请求已经不在运行，或已开始最终收尾。
           content:
