@@ -1424,6 +1424,11 @@
     if (!el) return;
     const j = modelHub.runtime || {};
     const noteEl = $("runtimeUnloadNote");
+    if (modelHub.runtimeError) {
+      el.innerHTML = '<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">\u8FD0\u884C\u65F6\u72B6\u6001\u6682\u4E0D\u53EF\u7528</p><p class="runtime-hero-desc">\u5DF2\u767B\u8BB0\u7684\u672C\u5730\u6A21\u578B\u4ECD\u53EF\u67E5\u770B\u548C\u7BA1\u7406\uFF1B\u8BF7\u68C0\u67E5\u5F53\u524D\u540E\u7AEF\u5730\u5740\u53CA\u670D\u52A1\u72B6\u6001\u540E\u5237\u65B0\u3002</p></div></div>';
+      if (noteEl) noteEl.innerHTML = "";
+      return;
+    }
     const backend = String(j.backend || "llamacpp").toLowerCase();
     const backendLabel3 = backend === "ollama" ? "Ollama" : "llama.cpp";
     const activeModel = String(j.active_model || "").trim() || (findActiveRuntimeItem(j)?.id || "");
@@ -1976,7 +1981,15 @@
     const el = $("modelTable");
     if (!el) return;
     const rows = modelHub.rows || [];
-    el.innerHTML = !rows.length ? emptyState("\u6682\u65E0 Llama \u6A21\u578B\uFF0C\u8BF7\u5728\u300C\u6A21\u578B\u4E0B\u8F7D\u300D\u5B89\u88C5 GGUF") : wrapTable(
+    const warnings = $("modelHubWarnings");
+    if (warnings) {
+      const notices = [];
+      if (modelHub.rowsError) notices.push('<span class="err">' + esc(modelHub.rowsError) + "</span>");
+      if (modelHub.runtimeError) notices.push('<span class="warn">' + esc(modelHub.runtimeError) + "</span>");
+      warnings.innerHTML = notices.join("<br>");
+      warnings.hidden = !notices.length;
+    }
+    el.innerHTML = !rows.length ? modelHub.rowsError ? "" : emptyState("\u6682\u65E0 Llama \u6A21\u578B\uFF0C\u8BF7\u5728\u300C\u6A21\u578B\u4E0B\u8F7D\u300D\u5B89\u88C5 GGUF") : wrapTable(
       "<tr><th>\u6A21\u578B\u540D\u79F0</th><th>\u6A21\u578B\u952E</th><th>\u5927\u5C0F</th><th>\u72B6\u6001</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
         const st = modelHub.loadState(x);
         const name = String(x.display_name || x.model_key || "").trim();
@@ -2741,13 +2754,28 @@
         rows: [],
         runtime: null,
         catalogById: /* @__PURE__ */ new Map(),
+        rowsLoaded: false,
+        rowsError: "",
+        runtimeError: "",
         _inflight: null,
         async refresh(opts = {}) {
           if (opts.force) this._inflight = null;
           if (this._inflight) return this._inflight;
-          this._inflight = Promise.all([api("/api/models"), api("/api/admin/runtime")]).then(([mj, rj]) => {
-            this.rows = mj.data || [];
-            this.runtime = rj;
+          this._inflight = Promise.allSettled([api("/api/models"), api("/api/admin/runtime")]).then(([modelsResult, runtimeResult]) => {
+            if (modelsResult.status === "fulfilled" && Array.isArray(modelsResult.value?.data)) {
+              this.rows = modelsResult.value.data;
+              this.rowsLoaded = true;
+              this.rowsError = "";
+            } else {
+              this.rowsError = this.rowsLoaded ? "\u672C\u5730\u6A21\u578B\u6E05\u5355\u5237\u65B0\u5931\u8D25\uFF0C\u5F53\u524D\u5C55\u793A\u4E0A\u6B21\u6210\u529F\u8BFB\u53D6\u7684\u6570\u636E\uFF1B\u8BF7\u68C0\u67E5\u6570\u636E\u5E93\u8FDE\u63A5\u540E\u5237\u65B0\u3002" : "\u672C\u5730\u6A21\u578B\u6E05\u5355\u8BFB\u53D6\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u5173\u6570\u636E\u5E93\u8FDE\u63A5\u540E\u5237\u65B0\u3002";
+            }
+            if (runtimeResult.status === "fulfilled") {
+              this.runtime = runtimeResult.value;
+              this.runtimeError = "";
+            } else {
+              this.runtime = null;
+              this.runtimeError = "\u5F53\u524D\u63A8\u7406\u540E\u7AEF\u8FD0\u884C\u72B6\u6001\u6682\u4E0D\u53EF\u7528\uFF1B\u672C\u5730\u6A21\u578B\u6E05\u5355\u4ECD\u53EF\u72EC\u7ACB\u67E5\u770B\u3002";
+            }
             this._reindexRuntime();
           }).finally(() => {
             this._inflight = null;

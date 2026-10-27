@@ -226,12 +226,28 @@ async function loadMmBackendPills(){
 }
 /** 网关模型 + 上游 runtime 快照：列表/大小/加载态统一从此读取，避免各 Tab 各拉一套逻辑 */
 const modelHub={
-  rows:[],runtime:null,catalogById:new Map(),_inflight:null,
+  rows:[],runtime:null,catalogById:new Map(),rowsLoaded:false,rowsError:'',runtimeError:'',_inflight:null,
   async refresh(opts={}){
     if(opts.force)this._inflight=null;
     if(this._inflight)return this._inflight;
-    this._inflight=Promise.all([api('/api/models'),api('/api/admin/runtime')])
-      .then(([mj,rj])=>{this.rows=mj.data||[];this.runtime=rj;this._reindexRuntime();})
+    this._inflight=Promise.allSettled([api('/api/models'),api('/api/admin/runtime')])
+      .then(([modelsResult,runtimeResult])=>{
+        if(modelsResult.status==='fulfilled'&&Array.isArray(modelsResult.value?.data)){
+          this.rows=modelsResult.value.data;
+          this.rowsLoaded=true;
+          this.rowsError='';
+        }else{
+          this.rowsError=this.rowsLoaded?'本地模型清单刷新失败，当前展示上次成功读取的数据；请检查数据库连接后刷新。':'本地模型清单读取失败，请检查网关数据库连接后刷新。';
+        }
+        if(runtimeResult.status==='fulfilled'){
+          this.runtime=runtimeResult.value;
+          this.runtimeError='';
+        }else{
+          this.runtime=null;
+          this.runtimeError='当前推理后端运行状态暂不可用；本地模型清单仍可独立查看。';
+        }
+        this._reindexRuntime();
+      })
       .finally(()=>{this._inflight=null});
     return this._inflight;
   },
@@ -511,6 +527,11 @@ function renderRuntimeOverview(){
   if(!el)return;
   const j=modelHub.runtime||{};
   const noteEl=$('runtimeUnloadNote');
+  if(modelHub.runtimeError){
+    el.innerHTML='<div class="runtime-hero runtime-hero-idle"><div class="runtime-hero-icon" aria-hidden="true"></div><div class="runtime-hero-copy"><p class="runtime-hero-title">运行时状态暂不可用</p><p class="runtime-hero-desc">已登记的本地模型仍可查看和管理；请检查当前后端地址及服务状态后刷新。</p></div></div>';
+    if(noteEl)noteEl.innerHTML='';
+    return;
+  }
   const backend=String(j.backend||'llamacpp').toLowerCase();
   const backendLabel=backend==='ollama'?'Ollama':'llama.cpp';
   const activeModel=String(j.active_model||'').trim()||(findActiveRuntimeItem(j)?.id||'');
@@ -1127,7 +1148,15 @@ async function installModel(){
 function renderGatewayModelTable(){
   const el=$('modelTable');if(!el)return;
   const rows=modelHub.rows||[];
-  el.innerHTML=!rows.length?emptyState('暂无 Llama 模型，请在「模型下载」安装 GGUF'):wrapTable(
+  const warnings=$('modelHubWarnings');
+  if(warnings){
+    const notices=[];
+    if(modelHub.rowsError)notices.push('<span class="err">'+esc(modelHub.rowsError)+'</span>');
+    if(modelHub.runtimeError)notices.push('<span class="warn">'+esc(modelHub.runtimeError)+'</span>');
+    warnings.innerHTML=notices.join('<br>');
+    warnings.hidden=!notices.length;
+  }
+  el.innerHTML=!rows.length?(modelHub.rowsError?'':emptyState('暂无 Llama 模型，请在「模型下载」安装 GGUF')):wrapTable(
     '<tr><th>模型名称</th><th>模型键</th><th>大小</th><th>状态</th><th>操作</th></tr>'+
     rows.map(x=>{
     const st=modelHub.loadState(x);
