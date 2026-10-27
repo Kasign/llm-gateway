@@ -4,12 +4,11 @@
 
 ## 当前基线
 
-- 最近完整 CI 基线：`bff9899e7a506d0554992f1bc3d27e5e456c872a`，提交 `docs(api): define request detail top-level fields`；Actions [#252](https://github.com/Kasign/llm-gateway/actions/runs/40448344985) 五个 Job 全部通过，约 2 分 01 秒。
-- Actions #241/#242 已证明四个并行 Job 可用；最新完整基线 #243（Head `747bdba`）同样全部通过，总耗时约 2 分 10 秒。慢点集中在同一个 Job 内串行执行稳态负载与多组故障注入。
-- CI 并行化前 Actions #240 约 4 分 10 秒；拆分稳态负载/故障注入后的 #244 约 1 分 52 秒，#245 约 1 分 54 秒，#246 约 1 分 58 秒。墙钟时间约缩短 50% 以上；npm/Buildx 缓存与过期运行取消已启用。
-- 最近功能提交对应的 Actions #237–#242 均已通过；#239 的 Provider Token 预算预占回滚修复完整运行 37/37 步通过。
-- PR #5 与 PR #7 已合并至 `dev`；当前没有开放 PR。保持不强推、不改写历史。
-- CI 使用 Mock、Redis 和 MariaDB；不能据此宣称真实供应商 E2E、公网反向代理或生产容量已验收。
+- `dev` 当前 Head：`064017e8eebfba15fbad63daccc4f2fb8cde9683`；Actions [#251](https://github.com/Kasign/llm-gateway/actions/runs/40447916241) 全部通过，约 2 分钟。
+- 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
+- Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
+- Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
+- CI 基于 Mock 与测试数据库；真实供应商、生产代理和 1Panel 部署需单独验收，不能标记为 CI 已覆盖。
 
 ## P1：可靠性与可观测性
 
@@ -43,14 +42,13 @@
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
 | GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 新增高风险字段/状态契约门禁，覆盖 Provider mutation/view 预算字段、创建/删除响应及统计数据库错误封套；整体 OpenAPI 仍为 partial。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 已覆盖高风险子集；一般性请求/响应 Schema 的全量 Go 等价性仍需分阶段补齐。 |
 
-## 本轮实施规则
+## 当前执行范围
 
-1. `GW-OBS-001`（Actions #162）、`GW-REL-001`（Actions #163）、`GW-REL-002`（Actions #164）和本地 TLS 握手中断（Actions #166）均已验收。下一项按独立功能组推进 `GW-PROV-UI-001`。真实供应商 E2E 需等安全凭据与预算条件明确后再做。
-2. 每次开发前核实 HEAD、PR 和 CI；不要依据过期会话状态修改远程代码。
-3. 按完整功能组提交中文 Conventional Commit；CI 失败必须查看日志并修复，不降低断言。
-4. 真实 E2E 仅在供应商凭据与预算明确可用时执行；Mock CI 不能替代真实端点验收。
-5. “已完成”必须说明验证层级：单测、Mock HTTP、Gateway + Redis/MariaDB 集成、真实供应商 E2E 或生产部署验收。
-
+1. 先完成一次聚焦整体 Review：配置来源/旧部署兼容、凭据脱敏、慢模型超时与取消、SSE 状态边界、源码与部署 Bundle 同步。
+2. 只修复能够从代码或实际结果明确确认的问题；生产代码、必要回归覆盖和中文文档按逻辑功能集中提交。
+3. 不再把完整 OpenAPI 字段对账、目录迁移、重试/故障转移或 Agent 权限扩展作为当前必须完成事项。
+4. 不重复运行小范围手工测试。每个完整提交由仓库 Actions 自动验证；用户统一进行真实供应商与生产部署验收。
+5. 失败回滚跨越数据库与内存 Registry 时，记录实际失败边界与补偿结果；不宣称跨系统事务绝对原子。
 
 ## 2026-10-23 执行记录：并发上限功能与基线依赖
 
