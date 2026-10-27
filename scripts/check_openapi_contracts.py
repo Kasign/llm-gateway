@@ -289,6 +289,22 @@ def validate(
                 except ValueError:
                     errors.append(f"{type_name}: missing Go JSON field {field!r}")
 
+        analysis_schema = schema_block(source, "RequestAnalysis")
+        require(
+            re.search(
+                r'(?m)^        phases_ms:\n          \$ref:[ \t]*"#/components/schemas/RequestPhaseMS"',
+                analysis_schema,
+            ) is not None,
+            "RequestAnalysis.phases_ms must reference RequestPhaseMS",
+        )
+        require(
+            re.search(
+                r'(?m)^        throughput:\n          \$ref:[ \t]*"#/components/schemas/RequestThroughput"',
+                analysis_schema,
+            ) is not None,
+            "RequestAnalysis.throughput must reference RequestThroughput",
+        )
+
         stream_event_schema = schema_block(source, "StreamEvent")
         stream_event_decl = re.search(
             r"(?ms)^type StreamEvent struct \{(.*?)^\}",
@@ -362,6 +378,7 @@ def validate(
         )
         summary_fn = go_function(request_detail_source, "func buildRequestSummary(")
         summary_keys = set(re.findall(r'"([a-z][a-z0-9_]*)"\s*:', summary_fn))
+        summary_keys.update(re.findall(r's\["([a-z][a-z0-9_]*)"\]', summary_fn))
         summary_keys.update(re.findall(r'summary\["([a-z][a-z0-9_]*)"\]', go_function(request_detail_source, "func buildRequestDetail(")))
         for field in sorted(summary_keys):
             try:

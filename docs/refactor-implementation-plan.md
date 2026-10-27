@@ -1064,3 +1064,9 @@ docs/                        中文架构、协议和运维文档
 
 - Actions #248 显示高风险契约脚本在 RequestDetail nested DTO 检查中先使用、后赋值 `request_detail_schema`，导致 `UnboundLocalError`；不是业务代码或 Schema 定义错误。
 - 已把 Schema 解析提前至首次引用前，保持检查项完整，修复提交需重新跑全量并行 CI。
+
+## 28. 请求摘要动态键与分析子 Schema 门禁补强（2026-10-27）
+
+- `buildRequestSummary` 除 map literal 外还有 `s["field"]` 后写字段；已将其加入 Go helper 键对账，确保 `request_kb`、`response_kb`、Provider/模型及错误信息等字段也被检查。
+- 增加 `RequestAnalysis.phases_ms` / `throughput` 对 `RequestPhaseMS` / `RequestThroughput` 的显式引用断言，避免 DTO 字段齐全但嵌套 Schema 关联错误。
+- 这是静态契约强化，不改变 API JSON 运行时行为。
