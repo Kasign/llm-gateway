@@ -531,7 +531,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	if tokenSrc == "usage" {
 		tokenSrc = "upstream_usage"
 	}
-	o.s.finishProviderTokenBudget(st.ID, !st.UpstreamStart.IsZero(), tokenSrc, inTok, outTok, totTok)
+	o.s.finishProviderTokenBudget(st.ID, tokenSrc, inTok, outTok, totTok)
 	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,

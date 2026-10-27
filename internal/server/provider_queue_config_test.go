@@ -45,7 +45,9 @@ func TestNewInferencePipelineAppliesDeploymentProviderQueueOptions(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	writer := httptest.NewRecorder()
+	dispatched := false
 	result, forwardErr := remote.Forward(ctx, provider.InferenceCall{
+		OnUpstreamDispatch: func() { dispatched = true },
 		Writer: writer,
 		Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
 		Path: "/v1/chat/completions",
@@ -61,5 +63,8 @@ func TestNewInferencePipelineAppliesDeploymentProviderQueueOptions(t *testing.T)
 	}
 	if result.Status != http.StatusServiceUnavailable {
 		t.Fatalf("result status = %d, want 503", result.Status)
+	}
+	if dispatched {
+		t.Fatal("queue timeout must not start an upstream HTTP dispatch")
 	}
 }

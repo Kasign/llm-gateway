@@ -293,3 +293,10 @@
 - 影响范围仅为部署托管 Provider：配置值虽然通过启动校验，运行时却采用队列关闭和默认等待时限，导致配置与实际准入行为不一致。
 - 已修复构造器参数透传，并新增 Server 层回归用例：检查启动注册后的队列容量，并在许可槽被占用时验证配置的 1 秒等待期限会返回 `503 provider_queue_timeout`。
 - 以提交后的 Actions 验收该链路；此测试验证本地构造与队列行为，不代表真实供应商可用性或生产容量验收。
+
+## 2026-10-27 预算预占与 Provider 队列准入边界修正
+
+- Review 发现 Pipeline 的 `UpstreamStart` 时间戳在调用 Provider 前写入；但 Provider 之后仍可能因并发槽位占满、FIFO 队列已满或等待超时而拒绝请求，未实际调用上游 HTTP。
+- 旧预算结算逻辑将 Pipeline 时间戳误当成已出网证据，导致这类请求没有可信 usage 时把预占 Token 保留到 UTC 日桶过期，可能提前耗尽日预算。
+- 已改为由 OpenAI-compatible Provider 在通过准入、即将执行 HTTP 请求时回调标记预算预占。未发起 HTTP dispatch 的请求退还全部预占；已发起请求若缺少可信供应商 usage，继续保守保留预占，避免对可能已计费请求错误退款。
+- 新增 Provider dispatch 回调准入/拒绝用例，以及依赖 `REDIS_TEST_ADDR` 的服务端预算回归：验证未 dispatch 时从 Redis 预算中全额退回，dispatch 后无可信 usage 时仍保留。无 Redis 的本地运行环境会跳过这条集成用例；真实 Provider 账单仍需按各自范围验收。

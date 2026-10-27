@@ -19,6 +19,7 @@ type providerTokenBudgetReservation struct {
 	ProviderID     string
 	Bucket         string
 	ReservedTokens int64
+	Dispatched      bool
 }
 
 var providerTokenBudgetTokenFields = []string{"max_output_tokens", "max_completion_tokens", "max_tokens"}
@@ -175,6 +176,20 @@ func (s *Server) storeProviderTokenBudgetReservation(requestID string, reservati
 	s.tokenBudgetMu.Unlock()
 }
 
+// markProviderTokenBudgetDispatched marks that Provider admission succeeded and outbound HTTP dispatch is about to start.
+func (s *Server) markProviderTokenBudgetDispatched(requestID string) {
+	if s == nil || strings.TrimSpace(requestID) == "" {
+		return
+	}
+	s.tokenBudgetMu.Lock()
+	reservation, ok := s.tokenBudgetReservations[requestID]
+	if ok {
+		reservation.Dispatched = true
+		s.tokenBudgetReservations[requestID] = reservation
+	}
+	s.tokenBudgetMu.Unlock()
+}
+
 func (s *Server) takeProviderTokenBudgetReservation(requestID string) (providerTokenBudgetReservation, bool) {
 	if s == nil {
 		return providerTokenBudgetReservation{}, false
@@ -186,15 +201,16 @@ func (s *Server) takeProviderTokenBudgetReservation(requestID string) (providerT
 	return reservation, ok
 }
 
-// finishProviderTokenBudget 只按真实供应商 usage 结算；无可信 usage 的已出网上游请求保守保留预占。
-func (s *Server) finishProviderTokenBudget(requestID string, upstreamStarted bool, source string, input, output, total *int64) {
+// finishProviderTokenBudget 只按真实供应商 usage 结算；未发起上游 HTTP 请求时退还全部预占。
+func (s *Server) finishProviderTokenBudget(requestID string, source string, input, output, total *int64) {
 	reservation, ok := s.takeProviderTokenBudgetReservation(requestID)
 	if !ok {
 		return
 	}
 	actual := int64(0)
-	settle := !upstreamStarted
-	if upstreamStarted && source == "upstream_usage" {
+	dispatched := reservation.Dispatched
+	settle := !dispatched
+	if dispatched && source == "upstream_usage" {
 		switch {
 		case total != nil && *total >= 0:
 			actual = *total
@@ -205,7 +221,7 @@ func (s *Server) finishProviderTokenBudget(requestID string, upstreamStarted boo
 		}
 	}
 	if !settle {
-		// 上游可能已经计费；未知 usage 不释放预占，直到 Redis UTC 日桶过期。
+		// 已发起出站 HTTP 请求后，上游可能已经计费；未知 usage 不释放预占，直到 Redis UTC 日桶过期。
 		applog.Printf("[%s] Provider token usage unavailable; daily reservation retained: provider=%s reserved=%d", requestID, reservation.ProviderID, reservation.ReservedTokens)
 		return
 	}

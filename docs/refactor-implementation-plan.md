@@ -992,3 +992,10 @@ docs/                        中文架构、协议和运维文档
 - 对照配置矩阵与实际运行时构造路径发现，Web Provider 使用 `buildRemoteProvider`，已传递 FIFO 队列配置；YAML/环境 Provider 则在 `newInferencePipeline` 里直接构造，遗漏了队列容量和等待时限。
 - 已补齐启动注册字段透传，并增加 Server 层回归覆盖配置后的队列上限和等待超时语义，避免仅通过 Config.Load 静态校验却在运行时退回默认值。
 - CI 通过后关闭此代码级问题。供应商真实连接、代理读超时和线上负载仍需要在统一部署回归中验证。
+
+## 17. Provider 预算预占与 FIFO 准入状态分离（2026-10-27）
+
+- Pipeline 的 `UpstreamStart` 表示即将进入 Provider Forward，并不表示已经通过 Provider 并发/队列准入。Review 确认旧逻辑在队列满、等待超时或 fail-fast 时仍会将预算预占视为“可能已计费”并保留到日桶过期。
+- 增加可选 `OnUpstreamDispatch` 回调，由 OpenAI-compatible Provider 在排队许可通过、即将调用出站 HTTP 时触发。预算 reservation 自身记录 `Dispatched`，不再依赖通用 Pipeline 阶段时间戳推断网络行为。
+- 未 dispatch 的请求结算为 0 并退还预占；已 dispatch 但缺少可信 usage 的请求仍保守保留；有可信 usage 时按真实 usage 结算。补充 Provider 并发拒绝/排队超时的回调回归和 Redis 服务端结算回归。
+- 该规则只调整 Gateway 自己的 Redis 预算，不自动判断第三方在网络错误后是否计费；真实供应商账单仍必须以可信 usage / 供应商平台数据为准。

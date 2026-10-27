@@ -1566,10 +1566,11 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 	defer server.Close()
 	p := testRemoteProvider(t, server, OpenAICompatibleConfig{MaxConcurrentRequests: 1})
 
-	forward := func() (core.Result, error, int) {
+	forward := func(onDispatch func()) (core.Result, error, int) {
 		writer := httptest.NewRecorder()
 		result, err := p.Forward(context.Background(), InferenceCall{
 			Writer: writer, Request: httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil),
+			OnUpstreamDispatch: onDispatch,
 			Path: "/v1/chat/completions", Body: []byte(`{"model":"test"}`), ModelID: "test",
 		})
 		return result, err, writer.Code
@@ -1581,7 +1582,7 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 	}
 	firstDone := make(chan outcome, 1)
 	go func() {
-		result, err, code := forward()
+		result, err, code := forward(func() {})
 		firstDone <- outcome{result: result, err: err, code: code}
 	}()
 	select {
@@ -1592,7 +1593,8 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 		close(releaseFirst)
 		t.Fatal("first upstream request did not start")
 	}
-	second, secondErr, _ := forward()
+	var secondDispatch atomic.Int32
+	second, secondErr, _ := forward(func() { secondDispatch.Add(1) })
 	if secondErr == nil {
 		close(releaseFirst)
 		t.Fatal("concurrent request should be rejected while the only slot is occupied")
@@ -1610,17 +1612,25 @@ func TestOpenAICompatibleProviderConcurrencyLimitRejectsExcessRequests(t *testin
 		close(releaseFirst)
 		t.Fatalf("upstream received %d requests while the limit was occupied, want 1", got)
 	}
+	if got := secondDispatch.Load(); got != 0 {
+		close(releaseFirst)
+		t.Fatalf("rejected request dispatch callback count = %d, want 0", got)
+	}
 	close(releaseFirst)
 	first := <-firstDone
 	if first.err != nil || first.result.Status != http.StatusOK || first.result.UpstreamStatus != http.StatusOK || first.code != http.StatusOK {
 		t.Fatalf("first request did not finish successfully: result=%+v err=%v writer=%d", first.result, first.err, first.code)
 	}
-	third, thirdErr, thirdCode := forward()
+	var thirdDispatch atomic.Int32
+	third, thirdErr, thirdCode := forward(func() { thirdDispatch.Add(1) })
 	if thirdErr != nil || third.Status != http.StatusOK || third.UpstreamStatus != http.StatusOK || thirdCode != http.StatusOK {
 		t.Fatalf("slot was not released after the first request: result=%+v err=%v writer=%d", third, thirdErr, thirdCode)
 	}
 	if got := upstreamRequests.Load(); got != 2 {
 		t.Fatalf("upstream request count after slot release = %d, want 2", got)
+	}
+	if got := thirdDispatch.Load(); got != 1 {
+		t.Fatalf("admitted request dispatch callback count = %d, want 1", got)
 	}
 }
 

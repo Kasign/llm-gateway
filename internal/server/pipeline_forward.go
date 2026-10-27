@@ -73,6 +73,9 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		ModelID: st.Model.UpstreamID,
 		Stream:  st.Stream,
 		OnChunk: onChunk,
+		OnUpstreamDispatch: func() {
+			f.s.markProviderTokenBudgetDispatched(st.ID)
+		},
 		OnHeaders: func(_ http.Header, _ int) {
 			v := time.Since(st.Started).Milliseconds()
 			upstreamHeadersMS = &v

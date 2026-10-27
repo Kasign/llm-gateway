@@ -716,6 +716,9 @@ func copyRemoteResponseHeaders(dst, src http.Header, rawPath string) {
 // forwardJSON 限制非流式响应体大小；HTTP 非 2xx 的上游 JSON 错误体仍按兼容协议返回。
 func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call InferenceCall, req *http.Request) (core.Result, error) {
 	req.Header.Set("Accept", "application/json")
+	if call.OnUpstreamDispatch != nil {
+		call.OnUpstreamDispatch()
+	}
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return core.Result{}, p.transportError(ctx, err)
@@ -787,6 +790,9 @@ func (p *OpenAICompatibleProvider) forwardStream(ctx context.Context, call Infer
 			return p.writeStreamErrorIfCommitted(call, code, responseSequence.NextSequence())
 		}
 		return p.writeStreamErrorIfCommitted(call, code)
+	}
+	if call.OnUpstreamDispatch != nil {
+		call.OnUpstreamDispatch()
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
