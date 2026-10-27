@@ -16,6 +16,7 @@ PROVIDER_HANDLER_FILE = ROOT / "internal" / "server" / "admin_providers_http.go"
 REQUEST_STATS_FILE = ROOT / "internal" / "server" / "request_stats.go"
 MODEL_STRUCT_FILE = ROOT / "internal" / "model" / "model.go"
 GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
+STORE_REQUEST_LOG_FILE = ROOT / "internal" / "store" / "store.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 
@@ -93,6 +94,7 @@ def validate(
     gateway_model_ops: str,
     request_list_handler: str,
     request_cancel_handler: str,
+    store_request_log: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -250,6 +252,41 @@ def validate(
             "cancelRequestAPI status/body behavior must match the OpenAPI contract",
         )
 
+        # RequestList and RequestDetail.log expose store.RequestLog JSON.
+        request_log_schema = schema_block(source, "RequestLog")
+        request_list_schema = schema_block(source, "RequestList")
+        require(
+            re.search(
+                r'(?m)^\s+items:[ \t]*\n\s+\$ref:[ \t]*"#/components/schemas/RequestLog"',
+                request_list_schema,
+            ) is not None,
+            "RequestList.data.items must reference RequestLog",
+        )
+        request_detail_schema = schema_block(source, "RequestDetail")
+        require(
+            re.search(
+                r'(?m)^        log:\n          \$ref:[ \t]*"#/components/schemas/RequestLog"',
+                request_detail_schema,
+            ) is not None,
+            "RequestDetail.log must reference RequestLog",
+        )
+        request_log_decl = re.search(
+            r"(?ms)^type RequestLog struct \{(.*?)^\}",
+            store_request_log,
+        )
+        if request_log_decl is None:
+            raise ValueError("internal/store/store.go: type RequestLog struct not found")
+        request_log_fields = {
+            tag
+            for tag in re.findall(r'json:"([^",]+)', request_log_decl.group(1))
+            if tag and tag != "-"
+        }
+        for field in sorted(request_log_fields):
+            try:
+                schema_field_block(request_log_schema, field)
+            except ValueError:
+                errors.append(f"RequestLog: missing Go JSON field {field!r}")
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -306,6 +343,7 @@ def main() -> int:
         gateway_model_ops = GATEWAY_MODEL_OPS_FILE.read_text(encoding="utf-8")
         request_list_handler = REQUEST_LIST_HANDLER_FILE.read_text(encoding="utf-8")
         request_cancel_handler = REQUEST_CANCEL_HANDLER_FILE.read_text(encoding="utf-8")
+        store_request_log = STORE_REQUEST_LOG_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -314,6 +352,7 @@ def main() -> int:
             gateway_model_ops,
             request_list_handler,
             request_cancel_handler,
+            store_request_log,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
@@ -329,7 +368,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "and /api/models GatewayModel field coverage."
+        "/api/models GatewayModel fields, and RequestLog response fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "

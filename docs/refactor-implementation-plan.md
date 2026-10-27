@@ -1037,3 +1037,9 @@ docs/                        中文架构、协议和运维文档
 - 前三轮并行工作流均全量通过，墙钟耗时约 2 分钟；检查分 Job 步骤发现 Gateway Job 内仍串行执行 60 秒、12,000 请求的稳态负载，再依次执行多组故障注入。
 - 将其拆为 `gateway-steady-load` 与 `gateway-faults` 两个并行 Job，保留 MariaDB 审计积压、完整稳态负载、429/503、TCP、DNS、已提交 SSE 后断流、TLS 握手及所有 Artifact。
 - 两个 Job 各自启动 Redis/MariaDB 测试服务，因此会增加少量 Runner 资源使用。目标是降低等待墙钟时间，而不是减少必要验证；合并前比较新 Actions 实测时间与所有 Job 结果。
+
+## 23. 请求日志 DTO 与 OpenAPI Schema 对账（2026-10-27）
+
+- `RequestList.data.items` 与 `RequestDetail.log` 已改为引用共享的 `RequestLog` Schema。Schema 按 `store.RequestLog` 当前 JSON 字段声明状态、Gateway/上游 HTTP 状态、Token、时间与错误信息。
+- 扩展 `scripts/check_openapi_contracts.py`，自动核对 Go `store.RequestLog` 的 JSON tag 全部映射到 Schema，并检查列表/详情两处引用，避免请求日志前后端字段静默漂移。
+- 详情里的 summary、timing、analysis、正文与流式事件仍包含动态或条件字段，本批不声称实现全量 API Schema 等价。

@@ -332,3 +332,9 @@
 - Actions #241/#242/#243 已确认四个主 Job 并行后总时长约 2 分钟；其中 Gateway Job 仍把 60 秒稳态负载、故障注入和连接/DNS/SSE 恢复测试串行执行。
 - 已将稳态负载与故障注入拆成两个独立并行 Job。MariaDB 审计积压用例和 12,000 次/目标 200 req/s 稳态负载保留在前者；429/503、TCP 拒绝与恢复、DNS、已提交 SSE 后断流、Provider TLS 握手测试与原有 Artifact 保留在后者。
 - 该拆分额外启动一套独立 Redis/MariaDB 服务，预期以少量 Runner/容器成本缩短墙钟时间；提速幅度以新 Head Actions 实测为准，不通过删减真实负载/故障覆盖提速。
+
+## 2026-10-27 请求日志 DTO 的 OpenAPI 字段对账
+
+- `GET /api/requests` 的 `RequestList.data.items` 和 `GET /api/requests/{id}` 的 `log` 原先均为泛化 object，未引用真实持久化 DTO。
+- 新增 `RequestLog` Schema，并扩展高风险契约检查器，对照 `internal/store/store.go` 中 `store.RequestLog` 的全部 JSON tag；列表与详情共用一个 Schema，减少字段漂移。
+- 这仅覆盖稳定审计 DTO；详情的 `summary`、`timing`、`analysis` 和 SSE 事件仍有动态/条件字段，整体 OpenAPI 状态继续保持 partial。

@@ -2531,6 +2531,40 @@ components:
           description: 留空表示不修改密码。
       additionalProperties: false
 
+    RequestLog:
+      type: object
+      description: 请求列表与详情中的持久化审计记录。
+      required: [request_id, api_key_id, api_key_name, client_ip, endpoint, method, stream, status, http_status, started_at, latency_ms, request_bytes, response_bytes]
+      properties:
+        request_id: { type: string }
+        api_key_id: { type: integer, format: int64, minimum: 0 }
+        api_key_name: { type: string }
+        client_ip: { type: string }
+        client_name: { type: string }
+        user_agent: { type: string }
+        endpoint: { type: string }
+        request_url: { type: string }
+        provider_id: { type: string }
+        method: { type: string }
+        model_requested: { type: string }
+        model_actual: { type: string }
+        stream: { type: boolean }
+        status: { type: string, enum: [running, success, error, cancelled] }
+        http_status: { type: integer, minimum: 0, maximum: 599, description: Gateway 实际提交给调用方的状态码。 }
+        upstream_http_status: { type: integer, minimum: 0, maximum: 599 }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        latency_ms: { type: integer, format: int64, minimum: 0 }
+        ttft_ms: { type: integer, format: int64, minimum: 0 }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        total_tokens: { type: integer, format: int64, minimum: 0 }
+        request_bytes: { type: integer, format: int64, minimum: 0 }
+        response_bytes: { type: integer, format: int64, minimum: 0 }
+        error_code: { type: string }
+        error_message: { type: string }
+        analysis_json: { type: string, description: 兼容性审计字段；具体分析内容优先使用详情接口的 analysis。 }
+      additionalProperties: false
     RequestList:
       type: object
       required: [data]
@@ -2538,17 +2572,14 @@ components:
         data:
           type: array
           items:
-            type: object
-            description: 请求列表记录；字段随当前数据版本扩展。
-            additionalProperties: true
+            $ref: "#/components/schemas/RequestLog"
     RequestDetail:
       type: object
       required: [log, summary, timing, diagnosis]
       description: 详情可能包含正文、请求头、响应头和流式事件；只有启用相应审计配置或事件已捕获时才会出现。
       properties:
         log:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/RequestLog"
         summary:
           type: object
           additionalProperties: true
