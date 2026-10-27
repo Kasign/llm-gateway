@@ -9,7 +9,18 @@
 | server.host、server.port | config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
 | server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
 | 管理 API Key | `.env` 提供值，YAML 负责引用 | 高 | 重启 | 与 Web 管理会话和调用方 `sk-llm-*` Key 分离 |
-| Web 控制台密码哈希 | `admin-auth.env` 通过 Compose `env_file` 注入；示例 YAML 引用此变量 | 高 | 重启；控制台保存后以数据库为准 | `gateway_settings.web_admin_login` 同时保存密码保护开关、密码哈希与版本号 |
+| Web 控制台初始密码哈希与保护默认值 | 主 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`、`LLM_GATEWAY_WEB_PASSWORD_ENABLED` 由 Compose 显式注入 | 高 | 重启；控制台保存后以数据库为准 | 新哈希格式为 `pbkdf2:`，兼容旧 `pbkdf2# LLM Gateway 配置清单与来源矩阵
+
+> 新增配置时同步更新 Go 配置结构、规范模板、Compose 环境白名单（需要注入变量时）、中文部署说明和 CI 契约检查。本表记录稳定配置的主维护入口。
+
+## 1. 服务静态配置
+
+| 配置组 | 主维护入口 | 敏感性 | 生效时机 | 备注 |
+| --- | --- | --- | --- | --- |
+| server.host、server.port | config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
+| server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
+| 管理 API Key | `.env` 提供值，YAML 负责引用 | 高 | 重启 | 与 Web 管理会话和调用方 `sk-llm-*` Key 分离 |
+；`gateway_settings.web_admin_login` 保存后优先 |
 | database.* | 容器地址由 LLM_GATEWAY_DB_HOST 注入；其余非敏感设置在 YAML，密码由 .env 注入 | 高 | 重启 | root 凭据用于自动初始化，日常使用 Gateway 专用数据库账号 |
 | redis.* | 地址由 LLM_GATEWAY_REDIS_ADDR 注入；DB 与密码在 YAML/.env 分层配置 | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |
 | 本地后端类型、Base URL、上游 Key | .env 提供值，YAML 负责引用 | 高（Key） | 重启；活动选择可被数据库覆盖 | LLM_BACKEND 仅作为数据库无活动选择时的初始默认 |
