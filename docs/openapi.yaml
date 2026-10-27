@@ -735,57 +735,7 @@ paths:
                 required: [data]
                 properties:
                   data:
-                    type: object
-                    required: [enabled, retention_days, batch_size, interval_seconds, max_batches_per_run, runtime]
-                    properties:
-                      enabled:
-                        type: boolean
-                      retention_days:
-                        type: integer
-                      batch_size:
-                        type: integer
-                      interval_seconds:
-                        type: integer
-                      max_batches_per_run:
-                        type: integer
-                        const: 10
-                      runtime:
-                        type: object
-                        required: [last_run_status, run_count, success_count, failure_count, last_run_duration_ms, last_run_deleted_rows, total_deleted_rows]
-                        properties:
-                          last_run_status:
-                            type: string
-                            enum: [disabled, unavailable, waiting, running, success, failed, cancelled]
-                          run_count:
-                            type: integer
-                            format: int64
-                          success_count:
-                            type: integer
-                            format: int64
-                          failure_count:
-                            type: integer
-                            format: int64
-                          last_run_started_at:
-                            type: string
-                            format: date-time
-                          last_run_finished_at:
-                            type: string
-                            format: date-time
-                          last_run_duration_ms:
-                            type: integer
-                            format: int64
-                          last_run_deleted_rows:
-                            type: integer
-                            format: int64
-                          total_deleted_rows:
-                            type: integer
-                            format: int64
-                          last_failure_code:
-                            type: string
-                            enum: [cleanup_failed]
-                          last_failure_at:
-                            type: string
-                            format: date-time
+                    $ref: "#/components/schemas/RequestRetentionStatus"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "405":
@@ -2720,14 +2670,65 @@ components:
         stream_events_note: { type: string }
         live: { type: boolean }
       additionalProperties: false
+    RequestRetentionRuntimeStatus:
+      type: object
+      description: 当前进程内的请求日志清理统计，不包含数据库错误正文；重启后计数归零。
+      required: [last_run_status, run_count, success_count, failure_count, last_run_duration_ms, last_run_deleted_rows, total_deleted_rows]
+      properties:
+        last_run_status:
+          type: string
+          enum: [disabled, unavailable, waiting, running, success, failed, cancelled]
+        run_count: { type: integer, format: int64, minimum: 0 }
+        success_count: { type: integer, format: int64, minimum: 0 }
+        failure_count: { type: integer, format: int64, minimum: 0 }
+        last_run_started_at: { type: string, format: date-time }
+        last_run_finished_at: { type: string, format: date-time }
+        last_run_duration_ms: { type: integer, format: int64, minimum: 0 }
+        last_run_deleted_rows: { type: integer, format: int64, minimum: 0 }
+        total_deleted_rows: { type: integer, format: int64, minimum: 0 }
+        last_failure_code: { type: string, enum: [cleanup_failed] }
+        last_failure_at: { type: string, format: date-time }
+      additionalProperties: false
+    RequestRetentionStatus:
+      type: object
+      required: [enabled, retention_days, batch_size, interval_seconds, max_batches_per_run, runtime]
+      properties:
+        enabled: { type: boolean }
+        retention_days: { type: integer, minimum: 0 }
+        batch_size: { type: integer, minimum: 0 }
+        interval_seconds: { type: integer, minimum: 0 }
+        max_batches_per_run: { type: integer, const: 10 }
+        runtime:
+          $ref: "#/components/schemas/RequestRetentionRuntimeStatus"
+      additionalProperties: false
+    AuditMetrics:
+      type: object
+      description: 审计队列只读内存快照；各计数器独立读取，不承诺跨字段事务一致性。
+      required: [queue_depth, queue_capacity, normal_limit, closed, enqueued_total, attempted_total, dropped_total, dropped_writer_closed_total, dropped_normal_capacity_reserved_total, dropped_queue_full_total, drop_rate, write_succeeded_total, write_failed_total, queue_wait_count, queue_wait_total_ms, queue_wait_max_ms]
+      properties:
+        queue_depth: { type: integer, minimum: 0 }
+        queue_capacity: { type: integer, minimum: 0 }
+        normal_limit: { type: integer, minimum: 0 }
+        closed: { type: boolean }
+        enqueued_total: { type: integer, format: int64, minimum: 0 }
+        attempted_total: { type: integer, format: int64, minimum: 0 }
+        dropped_total: { type: integer, format: int64, minimum: 0 }
+        dropped_writer_closed_total: { type: integer, format: int64, minimum: 0 }
+        dropped_normal_capacity_reserved_total: { type: integer, format: int64, minimum: 0 }
+        dropped_queue_full_total: { type: integer, format: int64, minimum: 0 }
+        drop_rate: { type: number, minimum: 0, maximum: 1 }
+        write_succeeded_total: { type: integer, format: int64, minimum: 0 }
+        write_failed_total: { type: integer, format: int64, minimum: 0 }
+        queue_wait_count: { type: integer, format: int64, minimum: 0 }
+        queue_wait_total_ms: { type: number, minimum: 0 }
+        queue_wait_max_ms: { type: number, minimum: 0 }
+      additionalProperties: false
     AuditMetricsEnvelope:
       type: object
       required: [data]
       properties:
         data:
-          type: object
-          description: 审计队列深度、容量、完成/失败、排队耗时和丢弃计数等内存快照。
-          additionalProperties: true
+          $ref: "#/components/schemas/AuditMetrics"
     RuntimeSnapshot:
       type: object
       description: 字段依据本地 llama.cpp、Ollama 或远程 Provider 运行时而变化。

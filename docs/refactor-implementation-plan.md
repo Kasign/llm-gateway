@@ -2,7 +2,7 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 最近完整 CI 基线：`4122fb9a002c83603c6e1552f6324c4f82194311`（Actions [#250](https://github.com/Kasign/llm-gateway/actions/runs/40447617642)，五个并行 Job 全部通过，约 1 分 44 秒）。
+> 最近完整 CI 基线：`bff9899e7a506d0554992f1bc3d27e5e456c872a`（Actions [#252](https://github.com/Kasign/llm-gateway/actions/runs/40448344985)，五个 Job 全部通过，约 2 分 01 秒）。
 
 ## 当前状态快照（2026-10-27）
 
@@ -1076,3 +1076,9 @@ docs/                        中文架构、协议和运维文档
 - 将 RequestDetail 的正文、预览、Headers、请求参数、分析说明、Token 说明、流事件元数据和实时标记逐项显式声明；将 `additionalProperties` 收紧为 `false`，可选字段仍按实际存储/请求状态出现。
 - 扩展高风险门禁，从 `buildRequestDetail` 相关 helper 及 `requestDetailAPI` 提取 `out["field"]` 写入键，并逐一检查 Schema 属性，减少 API 与管理台字段漂移。
 - 最新基线 Actions #250（Head `4122fb9`）全量通过，五个 Job 约 1 分 44 秒；本批提交后重新执行完整 CI。
+
+## 30. 审计与请求日志保留状态 API Schema 对账（2026-10-27）
+
+- `AuditMetricsEnvelope.data` 改为引用 `AuditMetrics`，将队列深度/容量、所有丢弃分类、写入成功/失败、丢弃率和排队等待耗时显式化，并将 Go `audit.StatsSnapshot` JSON tags 纳入契约检查。
+- `GET /api/admin/retention/status` 改为引用 `RequestRetentionStatus` / `RequestRetentionRuntimeStatus`，并对照 Go 的静态配置响应和进程内运行指标结构，覆盖最近执行状态、失败代码、耗时与删除计数。
+- 该门禁继续保持字段级、分阶段覆盖；不会把只读内存指标描述为持久化或跨实例状态。

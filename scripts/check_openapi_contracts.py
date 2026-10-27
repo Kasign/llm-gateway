@@ -19,6 +19,8 @@ GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
 STORE_REQUEST_LOG_FILE = ROOT / "internal" / "store" / "store.go"
 REQUEST_DETAIL_SOURCE_FILE = ROOT / "internal" / "server" / "request_detail.go"
 REQUEST_ANALYSIS_FILE = ROOT / "internal" / "server" / "request_analysis.go"
+AUDIT_METRICS_FILE = ROOT / "internal" / "audit" / "metrics.go"
+REQUEST_RETENTION_FILE = ROOT / "internal" / "server" / "request_retention.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 
@@ -99,6 +101,8 @@ def validate(
     store_request_log: str,
     request_detail_source: str,
     request_analysis_source: str,
+    audit_metrics_source: str,
+    request_retention_source: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -255,6 +259,77 @@ def validate(
             and '"cancelled": true' in cancel_handler,
             "cancelRequestAPI status/body behavior must match the OpenAPI contract",
         )
+
+        # Operational status endpoints share explicit schemas with their Go DTOs.
+        audit_operation = operation_block(source, "/api/admin/audit/metrics", "get")
+        audit_response = response_block(audit_operation, "200")
+        require(
+            "#/components/schemas/AuditMetricsEnvelope" in audit_response,
+            "GET /api/admin/audit/metrics 200 must reference AuditMetricsEnvelope",
+        )
+        audit_envelope = schema_block(source, "AuditMetricsEnvelope")
+        require(
+            re.search(
+                r'(?m)^        data:\n          \$ref:[ \t]*"#/components/schemas/AuditMetrics"',
+                audit_envelope,
+            ) is not None,
+            "AuditMetricsEnvelope.data must reference AuditMetrics",
+        )
+        audit_schema = schema_block(source, "AuditMetrics")
+        audit_decl = re.search(
+            r"(?ms)^type StatsSnapshot struct \{(.*?)^\}",
+            audit_metrics_source,
+        )
+        if audit_decl is None:
+            raise ValueError("internal/audit/metrics.go: type StatsSnapshot struct not found")
+        for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', audit_decl.group(1)) if tag and tag != "-"}):
+            try:
+                schema_field_block(audit_schema, field)
+            except ValueError:
+                errors.append(f"AuditMetrics: missing StatsSnapshot JSON field {field!r}")
+
+        retention_operation = operation_block(source, "/api/admin/retention/status", "get")
+        retention_response = response_block(retention_operation, "200")
+        require(
+            re.search(
+                r'(?m)^                  data:\n                    \$ref:[ \t]*"#/components/schemas/RequestRetentionStatus"',
+                retention_response,
+            ) is not None,
+            "GET /api/admin/retention/status 200 data must reference RequestRetentionStatus",
+        )
+        retention_schema = schema_block(source, "RequestRetentionStatus")
+        runtime_field = schema_field_block(retention_schema, "runtime")
+        require(
+            re.search(
+                r'(?m)^        runtime:\n          \$ref:[ \t]*"#/components/schemas/RequestRetentionRuntimeStatus"',
+                runtime_field,
+            ) is not None,
+            "RequestRetentionStatus.runtime must reference RequestRetentionRuntimeStatus",
+        )
+        retention_decl = re.search(
+            r"(?ms)^type requestRetentionStatusResponse struct \{(.*?)^\}",
+            request_retention_source,
+        )
+        if retention_decl is None:
+            raise ValueError("internal/server/request_retention.go: type requestRetentionStatusResponse not found")
+        for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', retention_decl.group(1)) if tag and tag != "-"}):
+            try:
+                schema_field_block(retention_schema, field)
+            except ValueError:
+                errors.append(f"RequestRetentionStatus: missing response JSON field {field!r}")
+
+        retention_runtime_schema = schema_block(source, "RequestRetentionRuntimeStatus")
+        retention_runtime_decl = re.search(
+            r"(?ms)^type requestRetentionRuntimeStatus struct \{(.*?)^\}",
+            request_retention_source,
+        )
+        if retention_runtime_decl is None:
+            raise ValueError("internal/server/request_retention.go: type requestRetentionRuntimeStatus not found")
+        for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', retention_runtime_decl.group(1)) if tag and tag != "-"}):
+            try:
+                schema_field_block(retention_runtime_schema, field)
+            except ValueError:
+                errors.append(f"RequestRetentionRuntimeStatus: missing runtime JSON field {field!r}")
 
         # RequestDetail nested analysis/stream DTOs must match their Go structs.
         request_detail_schema = schema_block(source, "RequestDetail")
@@ -469,6 +544,8 @@ def main() -> int:
         store_request_log = STORE_REQUEST_LOG_FILE.read_text(encoding="utf-8")
         request_detail_source = REQUEST_DETAIL_SOURCE_FILE.read_text(encoding="utf-8")
         request_analysis_source = REQUEST_ANALYSIS_FILE.read_text(encoding="utf-8")
+        audit_metrics_source = AUDIT_METRICS_FILE.read_text(encoding="utf-8")
+        request_retention_source = REQUEST_RETENTION_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -480,6 +557,8 @@ def main() -> int:
             store_request_log,
             request_detail_source,
             request_analysis_source,
+            audit_metrics_source,
+            request_retention_source,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
@@ -495,7 +574,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "/api/models GatewayModel fields, RequestLog fields, RequestDetail top-level/summary/timing fields, RequestAnalysis fields, and StreamEvent fields."
+        "/api/models GatewayModel fields, RequestLog fields, RequestDetail fields, RequestAnalysis/StreamEvent fields, AuditMetrics fields, and request retention status fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "
