@@ -300,3 +300,9 @@
 - 旧预算结算逻辑将 Pipeline 时间戳误当成已出网证据，导致这类请求没有可信 usage 时把预占 Token 保留到 UTC 日桶过期，可能提前耗尽日预算。
 - 已改为由 OpenAI-compatible Provider 在通过准入、即将执行 HTTP 请求时回调标记预算预占。未发起 HTTP dispatch 的请求退还全部预占；已发起请求若缺少可信供应商 usage，继续保守保留预占，避免对可能已计费请求错误退款。
 - 新增 Provider dispatch 回调准入/拒绝用例，以及依赖 `REDIS_TEST_ADDR` 的服务端预算回归：验证未 dispatch 时从 Redis 预算中全额退回，dispatch 后无可信 usage 时仍保留。无 Redis 的本地运行环境会跳过这条集成用例；真实 Provider 账单仍需按各自范围验收。
+
+## 2026-10-27 本地模型清单 API 字段契约收口
+
+- 本地模型列表故障修复后，对照 Handler 发现 `GET /api/models` 实际返回完整 `GatewayModel` 行，但 OpenAPI 的 `data.items` 仍声明为任意 object，没有引用仓库中已经存在的详细 Schema。
+- 已将响应改为引用 `GatewayModel`，并扩展高风险 OpenAPI 检查脚本：检查该响应引用、Go `model.Model` 的所有 JSON tag，以及 `ListGatewayModelRows` 合成的上游名称/ID与磁盘大小字段均存在于 Schema。
+- 这只关闭本地模型列表端点的一项字段漂移缺口；OpenAPI 对所有 Handler 的全量字段级等价检查仍是分阶段工作。

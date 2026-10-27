@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENAPI_FILE = ROOT / "docs" / "openapi.yaml"
 PROVIDER_HANDLER_FILE = ROOT / "internal" / "server" / "admin_providers_http.go"
 REQUEST_STATS_FILE = ROOT / "internal" / "server" / "request_stats.go"
+MODEL_STRUCT_FILE = ROOT / "internal" / "model" / "model.go"
+GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -81,7 +83,13 @@ def go_function(source: str, signature: str) -> str:
     return source[start:] if end < 0 else source[start:end]
 
 
-def validate(source: str, provider_handler: str, stats_handler: str) -> list[str]:
+def validate(
+    source: str,
+    provider_handler: str,
+    stats_handler: str,
+    model_struct: str,
+    gateway_model_ops: str,
+) -> list[str]:
     errors: list[str] = []
 
     def require(condition: bool, message: str) -> None:
@@ -192,6 +200,48 @@ def validate(source: str, provider_handler: str, stats_handler: str) -> list[str
             "err)" in stats_error_handler and "applog.Printf" in stats_error_handler,
             "request statistics DB diagnostics must remain in server-side logs",
         )
+
+        # GET /api/models returns GatewayModel rows, including runtime-name
+        # fields synthesized by ListGatewayModelRows rather than model.Model.
+        model_schema = schema_block(source, "GatewayModel")
+        model_response = response_block(
+            operation_block(source, "/api/models", "get"), "200"
+        )
+        require(
+            re.search(
+                r'(?m)^\s+items:[ \t]*\n\s+\$ref:[ \t]*"#/components/schemas/GatewayModel"',
+                model_response,
+            ) is not None,
+            "GET /api/models 200 data.items must reference GatewayModel",
+        )
+        model_decl = re.search(
+            r"(?ms)^type Model struct \{(.*?)^\}",
+            model_struct,
+        )
+        if model_decl is None:
+            raise ValueError("internal/model/model.go: type Model struct not found")
+        json_fields = {
+            tag
+            for tag in re.findall(r'json:"([^",]+)', model_decl.group(1))
+            if tag and tag != "-"
+        }
+        for field in sorted(json_fields):
+            try:
+                schema_field_block(model_schema, field)
+            except ValueError:
+                errors.append(f"GatewayModel: missing Go Model JSON field {field!r}")
+
+        for field in (
+            "upstream_llamacpp_id",
+            "upstream_ollama_name",
+            "upstream_name",
+            "disk_bytes",
+        ):
+            if re.search(rf'(?m)row\["{re.escape(field)}"\]', gateway_model_ops) is not None:
+                try:
+                    schema_field_block(model_schema, field)
+                except ValueError as exc:
+                    errors.append(f"GatewayModel: missing synthesized field {field!r}: {exc}")
     except ValueError as exc:
         errors.append(str(exc))
 
@@ -203,7 +253,11 @@ def main() -> int:
         source = OPENAPI_FILE.read_text(encoding="utf-8")
         provider_handler = PROVIDER_HANDLER_FILE.read_text(encoding="utf-8")
         stats_handler = REQUEST_STATS_FILE.read_text(encoding="utf-8")
-        errors = validate(source, provider_handler, stats_handler)
+        model_struct = MODEL_STRUCT_FILE.read_text(encoding="utf-8")
+        gateway_model_ops = GATEWAY_MODEL_OPS_FILE.read_text(encoding="utf-8")
+        errors = validate(
+            source, provider_handler, stats_handler, model_struct, gateway_model_ops
+        )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
         return 2
@@ -216,7 +270,8 @@ def main() -> int:
 
     print(
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
-        "Provider create/delete status/body, request-stats DB error envelope."
+        "Provider create/delete status/body, request-stats DB error envelope, "
+        "and /api/models GatewayModel field coverage."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "

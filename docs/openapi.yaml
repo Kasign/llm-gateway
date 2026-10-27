@@ -681,8 +681,7 @@ paths:
                   data:
                     type: array
                     items:
-                      type: object
-                      additionalProperties: true
+                      $ref: "#/components/schemas/GatewayModel"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":

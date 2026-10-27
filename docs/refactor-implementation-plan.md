@@ -999,3 +999,9 @@ docs/                        中文架构、协议和运维文档
 - 增加可选 `OnUpstreamDispatch` 回调，由 OpenAI-compatible Provider 在排队许可通过、即将调用出站 HTTP 时触发。预算 reservation 自身记录 `Dispatched`，不再依赖通用 Pipeline 阶段时间戳推断网络行为。
 - 未 dispatch 的请求结算为 0 并退还预占；已 dispatch 但缺少可信 usage 的请求仍保守保留；有可信 usage 时按真实 usage 结算。补充 Provider 并发拒绝/排队超时的回调回归和 Redis 服务端结算回归。
 - 该规则只调整 Gateway 自己的 Redis 预算，不自动判断第三方在网络错误后是否计费；真实供应商账单仍必须以可信 usage / 供应商平台数据为准。
+
+## 18. 本地模型列表响应 Schema 与 Go 字段对账（2026-10-27）
+
+- `GET /api/models` 的 Handler 返回 `ListGatewayModelRows` 生成的模型记录，而 OpenAPI 路径曾使用泛化 object，未消费现有 `GatewayModel` Schema。
+- 已改为引用 `GatewayModel` 并扩充标准库契约检查器：将 `model.Model` 的 JSON tag 与 Schema 属性对账，同时检查该 Handler 新增的 `upstream_llamacpp_id`、`upstream_ollama_name`、`upstream_name`、`disk_bytes` 字段。
+- 这是有针对性的字段级门禁，不代表所有管理 API 的 Go/Schema 完全等价；后续应按实际功能风险继续分批补齐，而不把 OpenAPI 的 `partial` 状态提前改成完整。
