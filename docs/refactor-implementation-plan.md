@@ -950,3 +950,11 @@ docs/                        中文架构、协议和运维文档
 - Provider 配置新增 `max_queue_size` 与 `queue_wait_timeout_seconds`，同步 YAML、任意 ID 环境变量、Docker Compose 显式白名单、Web 管理 CRUD、安全 Provider 视图、用量指标和 OpenAPI Schema。Web 热更新遵守并发预算相同的事务顺序：缩小队列先应用，扩大队列需等持久化和 Registry 更新成功。
 - 管理台同时展示活动并发、等待队列深度、拒绝数量与队列超时数。此队列及计数只在单个 Gateway 进程内生效；RPM 与每日 Token 预算仍走 Redis，不把本功能描述成多副本全局排队。
 - 新增 FIFO 顺序、请求取消、队列满、等待超时和配置范围用例。依当前协作约定，本次不在修改阶段重复跑手动测试；提交后以 GitHub Actions 为准，真实慢上游与反向代理端到端行为仍留给统一部署回归。
+
+
+## 2026-10-27 高风险管理 API 契约门禁
+
+- Provider FIFO 队列的完整验收已通过 Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661)，Head 为 `9533cfd51dbd1fc789fcc8480a65c5ba10990534`；真实供应商、公网代理和生产容量仍留待统一部署回归。
+- 复核管理 API 后，统计接口的数据库失败已使用通用 `database_error` 响应并将原始原因只写服务端日志；Provider 创建/删除 Handler 分别返回 `201 Created` 与无正文的 `204 No Content`，已有单测覆盖统计错误脱敏。
+- 新增 `scripts/check_openapi_contracts.py`，在 CI 前置阶段核验 Provider 配置/用量 Schema 的关键字段和范围、创建/删除响应正文边界及统计接口稳定错误封套。同步补齐 ProviderView 中已由 Handler 返回但先前未显式声明的并发使用指标。
+- 本门禁只覆盖高风险子集；`x-contract-status: partial` 保留，不声称已完成所有 Handler 的全字段 Schema 对账。后续逐步扩展到请求统计 Token 来源、请求日志 Provider 筛选与取消端点。

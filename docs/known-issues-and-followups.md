@@ -29,7 +29,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入，等待本次新 Head CI。 | RPM 与 Token 预算此前已由 Actions 验证；本提交增加可选的进程内有界 FIFO 队列及取消/超时/满队列语义，等待新 Head CI | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。无可信 usage 时保守保留预占。 | 最新 Actions 通过预算边界、跨日隔离、真实 usage 结算和动态 Web 配置；等待队列默认关闭（`max_queue_size=0`），启用后为进程内 FIFO、有界 1024、支持 Context 取消及 503 超时/满队列错误；不会将其与 Redis RPM 或 Token 预算混为一套状态。 |
+| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入。 | Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过；队列逻辑、取消/超时、竞态和前端 Bundle 均已验收，真实供应商与公网链路仍待部署环境回归。 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。排队默认关闭（`max_queue_size=0`），启用后进程内 FIFO、有界 1024，支持 Context 取消及 503 超时/满队列错误；不将它与 Redis RPM 或 Token 预算混为一套状态。 | CI 对逻辑与构建验收通过；真实用量差异、慢模型及反向代理端到端行为保留在统一部署回归。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -40,7 +40,7 @@
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与 `.env` 预置。 | 代码随 PR #7 合入 `dev`，完整 Actions #222/#224 通过；真实供应商与已部署 Web 行为仍需用户环境验收。 | 继续按统一测试安排验证配置来源、密钥存储、Registry 更新/回滚与活动 Provider 安全边界。 | 完整 CI 通过，并在部署环境核对密钥不回显、活动 Provider 无法被间接停用/清 Key、Registry 失败时配置回滚。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 63 个字面路径模板、72 个 operation 的元数据门禁及 67 个运行时路由路径双向对账由完整 Actions #225 通过；仍需逐项补齐字段级 Schema 等价性。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 路由与 operation 元数据门禁通过；稳定 Schema 有可复核的字段/状态码约束；OpenAPI 的 `partial` 状态仅在字段级覆盖实际完整后调整。 |
+| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 新增高风险字段/状态契约门禁，覆盖 Provider mutation/view 预算字段、创建/删除响应及统计数据库错误封套；整体 OpenAPI 仍为 partial。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 已覆盖高风险子集；一般性请求/响应 Schema 的全量 Go 等价性仍需分阶段补齐。 |
 
 ## 本轮实施规则
 
@@ -263,3 +263,11 @@
 ## 2026-10-27 Provider 有界 FIFO 等待队列
 
 新增 `max_queue_size`（0 关闭、最大 1024）和 `queue_wait_timeout_seconds`（0 使用默认 30 秒、最大 3600 秒）。队列关闭保持旧版立即拒绝；开启时按 FIFO 等待、队列满或超时返回 503、客户端取消立即移除排队项。管理台增加排队深度/累计超时指标。该状态仅限单个 Gateway 进程；多副本全局并发与排队协调仍未实现。本次补齐单测并等待 GitHub Actions 对新提交的自动验证，生产慢上游与代理链路尚未实测。
+
+
+## 2026-10-27 高风险管理 API 契约门禁
+
+- 已核实 `GET /api/requests/stats` 对数据库错误保留服务端日志、向客户端返回稳定的 `500 database_error`；`TestWriteRequestStatsDatabaseErrorHidesInternalDetails` 验证不泄露数据库诊断。
+- Provider 创建 Handler 返回 `201 Created`，删除返回无正文的 `204 No Content`；OpenAPI 对应成功响应保持一致。
+- 新增标准库脚本 `scripts/check_openapi_contracts.py`，检查 Provider mutation/view 的并发、队列、RPM、每日 Token 和超时字段/范围，以及创建、删除、统计失败响应的关键契约，并加入 Actions 前置门禁。
+- 这是字段级覆盖的起点，不代表整个 OpenAPI 与 Go Handler 已完全等价；`x-contract-status: partial` 继续保留。Provider 队列功能对应 Actions [40434515661](https://github.com/Kasign/llm-gateway/actions/runs/40434515661) 已全量通过。
