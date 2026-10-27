@@ -1088,4 +1088,4 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 
 - 在所有页面初始存在的 `input[type="password"]` 上统一增加眼睛图标，可切换显示/隐藏明文，涵盖登录密码、账号密码、管理员密钥和远程 Provider API Key。
 - 默认仍为隐藏状态；按钮为独立的 `type="button"`，不会触发表单提交。切换状态同步更新无障碍名称和图标。
-- 控件初始化放在 HTML 入口，样式放在主样式表中，不依赖重新构建 JavaScript Bundle；本次未运行浏览器回归或完整构建。
+- 控件初始化与登录表单提交事件均由外部 JavaScript Bundle 绑定，不依赖 HTML 内联脚本，以兼容禁止 inline script/handler 的内容安全策略；样式放在主样式表中。源码与已提交 Bundle 同步修改，仍需在实际反向代理环境完成浏览器回归。
