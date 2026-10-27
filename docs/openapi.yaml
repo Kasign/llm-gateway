@@ -2674,7 +2674,7 @@ components:
     RequestDetail:
       type: object
       required: [log, summary, timing, diagnosis]
-      description: 详情可能包含正文、请求头、响应头和流式事件；只有启用相应审计配置或事件已捕获时才会出现。
+      description: 详情中的正文、Headers、分析说明等字段按存储策略和请求状态可选出现。
       properties:
         log:
           $ref: "#/components/schemas/RequestLog"
@@ -2687,14 +2687,39 @@ components:
           items: { type: string }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
-        payload:
-          type: object
-          additionalProperties: { type: string }
+        analysis_note: { type: string }
         stream_events:
           type: array
           items:
             $ref: "#/components/schemas/StreamEvent"
-      additionalProperties: true
+        stream_event_count: { type: integer, minimum: 0 }
+        payload:
+          type: object
+          additionalProperties: { type: string }
+        request_body: { type: string }
+        request_body_bytes: { type: integer, minimum: 0 }
+        request_body_note: { type: string }
+        request_preview: { type: string }
+        response_body: { type: string }
+        response_body_bytes: { type: integer, minimum: 0 }
+        response_preview: { type: string }
+        token_note: { type: string }
+        payload_note: { type: string }
+        headers_note: { type: string }
+        request_params:
+          type: object
+          additionalProperties: true
+        request_headers:
+          type: object
+          additionalProperties: true
+        upstream_headers:
+          type: object
+          additionalProperties: true
+        content_text: { type: string }
+        reasoning_text: { type: string }
+        stream_events_note: { type: string }
+        live: { type: boolean }
+      additionalProperties: false
     AuditMetricsEnvelope:
       type: object
       required: [data]

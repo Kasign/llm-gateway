@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 最近完整 CI 基线：`5946e529ec213f41561452417af6dbd797282d2c`，提交 `docs(api): define request detail summary timing schema`；Actions [#246](https://github.com/Kasign/llm-gateway/actions/runs/40446504395) 五个并行 Job 全部通过。新一轮 RequestAnalysis Schema 对账在 #247/#248 中暴露门禁脚本问题，#249 正在重新验证修复后的 Head。
+- 最近完整 CI 基线：`4122fb9a002c83603c6e1552f6324c4f82194311`，提交 `test(api): cover dynamic request summary fields`；Actions [#250](https://github.com/Kasign/llm-gateway/actions/runs/40447617642) 五个 Job 全部通过，约 1 分 44 秒。
 - Actions #241/#242 已证明四个并行 Job 可用；最新完整基线 #243（Head `747bdba`）同样全部通过，总耗时约 2 分 10 秒。慢点集中在同一个 Job 内串行执行稳态负载与多组故障注入。
 - CI 并行化前 Actions #240 约 4 分 10 秒；拆分稳态负载/故障注入后的 #244 约 1 分 52 秒，#245 约 1 分 54 秒，#246 约 1 分 58 秒。墙钟时间约缩短 50% 以上；npm/Buildx 缓存与过期运行取消已启用。
 - 最近功能提交对应的 Actions #237–#242 均已通过；#239 的 Provider Token 预算预占回滚修复完整运行 37/37 步通过。
@@ -370,3 +370,9 @@
 - 最新已核实集成基线为 `4122fb9a002c83603c6e1552f6324c4f82194311`；该提交对应 Actions #249 全部通过。前两轮 RequestAnalysis 契约门禁失败是脚本语法与变量初始化顺序问题，已修复并由后续完整 CI 验证通过。
 - CI 已按配置/API 契约、Go 测试与静态检查、稳态负载、故障注入、构建拆分并行执行，并启用 npm/Buildx 缓存和同一 ref 过期运行取消；此前完整运行从约 4 分 10 秒降至约 2 分钟。
 - 后续提速原则：将相关生产代码、回归覆盖、OpenAPI 与中文文档合并为合理的功能批次，避免逐文件提交触发重复 CI；继续保留 race、负载和故障注入，不通过删除验证步骤换取表面速度。
+
+## 2026-10-27 RequestDetail 顶层返回字段收口
+
+- `RequestDetail` 现显式声明正文/预览、字节数、存储提示、Token 重解析提示、请求参数、请求/上游 Headers、聚合 content/reasoning、流事件数量/说明与实时标记，不再使用宽泛的 `additionalProperties: true`。
+- 高风险契约检查器会从 `buildRequestDetail` 相关 helper 及 `requestDetailAPI` 中提取 `out["field"]` 顶层写入键，并要求每个键都在 Schema 中，防止有字段实际返回但 OpenAPI 不知情。
+- 正文和 Headers 字段仍是可选项，具体是否存在由 `logging.store_payload`、历史记录与请求状态决定。

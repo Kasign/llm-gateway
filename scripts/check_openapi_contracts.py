@@ -358,6 +358,20 @@ def validate(
             except ValueError:
                 errors.append(f"RequestLog: missing Go JSON field {field!r}")
 
+        # Keep every stable top-level response key returned by the detail builder/handler in OpenAPI.
+        detail_keys = {"log", "summary", "timing", "diagnosis"}
+        detail_keys.update(re.findall(r'out\["([a-z][a-z0-9_]*)"\]', request_detail_source))
+        detail_handler = go_function(request_list_handler, "func (s *Server) requestDetailAPI(")
+        detail_keys.update(re.findall(r'out\["([a-z][a-z0-9_]*)"\]', detail_handler))
+        require(
+            "additionalProperties: false" in request_detail_schema,
+            "RequestDetail must reject undocumented top-level properties",
+        )
+        for field in sorted(detail_keys):
+            try:
+                schema_field_block(request_detail_schema, field)
+            except ValueError:
+                errors.append(f"RequestDetail: missing handler/helper field {field!r}")
         # RequestDetail summary/timing are dynamic maps; keep their key sets aligned with helpers.
         summary_schema = schema_block(source, "RequestSummary")
         timing_schema = schema_block(source, "RequestTiming")
@@ -481,7 +495,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "/api/models GatewayModel fields, RequestLog fields, RequestDetail summary/timing fields, RequestAnalysis fields, and StreamEvent fields."
+        "/api/models GatewayModel fields, RequestLog fields, RequestDetail top-level/summary/timing fields, RequestAnalysis fields, and StreamEvent fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "
