@@ -4,7 +4,6 @@ package llama
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
