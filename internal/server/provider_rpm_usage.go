@@ -143,6 +143,9 @@ func attachProviderConcurrencyUsage(s *Server, views []map[string]interface{}) {
 		view["concurrent_requests_limit"] = 0
 		view["concurrent_requests_remaining"] = 0
 		view["concurrent_requests_rejected"] = int64(0)
+		view["queued_requests"] = 0
+		view["queue_limit"] = 0
+		view["queue_timeouts"] = int64(0)
 		view["concurrent_requests_usage_available"] = false
 		id, _ := view["id"].(string)
 		limiter := s.providerConcurrencyLimiter(id)
@@ -161,6 +164,9 @@ func attachProviderConcurrencyUsage(s *Server, views []map[string]interface{}) {
 		view["concurrent_requests_limit"] = limit
 		view["concurrent_requests_remaining"] = remaining
 		view["concurrent_requests_rejected"] = limiter.RejectedRequests()
+		view["queued_requests"] = limiter.QueueDepth()
+		view["queue_limit"] = limiter.QueueLimit()
+		view["queue_timeouts"] = limiter.QueueTimeouts()
 		view["concurrent_requests_usage_available"] = true
 	}
 }

@@ -25,9 +25,11 @@ type OpenAICompatibleProviderConfig struct {
 	ModelMappings       map[string]string `yaml:"model_mappings"`
 	AllowInsecureHTTP   bool   `yaml:"allow_insecure_http"`
 	AllowPrivateNetwork bool   `yaml:"allow_private_network"`
-	MaxResponseBytes    int64  `yaml:"max_response_bytes"`
-	MaxConcurrentRequests int `yaml:"max_concurrent_requests"`
-	RequestsPerMinute      int   `yaml:"requests_per_minute"`
+	MaxResponseBytes        int64  `yaml:"max_response_bytes"`
+	MaxConcurrentRequests   int    `yaml:"max_concurrent_requests"`
+	MaxQueueSize            int    `yaml:"max_queue_size"`
+	QueueWaitTimeoutSeconds int    `yaml:"queue_wait_timeout_seconds"`
+	RequestsPerMinute       int    `yaml:"requests_per_minute"`
 	TokenBudgetPerDay      int64 `yaml:"token_budget_per_day"`
 	RequestTimeoutSeconds  int   `yaml:"request_timeout_seconds"`
 }
@@ -67,6 +69,12 @@ func (c *Config) validateProviderConfigs() error {
 		if item.MaxConcurrentRequests < 0 || item.MaxConcurrentRequests > gatewayprovider.MaxOpenAICompatibleConcurrentRequests {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): max_concurrent_requests must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleConcurrentRequests)
 		}
+		if item.MaxQueueSize < 0 || item.MaxQueueSize > gatewayprovider.MaxOpenAICompatibleQueueSize {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): max_queue_size must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleQueueSize)
+		}
+		if item.QueueWaitTimeoutSeconds < 0 || item.QueueWaitTimeoutSeconds > gatewayprovider.MaxOpenAICompatibleQueueWaitTimeoutSeconds {
+			return fmt.Errorf("providers.openai_compatible[%d] (%s): queue_wait_timeout_seconds must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleQueueWaitTimeoutSeconds)
+		}
 		if item.RequestTimeoutSeconds < 0 || item.RequestTimeoutSeconds > gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds {
 			return fmt.Errorf("providers.openai_compatible[%d] (%s): request_timeout_seconds must be between 0 and %d", i, item.ID, gatewayprovider.MaxOpenAICompatibleRequestTimeoutSeconds)
 		}
@@ -90,6 +98,8 @@ func (c *Config) validateProviderConfigs() error {
 			AllowInsecureHTTP: item.AllowInsecureHTTP, AllowPrivateNetwork: item.AllowPrivateNetwork,
 			MaxResponseBytes: item.MaxResponseBytes,
 			MaxConcurrentRequests: item.MaxConcurrentRequests,
+			MaxQueueSize: item.MaxQueueSize,
+			QueueWaitTimeoutSeconds: item.QueueWaitTimeoutSeconds,
 			RequestTimeoutSeconds: item.RequestTimeoutSeconds,
 		})
 		if err != nil {

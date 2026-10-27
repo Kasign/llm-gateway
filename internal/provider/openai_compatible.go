@@ -39,15 +39,29 @@ const (
 	defaultOpenAICompatibleMaxConcurrentRequests = 64
 	// MaxOpenAICompatibleRequestTimeoutSeconds 限制可配置的 Provider 整体请求时限（包含完整流式响应）。
 	MaxOpenAICompatibleRequestTimeoutSeconds = 86400
+	// MaxOpenAICompatibleQueueSize 限制单 Provider 等待队列容量，0 表示关闭队列。
+	MaxOpenAICompatibleQueueSize = 1024
+	// DefaultOpenAICompatibleQueueWaitTimeoutSeconds 是启用队列且未指定超时时的默认等待时限。
+	DefaultOpenAICompatibleQueueWaitTimeoutSeconds = 30
+	// MaxOpenAICompatibleQueueWaitTimeoutSeconds 限制队列等待时限最大值。
+	MaxOpenAICompatibleQueueWaitTimeoutSeconds = 3600
 )
 
-// ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算。
-// Web 配置热更新会替换 Provider 实例，但仍在执行的请求必须继续占用同一份预算。
+// concurrencyWaiter 表示进入 Provider FIFO 等待队列的单个请求。
+type concurrencyWaiter struct {
+	ready   chan struct{}
+	granted bool
+}
+
+// ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算与等待队列。
 type ConcurrencyLimiter struct {
-	mu       sync.Mutex
-	active   int
-	limit    int
-	rejected int64
+	mu            sync.Mutex
+	active        int
+	limit         int
+	rejected      int64
+	queueLimit    int
+	waiters       []*concurrencyWaiter
+	queueTimeouts int64
 }
 
 // NewConcurrencyLimiter 创建有界的并发许可器；0 表示默认上限。
@@ -72,6 +86,7 @@ func (l *ConcurrencyLimiter) SetLimit(maxConcurrentRequests int) error {
 	}
 	l.mu.Lock()
 	l.limit = maxConcurrentRequests
+	l.dispatchWaitersLocked()
 	l.mu.Unlock()
 	return nil
 }
@@ -83,7 +98,8 @@ func (l *ConcurrencyLimiter) TryAcquire() bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.active >= l.limit {
+	// 不能越过已排队请求，即使热更新后暂时有空余槽位。
+	if l.active >= l.limit || len(l.waiters) > 0 {
 		l.rejected++
 		return false
 	}
@@ -100,6 +116,7 @@ func (l *ConcurrencyLimiter) Release() {
 	if l.active > 0 {
 		l.active--
 	}
+	l.dispatchWaitersLocked()
 	l.mu.Unlock()
 }
 
@@ -125,12 +142,122 @@ func (l *ConcurrencyLimiter) RejectedRequests() int64 {
 
 // Limit 返回当前有效上限，供诊断和单元测试使用。
 func (l *ConcurrencyLimiter) Limit() int {
-	if l == nil {
-		return 0
-	}
+	if l == nil { return 0 }
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.limit
+}
+
+// SetQueueLimit 设置 FIFO 等待队列容量；降低容量不会取消现有等待者。
+func (l *ConcurrencyLimiter) SetQueueLimit(maxQueueSize int) error {
+	if l == nil { return fmt.Errorf("provider concurrency limiter is nil") }
+	if maxQueueSize < 0 || maxQueueSize > MaxOpenAICompatibleQueueSize {
+		return fmt.Errorf("provider max_queue_size must be between 0 and %d", MaxOpenAICompatibleQueueSize)
+	}
+	l.mu.Lock()
+	l.queueLimit = maxQueueSize
+	l.mu.Unlock()
+	return nil
+}
+func (l *ConcurrencyLimiter) QueueLimit() int {
+	if l == nil { return 0 }
+	l.mu.Lock(); defer l.mu.Unlock()
+	return l.queueLimit
+}
+func (l *ConcurrencyLimiter) QueueDepth() int {
+	if l == nil { return 0 }
+	l.mu.Lock(); defer l.mu.Unlock()
+	return len(l.waiters)
+}
+func (l *ConcurrencyLimiter) QueueTimeouts() int64 {
+	if l == nil { return 0 }
+	l.mu.Lock(); defer l.mu.Unlock()
+	return l.queueTimeouts
+}
+
+// dispatchWaitersLocked 按 FIFO 顺序预留并发许可；调用方必须持有 l.mu。
+func (l *ConcurrencyLimiter) dispatchWaitersLocked() {
+	for l.active < l.limit && len(l.waiters) > 0 {
+		waiter := l.waiters[0]
+		l.waiters[0] = nil
+		l.waiters = l.waiters[1:]
+		waiter.granted = true
+		l.active++
+		close(waiter.ready)
+	}
+	if len(l.waiters) == 0 { l.waiters = nil }
+}
+func (l *ConcurrencyLimiter) removeWaiterLocked(target *concurrencyWaiter) bool {
+	for i, waiter := range l.waiters {
+		if waiter != target { continue }
+		copy(l.waiters[i:], l.waiters[i+1:])
+		l.waiters[len(l.waiters)-1] = nil
+		l.waiters = l.waiters[:len(l.waiters)-1]
+		if len(l.waiters) == 0 { l.waiters = nil }
+		return true
+	}
+	return false
+}
+func (l *ConcurrencyLimiter) releaseGrantedWaiter(waiter *concurrencyWaiter) {
+	l.mu.Lock()
+	if waiter.granted {
+		waiter.granted = false
+		if l.active > 0 { l.active-- }
+		l.dispatchWaitersLocked()
+	}
+	l.mu.Unlock()
+}
+
+// Acquire 获取 Provider 并发许可；关闭队列时立即拒绝，启用后使用有界 FIFO 等待。
+func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Duration) error {
+	if ctx == nil { ctx = context.Background() }
+	if err := ctx.Err(); err != nil { return err }
+	if l == nil {
+		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_concurrency_limit", Message: "upstream provider concurrency limit reached"}
+	}
+	l.mu.Lock()
+	if l.active < l.limit && len(l.waiters) == 0 {
+		l.active++
+		l.mu.Unlock()
+		return nil
+	}
+	if l.queueLimit <= 0 {
+		l.rejected++
+		l.mu.Unlock()
+		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_concurrency_limit", Message: "upstream provider concurrency limit reached"}
+	}
+	if len(l.waiters) >= l.queueLimit {
+		l.rejected++
+		l.mu.Unlock()
+		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_queue_full", Message: "upstream provider waiting queue is full"}
+	}
+	waiter := &concurrencyWaiter{ready: make(chan struct{})}
+	l.waiters = append(l.waiters, waiter)
+	l.mu.Unlock()
+
+	if waitTimeout <= 0 { waitTimeout = time.Duration(DefaultOpenAICompatibleQueueWaitTimeoutSeconds) * time.Second }
+	waitCtx, cancel := context.WithTimeout(ctx, waitTimeout)
+	defer cancel()
+	select {
+	case <-waiter.ready:
+		if err := ctx.Err(); err != nil { l.releaseGrantedWaiter(waiter); return err }
+		return nil
+	case <-waitCtx.Done():
+		l.mu.Lock()
+		if waiter.granted {
+			if ctx.Err() == nil { l.mu.Unlock(); return nil }
+			waiter.granted = false
+			if l.active > 0 { l.active-- }
+			l.dispatchWaitersLocked()
+			l.mu.Unlock()
+			return ctx.Err()
+		}
+		removed := l.removeWaiterLocked(waiter)
+		if removed && ctx.Err() == nil { l.queueTimeouts++; l.rejected++ }
+		l.mu.Unlock()
+		if err := ctx.Err(); err != nil { return err }
+		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_queue_timeout", Message: "upstream provider queue wait timed out"}
+	}
 }
 
 // OpenAICompatibleConfig 是远程 OpenAI-compatible Provider 的运行时参数。
@@ -145,7 +272,11 @@ type OpenAICompatibleConfig struct {
 	MaxResponseBytes    int64
 	// MaxConcurrentRequests 为此 Provider 的最大并发推理数；0 使用默认值 64。
 	MaxConcurrentRequests int
-	// RequestLimiter 可用于同一 Provider 的热更新实例共享并发预算；nil 时会创建独立许可器。
+	// MaxQueueSize 为等待并发许可的最大请求数；0 关闭排队并维持 fail-fast。
+	MaxQueueSize int
+	// QueueWaitTimeoutSeconds 为排队等待秒数；启用队列且值为 0 时使用默认 30 秒。
+	QueueWaitTimeoutSeconds int
+	// RequestLimiter 可用于同一 Provider 的热更新实例共享并发预算与队列；nil 时会创建独立许可器。
 	RequestLimiter *ConcurrencyLimiter
 	// RequestTimeoutSeconds 为完整 HTTP 请求时限，包含 JSON/SSE 响应体读取；0 表示不增加 Provider 级总时限。
 	RequestTimeoutSeconds int
@@ -160,6 +291,7 @@ type OpenAICompatibleProvider struct {
 	allowPrivateNetwork bool
 	maxResponseBytes    int64
 	requestLimiter      *ConcurrencyLimiter
+	queueWaitTimeout    time.Duration
 	client              *http.Client
 }
 
@@ -185,6 +317,12 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 	}
 	if cfg.RequestTimeoutSeconds < 0 || cfg.RequestTimeoutSeconds > MaxOpenAICompatibleRequestTimeoutSeconds {
 		return nil, fmt.Errorf("provider request_timeout_seconds must be between 0 and %d", MaxOpenAICompatibleRequestTimeoutSeconds)
+	}
+	if cfg.MaxQueueSize < 0 || cfg.MaxQueueSize > MaxOpenAICompatibleQueueSize {
+		return nil, fmt.Errorf("provider max_queue_size must be between 0 and %d", MaxOpenAICompatibleQueueSize)
+	}
+	if cfg.QueueWaitTimeoutSeconds < 0 || cfg.QueueWaitTimeoutSeconds > MaxOpenAICompatibleQueueWaitTimeoutSeconds {
+		return nil, fmt.Errorf("provider queue_wait_timeout_seconds must be between 0 and %d", MaxOpenAICompatibleQueueWaitTimeoutSeconds)
 	}
 	for _, r := range id {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
@@ -248,19 +386,18 @@ func NewOpenAICompatibleProviderWithResolver(cfg OpenAICompatibleConfig, resolve
 	requestLimiter := cfg.RequestLimiter
 	if requestLimiter == nil {
 		requestLimiter, err = NewConcurrencyLimiter(maxConcurrentRequests)
-		if err != nil {
-			return nil, err
-		}
+		if err != nil { return nil, err }
+		if err := requestLimiter.SetQueueLimit(cfg.MaxQueueSize); err != nil { return nil, err }
+	}
+	queueWaitTimeoutSeconds := cfg.QueueWaitTimeoutSeconds
+	if cfg.MaxQueueSize > 0 && queueWaitTimeoutSeconds == 0 {
+		queueWaitTimeoutSeconds = DefaultOpenAICompatibleQueueWaitTimeoutSeconds
 	}
 	return &OpenAICompatibleProvider{
-		id:                  id,
-		baseURL:             base,
-		apiKey:              cfg.APIKey,
-		apiKeyHeader:        apiKeyHeader,
-		allowPrivateNetwork: cfg.AllowPrivateNetwork,
-		maxResponseBytes:    maxResponseBytes,
-		requestLimiter:      requestLimiter,
-		client:              client,
+		id: id, baseURL: base, apiKey: cfg.APIKey, apiKeyHeader: apiKeyHeader,
+		allowPrivateNetwork: cfg.AllowPrivateNetwork, maxResponseBytes: maxResponseBytes,
+		requestLimiter: requestLimiter, queueWaitTimeout: time.Duration(queueWaitTimeoutSeconds) * time.Second,
+		client: client,
 	}, nil
 }
 
@@ -367,17 +504,16 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 		if ctx.Err() != nil {
 			return core.Result{UpstreamStatus: 0}, err
 		}
-		status, _, _ := core.Unpack(err)
-		if status < http.StatusBadRequest || status > 599 {
-			status = http.StatusServiceUnavailable
-		}
+		status, code, _ := core.Unpack(err)
+		if status < http.StatusBadRequest || status > 599 { status = http.StatusServiceUnavailable }
+		if code == "" { code = "provider_concurrency_limit" }
 		if call.Stream && call.WriterWritten() {
-			// warm-start 已提交状态行时，不能再返回普通 JSON；必须以 SSE error 结束流。
+			// warm-start 已提交状态行时，追加对应错误码的 SSE error。
 			written := int64(0)
 			if isResponsesAPIPath(call.Path) {
-				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit", 0)
+				written = p.writeStreamErrorIfCommitted(call, code, 0)
 			} else {
-				written = p.writeStreamErrorIfCommitted(call, "provider_concurrency_limit")
+				written = p.writeStreamErrorIfCommitted(call, code)
 			}
 			return core.Result{Status: status, UpstreamStatus: 0, ResponseBytes: written}, err
 		}
@@ -391,19 +527,13 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 	return p.forwardJSON(ctx, call, req)
 }
 
-// acquireRequestSlot 使用 fail-fast 策略，防止 Provider 堆积无界等待中的推理请求。
+// acquireRequestSlot 使用共享 Provider 许可器；关闭队列时立即拒绝，启用后按 FIFO 等待。
 func (p *OpenAICompatibleProvider) acquireRequestSlot(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	if err := ctx.Err(); err != nil { return err }
+	if p == nil || p.requestLimiter == nil {
+		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_concurrency_limit", Message: "upstream provider concurrency limit reached"}
 	}
-	if p == nil || p.requestLimiter == nil || !p.requestLimiter.TryAcquire() {
-		return &core.Error{
-			Status:  http.StatusServiceUnavailable,
-			Code:    "provider_concurrency_limit",
-			Message: "upstream provider concurrency limit reached",
-		}
-	}
-	return nil
+	return p.requestLimiter.Acquire(ctx, p.queueWaitTimeout)
 }
 
 // releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放共享许可。

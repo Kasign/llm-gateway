@@ -941,3 +941,12 @@ docs/                        中文架构、协议和运维文档
 - 有可信供应商 usage 时按真实总 Token（或 input+output）结算并释放预占差额；没有可信 usage 的已出网上游请求会保守保留预占直到日桶过期。不会把 llama timings 或估算值冒充供应商计费 Token。
 - 新增 Redis UTC 日桶预占/结算用例、输出上限字段用例、Web 配置和用量展示、环境变量白名单、OpenAPI 和中文配置说明。本批未手动运行测试，等待新 Head GitHub Actions。
 - 排队策略仍独立待设计，需要另外评审公平性、队列上限、等待超时、取消移除、Redis 故障策略和 SSE 提交边界。
+
+
+## 2026-10-27 Provider 有界 FIFO 排队
+
+- 在已有 Provider 并发许可器内实现可选的有界 FIFO 等待队列，避免在 Provider 热更新后丢失共享准入状态。队列关闭（默认 `max_queue_size=0`）时继续 fail-fast 返回 503，不改变旧部署行为。
+- 队列容量允许 0–1024；启用后队列满返回 `provider_queue_full`，等待超时返回 `provider_queue_timeout`（503），客户端取消会移除等待项。发放许可时按 FIFO 预留并发槽位，并在等待者取消时归还槽位。
+- Provider 配置新增 `max_queue_size` 与 `queue_wait_timeout_seconds`，同步 YAML、任意 ID 环境变量、Docker Compose 显式白名单、Web 管理 CRUD、安全 Provider 视图、用量指标和 OpenAPI Schema。Web 热更新遵守并发预算相同的事务顺序：缩小队列先应用，扩大队列需等持久化和 Registry 更新成功。
+- 管理台同时展示活动并发、等待队列深度、拒绝数量与队列超时数。此队列及计数只在单个 Gateway 进程内生效；RPM 与每日 Token 预算仍走 Redis，不把本功能描述成多副本全局排队。
+- 新增 FIFO 顺序、请求取消、队列满、等待超时和配置范围用例。依当前协作约定，本次不在修改阶段重复跑手动测试；提交后以 GitHub Actions 为准，真实慢上游与反向代理端到端行为仍留给统一部署回归。

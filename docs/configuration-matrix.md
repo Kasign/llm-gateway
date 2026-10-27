@@ -21,13 +21,16 @@
 
 | 来源 | 管理内容 | Web 是否可编辑 | 生效时机 | 冲突规则 |
 | --- | --- | --- | --- | --- |
-| YAML: providers.openai_compatible[] | ID、URL、Key 引用、默认模型、模型映射、安全选项、RPM、每日 Token 预算和超时 | 否，部署托管项只读 | 重启 | 不得与环境预置或 Web Provider 重复 ID |
-| 环境变量: LLM_GATEWAY_PROVIDER_<ID>_* | Key、模型映射、并发/RPM、每日 Token 预算、响应体限制、请求时限和网络安全选项 | 否，部署托管项只读 | 重启 | DeepSeek/OpenAI 通过显式环境白名单；自定义 ID 使用 providers.env |
-| Web / 数据库 | 新建、更新、启用/停用、删除、模型映射和凭据轮换 | 是 | 按后端持久化和 Registry 热更新契约生效 | Key 加密保存且不回显；活动 Provider 受保护 |
+| YAML: providers.openai_compatible[] | ID、URL、Key 引用、默认模型、模型映射、安全选项、并发、等待队列、RPM、每日 Token 预算和超时 | 否，部署托管项只读 | 重启 | 不得与环境预置或 Web Provider 重复 ID |
+| 环境变量: LLM_GATEWAY_PROVIDER_<ID>_* | Key、模型映射、并发/队列/RPM、每日 Token 预算、响应体限制、请求时限和网络安全选项 | 否，部署托管项只读 | 重启 | DeepSeek/OpenAI 通过显式环境白名单；自定义 ID 使用 providers.env |
+| Web / 数据库 | 新建、更新、启用/停用、删除、模型映射、并发/队列策略和凭据轮换 | 是 | 按后端持久化和 Registry 热更新契约生效 | Key 加密保存且不回显；活动 Provider 受保护 |
 
 Provider 环境字段以 internal/config/provider_env.go 中的解析器清单为准。CI 检查它与 .env.example、providers.env.example 及 Compose 中的 DeepSeek/OpenAI 字段一致。
 
 `token_budget_per_day=0` 默认关闭；正数按 Provider ID 使用 Redis UTC 自然日预算，在所有 API Key 和 Agent 间共享。准入时原子预占请求体字节估算与强制输出上限，余额不足时尽量收紧单次输出上限；收到可信供应商 usage 后结算为真实用量。没有可信 usage 时保守保留预占至日桶过期，因此这是预算保护，不是各家计费规则的精确复刻。
+
+
+Provider 等待队列是**进程内**准入控制，不依赖 Redis：`max_queue_size=0` 默认关闭并保持旧的立即拒绝行为；启用后采用有界 FIFO（1–1024），请求取消会从队列移除。等待超时默认 30 秒，最大 3600 秒；队列满或等待超时返回 503（`provider_queue_full` / `provider_queue_timeout`）。已经提交 HTTP 状态行的流式响应以安全 SSE error 结束。管理台显示当前排队数与队列超时累计数；多副本部署时，这些指标不是全局合计。
 
 ## 3. 数据库运行配置
 

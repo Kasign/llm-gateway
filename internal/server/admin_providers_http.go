@@ -37,6 +37,8 @@ type managedProvider struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
+	MaxQueueSize int `json:"max_queue_size"`
+	QueueWaitTimeoutSeconds int `json:"queue_wait_timeout_seconds"`
 	RequestsPerMinute int `json:"requests_per_minute"`
 	TokenBudgetPerDay int64 `json:"token_budget_per_day"`
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
@@ -58,6 +60,8 @@ type providerMutationRequest struct {
 	AllowPrivateNetwork bool `json:"allow_private_network"`
 	MaxResponseBytes int64 `json:"max_response_bytes"`
 	MaxConcurrentRequests int `json:"max_concurrent_requests"`
+	MaxQueueSize int `json:"max_queue_size"`
+	QueueWaitTimeoutSeconds int `json:"queue_wait_timeout_seconds"`
 	RequestsPerMinute int `json:"requests_per_minute"`
 	TokenBudgetPerDay int64 `json:"token_budget_per_day"`
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
@@ -166,6 +170,7 @@ func (s *Server) buildRemoteProvider(row managedProvider) (*provider.OpenAICompa
 		ID:row.ID,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,
 		AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,
 		MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,
+		MaxQueueSize:row.MaxQueueSize,QueueWaitTimeoutSeconds:row.QueueWaitTimeoutSeconds,
 		RequestTimeoutSeconds:row.RequestTimeoutSeconds,
 		RequestLimiter:row.ConcurrencyLimiter,
 	})
@@ -188,7 +193,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 	id:=strings.ToLower(strings.TrimSpace(in.ID));if id==""{id=strings.ToLower(strings.TrimSpace(routeID))}
 	if !managedProviderIDPattern.MatchString(id)||id=="llamacpp"||id=="ollama" {return managedProvider{},providerErr(400,"invalid_provider_id","Provider ID 格式无效或与内置 Provider 冲突")}
 	if routeID!=""&&id!=strings.ToLower(strings.TrimSpace(routeID)){return managedProvider{},providerErr(400,"provider_id_immutable","Provider ID 不允许通过编辑修改")}
-	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests,RequestsPerMinute:in.RequestsPerMinute,TokenBudgetPerDay:in.TokenBudgetPerDay,RequestTimeoutSeconds:in.RequestTimeoutSeconds}
+	row:=managedProvider{ID:id,Enabled:in.Enabled,BaseURL:strings.TrimRight(strings.TrimSpace(in.BaseURL),"/"),APIKeyHeader:strings.ToLower(strings.TrimSpace(in.APIKeyHeader)),DefaultModel:strings.TrimSpace(in.DefaultModel),ModelMappings:cloneStringMap(in.ModelMappings),AllowInsecureHTTP:in.AllowInsecureHTTP,AllowPrivateNetwork:in.AllowPrivateNetwork,MaxResponseBytes:in.MaxResponseBytes,MaxConcurrentRequests:in.MaxConcurrentRequests,MaxQueueSize:in.MaxQueueSize,QueueWaitTimeoutSeconds:in.QueueWaitTimeoutSeconds,RequestsPerMinute:in.RequestsPerMinute,TokenBudgetPerDay:in.TokenBudgetPerDay,RequestTimeoutSeconds:in.RequestTimeoutSeconds}
 	if row.APIKeyHeader==""{row.APIKeyHeader="authorization"}
 	if row.APIKeyHeader!="authorization"&&row.APIKeyHeader!="api-key"&&row.APIKeyHeader!="x-api-key" {return managedProvider{},providerErr(400,"invalid_api_key_header","API Key Header 仅支持 Authorization、api-key 或 x-api-key")}
 	if row.DefaultModel==""||len(row.DefaultModel)>255||strings.ContainsAny(row.DefaultModel,"\r\n"){return managedProvider{},providerErr(400,"invalid_default_model","默认模型 ID 必须是非空单行字符串")}
@@ -200,7 +205,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 		mappings[alias]=target
 	}
 	row.ModelMappings=mappings
-	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.RequestsPerMinute<0||row.RequestsPerMinute>config.MaxProviderRequestsPerMinute{return managedProvider{},providerErr(400,"invalid_provider_rate_limit","Provider 每分钟请求数必须在 0 到 100000 之间")};if row.TokenBudgetPerDay<0||row.TokenBudgetPerDay>config.MaxProviderTokenBudgetPerDay{return managedProvider{},providerErr(400,"invalid_token_budget","每日 Token 预算必须在 0 到 1000000000000 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
+	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxQueueSize<0||row.MaxQueueSize>provider.MaxOpenAICompatibleQueueSize{return managedProvider{},providerErr(400,"invalid_queue_limit","排队队列大小必须在 0 到 1024 之间")};if row.QueueWaitTimeoutSeconds<0||row.QueueWaitTimeoutSeconds>provider.MaxOpenAICompatibleQueueWaitTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_queue_timeout","排队等待超时必须在 0 到 3600 秒之间")};if row.RequestsPerMinute<0||row.RequestsPerMinute>config.MaxProviderRequestsPerMinute{return managedProvider{},providerErr(400,"invalid_provider_rate_limit","Provider 每分钟请求数必须在 0 到 100000 之间")};if row.TokenBudgetPerDay<0||row.TokenBudgetPerDay>config.MaxProviderTokenBudgetPerDay{return managedProvider{},providerErr(400,"invalid_token_budget","每日 Token 预算必须在 0 到 1000000000000 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
 	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable;row.ConcurrencyLimiter=old.ConcurrencyLimiter}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))
@@ -215,7 +220,7 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 
 func (s *Server) safeProviderView(row managedProvider,source string,editable bool) map[string]interface{} {
 	configured:=row.APIKey!=""||row.APIKeyCiphertext!=""
-	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"requests_per_minute":row.RequestsPerMinute,"token_budget_per_day":row.TokenBudgetPerDay,"request_timeout_seconds":row.RequestTimeoutSeconds,"source":source,"editable":editable}
+	v:=map[string]interface{}{"id":row.ID,"enabled":row.Enabled,"base_url":row.BaseURL,"api_key_header":row.APIKeyHeader,"api_key_configured":configured,"api_key_masked":"","default_model":row.DefaultModel,"model_mappings":cloneStringMap(row.ModelMappings),"allow_insecure_http":row.AllowInsecureHTTP,"allow_private_network":row.AllowPrivateNetwork,"max_response_bytes":row.MaxResponseBytes,"max_concurrent_requests":row.MaxConcurrentRequests,"max_queue_size":row.MaxQueueSize,"queue_wait_timeout_seconds":row.QueueWaitTimeoutSeconds,"requests_per_minute":row.RequestsPerMinute,"token_budget_per_day":row.TokenBudgetPerDay,"request_timeout_seconds":row.RequestTimeoutSeconds,"source":source,"editable":editable}
 	if configured{v["api_key_masked"]="••••••••"}
 	if row.SourceConflict{v["source_conflict"]=true;v["enabled"]=false;v["warning"]="ID 与部署配置冲突，已拒绝覆盖"}
 	if row.SecretUnavailable{v["secret_unavailable"]=true;v["warning"]="密文无法解密；请重新填写 API Key 或显式清除"}
@@ -225,7 +230,7 @@ func (s *Server) listManagedProviderViews() []map[string]interface{} {
 	out:=make([]map[string]interface{},0)
 	if s!=nil&&s.cfg!=nil {
 		for _,r:=range s.cfg.Providers.OpenAICompatible {
-			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,RequestsPerMinute:r.RequestsPerMinute,TokenBudgetPerDay:r.TokenBudgetPerDay,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
+			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,MaxQueueSize:r.MaxQueueSize,QueueWaitTimeoutSeconds:r.QueueWaitTimeoutSeconds,RequestsPerMinute:r.RequestsPerMinute,TokenBudgetPerDay:r.TokenBudgetPerDay,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
 			out=append(out,s.safeProviderView(row,"deployment",false))
 		}
 	}
@@ -330,6 +335,33 @@ func prepareProviderConcurrencyLimit(action string, exists, enabled bool, limite
 	return current, false, false, nil
 }
 
+// prepareProviderQueueLimit applies queue reductions before persistence and queue increases only after Registry updates.
+func prepareProviderQueueLimit(action string, exists, enabled bool, limiter *provider.ConcurrencyLimiter, configuredLimit int) (previousLimit int, changedBeforeRegistry, raiseAfterRegistry bool, err error) {
+	if limiter == nil {
+		return 0, false, false, nil
+	}
+	if action != "enable" && !(action == "save" && exists) {
+		return limiter.QueueLimit(), false, false, nil
+	}
+	current := limiter.QueueLimit()
+	if action == "save" && !enabled {
+		return current, false, false, nil
+	}
+	if configuredLimit < 0 || configuredLimit > provider.MaxOpenAICompatibleQueueSize {
+		return current, false, false, errors.New("invalid Provider queue limit")
+	}
+	if configuredLimit < current {
+		if err := limiter.SetQueueLimit(configuredLimit); err != nil {
+			return current, false, false, err
+		}
+		return current, true, false, nil
+	}
+	if configuredLimit > current && (action == "enable" || enabled) {
+		return current, false, true, nil
+	}
+	return current, false, false, nil
+}
+
 func (s *Server) changeWebProvider(ctx context.Context,id string,input *providerMutationRequest,action string)error {
 	id=strings.ToLower(strings.TrimSpace(id))
 	// 与上游切换共用锁，避免检查非活动后又被并发切换为活动 Provider。
@@ -380,7 +412,15 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 	if limitErr != nil {
 		return providerErr(400, "invalid_concurrency_limit", "并发上限必须在 0 到 64 之间")
 	}
+	previousQueueLimit, queueLimitChanged, queueLimitRaisePending, queueLimitErr := prepareProviderQueueLimit(
+		action, exists, row.Enabled, row.ConcurrencyLimiter, row.MaxQueueSize,
+	)
+	if queueLimitErr != nil {
+		if limiterChanged { _ = row.ConcurrencyLimiter.SetLimit(previousLimit) }
+		return providerErr(400, "invalid_queue_limit", "排队队列大小必须在 0 到 1024 之间")
+	}
 	if err := s.persistWebProviderMap(ctx, next); err != nil {
+		if queueLimitChanged { _ = row.ConcurrencyLimiter.SetQueueLimit(previousQueueLimit) }
 		if limiterChanged {
 			if rollbackErr := row.ConcurrencyLimiter.SetLimit(previousLimit); rollbackErr != nil {
 				applog.Printf("Web Provider concurrency limit rollback after persistence failure failed: id=%s", id)
@@ -399,6 +439,7 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 		}
 	}
 	if registryErr != nil {
+		if queueLimitChanged { _ = row.ConcurrencyLimiter.SetQueueLimit(previousQueueLimit) }
 		if limiterChanged {
 			if err := row.ConcurrencyLimiter.SetLimit(previousLimit); err != nil {
 				applog.Printf("Web Provider concurrency limit rollback failed: id=%s", id)
@@ -409,6 +450,12 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 		}
 		applog.Printf("Web Provider Registry update failed: id=%s", id)
 		return providerErr(503, "provider_registry_update_failed", "更新 Provider 运行时注册表失败，已尝试回滚持久化配置")
+	}
+	if queueLimitRaisePending {
+		if err := row.ConcurrencyLimiter.SetQueueLimit(row.MaxQueueSize); err != nil {
+			applog.Printf("apply Provider queue limit failed: id=%s", id)
+			return providerErr(503, "provider_queue_update_failed", "更新 Provider 排队预算失败；当前运行时保留旧上限")
+		}
 	}
 	if limiterRaisePending {
 		// 目标上限已由配置与 Provider 构造器验证过；只有 Registry 更新成功后才放宽预算。
@@ -435,7 +482,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 		if key=="" {s.providerConfigMu.RLock();if row,ok:=s.webProviders[id];ok{key=row.APIKey};s.providerConfigMu.RUnlock()}
 		in.APIKey=""
 		row,err:=s.validateProviderInput(in,nil,id);if err!=nil{writeProviderManagementError(w,err);return};row.APIKey=key
-		cfg=config.OpenAICompatibleProviderConfig{ID:row.ID,Enabled:true,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,DefaultModel:row.DefaultModel,ModelMappings:cloneStringMap(row.ModelMappings),AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,TokenBudgetPerDay:row.TokenBudgetPerDay,RequestTimeoutSeconds:row.RequestTimeoutSeconds}
+		cfg=config.OpenAICompatibleProviderConfig{ID:row.ID,Enabled:true,BaseURL:row.BaseURL,APIKey:row.APIKey,APIKeyHeader:row.APIKeyHeader,DefaultModel:row.DefaultModel,ModelMappings:cloneStringMap(row.ModelMappings),AllowInsecureHTTP:row.AllowInsecureHTTP,AllowPrivateNetwork:row.AllowPrivateNetwork,MaxResponseBytes:row.MaxResponseBytes,MaxConcurrentRequests:row.MaxConcurrentRequests,MaxQueueSize:row.MaxQueueSize,QueueWaitTimeoutSeconds:row.QueueWaitTimeoutSeconds,TokenBudgetPerDay:row.TokenBudgetPerDay,RequestTimeoutSeconds:row.RequestTimeoutSeconds}
 	} else {
 		if r.URL.Query().Get("source") == "deployment" {
 			for _, item := range s.cfg.Providers.OpenAICompatible {
@@ -453,6 +500,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 					ModelMappings: cloneStringMap(row.ModelMappings),
 					AllowInsecureHTTP: row.AllowInsecureHTTP, AllowPrivateNetwork: row.AllowPrivateNetwork,
 					MaxResponseBytes: row.MaxResponseBytes, MaxConcurrentRequests: row.MaxConcurrentRequests,
+					MaxQueueSize: row.MaxQueueSize, QueueWaitTimeoutSeconds: row.QueueWaitTimeoutSeconds,
 					TokenBudgetPerDay: row.TokenBudgetPerDay,
 					RequestTimeoutSeconds: row.RequestTimeoutSeconds,
 				}
@@ -463,7 +511,7 @@ func (s *Server) testProviderAPI(w http.ResponseWriter,r *http.Request,id string
 			return
 		}
 	}
-	remote,err:=provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{ID:cfg.ID,BaseURL:cfg.BaseURL,APIKey:cfg.APIKey,APIKeyHeader:cfg.APIKeyHeader,AllowInsecureHTTP:cfg.AllowInsecureHTTP,AllowPrivateNetwork:cfg.AllowPrivateNetwork,MaxResponseBytes:cfg.MaxResponseBytes,MaxConcurrentRequests:cfg.MaxConcurrentRequests,RequestTimeoutSeconds:cfg.RequestTimeoutSeconds})
+	remote,err:=provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{ID:cfg.ID,BaseURL:cfg.BaseURL,APIKey:cfg.APIKey,APIKeyHeader:cfg.APIKeyHeader,AllowInsecureHTTP:cfg.AllowInsecureHTTP,AllowPrivateNetwork:cfg.AllowPrivateNetwork,MaxResponseBytes:cfg.MaxResponseBytes,MaxConcurrentRequests:cfg.MaxConcurrentRequests,MaxQueueSize:cfg.MaxQueueSize,QueueWaitTimeoutSeconds:cfg.QueueWaitTimeoutSeconds,RequestTimeoutSeconds:cfg.RequestTimeoutSeconds})
 	if err!=nil{jsonError(w,400,"invalid_provider_config","Provider 配置校验失败；请检查 HTTPS、URL 与网络访问策略");return}
 	ctx,cancel:=context.WithTimeout(r.Context(),4*time.Second);defer cancel()
 	models,err:=remote.TestConnection(ctx)

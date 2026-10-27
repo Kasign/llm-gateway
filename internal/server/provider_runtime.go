@@ -66,6 +66,7 @@ func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProvide
 		APIKeyHeader:item.APIKeyHeader, DefaultModel:item.DefaultModel, ModelMappings:cloneStringMap(item.ModelMappings),
 		AllowInsecureHTTP:item.AllowInsecureHTTP, AllowPrivateNetwork:item.AllowPrivateNetwork,
 		MaxResponseBytes:item.MaxResponseBytes, MaxConcurrentRequests:item.MaxConcurrentRequests,
+		MaxQueueSize:item.MaxQueueSize, QueueWaitTimeoutSeconds:item.QueueWaitTimeoutSeconds,
 		RequestTimeoutSeconds:item.RequestTimeoutSeconds,
 		RequestsPerMinute:item.RequestsPerMinute,
 		TokenBudgetPerDay:item.TokenBudgetPerDay,

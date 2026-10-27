@@ -29,7 +29,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-GOV-001 | 远程 Provider 缺少按 Provider 独立配置的并发上限和一致的过载语义。 | Provider 并发、RPM 与热更新完整 Actions #222/#224 通过；真实供应商流量仍需部署环境验收 | `max_concurrent_requests` 默认/上限均为 64；过载不发起上游请求，`UpstreamStatus` 为空；流式已提交时追加安全 SSE error。热更新实例必须复用同一个 Provider 并发许可器，避免旧请求仍在执行时替换实例导致总并发超限。 | 新 `dev` Head 的完整 CI/race 通过；统一回归确认旧请求许可释放和负载持久化。 |
-| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与排队策略尚未全部齐全。 | RPM 已由完整 Actions #222/#224 复验；每日 Token 预算本批进入代码，等待新 Head CI。排队策略仍待设计 | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。无可信 usage 时保守保留预占。 | 最新 Actions 通过预算边界、跨日隔离、真实 usage 结算和动态 Web 配置；另行设计队列公平性、最大长度、等待超时、请求取消和 Redis 失效语义。 |
+| GW-GOV-002 | Provider 级 RPM、每日 Token 预算与可选排队已接入，等待本次新 Head CI。 | RPM 与 Token 预算此前已由 Actions 验证；本提交增加可选的进程内有界 FIFO 队列及取消/超时/满队列语义，等待新 Head CI | `requests_per_minute=0` 默认关闭，正数按 UTC 固定分钟窗口计数。`token_budget_per_day=0` 默认关闭；启用后对同一 Provider 跨 API Key/Agent 共享 Redis UTC 日桶，原子预占并在可信供应商 usage 到达后结算。无可信 usage 时保守保留预占。 | 最新 Actions 通过预算边界、跨日隔离、真实 usage 结算和动态 Web 配置；等待队列默认关闭（`max_queue_size=0`），启用后为进程内 FIFO、有界 1024、支持 Context 取消及 503 超时/满队列错误；不会将其与 Redis RPM 或 Token 预算混为一套状态。 |
 | GW-GOV-003 | 自动重试/故障转移尚未实现。 | 明确暂缓，非当前缺陷 | 定义幂等性、已提交响应判定、Provider Retry-After、预算与重复请求语义；SSE 开始输出后不得换 Provider 产生第二份答案。 | 经架构 Review 后独立决策；未批准前不启用自动切换。 |
 
 ## P2：外部兼容与产品增强
@@ -258,3 +258,8 @@
 - Redis Lua 实现每日预算原子预占和结算；多个 API Key 与 Agent 按 Provider ID 共享额度。准入估算为请求体 UTF-8 字节数加单次输出上限，属于保护性估算，不是供应商 tokenizer。只有可信供应商 usage 会用于最终结算。
 - 无可信 usage 的已出网上游请求保留预占到 UTC 日桶过期，避免在供应商可能已计费时错误退款。实际用量超过估算时会按上游真实数记账，已开始的请求无法被事后撤回。
 - 本批新增 Go 配置/环境变量、Redis 预算集成用例、输出 Token 限制用例、Web UI、Compose 白名单、OpenAPI 和中文文档；不手动运行测试，以本批提交后的 GitHub Actions 作为自动化验证。
+
+
+## 2026-10-27 Provider 有界 FIFO 等待队列
+
+新增 `max_queue_size`（0 关闭、最大 1024）和 `queue_wait_timeout_seconds`（0 使用默认 30 秒、最大 3600 秒）。队列关闭保持旧版立即拒绝；开启时按 FIFO 等待、队列满或超时返回 503、客户端取消立即移除排队项。管理台增加排队深度/累计超时指标。该状态仅限单个 Gateway 进程；多副本全局并发与排队协调仍未实现。本次补齐单测并等待 GitHub Actions 对新提交的自动验证，生产慢上游与代理链路尚未实测。

@@ -89,6 +89,8 @@ providers:
   #     #   public-chat: deepseek-chat
   #     #   public-reasoner: deepseek-reasoner
   #     max_concurrent_requests: 64 # 默认上限；达到后 fail-fast 返回 503
+  #     max_queue_size: 0 # 0 关闭排队并沿用立即返回 503 的行为；最大 1024
+  #     queue_wait_timeout_seconds: 30 # 队列开启后等待时限；0 使用默认 30 秒，最大 3600
   #     requests_per_minute: 0 # 0 不限速；正数限制该 Provider 每分钟新请求数
   #     token_budget_per_day: 0 # 0 关闭；正数设置 UTC 每日 Token 预算
   #     request_timeout_seconds: 0 # 0 不设 Provider 总时限；1–86400 秒限制完整 JSON/SSE 请求
@@ -101,6 +103,8 @@ providers:
   #     api_key_header: "Authorization"
   #     default_model: "gpt-4.1"
   #     max_concurrent_requests: 64
+  #     max_queue_size: 0
+  #     queue_wait_timeout_seconds: 30
   #     requests_per_minute: 0
   #     token_budget_per_day: 0
   #     request_timeout_seconds: 0

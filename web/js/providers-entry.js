@@ -57,7 +57,7 @@
         if (row.api_key_configured) actions += ' <button class="btn sm ghost" data-action="clear-key" data-id="' + esc(row.id) + '">清除 Key</button>';
         actions += ' <button class="btn sm danger" data-action="delete" data-id="' + esc(row.id) + '">删除</button>';
       }
-      return '<tr><td><code>' + esc(row.id) + '</code></td><td>' + esc(source) + '</td><td><span class="provider-state ' + statusClass + '">' + esc(status) + '</span></td><td><code>' + esc(row.default_model || '—') + '</code></td><td>' + (Number(row.requests_per_minute) > 0 ? (row.requests_per_minute_usage_available ? esc(row.requests_per_minute_used ?? 0) + ' / ' + esc(row.requests_per_minute) + ' · 剩 ' + esc(row.requests_per_minute_remaining ?? 0) + ' · ' + esc(row.requests_per_minute_reset_seconds ?? 0) + ' 秒重置' : esc(row.requests_per_minute) + '/分钟 · 用量暂不可用') : '不限') + '</td><td>' + (Number(row.token_budget_per_day) > 0 ? (row.token_budget_per_day_usage_available ? esc(row.token_budget_per_day_used ?? 0) + ' / ' + esc(row.token_budget_per_day) + ' · 剩 ' + esc(row.token_budget_per_day_remaining ?? 0) + ' · ' + esc(row.token_budget_per_day_reset_seconds ?? 0) + ' 秒重置' : esc(row.token_budget_per_day) + '/日 · 用量暂不可用') : '不限') + '</td><td>' + (row.concurrent_requests_usage_available ? (esc(row.concurrent_requests_used ?? 0) + ' / ' + esc(row.concurrent_requests_limit ?? 0) + ' · 剩 ' + esc(row.concurrent_requests_remaining ?? 0)) : '—') + '</td><td>' + (row.concurrent_requests_usage_available ? esc(row.concurrent_requests_rejected ?? 0) : '—') + '</td><td>' + (row.api_key_configured ? '<span class="provider-key-set">已配置</span>' : '<span class="muted">未配置</span>') + '</td><td class="provider-row-actions">' + actions + '</td></tr>';
+      return '<tr><td><code>' + esc(row.id) + '</code></td><td>' + esc(source) + '</td><td><span class="provider-state ' + statusClass + '">' + esc(status) + '</span></td><td><code>' + esc(row.default_model || '—') + '</code></td><td>' + (Number(row.requests_per_minute) > 0 ? (row.requests_per_minute_usage_available ? esc(row.requests_per_minute_used ?? 0) + ' / ' + esc(row.requests_per_minute) + ' · 剩 ' + esc(row.requests_per_minute_remaining ?? 0) + ' · ' + esc(row.requests_per_minute_reset_seconds ?? 0) + ' 秒重置' : esc(row.requests_per_minute) + '/分钟 · 用量暂不可用') : '不限') + '</td><td>' + (Number(row.token_budget_per_day) > 0 ? (row.token_budget_per_day_usage_available ? esc(row.token_budget_per_day_used ?? 0) + ' / ' + esc(row.token_budget_per_day) + ' · 剩 ' + esc(row.token_budget_per_day_remaining ?? 0) + ' · ' + esc(row.token_budget_per_day_reset_seconds ?? 0) + ' 秒重置' : esc(row.token_budget_per_day) + '/日 · 用量暂不可用') : '不限') + '</td><td>' + (row.concurrent_requests_usage_available ? (esc(row.concurrent_requests_used ?? 0) + ' / ' + esc(row.concurrent_requests_limit ?? 0) + ' · 剩 ' + esc(row.concurrent_requests_remaining ?? 0) + ' · 队列 ' + esc(row.queued_requests ?? 0) + '/' + esc(row.queue_limit ?? row.max_queue_size ?? 0)) : '—') + '</td><td>' + (row.concurrent_requests_usage_available ? (esc(row.concurrent_requests_rejected ?? 0) + ' · 队列超时 ' + esc(row.queue_timeouts ?? 0)) : '—') + '</td><td>' + (row.api_key_configured ? '<span class="provider-key-set">已配置</span>' : '<span class="muted">未配置</span>') + '</td><td class="provider-row-actions">' + actions + '</td></tr>';
     }).join('');
   }
   async function loadProviders() {
@@ -87,6 +87,8 @@
     $('providerApiKey').value = '';
     $('providerApiKeyHeader').value = row?.api_key_header || 'authorization';
     $('providerConcurrency').value = row?.max_concurrent_requests ?? 64;
+    $('providerMaxQueue').value = row?.max_queue_size ?? 0;
+    $('providerQueueWaitTimeout').value = row?.queue_wait_timeout_seconds ?? 30;
     $('providerRPM').value = row?.requests_per_minute ?? 0;
     $('providerTokenBudget').value = row?.token_budget_per_day ?? 0;
     $('providerMaxResponse').value = row?.max_response_bytes ?? 0;
@@ -126,6 +128,8 @@
       allow_private_network: $('providerAllowPrivate').checked,
       max_response_bytes: Number($('providerMaxResponse').value || 0),
       max_concurrent_requests: Number($('providerConcurrency').value || 0),
+      max_queue_size: Number($('providerMaxQueue').value || 0),
+      queue_wait_timeout_seconds: Number($('providerQueueWaitTimeout').value || 0),
       requests_per_minute: Number($('providerRPM').value || 0),
       token_budget_per_day: Number($('providerTokenBudget').value || 0),
       request_timeout_seconds: Number($('providerRequestTimeout').value || 0),
