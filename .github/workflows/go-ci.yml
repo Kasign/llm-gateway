@@ -6,14 +6,84 @@ on:
   pull_request:
     branches: [main, dev]
 
+# 新提交到同一分支时取消过期 CI，避免旧 HEAD 占用 Runner。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: 测试、静态检查与构建
+  contracts:
+    name: 配置、API 契约与前端
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 校验路由与 OpenAPI paths
+        run: python3 scripts/check_openapi_routes.py
+
+      - name: 校验高风险 Schema 与 Handler 状态契约
+        run: python3 scripts/check_openapi_contracts.py
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 校验配置结构、环境变量与部署模板
+        run: go run ./scripts/check_config_contract.go
+
+      - name: 验证根目录 Docker Compose 配置
+        run: |
+          cp .env.example .env
+          cp providers.env.example providers.env
+          docker compose config -q
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装前端依赖
+        working-directory: web
+        run: npm ci
+
+      - name: 构建管理台与部署 Bundle
+        working-directory: web
+        run: npm run build
+
+      - name: 校验前端语法、关键字段与 Bundle 一致性
+        run: |
+          node --check web/js/providers-entry.js
+          node --check web/static/dist/providers-admin.js
+          node --check web/static/dist/app.js
+          grep -q 'api_key_ciphertext' internal/server/admin_providers_http.go
+          grep -q 'clear-key' web/js/providers-entry.js
+          grep -q 'model_mappings' web/static/dist/providers-admin.js
+          grep -q 'upstream_http_status' web/static/dist/app.js
+          grep -q 'time_to_upstream_headers_ms' web/static/dist/app.js
+          grep -q 'time_to_first_byte_ms' web/static/dist/app.js
+          grep -q 'available_backends' web/js/app/main.js
+          grep -q 'configured_remote' web/js/app/main.js
+          grep -q 'available_backends' web/static/dist/app.js
+          grep -q 'configured_remote' web/static/dist/app.js
+          if ! git diff --quiet -- web/static/dist/app.js web/static/dist/providers-admin.js; then
+            echo "::error::提交的前端部署 Bundle 与当前源码构建结果不一致，请重新生成并提交"
+            git diff -- web/static/dist/app.js web/static/dist/providers-admin.js | head -120 || true
+            exit 1
+          fi
+
+  go-quality:
+    name: Go 测试、竞态与静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       REDIS_TEST_ADDR: 127.0.0.1:6379
       MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
@@ -43,29 +113,59 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 校验路由与 OpenAPI paths
-        run: python3 scripts/check_openapi_routes.py
-
-      - name: 校验高风险 Schema 与 Handler 状态契约
-        run: python3 scripts/check_openapi_contracts.py
-
       - name: 配置 Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: 校验配置结构、环境变量与部署模板
-        run: go run ./scripts/check_config_contract.go
-
-      - name: 验证根目录 Docker Compose 配置
-        run: |
-          cp .env.example .env
-          cp providers.env.example providers.env
-          docker compose config -q
-
-      - name: 单元测试
+      - name: 单元与集成测试
         run: go test ./...
+
+      - name: 并发与数据竞态测试
+        run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
+
+      - name: 静态检查
+        run: go vet ./...
+
+  gateway-load:
+    name: Gateway 负载与故障注入
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REDIS_TEST_ADDR: 127.0.0.1:6379
+      MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-test-password
+          MARIADB_DATABASE: llm_gateway_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: MariaDB 审计积压集成测试
         run: go test -count=1 -run TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites -v ./internal/audit
@@ -148,67 +248,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: 并发与数据竞态测试
-        run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live
+  build:
+    name: 编译与 Docker 镜像
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-      - name: 性能基线（仅记录，不设阈值）
-        run: |
-          set -o pipefail
-          go test -run '^$' -bench '^(BenchmarkOpenAICompatibleProviderForwardJSON|BenchmarkResolveInferenceAgentRoute|BenchmarkBuildRequestAnalysis|BenchmarkRequestTraceRecordStreamChunk|BenchmarkInferenceObserverOnChunkParallel)$' -benchmem -benchtime=1s ./internal/provider ./internal/server | tee /tmp/llm-gateway-benchmarks.txt
-
-      - name: 保存性能基线产物
-        uses: actions/upload-artifact@v4
+      - name: 配置 Go
+        uses: actions/setup-go@v5
         with:
-          name: llm-gateway-performance-baseline-${{ github.sha }}
-          path: /tmp/llm-gateway-benchmarks.txt
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: 静态检查
-        run: go vet ./...
+          go-version-file: go.mod
+          cache: true
 
       - name: 构建 Gateway
         run: go build -o /tmp/llm-gateway ./cmd/gateway
 
-      - name: 构建 Docker 部署镜像
-        run: docker build --target release -t llm-gateway:ci .
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: 配置 Node.js
-        uses: actions/setup-node@v4
+      - name: 构建 Docker 部署镜像（启用 GitHub Actions 层缓存）
+        uses: docker/build-push-action@v6
         with:
-          node-version: 22
-
-      - name: 安装前端依赖
-        working-directory: web
-        run: npm ci
-
-      - name: 构建管理台源码
-        working-directory: web
-        run: npx esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=/tmp/llm-gateway-admin.js
-
-      - name: 校验前端语法与关键功能字段
-        run: |
-          node --check web/js/providers-entry.js
-          node --check web/static/dist/providers-admin.js
-          cmp -s web/js/providers-entry.js web/static/dist/providers-admin.js
-          grep -q 'api_key_ciphertext' internal/server/admin_providers_http.go
-          grep -q 'clear-key' web/js/providers-entry.js
-          grep -q 'model_mappings' web/static/dist/providers-admin.js
-          node --check web/static/dist/app.js
-          node --check /tmp/llm-gateway-admin.js
-          # 直接比较 CI 从当前源码生成的 bundle 与已提交部署产物，防止漏提交或提交过期的 dist。
-          if ! cmp -s /tmp/llm-gateway-admin.js web/static/dist/app.js; then
-            echo "::error::web/static/dist/app.js 与当前管理台源码构建结果不一致，请重新生成并提交部署 bundle"
-            diff -u web/static/dist/app.js /tmp/llm-gateway-admin.js | head -120 || true
-            exit 1
-          fi
-          # 调用记录耗时字段必须存在于部署 bundle。
-          grep -q 'upstream_http_status' web/static/dist/app.js
-          grep -q 'time_to_upstream_headers_ms' web/static/dist/app.js
-          grep -q 'time_to_first_byte_ms' web/static/dist/app.js
-          # 远程 Provider 选择逻辑分别检查源文件和实际部署 bundle。
-          grep -q 'available_backends' web/js/app/main.js
-          grep -q 'configured_remote' web/js/app/main.js
-          grep -q 'available_backends' web/static/dist/app.js
-          grep -q 'configured_remote' web/static/dist/app.js
-
+          context: .
+          target: release
+          tags: llm-gateway:ci
+          push: false
+          cache-from: type=gha,scope=llm-gateway-release
+          cache-to: type=gha,scope=llm-gateway-release,mode=max

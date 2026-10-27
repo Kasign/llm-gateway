@@ -306,3 +306,11 @@
 - 本地模型列表故障修复后，对照 Handler 发现 `GET /api/models` 实际返回完整 `GatewayModel` 行，但 OpenAPI 的 `data.items` 仍声明为任意 object，没有引用仓库中已经存在的详细 Schema。
 - 已将响应改为引用 `GatewayModel`，并扩展高风险 OpenAPI 检查脚本：检查该响应引用、Go `model.Model` 的所有 JSON tag，以及 `ListGatewayModelRows` 合成的上游名称/ID与磁盘大小字段均存在于 Schema。
 - 这只关闭本地模型列表端点的一项字段漂移缺口；OpenAPI 对所有 Handler 的全量字段级等价检查仍是分阶段工作。
+
+## 2026-10-27 CI 提速：并行独立门禁与缓存镜像层
+
+- 旧工作流将配置/前端检查、Go 测试、负载故障注入、竞态、性能基线、静态检查和 Docker 镜像构建放在同一个 Job 串行执行；任何阶段的耗时都会阻塞后续互不依赖的检查。
+- 已拆为四个并行 Job：配置/API 契约与前端、Go 测试/竞态/静态检查、Gateway 负载与故障注入、Go/Docker 构建。保留原有覆盖范围及请求负载、故障注入产物。
+- 删除独立重复的 MariaDB 审计用例步骤（该用例仍在完整 `go test ./...` 中执行，并在负载 Job 保留专项运行），避免基础测试重复消耗 Runner。
+- Docker 镜像使用 Buildx GitHub Actions 层缓存，Node/npm 启用依赖缓存；同一分支新提交会取消过期 CI，防止排队中的旧 HEAD 持续占用 Runner。
+- 此变更的实际提速幅度以新工作流运行时间为准。并行 Job 会增加同时启动的 Runner/数据库服务，不减少关键验证覆盖，也不声称能加速用户本地模型的真实推理耗时。

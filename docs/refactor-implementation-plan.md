@@ -1005,3 +1005,10 @@ docs/                        中文架构、协议和运维文档
 - `GET /api/models` 的 Handler 返回 `ListGatewayModelRows` 生成的模型记录，而 OpenAPI 路径曾使用泛化 object，未消费现有 `GatewayModel` Schema。
 - 已改为引用 `GatewayModel` 并扩充标准库契约检查器：将 `model.Model` 的 JSON tag 与 Schema 属性对账，同时检查该 Handler 新增的 `upstream_llamacpp_id`、`upstream_ollama_name`、`upstream_name`、`disk_bytes` 字段。
 - 这是有针对性的字段级门禁，不代表所有管理 API 的 Go/Schema 完全等价；后续应按实际功能风险继续分批补齐，而不把 OpenAPI 的 `partial` 状态提前改成完整。
+
+## 19. CI 并行化与缓存（2026-10-27）
+
+- 将原先单个长 Job 拆为四个独立并行 Job：配置/API 契约与前端、Go 测试与 race/vet、Gateway 负载/故障注入、Go/Docker 构建。
+- 保留 Redis/MariaDB 覆盖、队列/预算回归、故障注入、Race、Compose、前端 Bundle 比对和 Release 镜像构建。MariaDB 专项审计测试在全套 `go test ./...` 之外仍保留于负载 Job，便于查看独立诊断和产物。
+- 加入同一 ref 的过期工作流取消策略、Node npm 缓存及 Buildx GitHub Actions 层缓存。性能目标是让独立耗时阶段并行，而不是减少必要的回归范围。
+- 后续比较本次完整 Actions 的总时长与分 Job 耗时；若 GitHub Runner/服务启动成为瓶颈，再按实测结果调整并行度。
