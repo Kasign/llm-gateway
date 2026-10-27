@@ -64,6 +64,85 @@ func scanLlamaDiskInventory(root string) ([]llama.CatalogItem, error) {
 	return out, warning
 }
 
+
+ 
+// llamaDiskModelFiles 解析一个由扫描清单产生的逻辑 GGUF ID，返回实际文件路径。
+// ID 必须是模型目录内的相对路径；路径段、扩展名和文件类型都会再次校验。
+func llamaDiskModelFiles(root, modelID string) ([]string, error) {
+	root = strings.TrimSpace(root)
+	modelID = strings.TrimSpace(modelID)
+	if root == "" || modelID == "" {
+		return nil, os.ErrInvalid
+	}
+	id := filepath.Clean(filepath.FromSlash(modelID))
+	if id == "." || filepath.IsAbs(id) || id == ".." || strings.HasPrefix(id, ".."+string(filepath.Separator)) ||
+		!strings.EqualFold(filepath.Ext(id), ".gguf") {
+		return nil, os.ErrInvalid
+	}
+	id = filepath.ToSlash(id)
+
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(rootAbs)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, os.ErrInvalid
+	}
+
+	var paths []string
+	err = filepath.WalkDir(rootAbs, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || entry.Type()&fs.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return nil
+		}
+		name := filepath.Base(path)
+		if !strings.EqualFold(filepath.Ext(name), ".gguf") || strings.HasPrefix(strings.ToLower(name), "mmproj") {
+			return nil
+		}
+		rel, err := filepath.Rel(rootAbs, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		key := rel
+		if llamaShardSuffix.MatchString(name) {
+			key = llamaShardSuffix.ReplaceAllString(rel, ".gguf")
+		}
+		if key == id {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, os.ErrNotExist
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// deleteLlamaDiskModelFiles 删除对应逻辑 GGUF 的所有分片；不跟随符号链接，也不触碰 mmproj 文件。
+func deleteLlamaDiskModelFiles(root, modelID string) ([]string, error) {
+	paths, err := llamaDiskModelFiles(root, modelID)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil {
+			return paths, err
+		}
+	}
+	return paths, nil
+}
+
 func llamaShardNumber(name string) string {
 	match := llamaShardSuffix.FindStringSubmatch(name)
 	if len(match) != 3 { return "" }

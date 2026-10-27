@@ -919,6 +919,55 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/AdminError"
+  /api/admin/gguf/delete:
+    delete:
+      operationId: deleteApiAdminGGUFModelFile
+      tags: [ModelManagement]
+      summary: 删除共享模型目录中的 GGUF 文件
+      description: |
+        仅接受当前模型目录扫描清单中的 model_path，不接受任意文件系统路径。
+        多分片 GGUF 会一并删除全部分片；当前 Gateway 默认路由目标不可直接删除。
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_path]
+              properties:
+                model_path:
+                  type: string
+                  minLength: 1
+                  description: 从本地模型清单返回的磁盘模型路径
+      responses:
+        "200":
+          description: 删除完成；warning 表示 Router 注册目录刷新失败，但磁盘删除已完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, model_path, deleted_files]
+                properties:
+                  success: { type: boolean, const: true }
+                  model_path: { type: string }
+                  deleted_files: { type: integer, minimum: 1 }
+                  warning: { type: string }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "409":
+          $ref: "#/components/responses/AdminError"
+        "500":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+
   /api/admin/runtime/refresh:
     post:
       operationId: postApiAdminRuntimeRefresh

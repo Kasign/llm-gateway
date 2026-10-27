@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/applog"
@@ -153,6 +154,138 @@ func (s *Server) runtimeUnloadAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result.toJSON())
+}
+
+
+// deleteDiskGGUFAPI 删除共享模型目录中未登记到 Gateway 的 GGUF 模型。
+// 客户端只能提交目录扫描返回的 model_path，不能传入任意文件系统路径。
+func (s *Server) deleteDiskGGUFAPI(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		jsonError(w, http.StatusMethodNotAllowed, "method_not_allowed", "DELETE required")
+		return
+	}
+
+	var in struct {
+		ModelPath string `json:"model_path"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid_body", "model_path is required")
+		return
+	}
+	requestedPath := filepath.Clean(strings.TrimSpace(in.ModelPath))
+	if requestedPath == "" || requestedPath == "." {
+		jsonError(w, http.StatusBadRequest, "invalid_model_path", "model_path is required")
+		return
+	}
+
+	modelsDir := s.llamaModelsDir()
+	diskItems, scanErr := scanLlamaDiskInventory(modelsDir)
+	if scanErr != nil {
+		jsonError(w, http.StatusInternalServerError, "model_inventory_failed", "无法读取共享 GGUF 模型目录")
+		return
+	}
+	var target *llama.CatalogItem
+	for i := range diskItems {
+		if filepath.Clean(diskItems[i].Path) == requestedPath {
+			target = &diskItems[i]
+			break
+		}
+	}
+	if target == nil {
+		jsonError(w, http.StatusNotFound, "model_not_found", "该 GGUF 文件不在当前共享模型目录清单中，请刷新后重试")
+		return
+	}
+
+	// 如果上游可用，先检查模型生命周期状态：默认路由目标不能被直接删除；
+	// 其它仍在内存的模型先卸载，避免删掉仍在使用的权重文件。
+	if s.baseURLForBackend("llamacpp") != "" {
+		list, err := s.InferenceList(r.Context(), "llamacpp", false)
+		if err != nil || list.Snapshot == nil {
+			jsonError(w, http.StatusBadGateway, "runtime_unavailable", "无法确认 llama.cpp 模型状态，请检查上游后重试")
+			return
+		}
+		s.mergeLlamacppCatalog(list.Snapshot, list.GatewayModels, list.CatalogSource == "upstream")
+		for i := range list.Snapshot.Catalog {
+			item := &list.Snapshot.Catalog[i]
+			if !catalogPathsMatch(item.Path, target.Path) {
+				continue
+			}
+			if item.Active {
+				jsonError(w, http.StatusConflict, "model_is_default", "该模型当前是 Gateway 默认路由目标，请先切换默认模型再删除")
+				return
+			}
+			if strings.EqualFold(strings.TrimSpace(item.Status), "loading") {
+				jsonError(w, http.StatusConflict, "model_is_loading", "该模型正在加载，请稍后刷新并重试")
+				return
+			}
+			if item.Loaded {
+				if _, err := s.InferenceUnload(r.Context(), "llamacpp", item.ID, "", nil); err != nil {
+					jsonError(w, http.StatusBadGateway, "model_unload_failed", "卸载模型失败，未删除磁盘文件")
+					return
+				}
+			}
+			break
+		}
+	}
+
+	// 先读取元数据，成功删除文件后清理恰好指向这些文件的数据库记录。
+	metadata, err := s.models.List(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "database_error", "读取模型登记信息失败")
+		return
+	}
+	deletedPaths, err := deleteLlamaDiskModelFiles(modelsDir, target.ID)
+	if err != nil {
+		applog.Printf("disk GGUF delete failed: model=%q err=%v", target.ID, err)
+		jsonError(w, http.StatusInternalServerError, "delete_failed", "删除 GGUF 文件失败；请刷新模型目录检查剩余分片")
+		return
+	}
+	deletedPathSet := make(map[string]struct{}, len(deletedPaths))
+	for _, path := range deletedPaths {
+		abs, absErr := filepath.Abs(path)
+		if absErr == nil {
+			deletedPathSet[filepath.Clean(abs)] = struct{}{}
+		}
+	}
+	for _, m := range metadata {
+		if strings.TrimSpace(m.LocalPath) == "" {
+			continue
+		}
+		abs, absErr := filepath.Abs(m.LocalPath)
+		if absErr != nil {
+			continue
+		}
+		if _, ok := deletedPathSet[filepath.Clean(abs)]; !ok {
+			continue
+		}
+		if err := s.models.Delete(r.Context(), m.ModelKey); err != nil {
+			applog.Printf("disk GGUF delete: file removed but model metadata cleanup failed: key=%q err=%v", m.ModelKey, err)
+			jsonError(w, http.StatusInternalServerError, "metadata_cleanup_failed", "文件已删除，但模型登记清理失败；请刷新并再次检查模型列表")
+			return
+		}
+	}
+
+	var refreshWarning string
+	if s.baseURLForBackend("llamacpp") != "" {
+		if _, err := s.InferenceRefreshRegistry(r.Context(), "llamacpp"); err != nil {
+			refreshWarning = "GGUF 文件已删除，但 llama.cpp 注册目录刷新失败，请手动刷新模型目录"
+		}
+	}
+	s.invalidateAdminRuntimeCaches()
+
+	w.Header().Set("Content-Type", "application/json")
+	out := map[string]interface{}{
+		"success":       true,
+		"model_path":    requestedPath,
+		"deleted_files": len(deletedPaths),
+	}
+	if refreshWarning != "" {
+		out["warning"] = refreshWarning
+	}
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (s *Server) runtimeSelectAPI(w http.ResponseWriter, r *http.Request) {

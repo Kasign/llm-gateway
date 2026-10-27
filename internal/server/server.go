@@ -292,6 +292,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/runtime/unload", s.runtimeUnloadAPI)   // 卸载当前模型
 	mux.HandleFunc("/api/admin/runtime/select", s.runtimeSelectAPI)   // 选择/加载指定模型
 	mux.HandleFunc("/api/admin/runtime", s.runtimeAPI)                // 读取运行时状态
+	mux.HandleFunc("/api/admin/gguf/delete", s.deleteDiskGGUFAPI)      // 删除共享磁盘中未登记的 GGUF 模型
 
 	// —— 管理 API：基准测试 ——
 	mux.HandleFunc("/api/benchmark/", s.benchmarkStatusAPI) // 查看基准测试进度/结果

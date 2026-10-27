@@ -89,7 +89,9 @@ function handleInferClick(ev){
     const kind=delBtn.dataset.modelDelete||'';
     const modelKey=(delBtn.dataset.modelKey||'').trim();
     const modelId=(delBtn.dataset.modelId||'').trim();
+    const modelPath=(delBtn.dataset.modelPath||'').trim();
     if(kind==='gguf'&&modelKey){void deleteModel(modelKey);return}
+    if(kind==='gguf-disk'&&modelPath){void deleteDiskGGUFModel(modelPath);return}
     if(kind==='ollama'&&(modelId||modelKey)){void ollamaDelete(modelId||modelKey);return}
   }
   const btn=ev.target.closest?.('button[data-infer]');
@@ -1240,7 +1242,9 @@ function renderGatewayModelTable(){
         :'';
       const deleteButton=managed&&modelKey
         ?'<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key='+JSON.stringify(modelKey)+'>删除</button>'
-        :'';
+        :rt?.disk_present&&rt?.path
+          ?'<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path='+JSON.stringify(String(rt.path))+'>删除</button>'
+          :'';
       const defaultPill=rt?.active?' <span class="pill pill-active">Gateway 默认</span>':'';
       return '<tr><td>'+esc(name)+(x.quantization?'<div class="small muted">'+esc(x.quantization)+'</div>':'')+defaultPill+'</td>'+
         '<td>'+esc(llamaCatalogSourceLabel(rt,managed))+'</td>'+
@@ -1304,6 +1308,26 @@ async function deleteModel(k){
     renderGatewayModelTable();
     renderRuntimeCatalog();
   }catch(e){setGgufMsg('err',e.message)}
+}
+
+
+async function deleteDiskGGUFModel(modelPath){
+  if(!isAuthenticated()){setGgufMsg('err','请先登录控制台');return}
+  if(!confirm('确定从共享模型目录永久删除该 GGUF 模型？如果模型由多个分片组成，所有分片都会一起删除；此操作不可恢复。'))return;
+  try{
+    const result=await api('/api/admin/gguf/delete',{
+      method:'DELETE',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model_path:modelPath})
+    });
+    const deleted=Number(result.deleted_files||0);
+    setGgufMsg(result.warning?'warn':'ok',result.warning||('已删除 GGUF 模型（'+deleted+' 个文件）'));
+    await modelHub.refresh({force:true});
+    renderGatewayModelTable();
+    renderRuntimeCatalog();
+  }catch(e){
+    setGgufMsg('err',e.message);
+  }
 }
 
 function isTerminalDownloadStatus(st){
