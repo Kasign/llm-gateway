@@ -1089,3 +1089,12 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - 在所有页面初始存在的 `input[type="password"]` 上统一增加眼睛图标，可切换显示/隐藏明文，涵盖登录密码、账号密码、管理员密钥和远程 Provider API Key。
 - 默认仍为隐藏状态；按钮为独立的 `type="button"`，不会触发表单提交。切换状态同步更新无障碍名称和图标。
 - 控件初始化与登录表单提交事件均由外部 JavaScript Bundle 绑定，不依赖 HTML 内联脚本，以兼容禁止 inline script/handler 的内容安全策略；样式放在主样式表中。源码与已提交 Bundle 同步修改，仍需在实际反向代理环境完成浏览器回归。
+
+
+## 36. Web 登录哈希与 Compose 环境插值解耦（2026-10-27）
+
+- 线上构建日志持续出现 PBKDF2 哈希盐值与派生值被识别为未设置环境变量的警告，说明登录哈希仍经过 Compose 变量插值路径；单纯清理镜像或重建容器并不能修复输入配置。
+- 将 `LLM_GATEWAY_ADMIN_PASSWORD_HASH` 从 Compose 的 `environment: ${...}` 映射中移除，改由专用 `admin-auth.env` 注入。主 `.env` 只保留普通部署变量与管理员用户名，减少特殊字符凭据对 Compose 解析的依赖。
+- 新增 `admin-auth.env.example`；真实文件已加入 Git 和 Docker build context 忽略规则，避免凭据提交或进入镜像构建上下文。
+- 仅删除了 Web 登录配置覆盖记录的文档建议：必须先确认 `gateway_settings` 存在 `web_admin_login`，无该记录或表为空时不需要删表、清库或删除其他数据。
+- 本次尚未在用户服务器验证运行结果；完成部署后应确认 Compose 不再输出哈希相关的变量警告，容器环境中哈希为四段 PBKDF2 格式，再验证登录接口返回与前端切页。

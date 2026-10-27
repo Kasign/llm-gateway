@@ -426,3 +426,11 @@
 - UI 切换不改变提交与密钥存储行为；使用独立按钮和无障碍标签。
 - 修改 `web/index.html`、`web/static/css/app.css` 及同步实施计划。此前逻辑放在 HTML 内联脚本中，在存在 CSP 限制的反向代理环境下可能被浏览器拦截；已将按钮初始化迁移到 `web/js/features/auth.js` 并同步更新 `web/static/dist/app.js`，登录提交也改为由 Bundle 绑定，移除 HTML 内联脚本和 `onsubmit`。
 - 本次未运行浏览器测试或构建，待用户统一验收。
+
+
+## 2026-10-27 追加：登录哈希不再经过 Compose 插值
+
+- 将 Web 登录哈希从 Compose `environment` 的 `${LLM_GATEWAY_ADMIN_PASSWORD_HASH}` 直接映射移除，改由独立 `admin-auth.env` 以字面字符串注入。主 `.env` 不再保存同名变量，从根源减少 PBKDF2 哈希美元符号触发未定义变量警告的机会。
+- 新增 `admin-auth.env.example`，并将真实凭据文件加入 Git 忽略和 Docker 构建上下文忽略规则。
+- 数据库无 `web_admin_login` 行时，应用使用配置账号与哈希；不应通过删表或清空其他设置来处理登录失败。
+- 部署端结果尚待验证：检查 Compose 渲染警告、容器内哈希分段数及 `/api/auth/login` 的 HTTP 状态后再判定登录故障是否关闭。
