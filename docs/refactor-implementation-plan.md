@@ -1059,3 +1059,8 @@ docs/                        中文架构、协议和运维文档
 
 - 新增分析 DTO Schema 对账的第一轮 CI 因两处 Python set comprehension 语法错误而在契约门禁阶段失败，尚未运行后续步骤。已修正条件表达式尾随逗号，未放宽检查。
 - 以修复提交对应的完整 Actions 验证高风险契约脚本、Go/race/vet、稳态负载、故障注入与 Docker 构建。
+
+## 27. RequestAnalysis 门禁变量初始化顺序修复（2026-10-27）
+
+- Actions #248 显示高风险契约脚本在 RequestDetail nested DTO 检查中先使用、后赋值 `request_detail_schema`，导致 `UnboundLocalError`；不是业务代码或 Schema 定义错误。
+- 已把 Schema 解析提前至首次引用前，保持检查项完整，修复提交需重新跑全量并行 CI。

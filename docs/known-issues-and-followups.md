@@ -354,3 +354,8 @@
 
 - Actions #247 在高风险 Schema 检查阶段发现新增 DTO 字段对账脚本两处集合推导式条件行有非法尾随逗号，Python 解析阶段报 SyntaxError；不是生产 Go 代码或 OpenAPI Schema 不匹配。
 - 已移除这两处逗号，保留 RequestAnalysis/RequestPhaseMS/RequestThroughput 与 StreamEvent 全字段核对。新 Head 需重新执行完整 CI；不以本次失败运行作为验收结果。
+
+## 2026-10-27 RequestAnalysis 门禁第二轮修复
+
+- Actions #248 的契约脚本在语法修正后暴露第二个顺序问题：新增 RequestAnalysis/StreamEvent 检查使用了 `request_detail_schema`，但赋值位于后面的 RequestLog 检查段，触发 `UnboundLocalError`。
+- 已将 RequestDetail Schema 初始化移动到首次使用之前，保留 RequestAnalysis、RequestPhaseMS、RequestThroughput、StreamEvent 与其他字段的所有检查；没有绕过高风险门禁。以新 Head Actions 验证完整结果。

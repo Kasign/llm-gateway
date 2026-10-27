@@ -257,6 +257,7 @@ def validate(
         )
 
         # RequestDetail nested analysis/stream DTOs must match their Go structs.
+        request_detail_schema = schema_block(source, "RequestDetail")
         require(
             re.search(
                 r'(?m)^        analysis:\n          \$ref:[ \t]*"#/components/schemas/RequestAnalysis"',
