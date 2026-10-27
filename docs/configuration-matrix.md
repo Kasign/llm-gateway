@@ -27,6 +27,8 @@
 
 Provider 环境字段以 internal/config/provider_env.go 中的解析器清单为准。CI 检查它与 .env.example、providers.env.example 及 Compose 中的 DeepSeek/OpenAI 字段一致。
 
+部署托管 Provider 在启动注册时会同时应用 `max_concurrent_requests`、`max_queue_size`、`queue_wait_timeout_seconds` 与 `request_timeout_seconds`；Web/数据库 Provider 则在保存时通过共享许可器热更新并发和排队容量。配置文件中写入这些字段不等于供应商连通性已验证。
+
 `token_budget_per_day=0` 默认关闭；正数按 Provider ID 使用 Redis UTC 自然日预算，在所有 API Key 和 Agent 间共享。准入时原子预占请求体字节估算与强制输出上限，余额不足时尽量收紧单次输出上限；收到可信供应商 usage 后结算为真实用量。没有可信 usage 时保守保留预占至日桶过期，因此这是预算保护，不是各家计费规则的精确复刻。
 
 

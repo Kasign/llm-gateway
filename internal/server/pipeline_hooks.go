@@ -41,6 +41,7 @@ func (s *Server) newInferencePipeline() *core.Pipeline {
 				ID: cfg.ID, BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, APIKeyHeader: cfg.APIKeyHeader,
 				AllowInsecureHTTP: cfg.AllowInsecureHTTP, AllowPrivateNetwork: cfg.AllowPrivateNetwork,
 				MaxResponseBytes: cfg.MaxResponseBytes, MaxConcurrentRequests: cfg.MaxConcurrentRequests,
+				MaxQueueSize: cfg.MaxQueueSize, QueueWaitTimeoutSeconds: cfg.QueueWaitTimeoutSeconds,
 				RequestTimeoutSeconds: cfg.RequestTimeoutSeconds,
 			})
 			if err != nil {
