@@ -517,14 +517,14 @@ func Load(path string) (*Config, error) {
 		)
 	}
 	if llamaCppURL == "" && ollamaURL == "" {
-		return nil, errors.New("no upstream URL: set at least LLAMA_CPP_BASE_URL or OLLAMA_BASE_URL in deploy/.env")
+		return nil, errors.New("no upstream URL: set at least LLAMA_CPP_BASE_URL or OLLAMA_BASE_URL in the repository-root .env file")
 	}
 	c.Llama.BaseURL = c.BaseURLForBackend(c.Llama.Backend)
 	if c.Llama.BaseURL == "" {
 		if c.Llama.Backend == "ollama" {
-			return nil, fmt.Errorf("active backend is ollama but OLLAMA_BASE_URL is missing or unresolved in deploy/.env")
+			return nil, fmt.Errorf("active backend is ollama but OLLAMA_BASE_URL is missing or unresolved in the repository-root .env file")
 		}
-		return nil, fmt.Errorf("active backend is llamacpp but LLAMA_CPP_BASE_URL is missing or unresolved in deploy/.env")
+		return nil, fmt.Errorf("active backend is llamacpp but LLAMA_CPP_BASE_URL is missing or unresolved in the repository-root .env file")
 	}
 	if strings.Contains(c.Llama.UpstreamAPIKey, "${") {
 		c.Llama.UpstreamAPIKey = ""
