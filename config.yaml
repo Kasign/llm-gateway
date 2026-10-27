@@ -7,9 +7,11 @@ server:
   trusted_proxies: []
 
 auth:
-  # 管理 API 密钥从主 .env 读取；Web 登录哈希由 admin-auth.env 注入进程。
+  # 管理 API 密钥和 Web 登录初始哈希均从主 .env 读取。
   admin_api_key: "${LLM_GATEWAY_ADMIN_API_KEY}"
   admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"
+  # 仅在数据库尚无 web_admin_login 记录时生效。
+  web_password_enabled: true
   session_ttl_hours: 168
 
 database:

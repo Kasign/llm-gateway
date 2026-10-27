@@ -20,7 +20,7 @@ type webLoginSnapshot struct {
 
 func (s *Server) loadWebLoginState(ctx context.Context) {
     hash := strings.TrimSpace(s.cfg.Auth.AdminPasswordHash)
-    enabled := adminuser.WebLoginConfigured(webAdminIdentity, hash)
+    enabled := s.cfg.Auth.WebPasswordEnabled && adminuser.WebLoginConfigured(webAdminIdentity, hash)
     revision := uint64(0)
     if stored, err := s.settings.GetWebLogin(ctx); err == nil && stored != nil {
         storedHash := strings.TrimSpace(stored.PasswordHash)

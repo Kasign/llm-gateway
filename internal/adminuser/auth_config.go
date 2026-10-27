@@ -37,8 +37,9 @@ func NormalizeWebLogin(username, plain, hash *string) error {
 
 // WebLoginConfigured 是否已配置 Web 控制台登录。
 func WebLoginConfigured(username, passwordHash string) bool {
-	return strings.TrimSpace(username) != "" && strings.TrimSpace(passwordHash) != "" &&
-		strings.HasPrefix(strings.TrimSpace(passwordHash), "pbkdf2$")
+	passwordHash = strings.TrimSpace(passwordHash)
+	return strings.TrimSpace(username) != "" && passwordHash != "" &&
+		(strings.HasPrefix(passwordHash, "pbkdf2$") || strings.HasPrefix(passwordHash, "pbkdf2:"))
 }
 
 // ValidUsername 校验控制台用户名（3–64，字母数字与下划线）。

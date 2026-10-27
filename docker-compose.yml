@@ -19,12 +19,8 @@ services:
       - "${MODEL_HOST_DIR}:/data/models"
       - "./config.yaml:/etc/llm-gateway/config.yaml:ro"
 
-    # Web 登录哈希单独由 env_file 传入，避免 Compose 对 PBKDF2 哈希中的 $ 做插值。
-    # admin-auth.env 只应包含 LLM_GATEWAY_ADMIN_PASSWORD_HASH，不要提交到 Git。
     # Provider 环境文件允许新增任意 Provider ID；不要把主 .env 全量传入容器。
     env_file:
-      - path: ./admin-auth.env
-        required: true
       - path: ./providers.env
         required: false
 
@@ -36,6 +32,10 @@ services:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
       LLM_GATEWAY_DB_PASSWORD: ${LLM_GATEWAY_DB_PASSWORD}
       LLM_GATEWAY_ADMIN_API_KEY: ${LLM_GATEWAY_ADMIN_API_KEY}
+      # 新哈希采用 pbkdf2: 冒号分隔格式，不含 Compose 变量插值字符 $。
+      LLM_GATEWAY_ADMIN_PASSWORD_HASH: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH:-pbkdf2:120000:Rq4omCdIiNZh1T7fMz/r1Q:Tiesjxer65K62mmSomM4uk+pRBouNU9oEnwe/Y0KeVk}"
+      # 仅用于数据库尚无账号设置时的初始开关；已有数据库设置优先。
+      LLM_GATEWAY_WEB_PASSWORD_ENABLED: "${LLM_GATEWAY_WEB_PASSWORD_ENABLED:-true}"
       LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
       LLAMA_UPSTREAM_API_KEY: ${LLAMA_UPSTREAM_API_KEY}

@@ -17,7 +17,7 @@ const pbkdf2Iterations = 120_000
 
 var ErrWeakPassword = errors.New("password must be at least 8 characters")
 
-// HashPassword 生成 PBKDF2-HMAC-SHA256 哈希，供写入配置文件。
+// HashPassword 生成 PBKDF2 哈希；新格式使用冒号分隔，避免 Compose 将 $ 误作变量插值。
 func HashPassword(plain string) (string, error) {
 	if utf8.RuneCountInString(plain) < minPasswordRunes {
 		return "", ErrWeakPassword
@@ -27,7 +27,7 @@ func HashPassword(plain string) (string, error) {
 		return "", err
 	}
 	dk := pbkdf2Key([]byte(plain), salt, pbkdf2Iterations, 32)
-	return fmt.Sprintf("pbkdf2$%d$%s$%s",
+	return fmt.Sprintf("pbkdf2:%d:%s:%s",
 		pbkdf2Iterations,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(dk),
@@ -36,7 +36,17 @@ func HashPassword(plain string) (string, error) {
 
 // CheckPassword 校验明文与存储哈希（常量时间比较摘要）。
 func CheckPassword(stored, plain string) bool {
-	parts := strings.Split(stored, "$")
+	stored = strings.TrimSpace(stored)
+	var parts []string
+	switch {
+	case strings.HasPrefix(stored, "pbkdf2$"):
+		// 兼容数据库和旧部署配置中已保存的哈希。
+		parts = strings.Split(stored, "$")
+	case strings.HasPrefix(stored, "pbkdf2:"):
+		parts = strings.Split(stored, ":")
+	default:
+		return false
+	}
 	if len(parts) != 4 || parts[0] != "pbkdf2" {
 		return false
 	}

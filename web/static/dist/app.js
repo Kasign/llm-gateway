@@ -313,20 +313,27 @@ function resetPasswordField(id) {
 }
 function initPasswordToggles() {
   document.querySelectorAll('input[type="password"]').forEach((input) => {
-    if (input.closest('.password-input-wrap')) return;
+    let wrapper = input.closest('.password-input-wrap');
+    if (!wrapper) {
+      wrapper = document.createElement('span');
+      wrapper.className = 'password-input-wrap';
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.appendChild(input);
+    }
 
-    const wrapper = document.createElement('span');
-    wrapper.className = 'password-input-wrap';
-    input.parentNode.insertBefore(wrapper, input);
-    wrapper.appendChild(input);
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'password-toggle';
+    let button = wrapper.querySelector('.password-toggle');
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'password-toggle';
+      wrapper.appendChild(button);
+    }
     button.innerHTML = passwordEyeIcon;
     button.title = '显示明文';
     button.setAttribute('aria-label', '显示明文');
     button.setAttribute('aria-pressed', 'false');
+    if (button.dataset.passwordToggleBound === 'true') return;
+    button.dataset.passwordToggleBound = 'true';
     button.addEventListener('click', () => {
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
@@ -335,11 +342,10 @@ function initPasswordToggles() {
       button.setAttribute('aria-label', button.title);
       button.setAttribute('aria-pressed', String(show));
     });
-    wrapper.appendChild(button);
   });
 }
 
-  function updateLoginModeUI() {
+function updateLoginModeUI() {
     const field = $("authPasswordField");
     const password = $("authLoginPass");
     const button = $("authLoginBtn");

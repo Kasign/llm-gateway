@@ -8,8 +8,10 @@ server:
 auth:
   admin_api_key: "${LLM_GATEWAY_ADMIN_API_KEY}"
   # Web 控制台仅使用密码登录；设置页可启用/关闭密码保护和修改密码。
-  # 初始哈希通过 admin-auth.env 注入；空哈希会默认关闭密码保护。
+  # 初始哈希通过主 .env 的 LLM_GATEWAY_ADMIN_PASSWORD_HASH 注入。
   admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"
+  # 仅在数据库尚无 web_admin_login 记录时生效；容器部署可由 LLM_GATEWAY_WEB_PASSWORD_ENABLED 覆盖。
+  web_password_enabled: true
   # 或首次部署时用环境变量明文，启动后会哈希并丢弃明文（勿写入镜像）
   # admin_password: "${LLM_GATEWAY_ADMIN_PASSWORD}"
   session_ttl_hours: 168

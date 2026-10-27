@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,8 +28,9 @@ type Config struct {
 		AdminAPIKey       string `yaml:"admin_api_key"`
 		AdminUsername     string `yaml:"admin_username"`
 		AdminPassword     string `yaml:"admin_password"`      // 仅环境变量注入，启动后哈希并清零
-		AdminPasswordHash string `yaml:"admin_password_hash"` // 推荐：仅存 PBKDF2 哈希
-		SessionTTLHours   int    `yaml:"session_ttl_hours"`
+		AdminPasswordHash  string `yaml:"admin_password_hash"` // 推荐：仅存 PBKDF2 哈希
+		WebPasswordEnabled bool   `yaml:"web_password_enabled"` // 仅作数据库尚无设置时的初始开关
+		SessionTTLHours    int    `yaml:"session_ttl_hours"`
 	} `yaml:"auth"`
 	Database struct {
 		// Host/Port are used to build the application DSN safely.
@@ -423,11 +425,15 @@ func Load(path string) (*Config, error) {
 	data = []byte(expandConfigEnv(string(data)))
 
 	var c Config
+	// 旧配置未显式设置时，默认开启 Web 密码保护。
+	c.Auth.WebPasswordEnabled = true
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	// Web 登录与多 Provider 预置项由环境变量覆盖或补充。
-	applyAuthEnv(&c)
+	if err := applyAuthEnv(&c); err != nil {
+		return nil, err
+	}
 	if err := applyProviderEnvironment(&c); err != nil {
 		return nil, err
 	}
@@ -567,7 +573,7 @@ func Load(path string) (*Config, error) {
 }
 
 // applyAuthEnv 直接从进程环境读取 Web 登录项，避免 YAML 展开或 compose 未注入 ${} 时为空。
-func applyAuthEnv(c *Config) {
+func applyAuthEnv(c *Config) error {
 	if v := strings.TrimSpace(os.Getenv("LLM_GATEWAY_ADMIN_USERNAME")); v != "" && !strings.Contains(v, "${") {
 		c.Auth.AdminUsername = v
 	}
@@ -577,10 +583,28 @@ func applyAuthEnv(c *Config) {
 	if v := os.Getenv("LLM_GATEWAY_ADMIN_PASSWORD"); v != "" && !strings.Contains(v, "${") {
 		c.Auth.AdminPassword = v
 	}
+	if v := strings.TrimSpace(os.Getenv("LLM_GATEWAY_WEB_PASSWORD_ENABLED")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("auth.web_password_enabled must be a boolean")
+		}
+		c.Auth.WebPasswordEnabled = enabled
+	}
+	return nil
 }
 
 func looksLikePasswordHash(v string) bool {
-	return strings.HasPrefix(v, "pbkdf2$") && strings.Count(v, "$") >= 3 && len(v) > 40
+	v = strings.TrimSpace(v)
+	if len(v) <= 40 {
+		return false
+	}
+	if strings.HasPrefix(v, "pbkdf2$") {
+		return strings.Count(v, "$") >= 3
+	}
+	if strings.HasPrefix(v, "pbkdf2:") {
+		return strings.Count(v, ":") >= 3
+	}
+	return false
 }
 
 // 与 llama.UpstreamURLIsOllamaLibrary 保持一致：公网库域名不能作 OLLAMA_BASE_URL。
