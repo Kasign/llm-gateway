@@ -338,3 +338,9 @@
 - `GET /api/requests` 的 `RequestList.data.items` 和 `GET /api/requests/{id}` 的 `log` 原先均为泛化 object，未引用真实持久化 DTO。
 - 新增 `RequestLog` Schema，并扩展高风险契约检查器，对照 `internal/store/store.go` 中 `store.RequestLog` 的全部 JSON tag；列表与详情共用一个 Schema，减少字段漂移。
 - 这仅覆盖稳定审计 DTO；详情的 `summary`、`timing`、`analysis` 和 SSE 事件仍有动态/条件字段，整体 OpenAPI 状态继续保持 partial。
+
+## 2026-10-27 请求详情摘要与耗时字段契约
+
+- 请求详情中的 `summary` 与 `timing` 原先仅声明为任意 object；现在分别引用 `RequestSummary` 和 `RequestTiming`，明确稳定的状态、模型、请求大小、耗时、TTFT 与 Token 来源字段。
+- 高风险 OpenAPI 门禁从 `buildRequestSummary`、`buildRequestTiming`、`buildRequestDetail` 和 `applyHarvestToTiming` 中提取 map 键，并检查每个稳定字段都有 Schema 定义；新增字段需要同步更新契约，避免管理台显示字段无文档。
+- 动态正文、请求/上游 Header、分析内容和流式事件仍按配置与请求结果有条件出现，本次不将它们误标为必填。

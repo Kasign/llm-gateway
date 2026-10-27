@@ -2573,6 +2573,53 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RequestLog"
+    RequestSummary:
+      type: object
+      description: 从请求日志组装的摘要字段；可选字段取决于 Provider、错误与历史记录。
+      required: [request_id, status, http_status, method, endpoint, request_url, stream, client_ip, client_name, user_agent, api_key, api_key_id, request_kb, response_kb, stream_effective]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [running, success, error, cancelled] }
+        http_status: { type: integer, minimum: 0, maximum: 599 }
+        method: { type: string }
+        endpoint: { type: string }
+        request_url: { type: string }
+        stream: { type: boolean }
+        stream_effective: { type: boolean }
+        stream_note: { type: string }
+        client_ip: { type: string }
+        client_name: { type: string }
+        user_agent: { type: string }
+        api_key: { type: string }
+        api_key_id: { type: integer, format: int64, minimum: 0 }
+        provider_id: { type: string }
+        model_client: { type: string }
+        model_upstream: { type: string }
+        model_note: { type: string }
+        request_kb: { type: number, minimum: 0 }
+        response_kb: { type: number, minimum: 0 }
+        error_code: { type: string }
+        error_message: { type: string }
+      additionalProperties: false
+    RequestTiming:
+      type: object
+      description: 请求耗时与 Token 统计；生成阶段及 Token 来源字段可能因请求是否完成而缺失。
+      required: [started_at, latency_ms, latency_human]
+      properties:
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        latency_ms: { type: integer, format: int64, minimum: 0 }
+        latency_human: { type: string }
+        ttft_ms: { type: integer, format: int64, minimum: 0 }
+        ttft_human: { type: string }
+        generation_ms: { type: integer, format: int64, minimum: 0 }
+        generation_human: { type: string }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        total_tokens: { type: integer, format: int64, minimum: 0 }
+        token_source: { type: string }
+        token_source_label: { type: string }
+      additionalProperties: false
     RequestDetail:
       type: object
       required: [log, summary, timing, diagnosis]
@@ -2581,11 +2628,9 @@ components:
         log:
           $ref: "#/components/schemas/RequestLog"
         summary:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/RequestSummary"
         timing:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/RequestTiming"
         diagnosis:
           type: array
           items: { type: string }

@@ -17,6 +17,7 @@ REQUEST_STATS_FILE = ROOT / "internal" / "server" / "request_stats.go"
 MODEL_STRUCT_FILE = ROOT / "internal" / "model" / "model.go"
 GATEWAY_MODEL_OPS_FILE = ROOT / "internal" / "server" / "gateway_model_ops.go"
 STORE_REQUEST_LOG_FILE = ROOT / "internal" / "store" / "store.go"
+REQUEST_DETAIL_SOURCE_FILE = ROOT / "internal" / "server" / "request_detail.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 
@@ -95,6 +96,7 @@ def validate(
     request_list_handler: str,
     request_cancel_handler: str,
     store_request_log: str,
+    request_detail_source: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -287,6 +289,43 @@ def validate(
             except ValueError:
                 errors.append(f"RequestLog: missing Go JSON field {field!r}")
 
+        # RequestDetail summary/timing are dynamic maps; keep their key sets aligned with helpers.
+        summary_schema = schema_block(source, "RequestSummary")
+        timing_schema = schema_block(source, "RequestTiming")
+        detail_schema = schema_block(source, "RequestDetail")
+        require(
+            re.search(
+                r'(?m)^        summary:\n          \$ref:[ \t]*"#/components/schemas/RequestSummary"',
+                detail_schema,
+            ) is not None,
+            "RequestDetail.summary must reference RequestSummary",
+        )
+        require(
+            re.search(
+                r'(?m)^        timing:\n          \$ref:[ \t]*"#/components/schemas/RequestTiming"',
+                detail_schema,
+            ) is not None,
+            "RequestDetail.timing must reference RequestTiming",
+        )
+        summary_fn = go_function(request_detail_source, "func buildRequestSummary(")
+        summary_keys = set(re.findall(r'"([a-z][a-z0-9_]*)"\s*:', summary_fn))
+        summary_keys.update(re.findall(r'summary\["([a-z][a-z0-9_]*)"\]', go_function(request_detail_source, "func buildRequestDetail(")))
+        for field in sorted(summary_keys):
+            try:
+                schema_field_block(summary_schema, field)
+            except ValueError:
+                errors.append(f"RequestSummary: missing helper field {field!r}")
+
+        timing_fn = go_function(request_detail_source, "func buildRequestTiming(")
+        timing_keys = set(re.findall(r'"([a-z][a-z0-9_]*)"\s*:', timing_fn))
+        timing_keys.update(re.findall(r't\["([a-z][a-z0-9_]*)"\]', timing_fn))
+        timing_keys.update(re.findall(r'timing\["([a-z][a-z0-9_]*)"\]', go_function(request_detail_source, "func buildRequestDetail(")))
+        timing_keys.update(re.findall(r'timing\["([a-z][a-z0-9_]*)"\]', go_function(request_detail_source, "func applyHarvestToTiming(")))
+        for field in sorted(timing_keys):
+            try:
+                schema_field_block(timing_schema, field)
+            except ValueError:
+                errors.append(f"RequestTiming: missing helper field {field!r}")
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -344,6 +383,7 @@ def main() -> int:
         request_list_handler = REQUEST_LIST_HANDLER_FILE.read_text(encoding="utf-8")
         request_cancel_handler = REQUEST_CANCEL_HANDLER_FILE.read_text(encoding="utf-8")
         store_request_log = STORE_REQUEST_LOG_FILE.read_text(encoding="utf-8")
+        request_detail_source = REQUEST_DETAIL_SOURCE_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -353,6 +393,7 @@ def main() -> int:
             request_list_handler,
             request_cancel_handler,
             store_request_log,
+            request_detail_source,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
@@ -368,7 +409,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "/api/models GatewayModel fields, and RequestLog response fields."
+        "/api/models GatewayModel fields, RequestLog fields, and RequestDetail summary/timing fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "

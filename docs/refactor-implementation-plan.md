@@ -1043,3 +1043,9 @@ docs/                        中文架构、协议和运维文档
 - `RequestList.data.items` 与 `RequestDetail.log` 已改为引用共享的 `RequestLog` Schema。Schema 按 `store.RequestLog` 当前 JSON 字段声明状态、Gateway/上游 HTTP 状态、Token、时间与错误信息。
 - 扩展 `scripts/check_openapi_contracts.py`，自动核对 Go `store.RequestLog` 的 JSON tag 全部映射到 Schema，并检查列表/详情两处引用，避免请求日志前后端字段静默漂移。
 - 详情里的 summary、timing、analysis、正文与流式事件仍包含动态或条件字段，本批不声称实现全量 API Schema 等价。
+
+## 24. 请求详情 summary/timing Schema 与 Go helper 对账（2026-10-27）
+
+- 将 `RequestDetail.summary` 和 `RequestDetail.timing` 从泛化 object 改为共享、可复用的 `RequestSummary` / `RequestTiming` Schema，列出请求身份/状态、模型与 Provider、请求体积、延迟、TTFT、生成阶段和 Token 来源等稳定字段。
+- 扩展 `scripts/check_openapi_contracts.py`，从 `buildRequestSummary`、`buildRequestTiming`、`buildRequestDetail`、`applyHarvestToTiming` 提取 map 键，并在 CI 中验证每个字段都有 Schema 定义。
+- 正文与 Header、分析结果、SSE 事件仍是条件字段；这是一项针对详情接口的可维护性门禁，不代表所有 API 已完全 Schema 等价。
