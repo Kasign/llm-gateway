@@ -99,6 +99,54 @@ func TestPrepareProviderConcurrencyLimitAppliesChangesAtSafeTime(t *testing.T) {
 	})
 }
 
+func TestPrepareProviderQueueLimitAppliesChangesAtSafeTime(t *testing.T) {
+	t.Run("lower and rollback", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil { t.Fatal(err) }
+		if err := limiter.SetQueueLimit(8); err != nil { t.Fatal(err) }
+		previous, changed, raise, err := prepareProviderQueueLimit("save", true, true, limiter, 2)
+		if err != nil { t.Fatal(err) }
+		if previous != 8 || !changed || raise || limiter.QueueLimit() != 2 { t.Fatalf("previous=%d changed=%v raise=%v current=%d", previous, changed, raise, limiter.QueueLimit()) }
+		if err := limiter.SetQueueLimit(previous); err != nil { t.Fatal(err) }
+		if limiter.QueueLimit() != 8 { t.Fatalf("rollback queue limit=%d, want 8", limiter.QueueLimit()) }
+	})
+	t.Run("raise after Registry replacement", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil { t.Fatal(err) }
+		previous, changed, raise, err := prepareProviderQueueLimit("save", true, true, limiter, 8)
+		if err != nil { t.Fatal(err) }
+		if previous != 0 || changed || !raise || limiter.QueueLimit() != 0 { t.Fatalf("previous=%d changed=%v raise=%v current=%d", previous, changed, raise, limiter.QueueLimit()) }
+		if err := limiter.SetQueueLimit(8); err != nil { t.Fatal(err) }
+		if limiter.QueueLimit() != 8 { t.Fatalf("queue limit=%d, want 8", limiter.QueueLimit()) }
+	})
+	t.Run("disabled edits leave runtime capacity unchanged", func(t *testing.T) {
+		for _, tc := range []struct { name string; current, target int }{{"raise", 2, 8}, {"lower", 8, 2}} {
+			t.Run(tc.name, func(t *testing.T) {
+				limiter, err := provider.NewConcurrencyLimiter(2)
+				if err != nil { t.Fatal(err) }
+				if err := limiter.SetQueueLimit(tc.current); err != nil { t.Fatal(err) }
+				previous, changed, raise, err := prepareProviderQueueLimit("save", true, false, limiter, tc.target)
+				if err != nil { t.Fatal(err) }
+				if previous != tc.current || changed || raise || limiter.QueueLimit() != tc.current { t.Fatalf("previous=%d changed=%v raise=%v current=%d want=%d", previous, changed, raise, limiter.QueueLimit(), tc.current) }
+			})
+		}
+	})
+	t.Run("re-enable defers queue increase", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil { t.Fatal(err) }
+		previous, changed, raise, err := prepareProviderQueueLimit("enable", true, true, limiter, 8)
+		if err != nil { t.Fatal(err) }
+		if previous != 0 || changed || !raise || limiter.QueueLimit() != 0 { t.Fatalf("previous=%d changed=%v raise=%v current=%d", previous, changed, raise, limiter.QueueLimit()) }
+	})
+	t.Run("reject invalid capacity without mutation", func(t *testing.T) {
+		limiter, err := provider.NewConcurrencyLimiter(2)
+		if err != nil { t.Fatal(err) }
+		if err := limiter.SetQueueLimit(3); err != nil { t.Fatal(err) }
+		previous, changed, raise, err := prepareProviderQueueLimit("save", true, true, limiter, provider.MaxOpenAICompatibleQueueSize+1)
+		if err == nil { t.Fatal("expected invalid queue capacity error") }
+		if previous != 3 || changed || raise || limiter.QueueLimit() != 3 { t.Fatalf("invalid input mutated queue: previous=%d changed=%v raise=%v current=%d", previous, changed, raise, limiter.QueueLimit()) }
+	})
+}
 func TestBuildRemoteProviderReusesManagedConcurrencyLimiter(t *testing.T) {
 	limiter, err := provider.NewConcurrencyLimiter(2)
 	if err != nil {

@@ -1,14 +1,15 @@
 # LLM Gateway 未关闭问题与后续验收台账
 
-> 更新日期：2026-10-26。此文件是问题统一入口。发现问题先登记、分级并定义验收条件，按优先级集中解决；关闭事项时附 commit、CI 运行与可复查结果。历史记录中的 PR 状态可能早于当前基线，当前状态以本节最新复核和后续增量记录为准。
+> 更新日期：2026-10-27。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
 
 ## 当前基线
 
-- 本轮配置治理开始前 `dev` HEAD：`f89d064bc0b31478079e71631cbe23a18db139af`；新配置契约门禁提交及其 Actions 为后续最新状态。
-- PR #5：[Gateway TCP 连接失败与恢复](https://github.com/Kasign/llm-gateway/pull/5)，已于 2026-10-26 合并至 `dev`，合并提交 `6fcdc81e35bfc73b933aaa34a6c62538727bd0b0`。
-- PR #5 最终 CI：[Actions #156](https://github.com/Kasign/llm-gateway/actions/runs/39939567499)，结论 success，26 个步骤全部成功；代码修复提交的 Actions #155 同样全量通过。
-- PR #7（[远程 Provider 并发上限与多 Provider 管理](https://github.com/Kasign/llm-gateway/pull/7)）已于 2026-10-26 合并至 `dev`，合并提交 `17ce32918a872341a0475d103b69097b061acf53`。并发预算热更新顺序修正随 PR #7 一并合入；合并后 Actions [#40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 的负载验收失败，仍需统一回归。
-- #155/#156 的数据源是本机 loopback Mock + CI Redis/MariaDB。不能据此宣称真实供应商 E2E、公网链路恢复或生产容量已经验收。
+- 当前 `dev` HEAD：`064f5c9b20ae8fa633b762606ccd53fdeca39b22`，提交 `docs(api): align request cancellation response contract`。
+- 最新 Actions [#242](https://github.com/Kasign/llm-gateway/actions/runs/40444955557) 全部通过，四个并行 Job 覆盖配置/API 与前端、Go 测试/race/vet、Gateway 负载故障注入、Go/Docker 构建；总耗时约 2 分 03 秒。
+- CI 并行化前 Actions #240 约 4 分 10 秒；并行后的 #241/#242 约 2 分钟，墙钟时间接近减半。npm 与 Buildx 缓存、同 ref 过期 CI 取消均已启用。
+- 最近功能提交对应的 Actions #237–#242 均已通过；#239 的 Provider Token 预算预占回滚修复完整运行 37/37 步通过。
+- PR #5 与 PR #7 已合并至 `dev`；当前没有开放 PR。保持不强推、不改写历史。
+- CI 使用 Mock、Redis 和 MariaDB；不能据此宣称真实供应商 E2E、公网反向代理或生产容量已验收。
 
 ## P1：可靠性与可观测性
 
@@ -320,3 +321,8 @@
 - 复核发现 `POST /api/requests/{id}/cancel` Handler 会对非 POST 返回 `405 method_not_allowed`，但 OpenAPI 未声明 405，客户端契约与真实 Handler 不完整。
 - 已补齐 OpenAPI 405 响应，并扩展高风险契约检查器：核对取消端点的 200/400/401/405/409 状态集合、405 错误封套，以及 Handler 实际的 POST/状态码分支。
 - 同时核对 `GET /api/requests` 的 `provider` 字符串查询参数确实在 Handler 中传入合并日志查询，而非只有文档声明。该门禁仅覆盖此请求日志 API 子集，完整 Go/OpenAPI 字段对账仍分阶段推进。
+
+## 2026-10-27 Provider 热更新队列预算回归覆盖
+
+- 新增 `TestPrepareProviderQueueLimitAppliesChangesAtSafeTime`，覆盖队列容量缩小时前置应用并可回滚、扩大延后到 Registry 更新后、已停用 Provider 编辑不修改运行时许可器、重新启用时延后放宽，以及越界容量拒绝且不更改当前值。
+- 这是热更新事务的回归覆盖，不改变运行时队列策略；FIFO 状态仍局限于单个 Gateway 进程，不代表多副本全局排队。

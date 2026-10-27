@@ -1,17 +1,16 @@
 # LLM Gateway 重构实施计划与进度
 
 > 目标分支：`dev`
-> 初始计划基线：`e9e55286a4d3d2cba4d76df212280b8547065267`
-> 状态：配置治理基础门禁、OpenAPI operation 元数据校验和请求日志保留状态 API 已合入 dev；Actions #222–#225 均完整通过。日常开发继续以 dev 为唯一集成目标，真实供应商 E2E 与公网部署验证仍依赖用户环境。
+> 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
+> 最近完整 CI Head：`064f5c9b20ae8fa633b762606ccd53fdeca39b22`（Actions [#242](https://github.com/Kasign/llm-gateway/actions/runs/40444955557)，四个并行 Job 全部通过，约 2 分 03 秒）。
 
-## 当前状态快照（2026-10-26）
+## 当前状态快照（2026-10-27）
 
-本节用于校正历史计划中的旧状态；发生冲突时，以本节的最新核验结果为准。
-
-- 本轮配置治理开始前的 `dev` HEAD：`f89d064bc0b31478079e71631cbe23a18db139af`；本批在该基线上形成一个完整功能提交，默认分支 `main` 保持独立。
-- PR #5（TCP 连接拒绝与恢复）和 PR #7（远程 Provider 并发与管理能力）已分别于 2026-10-26 合并至 `dev`。PR #6 是重复的 Provider 并发功能分支，已关闭且未合并；当前已核实的 PR 列表中没有开放 PR。
-- 合并提交上的 Actions [40298422463](https://github.com/Kasign/llm-gateway/actions/runs/40298422463) 曾出现审计行数不足的失败；随后配置契约提交 [#222](https://github.com/Kasign/llm-gateway/actions/runs/40301496847)、配置地址迁移 [#223](https://github.com/Kasign/llm-gateway/actions/runs/40302076802)、OpenAPI operation 门禁 [#224](https://github.com/Kasign/llm-gateway/actions/runs/40302664234) 与保留状态 API [#225](https://github.com/Kasign/llm-gateway/actions/runs/40303724984) 均通过完整 Actions，分别为 34/34 步。后续验证以最新 HEAD 对应运行结果为准。
-- 历史功能/测试分支可以暂时保留；已确认的 PR #1–#5、#7 功能已进入 `dev`，不会重复合并。后续以 `dev` 作为唯一日常集成目标，只有独立的大型功能或紧急修复才短期开新分支并及时合回。
+- 最近完整 CI 的 Head 为 `064f5c9`，包括 OpenAPI 取消端点 405 契约修正；配置/API 与前端、Go 测试/race/vet、Gateway 负载/故障注入、Go/Docker 构建均通过。
+- CI 已拆为四个并行 Job，并启用 npm 缓存、Buildx GitHub Actions 层缓存，以及同一 ref 的过期运行取消。Actions #241 约 2 分 05 秒、#242 约 2 分 03 秒；相比串行 Actions #240 约 4 分 10 秒，墙钟时间接近减半。
+- 已合入的最近功能包括：本地 GGUF 清单与运行时状态隔离、部署 Provider FIFO 参数透传、Token 预算按实际出站 dispatch 结算、高风险 OpenAPI/Go 字段对账与请求取消状态契约。
+- 当前没有开放 PR。保持非强制更新、不改写历史；按完整功能组集中提交，避免小改动反复触发完整 CI。
+- CI 使用 Mock、Redis 与 MariaDB；真实供应商及生产部署验收单独登记，不以 CI 成功代替。
 
 ## 1. 重构目标
 
@@ -186,20 +185,28 @@ docs/                        中文架构、协议和运维文档
 
 每完成一个可验证工作单元，更新本文进度，包含：当前阶段和任务比例、完成内容及文件、实际运行的测试命令和结果、新风险/阻塞、下一步任务，以及提交 SHA。比例代表任务清单估算，不代表测试通过率。不得将“代码已写”写成“测试通过”，不得将静态审查写成运行验证。
 
-## 6. 当前进度
+## 6. 当前进度（2026-10-27）
 
-> 最新已通过完整 CI 的代码 Head：`0647b6aeef8c01f68d2a783989369c36e511293e`（[Actions #166](https://github.com/Kasign/llm-gateway/actions/runs/40259993963)，32/32 步骤成功）。Gateway + loopback Mock + Redis/MariaDB 验收覆盖 DNS NXDOMAIN=502、解析超时=504、TCP 拒绝/恢复、429/503、HTTP 200 已提交后的 SSE 中断与审计一致性；新增的本地 TLS 握手中断用例也通过。真实供应商 E2E 和公网反向代理链路仍未验收。
+> 最近完整 CI：Head `064f5c9b20ae8fa633b762606ccd53fdeca39b22`，Actions #242 全部通过。#241/#242 并行运行约 2 分钟；真实供应商和生产环境验收仍单独进行。
 
 | 阶段 | 状态 | 进度 | 说明 |
 |---|---|---:|---|
-| 阶段 0：基线与计划 | 进行中 | 98% | 分支基线、API/配置/数据库契约清单已建立；CI 已产出第一组可重复基准，仍需在固定环境持续采样与比较。 |
-| 阶段 1：日志可靠性 | 进行中 | 99% | 审计队列与只读指标、60 秒 Gateway Handler+Redis+MariaDB 负载、429/503 注入、TCP 拒绝/恢复（#162）、DNS NXDOMAIN/timeout 审计（#163）、HTTP 200 已提交后 SSE 正文 TCP RST 与 MariaDB 审计一致性（#164），以及 TLS 握手前 TCP 中断的 Provider 回归测试（#166）均全量通过。真实供应商 E2E 与生产环境故障恢复观测仍待。 |
-| 阶段 2：请求边界与路由 | 进行中 | 99% | 已完成 ACL 顺序、模型列表过滤、RawQuery 透传、可信代理白名单、原子限流、请求级 Provider 固定、取消终态保护、Agent 拒绝路径审计 URL 恢复；Actions #101 验证 JSON/SSE data-plane 隔离，#104 验证模型列表 ACL，#108 验证 Agent `/v1/models` 外层鉴权与真实 Redis RPM 429。持续性能趋势与线上压测仍待。 |
-| 阶段 3：Provider 抽象 | 进行中 | 94% | 已有 Provider 契约、Registry、Capabilities、本地 Adapter、可选 LocalModelManager 和统一推理出网点；Agent data-plane 集成已验证两条远程 Provider 的 Chat Completions 与 Responses API JSON/SSE 往返、各自密钥及模型固定。真实供应商契约仍待验证。 |
-| 阶段 4：外部 Provider 与密钥 | 进行中 | 98% | Provider 预置/Web 管理、独立 Key、模型映射、并发与 RPM 已在 PR #7 合入；真实供应商端到端及真实公网故障注入仍待用户控制的凭据/部署环境。 |
-| 阶段 4.5：配置来源治理 | 进行中 | 88% | 配置矩阵、Go YAML 字段校验、模板路径/静态值对账、环境变量与 Compose 注入门禁已完成；MariaDB/Redis 地址统一移入 `.env`，旧 `.env` 仍有 Compose 默认回退。YAML、环境 Provider 和 Web Provider 冲突保护已有代码；每日 Token 预算配置、Redis 预占/结算与 UI 观测本批进入实现，待最新 Actions。 |
-| 阶段 5：运行治理与 CI | 进行中 | 88% | Actions #222–#226 的配置契约、OpenAPI 元数据、保留状态 API、Go 单测、MariaDB 审计负载、race、性能、构建和前端 Bundle 均通过。每日 Token 预算正在作为独立功能组接入；真实供应商/公网验收与队列策略设计仍待。 |
+| 阶段 0：基线与计划 | 持续维护 | 98% | API、配置、数据迁移与 OpenAPI 目录已建立；性能数据需要在可比 Runner 上持续采样。 |
+| 阶段 1：日志可靠性 | 自动化门禁通过 | 99% | 审计队列、MariaDB 积压、Gateway 负载、DNS/TCP/TLS/SSE 故障、竞态及状态一致性有完整 CI 覆盖；公网代理与真实供应商仍需部署验证。 |
+| 阶段 2：请求边界与路由 | 自动化门禁通过 | 99% | ACL、请求取消终态、Provider 固定、Agent 路由、RawQuery 透传和限流有回归；持续线上性能趋势仍待。 |
+| 阶段 3：Provider 抽象 | 持续演进 | 94% | Registry、Provider 契约、本地 Adapter、OpenAI-compatible JSON/SSE 与统一出网点已实现；真实多厂商协议行为未验收。 |
+| 阶段 4：外部 Provider 与密钥 | 自动化门禁通过 | 98% | YAML/环境/Web 多来源、Key 加密/脱敏、模型映射、并发、RPM、时限与热更新已有实现；供应商真实 E2E 仍待。 |
+| 阶段 4.5：配置来源治理 | 代码与 CI 门禁基本完成 | 96% | 配置矩阵、环境变量展开、ID 冲突拒绝、根目录 Compose 与配置契约门禁已完成；旧环境迁移与实际 1Panel 配置仍需用户环境验收。 |
+| 阶段 5：运行治理与 CI | 持续收尾 | 96% | 每日 Token 预算、FIFO 队列、截止时刻保护、部署参数透传和 CI 并行缓存已实现；继续补 Provider 热更新预算回归和 API 字段契约。 |
 
+### 下一步
+
+1. **收紧 Provider 热更新回归**：补齐队列容量缩小/扩大、停用 Provider 编辑、重新启用和非法容量等状态组合；检查持久化失败/Registry 替换失败时共享并发与队列预算的回滚。
+2. **分阶段补齐 OpenAPI Go 契约**：已检查 Provider mutation/view、模型列表 Go 字段、请求列表 Provider 筛选和取消状态码；继续按风险覆盖其他管理 API，整体契约状态保持 `partial`。
+3. **完成配置来源与部署边界 Review**：保留旧 `.env` 兼容回退，不在没有配置备份/比对时改变用户实际部署数据。
+4. **集中整体 Review**：复核取消/Finish、SSE 已提交后的错误状态、慢速本地模型超时传播、密钥脱敏、MariaDB 迁移和源码/部署 Bundle 同步。
+5. **真实环境验收单独登记**：真实供应商 usage/计费、公网 OpenResty、1Panel 网络及慢模型延迟需要用户凭据和部署环境；CI 不能代替这些验收。
+6. 继续按逻辑功能批次提交并更新中文文档；新 CI 并行化后目前约 2 分钟，之后以实际 Actions 为准。
 ### 已核实的历史 CI 问题
 
 - 旧版 `provider_mutation_test.go` 曾把 `Path/Body` 错放在 `core.State` 顶层；正确布局是嵌入 `core.Request`。当前 `provider_mutation_test.go` 已按真实字段布局修复，当前 `provider_runtime_test.go` 也与 `internal/core/types.go` 一致，不需要重复修改。
@@ -1019,3 +1026,8 @@ docs/                        中文架构、协议和运维文档
 - 扩展 `scripts/check_openapi_contracts.py`，要求取消操作具备 200/400/401/405/409 响应定义，并检查 Handler 的方法校验、400/409 分支与成功响应关键字段。
 - 对 `GET /api/requests` 的 Provider 筛选做跨层对账，检查 OpenAPI 将其声明为字符串 query 参数，且 Go Handler 确实读取并传入日志合并查询。
 - 这项检查不等于对所有 RequestList/RequestDetail 动态字段进行全量 Schema 生成或等价性验证。
+
+## 21. Provider FIFO 队列热更新事务回归（2026-10-27）
+
+- 并发预算已有安全应用顺序测试，队列容量的同类 helper 之前没有等价覆盖。新增测试覆盖缩小前置应用并可回滚、扩大延后应用、已停用 Provider 编辑不修改活动许可器、重新启用后延后放宽，以及容量越界拒绝。
+- 该批只补热更新事务的回归覆盖，不改变队列策略；FIFO 队列仍是单 Gateway 进程内状态，不代表多副本全局排队。
