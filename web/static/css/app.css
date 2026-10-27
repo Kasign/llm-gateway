@@ -736,3 +736,23 @@ body.auth-locked{overflow:hidden}
   stroke-linejoin:round;
 }
 
+
+
+/* 控制台密码保护开关。 */
+.password-policy-toggle{
+  display:flex!important;
+  align-items:center;
+  gap:9px;
+  cursor:pointer;
+}
+.password-policy-toggle input{
+  width:16px;
+  height:16px;
+  margin:0;
+  flex:0 0 auto;
+}
+.password-policy-toggle+small{
+  display:block;
+  margin-top:7px;
+  line-height:1.5;
+}

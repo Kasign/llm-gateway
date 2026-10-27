@@ -3,7 +3,7 @@ import { $ } from './dom.js';
 const SESSION_STORAGE_KEY = 'llm_gateway_session_token';
 
 /** 无需 Web 会话即可调用的管理 API（仅登录接口）。 */
-const PUBLIC_API_PATHS = new Set(['/api/auth/login']);
+const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/status']);
 
 export const getKey = () => ($('adminKey')?.value || '').trim();
 

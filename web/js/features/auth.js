@@ -1,16 +1,10 @@
 import { $, esc } from '../core/dom.js';
-import {
-  api,
-  apiPublic,
-  getSessionToken,
-  setSessionToken,
-} from '../core/api.js';
+import { api, apiPublic, getSessionToken, setSessionToken } from '../core/api.js';
 
 let currentUser = null;
-
-export function authUser() {
-  return currentUser;
-}
+let passwordProtectionEnabled = true;
+let passwordProtectionAtLoad = true;
+export function authUser() { return currentUser; }
 
 function setAuthScreenVisible(show) {
   const screen = $('authScreen');
@@ -22,53 +16,40 @@ function setAuthScreenVisible(show) {
   if (app) app.hidden = show;
   document.body.classList.toggle('auth-locked', show);
 }
-
 export function forceLoginScreen() {
   currentUser = null;
   $('sidebarAccountBtn')?.classList.remove('active');
   setAuthScreenVisible(true);
 }
-
-function updateAuthChrome() {
-  setAuthScreenVisible(!getSessionToken());
-}
+function updateAuthChrome() { setAuthScreenVisible(!getSessionToken()); }
 
 export function openAccountSettings() {
-  if (!getSessionToken()) {
-    forceLoginScreen();
-    return;
-  }
+  if (!getSessionToken()) { forceLoginScreen(); return; }
   document.querySelectorAll('.nav button').forEach((x) => x.classList.remove('active'));
   document.querySelectorAll('.panel').forEach((x) => x.classList.remove('active'));
-  const panel = $('account');
-  if (panel) panel.classList.add('active');
+  $('account')?.classList.add('active');
   $('sidebarAccountBtn')?.classList.add('active');
   if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
-  const gm = $('globalMsg');
-  if (gm) gm.hidden = false;
+  const message = $('globalMsg');
+  if (message) message.hidden = false;
   if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
   loadAccountSettings().catch(() => {});
 }
-
 function bindAccountPageActions() {
-  $('btnAccountLogout')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    logout();
-  });
+  $('btnAccountLogout')?.addEventListener('click', (event) => { event.preventDefault(); logout(); });
+  $('accountForm')?.addEventListener('submit', (event) => { void submitAccountCredentials(event); });
+  $('accountPasswordEnabled')?.addEventListener('change', updateCredentialFormPolicy);
+  $('acctNewPass')?.addEventListener('input', updateCredentialFormPolicy);
 }
-
 function initPasswordToggles() {
   const eyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-  const eyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.1 3.8"></path><path d="M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1 0 1.9-.2 2.8-.5"></path></svg>';
-
+  const eyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7s-3.6 7-10 7-10-7-10-7"></path></svg>';
   document.querySelectorAll('input[type="password"]').forEach((input) => {
     if (input.closest('.password-input-wrap')) return;
-
     const wrapper = document.createElement('span');
     wrapper.className = 'password-input-wrap';
     input.parentNode.insertBefore(wrapper, input);
     wrapper.appendChild(input);
-
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'password-toggle';
@@ -87,65 +68,72 @@ function initPasswordToggles() {
     wrapper.appendChild(button);
   });
 }
-
+function updateLoginModeUI() {
+  const field = $('authPasswordField'), password = $('authLoginPass'), button = $('authLoginBtn');
+  if (field) field.hidden = !passwordProtectionEnabled;
+  if (password) password.required = passwordProtectionEnabled;
+  if (button) button.textContent = passwordProtectionEnabled ? '登录' : '直接进入控制台';
+}
+async function createWebSession(password = '') {
+  const response = await apiPublic('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+  });
+  setSessionToken(response.token);
+  currentUser = response.user || { username: 'admin' };
+  if ($('authLoginPass')) $('authLoginPass').value = '';
+  $('sidebarAccountBtn')?.classList.remove('active');
+  updateAuthChrome();
+  if (globalThis.refreshAll) globalThis.refreshAll();
+  return response;
+}
 export async function initAuth() {
   initPasswordToggles();
-  $('authLoginForm')?.addEventListener('submit', (event) => {
-    void submitLogin(event);
-  });
+  $('authLoginForm')?.addEventListener('submit', (event) => { void submitLogin(event); });
   bindAccountPageActions();
+  try {
+    const status = await apiPublic('/api/auth/status');
+    passwordProtectionEnabled = status?.password_enabled !== false;
+  } catch {
+    // 状态接口不可用时采取安全默认值，不自动创建无密码会话。
+    passwordProtectionEnabled = true;
+  }
+  updateLoginModeUI();
   if (getSessionToken()) {
     try {
-      const j = await api('/api/auth/me');
-      currentUser = j.user || null;
+      const response = await api('/api/auth/me');
+      currentUser = response.user || null;
     } catch {
       setSessionToken('');
       currentUser = null;
     }
   }
+  if (!getSessionToken() && !passwordProtectionEnabled) {
+    const message = $('authMsg');
+    if (message) message.textContent = '密码保护已关闭，正在进入控制台…';
+    try { await createWebSession(''); } catch (error) {
+      if (message) message.textContent = '暂时无法进入控制台：' + error.message;
+    }
+  }
   updateAuthChrome();
 }
-
-export async function submitLogin(ev) {
-  ev?.preventDefault?.();
-  const msg = $('authMsg');
-  const username = ($('authLoginUser')?.value || '').trim();
-  const password = $('authLoginPass')?.value || '';
-  if (!username || !password) {
-    if (msg) msg.innerHTML = '<span class="err">请填写用户名和密码</span>';
+export async function submitLogin(event) {
+  event?.preventDefault?.();
+  const message = $('authMsg'), password = $('authLoginPass')?.value || '';
+  if (passwordProtectionEnabled && !password) {
+    if (message) message.innerHTML = '<span class="err">请输入密码</span>';
     return;
   }
-  if (msg) msg.innerHTML = '';
-  const btn = $('authLoginBtn');
-  if (btn) btn.disabled = true;
-  try {
-    const j = await apiPublic('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    setSessionToken(j.token);
-    currentUser = j.user || null;
-    if ($('authLoginPass')) $('authLoginPass').value = '';
-    $('sidebarAccountBtn')?.classList.remove('active');
-    updateAuthChrome();
-    if (globalThis.refreshAll) globalThis.refreshAll();
-  } catch (e) {
-    if (msg) msg.innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+  if (message) message.textContent = '';
+  const button = $('authLoginBtn');
+  if (button) button.disabled = true;
+  try { await createWebSession(password); } catch (error) {
+    if (message) message.innerHTML = '<span class="err">' + esc(error.message) + '</span>';
   } finally {
-    if (btn) btn.disabled = false;
+    if (button) button.disabled = false;
   }
 }
-
-/** 清除 Web 会话并回到全屏登录页（与是否保存 API 密钥无关）。 */
 export async function logout() {
-  try {
-    if (getSessionToken()) {
-      await api('/api/auth/logout', { method: 'POST' });
-    }
-  } catch {
-    /* ignore */
-  }
+  try { if (getSessionToken()) await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
   const { adminStore } = await import('./admin-store.js');
   adminStore.reset();
   setSessionToken('');
@@ -156,65 +144,79 @@ export async function logout() {
   document.querySelector('.nav button[data-tab="dashboard"]')?.classList.add('active');
   forceLoginScreen();
 }
+export function onAdminKeySaved() {}
 
-export function onAdminKeySaved() {
-  /* 保存 API 密钥不替代 Web 登录 */
+function updateCredentialFormPolicy() {
+  const enabledNow = $('accountPasswordEnabled')?.checked ?? passwordProtectionAtLoad;
+  const currentField = $('acctCurrentPassField'), currentPassword = $('acctCurrentPass');
+  const newPassword = $('acctNewPass'), confirmPassword = $('acctNewPass2');
+  if (currentField) currentField.hidden = !passwordProtectionAtLoad;
+  if (currentPassword) currentPassword.required = passwordProtectionAtLoad;
+  if (newPassword) newPassword.required = enabledNow && !passwordProtectionAtLoad;
+  if (confirmPassword) confirmPassword.required = Boolean(newPassword?.value) || (enabledNow && !passwordProtectionAtLoad);
 }
-
 export async function loadAccountSettings() {
-  const cur = $('accountCurrent');
-  const msg = $('accountMsg');
-  const logoutBtn = $('btnAccountLogout');
-  if (msg) msg.innerHTML = '';
+  const status = $('accountCurrent'), message = $('accountMsg'), logoutButton = $('btnAccountLogout');
+  if (message) message.textContent = '';
   if (!getSessionToken()) {
-    if (cur) cur.textContent = '请使用 Web 登录后再修改账号（仅用 API 密钥无法在此改密）。';
-    if (logoutBtn) logoutBtn.hidden = true;
+    if (status) status.textContent = '请先进入控制台，再修改密码保护设置。';
+    if (logoutButton) logoutButton.hidden = true;
     return;
   }
-  if (logoutBtn) logoutBtn.hidden = false;
   try {
-    const j = await api('/api/auth/credentials');
-    if (cur) {
-      cur.textContent = `当前用户名：${j.username || '—'}${j.stored_in_db ? '（已保存到数据库）' : '（初始值来自配置文件，保存后将写入数据库）'}`;
+    const response = await api('/api/auth/credentials');
+    passwordProtectionAtLoad = response.password_enabled !== false;
+    const toggle = $('accountPasswordEnabled');
+    if (toggle) toggle.checked = passwordProtectionAtLoad;
+    if (status) {
+      const source = response.stored_in_db ? '已保存' : '使用初始部署设置';
+      status.textContent = (passwordProtectionAtLoad ? '密码保护已开启。' : '密码保护已关闭。') + source + '。';
     }
-    const u = $('acctNewUser');
-    if (u && !u.value) u.placeholder = j.username || '';
-  } catch (e) {
-    if (cur) cur.textContent = e.message;
-  }
+    if (logoutButton) logoutButton.hidden = !passwordProtectionAtLoad;
+    updateCredentialFormPolicy();
+  } catch (error) { if (status) status.textContent = error.message; }
 }
-
-export async function submitAccountCredentials(ev) {
-  ev?.preventDefault?.();
-  const msg = $('accountMsg');
-  const newPass = $('acctNewPass')?.value || '';
-  const newPass2 = $('acctNewPass2')?.value || '';
-  const newUser = ($('acctNewUser')?.value || '').trim();
-  if (newPass !== newPass2) {
-    if (msg) msg.innerHTML = '<span class="err">两次新密码不一致</span>';
+export async function submitAccountCredentials(event) {
+  event?.preventDefault?.();
+  const message = $('accountMsg'), targetEnabled = $('accountPasswordEnabled')?.checked === true;
+  const currentPassword = $('acctCurrentPass')?.value || '';
+  const newPassword = $('acctNewPass')?.value || '', confirmPassword = $('acctNewPass2')?.value || '';
+  if (newPassword !== confirmPassword) {
+    if (message) message.innerHTML = '<span class="err">两次新密码不一致</span>';
     return;
   }
-  if (!newUser && !newPass) {
-    if (msg) msg.innerHTML = '<span class="err">请填写新用户名或新密码</span>';
+  if (passwordProtectionAtLoad && !currentPassword) {
+    if (message) message.innerHTML = '<span class="err">请输入当前密码</span>';
     return;
   }
-  const body = { current_password: $('acctCurrentPass')?.value || '' };
-  if (newUser) body.new_username = newUser;
-  if (newPass) body.new_password = newPass;
+  if (!passwordProtectionAtLoad && targetEnabled && !newPassword) {
+    if (message) message.innerHTML = '<span class="err">开启密码保护时，请先设置新密码</span>';
+    return;
+  }
+  if (!targetEnabled && newPassword) {
+    if (message) message.innerHTML = '<span class="err">关闭密码保护时，请清空新密码输入框</span>';
+    return;
+  }
+  if (targetEnabled === passwordProtectionAtLoad && !newPassword) {
+    if (message) message.innerHTML = '<span class="err">没有需要保存的更改</span>';
+    return;
+  }
+  const button = $('accountSaveButton');
+  if (button) button.disabled = true;
   try {
-    const j = await api('/api/auth/credentials', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const body = { current_password: currentPassword, password_enabled: targetEnabled };
+    if (newPassword) body.new_password = newPassword;
+    await api('/api/auth/credentials', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    currentUser = j.user || currentUser;
     if ($('acctCurrentPass')) $('acctCurrentPass').value = '';
-    if ($('acctNewUser')) $('acctNewUser').value = '';
     if ($('acctNewPass')) $('acctNewPass').value = '';
     if ($('acctNewPass2')) $('acctNewPass2').value = '';
-    if (msg) msg.innerHTML = '<span class="ok">已更新，请牢记新凭据</span>';
+    if (message) message.innerHTML = '<span class="ok">设置已保存</span>';
     await loadAccountSettings();
-  } catch (e) {
-    if (msg) msg.innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+  } catch (error) {
+    if (message) message.innerHTML = '<span class="err">' + esc(error.message) + '</span>';
+  } finally {
+    if (button) button.disabled = false;
   }
 }

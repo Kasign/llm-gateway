@@ -558,12 +558,25 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/AdminError"
+  /api/auth/status:
+    get:
+      operationId: getApiAuthStatus
+      tags: [Authentication]
+      summary: 查询控制台密码保护开关
+      description: 公开只读状态，不返回密码哈希。
+      responses:
+        "200":
+          description: 当前密码保护状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
   /api/auth/login:
     post:
       operationId: postApiAuthLogin
       tags: [Authentication]
-      summary: 使用用户名和密码创建管理会话
-      description: 登录请求按客户端 IP 限流；成功返回的会话 Token 通过后续请求的 Authorization Bearer 头传递，不使用 Cookie。
+      summary: 使用密码创建管理会话
+      description: 启用密码保护时校验密码；关闭时允许建立无密码管理会话。接口按客户端 IP 限流，成功返回的 Token 通过 Authorization Bearer 传递。
       requestBody:
         required: true
         content:
@@ -634,8 +647,8 @@ paths:
     put:
       operationId: putApiAuthCredentials
       tags: [Authentication]
-      summary: 修改控制台登录用户名或密码
-      description: 必须使用 Web 登录会话，且提供当前密码；修改后会更新会话版本。
+      summary: 修改控制台密码保护设置
+      description: 必须使用 Web 登录会话。当前密码保护已启用时需要提供当前密码；从关闭状态启用时必须设置新密码。修改后会更新会话版本。
       security:
         - AdminSessionBearer: []
       requestBody:
@@ -2451,12 +2464,19 @@ components:
         status:
           type: string
           enum: [active, disabled]
+    AuthStatus:
+      type: object
+      required: [password_enabled]
+      properties:
+        password_enabled: { type: boolean }
     LoginRequest:
       type: object
-      required: [username, password]
       properties:
-        username: { type: string }
-        password: { type: string, format: password, writeOnly: true }
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: 密码保护开启时必填；关闭时可省略。
       additionalProperties: false
     LoginResponse:
       type: object
@@ -2482,29 +2502,30 @@ components:
             username: { type: string }
     CredentialsView:
       type: object
-      required: [username, stored_in_db, can_change_via]
+      required: [password_enabled, stored_in_db, can_change_via]
       properties:
-        username: { type: string }
+        password_enabled: { type: boolean }
         stored_in_db: { type: boolean }
         can_change_via:
           type: string
           const: web
     CredentialsMutation:
       type: object
-      required: [current_password]
+      required: [password_enabled]
       properties:
         current_password:
           type: string
           format: password
           writeOnly: true
-        new_username:
-          type: string
-          description: 留空表示不修改用户名。
+          description: 当前已启用密码保护时必填。
         new_password:
           type: string
           format: password
           writeOnly: true
-          description: 留空表示不修改密码。
+          description: 修改密码或从关闭状态启用密码保护时必填。
+        password_enabled:
+          type: boolean
+          description: 是否要求使用密码登录；关闭会让管理台可被访问地址上的任何人使用。
       additionalProperties: false
 
     RequestLog:

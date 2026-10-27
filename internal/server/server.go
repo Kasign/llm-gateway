@@ -314,7 +314,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/keys/", s.keyAction) // 对单个 Key 操作（删除/禁用/启用/轮换/修改）
 
 	// —— 管理 API：网页登录认证 ——
-	mux.HandleFunc("/api/auth/login", s.authLoginAPI)             // 管理员登录
+	mux.HandleFunc("/api/auth/status", s.authStatusAPI)           // 公开查询密码保护开关
+	mux.HandleFunc("/api/auth/login", s.authLoginAPI)             // 密码登录或无密码模式创建会话
 	mux.HandleFunc("/api/auth/logout", s.authLogoutAPI)           // 管理员登出
 	mux.HandleFunc("/api/auth/me", s.authMeAPI)                   // 获取当前登录用户信息
 	mux.HandleFunc("/api/auth/credentials", s.authCredentialsAPI) // 修改管理员密码
