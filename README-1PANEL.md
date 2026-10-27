@@ -22,7 +22,7 @@ cp providers.env.example providers.env
 - `MODEL_HOST_DIR`：宿主机上的 GGUF 目录。Gateway 下载的文件也写到这里，容器内是 `/data/models`。
 - `MARIADB_ROOT_PASSWORD`、`LLM_GATEWAY_DB_PASSWORD`、`REDIS_ROOT_PASSWORD`。
 - `LLM_GATEWAY_ADMIN_API_KEY`。
-- Web 登录见 [控制台与密码说明.md](./控制台与密码说明.md)。哈希写在 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`，`$` 要写成 `$$`。
+- Web 登录仅使用密码，无需用户名。按 [控制台与密码说明.md](./控制台与密码说明.md) 创建 `admin-auth.env`；密码保护可在账号设置页启用、关闭或修改密码。
 
 `LLM_BACKEND` 只决定数据库还没有上游记录时，第一次把 `/v1` 打到哪边。默认 `llamacpp`。
 
