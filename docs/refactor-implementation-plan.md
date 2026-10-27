@@ -965,3 +965,11 @@ docs/                        中文架构、协议和运维文档
 - 完成第一轮 FIFO 队列提交的完整 Actions 后，复审发现定时器与并发许可同时就绪时存在边界窗口：等待 goroutine 若延迟恢复，可能在 deadline 之后接受许可。
 - deadline 改为在等待项进入队列时固定，并为每个 waiter 记录实际许可发放时间；ready 和 timeout 分支都检查时间戳。晚到许可会退还并计为一次队列超时，父请求取消仍优先返回 Context 错误。
 - 新增锁竞争确定性回归用例覆盖晚到许可，不修改既有 FIFO、队列容量、取消和故障注入语义。该补丁提交后的完整 Actions 是本轮验收闸门。
+
+## 2026-10-27 根目录部署迁移后的配置路径 Review
+
+- 部署入口已统一到仓库根目录：`.env.example`、`providers.env.example`、`config.yaml`、`config.example.yaml`、`docker-compose.yml` 和 1Panel / OpenResty 说明不再要求进入旧的 `deploy/` 目录。
+- 修复配置启动错误中残留的旧路径提示：当两个本地后端均未配置，或当前活动后端地址缺失时，提示改为仓库根目录的 `.env`。该修改只纠正运维指引，不改变 URL 校验和活动后端选择语义。
+- 环境变量展开针对完整、未加引号的 `${VAR}` 标量恢复 YAML 原生整数/布尔/null 标签，避免 `LLAMA_REQUEST_TIMEOUT_SECONDS=0` 被按字符串解码；带引号的值仍强制保持字符串，避免数字型密码或 Key 被意外转换。
+- CI 已包含静态配置契约、根目录 Compose 渲染与 Release 镜像构建步骤。当前提交的 GitHub Actions 运行状态尚未从状态接口取得，不能用之前 Head 的绿色结果代替；实际 1Panel 容器网络、已有本地配置迁移、慢模型 SSE 和公网反向代理仍需部署环境验收。
+- 后续工作按原计划继续：完成 Provider 热更新与配置回滚的高风险 Review，逐项检查 OpenAPI 与管理 Handler 的字段/状态码契约，再做一次集中代码 Review。真实供应商凭据及生产请求不在 CI Mock 测试的证明范围内。
