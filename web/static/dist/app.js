@@ -1130,8 +1130,13 @@
       const kind = delBtn.dataset.modelDelete || "";
       const modelKey2 = (delBtn.dataset.modelKey || "").trim();
       const modelId2 = (delBtn.dataset.modelId || "").trim();
+      const modelPath = (delBtn.dataset.modelPath || "").trim();
       if (kind === "gguf" && modelKey2) {
         void deleteModel(modelKey2);
+        return;
+      }
+      if (kind === "gguf-disk" && modelPath) {
+        void deleteDiskGGUFModel(modelPath);
         return;
       }
       if (kind === "ollama" && (modelId2 || modelKey2)) {
@@ -2130,7 +2135,7 @@
         const canOperate = Boolean(routerMode && !modelHub.runtimeError && (rt?.registered || rt?.loaded));
         const loadButton = canOperate && rt?.registered && !rt.loaded && st !== "loading" ? inferButtonHtml("llamacpp", "load", { modelId, modelKey, title: "Llama \u6A21\u578B \xB7 \u52A0\u8F7D \xB7 " + (modelId || modelKey), label: "\u52A0\u8F7D" }) : "";
         const unloadButton = canOperate && rt.loaded ? inferButtonHtml("llamacpp", "unload", { modelId, modelKey, title: "Llama \u6A21\u578B \xB7 \u5378\u8F7D \xB7 " + (modelId || modelKey), confirmMsg: "\u4ECE llama.cpp \u5378\u8F7D " + (modelId || modelKey) + "\uFF1F", label: "\u5378\u8F7D" }) : "";
-        const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=' + JSON.stringify(modelKey) + ">\u5220\u9664</button>" : "";
+        const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=' + JSON.stringify(modelKey) + ">\u5220\u9664</button>" : rt?.disk_present && rt?.path ? '<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path=' + JSON.stringify(String(rt.path)) + ">\u5220\u9664</button>" : "";
         const defaultPill = rt?.active ? ' <span class="pill pill-active">Gateway \u9ED8\u8BA4</span>' : "";
         return "<tr><td>" + esc(name) + (x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : "") + defaultPill + "</td><td>" + esc(llamaCatalogSourceLabel(rt, managed)) + "</td><td><code>" + esc(modelKey || modelId || "\u2014") + '</code></td><td class="tabular-nums">' + fmtSize(sizeBytes) + "</td><td>" + ggufLoadPill(st) + '</td><td><div class="td-actions">' + loadButton + unloadButton + deleteButton + "</div></td></tr>";
       }).join("")
@@ -2198,6 +2203,27 @@
     try {
       await api("/api/models/" + encodeURIComponent(k), { method: "DELETE" });
       setGgufMsg("ok", "\u5DF2\u5220\u9664");
+      await modelHub.refresh({ force: true });
+      renderGatewayModelTable();
+      renderRuntimeCatalog();
+    } catch (e) {
+      setGgufMsg("err", e.message);
+    }
+  }
+  async function deleteDiskGGUFModel(modelPath) {
+    if (!isAuthenticated()) {
+      setGgufMsg("err", "\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0");
+      return;
+    }
+    if (!confirm("\u786E\u5B9A\u4ECE\u5171\u4EAB\u6A21\u578B\u76EE\u5F55\u6C38\u4E45\u5220\u9664\u8BE5 GGUF \u6A21\u578B\uFF1F\u5982\u679C\u6A21\u578B\u7531\u591A\u4E2A\u5206\u7247\u7EC4\u6210\uFF0C\u6240\u6709\u5206\u7247\u90FD\u4F1A\u4E00\u8D77\u5220\u9664\uFF1B\u6B64\u64CD\u4F5C\u4E0D\u53EF\u6062\u590D\u3002")) return;
+    try {
+      const result = await api("/api/admin/gguf/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_path: modelPath })
+      });
+      const deleted = Number(result.deleted_files || 0);
+      setGgufMsg(result.warning ? "warn" : "ok", result.warning || "\u5DF2\u5220\u9664 GGUF \u6A21\u578B\uFF08" + deleted + " \u4E2A\u6587\u4EF6\uFF09");
       await modelHub.refresh({ force: true });
       renderGatewayModelTable();
       renderRuntimeCatalog();
