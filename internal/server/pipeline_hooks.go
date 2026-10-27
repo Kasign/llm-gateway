@@ -215,7 +215,8 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 		applog.Printf("[%s] responses model ready: %v (continuing)", st.ID, err)
 		return nil
 	}
-	return &core.Error{Status: http.StatusServiceUnavailable, Code: "model_load_failed", Message: err.Error()}
+	// 上游控制 API 的原始错误只用于服务端诊断，不透传给推理调用方。
+	return &core.Error{Status: http.StatusServiceUnavailable, Code: "model_load_failed", Message: "model load failed"}
 }
 
 // allowModelsGuard 只由 /v1 门外按请求附加（benchmark 不附加）。

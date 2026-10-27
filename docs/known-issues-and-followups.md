@@ -387,4 +387,5 @@
 
 - `serveInference` 原先在 Redis 限流器失败时，将 `err.Error()` 同时传给客户端响应和请求审计，可能泄露内部连接或依赖诊断。
 - 已改为固定错误文案 `rate limiter unavailable`；HTTP 503 与错误码 `rate_limit_unavailable` 保持不变，详细错误仅保留在服务端日志。
+- 同轮还收紧了模型解析失败与本地模型加载失败的调用方消息，避免将上游控制 API 的原始错误透传；原有稳定错误码和 HTTP 状态不变。
 - 当前 Head 的自动化验收待完成；此修复不替代真实部署中 Redis 故障处理验收。

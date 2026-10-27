@@ -144,7 +144,8 @@ func (s *Server) proxyTargetFromGatewayModelForUpstream(ctx context.Context, act
 	}
 	actual, err := s.resolveUpstreamModelNameForBackend(ctx, client, active.Backend, active.ModelName, m)
 	if err != nil {
-		return zero, &core.Error{Status: 502, Code: "upstream_model_mismatch", Message: err.Error()}
+		applog.Printf("upstream model resolution failed: backend=%s model_key=%s error=%v", active.Backend, m.ModelKey, err)
+		return zero, &core.Error{Status: 502, Code: "upstream_model_mismatch", Message: "upstream model resolution failed"}
 	}
 	if actual == "" {
 		actual = strings.TrimSpace(m.LlamaModelName)
