@@ -2053,8 +2053,8 @@
         const st = modelHub.loadState(x);
         const sizeBytes = modelHub.diskBytes(x);
         const routerMode = Boolean(modelHub.runtime?.hot_unload_supported);
-        const canOperate = Boolean(rt?.registered && routerMode && !modelHub.runtimeError);
-        const loadButton = canOperate && !rt.loaded && st !== "loading" ? inferButtonHtml("llamacpp", "load", { modelId, modelKey, title: "Llama \u6a21\u578b \u00b7 \u52a0\u8f7d \u00b7 " + (modelId || modelKey), label: "\u52a0\u8f7d" }) : "";
+        const canOperate = Boolean(routerMode && !modelHub.runtimeError && (rt?.registered || rt?.loaded));
+        const loadButton = canOperate && rt?.registered && !rt.loaded && st !== "loading" ? inferButtonHtml("llamacpp", "load", { modelId, modelKey, title: "Llama \u6a21\u578b \u00b7 \u52a0\u8f7d \u00b7 " + (modelId || modelKey), label: "\u52a0\u8f7d" }) : "";
         const unloadButton = canOperate && rt.loaded ? inferButtonHtml("llamacpp", "unload", { modelId, modelKey, title: "Llama \u6a21\u578b \u00b7 \u5378\u8f7d \u00b7 " + (modelId || modelKey), confirmMsg: "\u4ece llama.cpp \u5378\u8f7d " + (modelId || modelKey) + "\uff1f", label: "\u5378\u8f7d" }) : "";
         const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=' + JSON.stringify(modelKey) + '>\u5220\u9664</button>' : "";
         const defaultPill = rt?.active ? ' <span class="pill pill-active">Gateway \u9ed8\u8ba4</span>' : "";

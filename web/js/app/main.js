@@ -1231,8 +1231,8 @@ function renderGatewayModelTable(){
       const st=modelHub.loadState(x);
       const sizeBytes=modelHub.diskBytes(x);
       const routerMode=Boolean(modelHub.runtime?.hot_unload_supported);
-      const canOperate=Boolean(rt?.registered&&routerMode&&!modelHub.runtimeError);
-      const loadButton=canOperate&&!rt.loaded&&st!=='loading'
+      const canOperate=Boolean(routerMode&&!modelHub.runtimeError&&(rt?.registered||rt?.loaded));
+      const loadButton=canOperate&&rt?.registered&&!rt.loaded&&st!=='loading'
         ?inferButtonHtml('llamacpp','load',{modelId,modelKey,title:'Llama 模型 · 加载 · '+(modelId||modelKey),label:'加载'})
         :'';
       const unloadButton=canOperate&&rt.loaded
