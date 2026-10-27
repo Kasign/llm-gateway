@@ -280,7 +280,7 @@ def validate(
             fields = {
                 tag
                 for tag in re.findall(r'json:"([^",]+)', declaration.group(1))
-                if tag and tag != "-",
+                if tag and tag != "-"
             }
             for field in sorted(fields):
                 try:
@@ -298,7 +298,7 @@ def validate(
         stream_event_fields = {
             tag
             for tag in re.findall(r'json:"([^",]+)', stream_event_decl.group(1))
-            if tag and tag != "-",
+            if tag and tag != "-"
         }
         for field in sorted(stream_event_fields):
             try:

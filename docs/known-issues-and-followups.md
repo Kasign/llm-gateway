@@ -349,3 +349,8 @@
 
 - 将 `RequestDetail.analysis` 与 `stream_events.items` 从泛化 object 改为 `RequestAnalysis` / `StreamEvent` Schema，明确阶段耗时、吞吐、Token 来源和流事件字段。
 - 高风险契约门禁现对照 `request_analysis.go` 中 `RequestAnalysis`、`RequestPhaseMS`、`RequestThroughput` 与 `store.StreamEvent` 的 JSON tags；详情正文、Headers 与分析备注仍按保存策略动态出现。
+
+## 2026-10-27 RequestAnalysis 门禁脚本语法修复
+
+- Actions #247 在高风险 Schema 检查阶段发现新增 DTO 字段对账脚本两处集合推导式条件行有非法尾随逗号，Python 解析阶段报 SyntaxError；不是生产 Go 代码或 OpenAPI Schema 不匹配。
+- 已移除这两处逗号，保留 RequestAnalysis/RequestPhaseMS/RequestThroughput 与 StreamEvent 全字段核对。新 Head 需重新执行完整 CI；不以本次失败运行作为验收结果。

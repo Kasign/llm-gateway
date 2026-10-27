@@ -1054,3 +1054,8 @@ docs/                        中文架构、协议和运维文档
 
 - `RequestDetail.analysis` 引用 `RequestAnalysis`，其阶段耗时和吞吐子对象分别引用 `RequestPhaseMS`、`RequestThroughput`；`stream_events.items` 引用 `StreamEvent`，避免管理台分析/流事件长期停留在任意 object。
 - 扩展契约脚本，对照 Go 分析 DTO 和持久化流事件 DTO 的 JSON tags；条件正文/Headers 不标记为必需字段，避免将配置关闭时不存在的数据误写进契约。
+
+## 26. RequestAnalysis 门禁脚本语法修复（2026-10-27）
+
+- 新增分析 DTO Schema 对账的第一轮 CI 因两处 Python set comprehension 语法错误而在契约门禁阶段失败，尚未运行后续步骤。已修正条件表达式尾随逗号，未放宽检查。
+- 以修复提交对应的完整 Actions 验证高风险契约脚本、Go/race/vet、稳态负载、故障注入与 Docker 构建。
