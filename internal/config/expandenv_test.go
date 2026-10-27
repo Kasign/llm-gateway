@@ -284,3 +284,57 @@ api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
 		t.Fatalf("quoted numeric API key = %q, want string 0", decoded.APIKey)
 	}
 }
+
+// TestRootConfigLoadsWithZeroLocalRequestTimeout protects the real deployment
+// config from YAML/environment type regressions that Compose parsing cannot catch.
+func TestRootConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
+	// Do not let a developer's local Provider environment leak into this fixture.
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(key, "LLM_GATEWAY_PROVIDER_") {
+			continue
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		key, value := key, value
+		t.Cleanup(func() {
+			if err := os.Setenv(key, value); err != nil {
+				t.Errorf("restore %s: %v", key, err)
+			}
+		})
+	}
+
+	// Use non-production values; Load validates config but does not connect to services.
+	for key, value := range map[string]string{
+		"LLM_GATEWAY_ADMIN_API_KEY":       "ci-admin-api-key-for-config-test",
+		"LLM_GATEWAY_ADMIN_USERNAME":      "ci-admin",
+		"LLM_GATEWAY_ADMIN_PASSWORD":      "ci-admin-password-for-config-test",
+		"LLM_GATEWAY_ADMIN_PASSWORD_HASH": "",
+		"LLM_GATEWAY_DB_HOST":             "Mariadb",
+		"LLM_GATEWAY_DB_PASSWORD":         "ci-db-password",
+		"MARIADB_ROOT_PASSWORD":           "ci-root-password",
+		"LLM_GATEWAY_REDIS_ADDR":          "Redis:6379",
+		"REDIS_ROOT_PASSWORD":             "",
+		"LLM_BACKEND":                     "llamacpp",
+		"LLAMA_CPP_BASE_URL":              "http://llama-cpp:8080",
+		"OLLAMA_BASE_URL":                 "http://ollama:11434",
+		"LLAMA_UPSTREAM_API_KEY":          "",
+		"LLAMA_REQUEST_TIMEOUT_SECONDS":   "0",
+	} {
+		t.Setenv(key, value)
+	}
+
+	rootConfig := filepath.Join("..", "..", "config.yaml")
+	cfg, err := Load(rootConfig)
+	if err != nil {
+		t.Fatalf("repository-root config.yaml should load with the example deployment environment: %v", err)
+	}
+	if cfg.Llama.RequestTimeoutSeconds == nil || *cfg.Llama.RequestTimeoutSeconds != 0 {
+		t.Fatalf("request_timeout_seconds = %v, want explicit 0 from environment", cfg.Llama.RequestTimeoutSeconds)
+	}
+	if cfg.Llama.RequestTimeout != 0 {
+		t.Fatalf("normalized local request timeout = %d, want 0 (no Gateway-wide timeout)", cfg.Llama.RequestTimeout)
+	}
+}
+
