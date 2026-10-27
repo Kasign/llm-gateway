@@ -4,6 +4,26 @@ import { api, apiPublic, getSessionToken, setSessionToken } from '../core/api.js
 let currentUser = null;
 let passwordProtectionEnabled = true;
 let passwordProtectionAtLoad = true;
+
+const passwordEyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const passwordEyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.1 3.8"></path><path d="M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1 0 1.9-.2 2.8-.5"></path></svg>';
+
+// 清空密码后同时恢复隐藏状态，避免下一次输入时意外以明文显示。
+function resetPasswordField(id) {
+  const input = $(id);
+  if (!input) return;
+
+  input.value = '';
+  input.type = 'password';
+  const button = input.closest('.password-input-wrap')?.querySelector('.password-toggle');
+  if (!button) return;
+
+  button.innerHTML = passwordEyeIcon;
+  button.title = '显示明文';
+  button.setAttribute('aria-label', '显示明文');
+  button.setAttribute('aria-pressed', 'false');
+}
+
 export function authUser() { return currentUser; }
 
 function setAuthScreenVisible(show) {
@@ -42,8 +62,6 @@ function bindAccountPageActions() {
   $('acctNewPass')?.addEventListener('input', updateCredentialFormPolicy);
 }
 function initPasswordToggles() {
-  const eyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-  const eyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.1 3.8"></path><path d="M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1 0 1.9-.2 2.8-.5"></path></svg>';
   document.querySelectorAll('input[type="password"]').forEach((input) => {
     if (input.closest('.password-input-wrap')) return;
     const wrapper = document.createElement('span');
@@ -53,14 +71,14 @@ function initPasswordToggles() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'password-toggle';
-    button.innerHTML = eyeIcon;
+    button.innerHTML = passwordEyeIcon;
     button.title = '显示明文';
     button.setAttribute('aria-label', '显示明文');
     button.setAttribute('aria-pressed', 'false');
     button.addEventListener('click', () => {
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      button.innerHTML = show ? eyeOffIcon : eyeIcon;
+      button.innerHTML = show ? passwordEyeOffIcon : passwordEyeIcon;
       button.title = show ? '隐藏明文' : '显示明文';
       button.setAttribute('aria-label', button.title);
       button.setAttribute('aria-pressed', String(show));
@@ -80,7 +98,7 @@ async function createWebSession(password = '') {
   });
   setSessionToken(response.token);
   currentUser = response.user || { username: 'admin' };
-  if ($('authLoginPass')) $('authLoginPass').value = '';
+  resetPasswordField('authLoginPass');
   $('sidebarAccountBtn')?.classList.remove('active');
   updateAuthChrome();
   if (globalThis.refreshAll) globalThis.refreshAll();
@@ -211,9 +229,9 @@ export async function submitAccountCredentials(event) {
     await api('/api/auth/credentials', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    if ($('acctCurrentPass')) $('acctCurrentPass').value = '';
-    if ($('acctNewPass')) $('acctNewPass').value = '';
-    if ($('acctNewPass2')) $('acctNewPass2').value = '';
+    resetPasswordField('acctCurrentPass');
+    resetPasswordField('acctNewPass');
+    resetPasswordField('acctNewPass2');
     if (message) message.innerHTML = '<span class="ok">设置已保存</span>';
     await loadAccountSettings();
   } catch (error) {

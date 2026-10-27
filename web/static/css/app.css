@@ -39,6 +39,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent-2)}
 
 .shell{min-height:100%;display:grid;grid-template-columns:var(--sidebar-w) 1fr}
+.shell[hidden]{display:none!important}
 .sidebar{
   background:linear-gradient(180deg,var(--sidebar),#0b1222);
   border-right:1px solid var(--border);

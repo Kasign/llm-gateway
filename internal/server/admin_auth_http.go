@@ -76,14 +76,6 @@ func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 同一份快照提供开关、密码哈希和会话版本，避免并发修改时混用新旧状态。
-	snap := s.currentWebLoginSnapshot()
-	cfgUser := strings.TrimSpace(snap.Username)
-	if cfgUser == "" {
-		jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
-		return
-	}
-
 	ip := clientIP(r, s.trustedProxyRanges)
 	allowed, _, err := s.limiter.Allow(r.Context(), "login:"+ip, 12)
 	if err != nil {
@@ -93,6 +85,18 @@ func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		applog.Printf("admin login rate limited: ip=%s", ip)
 		jsonError(w, 429, "too_many_attempts", "too many login attempts, try again later")
+		return
+	}
+
+	// 串行化会话签发与密码设置更新，防止密码刚变更就签发旧版本会话。
+	s.webLoginStateMu.Lock()
+	defer s.webLoginStateMu.Unlock()
+
+	// 开关、哈希和版本号必须来自同一份快照。
+	snap := s.currentWebLoginSnapshot()
+	cfgUser := strings.TrimSpace(snap.Username)
+	if cfgUser == "" {
+		jsonError(w, 503, "login_not_configured", "控制台登录状态未初始化")
 		return
 	}
 
@@ -190,8 +194,8 @@ func (s *Server) authCredentialsGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authCredentialsPut(w http.ResponseWriter, r *http.Request) {
 	// 密码设置只能串行修改，避免并发请求基于旧版本覆盖对方的新值。
-	s.webLoginMutationMu.Lock()
-	defer s.webLoginMutationMu.Unlock()
+	s.webLoginStateMu.Lock()
+	defer s.webLoginStateMu.Unlock()
 
 	_, token, ok := s.adminSessionFromRequest(r.Context(), r)
 	if !ok {

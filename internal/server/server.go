@@ -96,7 +96,7 @@ type Server struct {
 	reqListCache   map[string]requestsListCacheEntry // 请求列表查询结果缓存（相同查询条件直接返回缓存）
 	// —— 网页登录状态 ——
 	webLoginMu sync.RWMutex     // 网页登录状态读写锁
-	webLoginMutationMu sync.Mutex // 串行化密码设置修改，避免并发请求覆盖新版本
+	webLoginStateMu sync.Mutex // 串行化网页登录会话签发与密码设置修改
 	webLogin   webLoginSnapshot // 当前网页登录快照（谁登录了、登录态是否有效）
 	pipe       *core.Pipeline   // 固化的推理主流程
 	runs       *runCancels      // 进行中推理的取消函数
