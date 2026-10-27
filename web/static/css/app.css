@@ -686,3 +686,53 @@ body.auth-locked{overflow:hidden}
 .account-form input{width:100%}
 
 @media(max-width:900px){.layout-2{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.sidebar{height:auto;position:relative}.nav{flex-direction:row;flex-wrap:wrap}}
+
+/* 密码/密钥输入框：默认隐藏，允许用户按需切换明文。 */
+.password-input-wrap{
+  position:relative;
+  display:flex;
+  align-items:center;
+  width:100%;
+  min-width:0;
+}
+.password-input-wrap>input{
+  width:100%;
+  min-width:0;
+  padding-right:44px!important;
+}
+.password-toggle{
+  position:absolute;
+  top:50%;
+  right:5px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:30px;
+  height:30px;
+  padding:0;
+  transform:translateY(-50%);
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:var(--text-2);
+  cursor:pointer;
+}
+.password-toggle:hover{
+  color:var(--text);
+  background:var(--surface-2);
+}
+.password-toggle:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:1px;
+}
+.password-toggle svg{
+  display:block;
+  width:18px;
+  height:18px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
