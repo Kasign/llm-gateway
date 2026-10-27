@@ -424,5 +424,5 @@
 
 - 管理台登录、账号凭据、管理员 API Key、Provider API Key 等密码输入默认隐藏，并增加眼睛图标用于显示/隐藏。
 - UI 切换不改变提交与密钥存储行为；使用独立按钮和无障碍标签。
-- 修改 `web/index.html`、`web/static/css/app.css` 及同步实施计划。逻辑位于 HTML 入口，不涉及 `app.js` / `providers-admin.js` Bundle 生成。
+- 修改 `web/index.html`、`web/static/css/app.css` 及同步实施计划。此前逻辑放在 HTML 内联脚本中，在存在 CSP 限制的反向代理环境下可能被浏览器拦截；已将按钮初始化迁移到 `web/js/features/auth.js` 并同步更新 `web/static/dist/app.js`，登录提交也改为由 Bundle 绑定，移除 HTML 内联脚本和 `onsubmit`。
 - 本次未运行浏览器测试或构建，待用户统一验收。
