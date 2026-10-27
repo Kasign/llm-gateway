@@ -564,6 +564,7 @@ paths:
       tags: [Authentication]
       summary: 查询控制台密码保护开关
       description: 公开只读状态，不返回密码哈希。
+      security: []
       responses:
         "200":
           description: 当前密码保护状态
@@ -2466,9 +2467,13 @@ components:
           enum: [active, disabled]
     AuthStatus:
       type: object
-      required: [password_enabled]
+      required: [password_enabled, password_source]
       properties:
         password_enabled: { type: boolean }
+        password_source:
+          type: string
+          enum: [database, deployment]
+          description: 当前有效密码哈希来自数据库设置还是部署环境变量，不包含密码或哈希。
     LoginRequest:
       type: object
       properties:

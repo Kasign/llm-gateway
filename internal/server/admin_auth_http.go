@@ -67,7 +67,10 @@ func (s *Server) authStatusAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := s.currentWebLoginSnapshot()
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]interface{}{"password_enabled": snap.PasswordEnabled})
+	writeJSON(w, map[string]interface{}{
+		"password_enabled": snap.PasswordEnabled,
+		"password_source":  snap.PasswordSource,
+	})
 }
 
 func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {

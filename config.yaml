@@ -12,6 +12,7 @@ auth:
   admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"
   # 仅在数据库尚无 web_admin_login 记录时生效。
   web_password_enabled: true
+  # 忘记密码恢复开关只通过主 .env 中的 LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV 临时启用。
   session_ttl_hours: 168
 
 database:

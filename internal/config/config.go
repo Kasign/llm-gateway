@@ -29,8 +29,9 @@ type Config struct {
 		AdminUsername     string `yaml:"admin_username"`
 		AdminPassword     string `yaml:"admin_password"`      // 仅环境变量注入，启动后哈希并清零
 		AdminPasswordHash  string `yaml:"admin_password_hash"` // 推荐：仅存 PBKDF2 哈希
-		WebPasswordEnabled bool   `yaml:"web_password_enabled"` // 仅作数据库尚无设置时的初始开关
-		SessionTTLHours    int    `yaml:"session_ttl_hours"`
+		WebPasswordEnabled   bool   `yaml:"web_password_enabled"` // 仅作数据库尚无设置时的初始开关
+		WebLoginResetFromEnv bool   `yaml:"-"` // 忘记密码时临时强制使用部署哈希，修复后必须撤销
+		SessionTTLHours     int    `yaml:"session_ttl_hours"`
 	} `yaml:"auth"`
 	Database struct {
 		// Host/Port are used to build the application DSN safely.
@@ -589,6 +590,13 @@ func applyAuthEnv(c *Config) error {
 			return fmt.Errorf("auth.web_password_enabled must be a boolean")
 		}
 		c.Auth.WebPasswordEnabled = enabled
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV must be a boolean")
+		}
+		c.Auth.WebLoginResetFromEnv = enabled
 	}
 	return nil
 }

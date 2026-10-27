@@ -15,6 +15,7 @@ type webLoginSnapshot struct {
     Username string
     PasswordHash string
     PasswordEnabled bool
+    PasswordSource string
     Revision uint64
 }
 
@@ -22,7 +23,11 @@ func (s *Server) loadWebLoginState(ctx context.Context) {
     hash := strings.TrimSpace(s.cfg.Auth.AdminPasswordHash)
     enabled := s.cfg.Auth.WebPasswordEnabled && adminuser.WebLoginConfigured(webAdminIdentity, hash)
     revision := uint64(0)
-    if stored, err := s.settings.GetWebLogin(ctx); err == nil && stored != nil {
+    source := "deployment"
+    if s.cfg.Auth.WebLoginResetFromEnv {
+        // 忘记密码时显式临时跳过数据库旧值；保存新密码后必须移除此环境开关。
+        applog.Printf("web login: reset-from-env override active; stored database credentials are temporarily bypassed")
+    } else if stored, err := s.settings.GetWebLogin(ctx); err == nil && stored != nil {
         storedHash := strings.TrimSpace(stored.PasswordHash)
         storedEnabled := false
         useStored := true
@@ -43,16 +48,30 @@ func (s *Server) loadWebLoginState(ctx context.Context) {
         }
         if useStored {
             hash, enabled, revision = storedHash, storedEnabled, stored.Revision
+            source = "database"
         }
     }
+    applog.Printf("web login state loaded: source=%s password_enabled=%t hash_format=%s", source, enabled, webLoginHashFormat(hash))
     s.webLoginMu.Lock()
     s.webLogin = webLoginSnapshot{
         Username: webAdminIdentity,
         PasswordHash: hash,
         PasswordEnabled: enabled,
+        PasswordSource: source,
         Revision: revision,
     }
     s.webLoginMu.Unlock()
+}
+
+func webLoginHashFormat(hash string) string {
+    switch {
+    case strings.HasPrefix(strings.TrimSpace(hash), "pbkdf2:"):
+        return "colon"
+    case strings.HasPrefix(strings.TrimSpace(hash), "pbkdf2$"):
+        return "legacy-dollar"
+    default:
+        return "missing-or-invalid"
+    }
 }
 
 func (s *Server) currentWebLoginSnapshot() webLoginSnapshot {
@@ -84,6 +103,7 @@ func (s *Server) persistWebLogin(ctx context.Context, snap webLoginSnapshot) err
     }); err != nil {
         return err
     }
+    snap.PasswordSource = "database"
     s.webLoginMu.Lock()
     s.webLogin = snap
     s.webLoginMu.Unlock()

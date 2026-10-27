@@ -12,6 +12,7 @@ auth:
   admin_password_hash: "${LLM_GATEWAY_ADMIN_PASSWORD_HASH}"
   # 仅在数据库尚无 web_admin_login 记录时生效；容器部署可由 LLM_GATEWAY_WEB_PASSWORD_ENABLED 覆盖。
   web_password_enabled: true
+  # 忘记密码恢复开关只通过环境变量 LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV 临时启用。
   # 或首次部署时用环境变量明文，启动后会哈希并丢弃明文（勿写入镜像）
   # admin_password: "${LLM_GATEWAY_ADMIN_PASSWORD}"
   session_ttl_hours: 168

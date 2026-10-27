@@ -9,7 +9,7 @@
 | server.host、server.port | config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
 | server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
 | 管理 API Key | `.env` 提供值，YAML 负责引用 | 高 | 重启 | 与 Web 管理会话和调用方 `sk-llm-*` Key 分离 |
-| Web 控制台初始密码哈希与保护默认值 | 主 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`、`LLM_GATEWAY_WEB_PASSWORD_ENABLED` 由 Compose 显式注入 | 高 | 重启；控制台保存后以数据库为准 | 新哈希格式为 `pbkdf2:`，兼容旧 `pbkdf2# LLM Gateway 配置清单与来源矩阵
+| Web 控制台初始密码哈希与保护默认值 | 主 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`、`LLM_GATEWAY_WEB_PASSWORD_ENABLED` 由 Compose 显式注入 | 高 | 重启；控制台保存后以数据库为准 | 新哈希格式为 `pbkdf2:`，兼容旧 `pbkdf2$`；`gateway_settings.web_admin_login` 保存后优先。忘记密码时用 `LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV=true` 临时恢复，改密后撤销 |
 
 > 新增配置时同步更新 Go 配置结构、规范模板、Compose 环境白名单（需要注入变量时）、中文部署说明和 CI 契约检查。本表记录稳定配置的主维护入口。
 
