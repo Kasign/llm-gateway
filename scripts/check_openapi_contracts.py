@@ -631,6 +631,7 @@ def main() -> int:
             request_analysis_source,
             audit_metrics_source,
             request_retention_source,
+            auth_handler,
         )
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
