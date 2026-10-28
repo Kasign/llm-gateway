@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LLM Gateway</title>
-<link rel="stylesheet" href="/static/css/app.css?v=20261028-ui-priority-p2-1">
+<link rel="stylesheet" href="/static/css/app.css?v=20261028-ui-priority-p2-2">
 <link rel="stylesheet" href="/static/css/model-download.css">
 </head>
 <body>
@@ -149,6 +149,12 @@
               <div class="field"><label for="providerDefaultModel">默认模型 ID</label><input id="providerDefaultModel" name="default_model" required maxlength="255"></div>
               <div class="field"><label for="providerApiKey">API Key</label><input id="providerApiKey" name="api_key" type="password" autocomplete="new-password" placeholder="新增时填写；编辑留空保留旧 Key"><small id="providerKeyHelp">Key 仅发送到服务端一次加密保存，API 不回传密钥内容。</small></div>
               <div class="field"><label for="providerApiKeyHeader">API Key Header</label><select id="providerApiKeyHeader" name="api_key_header"><option value="authorization">Authorization: Bearer</option><option value="api-key">api-key</option><option value="x-api-key">x-api-key</option></select></div>
+              <div class="field"><label for="providerEnabled">启用状态</label><select id="providerEnabled" name="enabled"><option value="true">启用</option><option value="false">停用</option></select></div>
+            </div>
+
+            <details class="provider-advanced-group">
+              <summary><span>限流与资源控制</span><small>并发、排队、RPM、每日预算与响应限制</small></summary>
+              <div class="provider-advanced-content"><div class="provider-grid">
               <div class="field"><label for="providerConcurrency">最大并发请求数（0 使用默认值）</label><input id="providerConcurrency" name="max_concurrent_requests" type="number" min="0" max="64" value="64" required></div>
               <div class="field"><label for="providerMaxQueue">最大排队请求数（0 关闭）</label><input id="providerMaxQueue" name="max_queue_size" type="number" min="0" max="1024" step="1" value="0" required><small>按 FIFO 排队，最多 1024 个等待请求；只作用于当前 Gateway 进程。0 保持立即返回 503 的旧行为。</small></div>
               <div class="field"><label for="providerQueueWaitTimeout">排队等待超时（秒，0 默认 30 秒）</label><input id="providerQueueWaitTimeout" name="queue_wait_timeout_seconds" type="number" min="0" max="3600" step="1" value="30" required><small>队列启用后，等待超时返回 503；客户端取消会立即退出队列。</small></div>
@@ -156,13 +162,24 @@
               <div class="field"><label for="providerTokenBudget">每日 Token 预算（UTC，0 不限制）</label><input id="providerTokenBudget" name="token_budget_per_day" type="number" min="0" max="1000000000000" step="1" value="0" required><small>同一 Provider 的所有调用方和 Agent 共用每日额度；预算启用后网关会限制单次输出上限。上游没有真实 usage 时会保守保留预占至当日桶过期。</small></div>
               <div class="field"><label for="providerMaxResponse">最大响应体字节数（0 使用默认值）</label><input id="providerMaxResponse" name="max_response_bytes" type="number" min="0" step="1" value="0" required></div>
               <div class="field"><label for="providerRequestTimeout">整体请求超时（秒，0 不额外限制）</label><input id="providerRequestTimeout" name="request_timeout_seconds" type="number" min="0" max="86400" step="1" value="0" required><small>启用后限制完整 JSON/SSE 请求时长，包含流式生成；范围 1–86400 秒，0 沿用现有请求上下文及响应头超时。</small></div>
-              <div class="field"><label for="providerEnabled">启用状态</label><select id="providerEnabled" name="enabled"><option value="true">启用</option><option value="false">停用</option></select></div>
-            </div>
-            <div class="field"><label for="providerMappings">模型 ID 映射（JSON 对象，可选）</label><textarea id="providerMappings" name="model_mappings" rows="4" placeholder='{"public-chat":"vendor-chat","public-reasoner":"vendor-reasoner"}'></textarea><small>客户端使用左侧公开 ID，Gateway 转发时使用右侧上游 ID；最多 128 项。</small></div>
-            <div class="provider-checks">
+
+            
+              </div></div>
+            </details>
+            <details class="provider-advanced-group">
+              <summary><span>模型 ID 映射</span><small>可选，按需配置客户端公开 ID 与上游模型 ID 的转换</small></summary>
+              <div class="provider-advanced-content">            <div class="field"><label for="providerMappings">模型 ID 映射（JSON 对象，可选）</label><textarea id="providerMappings" name="model_mappings" rows="4" placeholder='{"public-chat":"vendor-chat","public-reasoner":"vendor-reasoner"}'></textarea><small>客户端使用左侧公开 ID，Gateway 转发时使用右侧上游 ID；最多 128 项。</small></div></div>
+            </details>
+            <details class="provider-advanced-group">
+              <summary><span>网络与安全</span><small>私网地址与不安全 HTTP 只在明确需要时启用</small></summary>
+              <div class="provider-advanced-content">
+                            <div class="provider-checks">
               <label><input type="checkbox" id="providerAllowPrivate"> 允许访问私网地址（谨慎启用）</label>
               <label><input type="checkbox" id="providerAllowHTTP"> 允许不安全 HTTP（非生产环境）</label>
             </div>
+                <p class="small muted provider-security-note">放宽网络访问限制会改变 SSRF 防护边界；生产环境优先使用 HTTPS 与可公开验证的服务地址。</p>
+              </div>
+            </details>
             <div class="provider-actions"><button type="button" class="btn ghost" id="providerTestDraft">测试当前填写配置</button><button type="submit" class="btn" id="providerSave">保存配置</button></div>
             <div id="providerEditorStatus" class="msg muted" role="status" hidden></div>
           </form>
