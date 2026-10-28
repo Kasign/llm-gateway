@@ -1,0 +1,147 @@
+name: Web UI Browser Smoke
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "web/**"
+      - "internal/**"
+      - "cmd/**"
+      - "migrations/**"
+      - "config.example.yaml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/web-browser-smoke.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: web-browser-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  browser-smoke:
+    name: 启动 Gateway 并执行真实浏览器验收
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CONFIG_FILE: ${{ runner.temp }}/config.yaml
+      MARIADB_ROOT_PASSWORD: gateway-browser-root-pass
+      LLM_GATEWAY_DB_PASSWORD: gateway-browser-db-pass
+      LLM_GATEWAY_DB_HOST: 127.0.0.1
+      LLM_GATEWAY_REDIS_ADDR: 127.0.0.1:6379
+      REDIS_ROOT_PASSWORD: ""
+      LLM_GATEWAY_ADMIN_API_KEY: browser-smoke-admin-key-not-for-production
+      LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      LLM_GATEWAY_WEB_PASSWORD_ENABLED: "true"
+      LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV: "false"
+      LLAMA_CPP_BASE_URL: http://127.0.0.1:19123
+      OLLAMA_BASE_URL: http://127.0.0.1:19124
+      LLAMA_UPSTREAM_API_KEY: ""
+      LLM_BACKEND: llamacpp
+      LLAMA_REQUEST_TIMEOUT_SECONDS: "0"
+      BROWSER_BASE_URL: http://127.0.0.1:8088
+      BROWSER_TEST_PASSWORD: ci-browser-pass
+      BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/web-ui-artifacts
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-browser-root-pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 构建前端 Bundle 并验证同步
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js
+
+      - name: 准备隔离的 Gateway 测试配置
+        run: |
+          mkdir -p "${RUNNER_TEMP}/models" "${RUNNER_TEMP}/web-ui-artifacts"
+          sed \
+            -e "s#/app/migrations/001_init.sql#${GITHUB_WORKSPACE}/migrations/001_init.sql#" \
+            -e "s#/data/models#${RUNNER_TEMP}/models#" \
+            config.example.yaml > "${CONFIG_FILE}"
+          test -f "${GITHUB_WORKSPACE}/migrations/001_init.sql"
+          test -d "${RUNNER_TEMP}/models"
+
+      - name: 构建 Gateway 并生成临时网页登录密码哈希
+        run: |
+          go build -trimpath -o "${RUNNER_TEMP}/llm-gateway" ./cmd/gateway
+          echo "LLM_GATEWAY_ADMIN_PASSWORD_HASH=$(go run ./cmd/hash-admin-password ci-browser-pass)" >> "$GITHUB_ENV"
+
+      - name: 启动真实 Gateway 服务
+        run: |
+          nohup "${RUNNER_TEMP}/llm-gateway" > "${RUNNER_TEMP}/llm-gateway.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/llm-gateway.pid"
+          for attempt in $(seq 1 60); do
+            if curl --silent --show-error --fail "${BROWSER_BASE_URL}/api/auth/status" > "${RUNNER_TEMP}/auth-status.json"; then
+              cat "${RUNNER_TEMP}/auth-status.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "${RUNNER_TEMP}/llm-gateway.log"
+          exit 1
+
+      - name: 安装 Chromium 与 Playwright
+        working-directory: web
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: 执行桌面、窄屏与核心交互验收
+        run: node web/tests/ui-smoke.mjs
+
+      - name: 上传浏览器截图与验收报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-browser-smoke
+          path: |
+            ${{ runner.temp }}/web-ui-artifacts/
+            ${{ runner.temp }}/llm-gateway.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: 停止 Gateway 服务
+        if: always()
+        run: |
+          if test -f "${RUNNER_TEMP}/llm-gateway.pid"; then
+            kill "$(cat "${RUNNER_TEMP}/llm-gateway.pid")" 2>/dev/null || true
+          fi
