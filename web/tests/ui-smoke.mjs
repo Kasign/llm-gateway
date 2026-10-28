@@ -252,6 +252,24 @@ try {
     await editButton.waitFor({state:'visible',timeout:10000});
     await editButton.click();
     await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    await page.waitForFunction(() => {
+      const save = document.getElementById('keyEditSave');
+      return Boolean(save && !save.disabled);
+    }, null, {timeout:10000});
+    await page.locator('#keyEditClose').focus();
+    await page.keyboard.press('Shift+Tab');
+    check('服务密钥编辑弹窗的 Shift+Tab 焦点循环留在弹窗内',
+      await page.locator('#keyEditSave').evaluate(el => document.activeElement === el));
+    await page.keyboard.press('Escape');
+    await page.locator('#keyEditModal').waitFor({state:'hidden',timeout:5000});
+    check('服务密钥编辑弹窗支持 Escape 并返回触发按钮',
+      await editButton.evaluate(el => document.activeElement === el));
+    await editButton.click();
+    await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    await page.waitForFunction(() => {
+      const save = document.getElementById('keyEditSave');
+      return Boolean(save && !save.disabled);
+    }, null, {timeout:10000});
     check('编辑弹窗会恢复当前服务权限', await page.locator('#keyEditServicesList input[value="llamacpp"]').isChecked());
     await page.locator('#keyEditServicesList input[value="llamacpp"]').uncheck();
     await page.locator('#keyEditServicesList input[value="ollama"]').check();
@@ -420,6 +438,19 @@ try {
     providersSource.includes('仍保留上次成功加载的数据') &&
     providersSource.includes("setAttribute('aria-busy', 'true')") &&
     indexHtml.includes('id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false"'));
+  check('请求详情弹窗具备可访问语义、Escape 关闭和焦点循环',
+    indexHtml.includes('id="detailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="requestDetailTitle" aria-hidden="true"') &&
+    requestsSource.includes('detailTrigger = document.activeElement') &&
+    requestsSource.includes("event.key === 'Escape'") &&
+    requestsSource.includes('event.shiftKey && (active === first || !modal.contains(active))') &&
+    appBundle.includes('detailTrigger = document.activeElement') &&
+    appBundle.includes('event.key === "Escape"'));
+  check('服务密钥编辑 Bundle 与源码一致，且具备 Escape、焦点返回和 Tab 循环',
+    providerBundle === fs.readFileSync(path.resolve('web/js/key-service-picker.js'), 'utf8') &&
+    keyPickerSource.includes('function restoreEditFocus()') &&
+    keyPickerSource.includes("if(event.key==='Escape')") &&
+    keyPickerSource.includes("event.shiftKey&&(active===first||!editModal.contains(active))") &&
+    keyPickerSource.includes('showEditModal(button)'));
   check('调用记录有明确的加载中、失败重试与无障碍忙碌状态',
     requestsSource.includes('正在加载调用记录…') &&
     requestsSource.includes('role="alert"') &&
