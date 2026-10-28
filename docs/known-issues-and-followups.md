@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 最新代码基线：`654416290a65090648080ffce3214bddb89b916f`（2026-10-28）。Go CI [运行 40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [运行 40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均通过；浏览器报告 52/52 项通过。早期 Actions #257 的 Runner 启动失败属于历史状态，不再代表当前基线。
+- 最新代码基线：`d89b94247e8b60164f28758a5da1142c5bafa054`（2026-10-28）。Go CI [运行 40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过；上一轮 Web UI 浏览器验收 [运行 40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过。此后提交集中在文档与 OpenAPI/契约门禁，未改 Web 运行时代码。早期 Actions #257 的 Runner 启动失败属于历史状态，不再代表当前基线。
 - 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
 - Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
 - Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
@@ -487,3 +487,11 @@
 - 新增 `docs/production-acceptance-checklist.md`：1Panel/OpenResty/llama.cpp 生产验收步骤与结果模板。未实际运行的项目默认标记“未测”。
 - 新增 `docs/admin-polling-performance-plan.md`：无轮询/默认轮询/高频轮询对照设计，区分 Go 微基准与管理台端到端测量。
 - 真实 Provider E2E 已有 opt-in 测试：OpenAI-compatible Chat、Responses 与 Anthropic Messages；默认不访问网络。运行前需确认端点、模型、预算与用户授权，不能将默认跳过视为通过。
+
+
+## 2026-10-28 追加：网页登录 OpenAPI 契约闭环
+
+- 修正 `PUT /api/auth/credentials` 成功响应的 Schema：Handler 除 `user.username` 外还返回 `password_enabled`，不应只引用 `SessionUser`。新增 `CredentialsMutationResponse` 使文档准确描述实际 JSON。
+- 将公开 `GET /api/auth/status` 的 `password_enabled`、`password_source` 及 `Cache-Control: no-store` 纳入高风险 Schema/Handler 门禁，防止密码来源状态与公开契约漂移。
+- 当前基线 `d89b94247e8b60164f28758a5da1142c5bafa054` 的 Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过，包含该门禁、前端 Bundle、race、稳态负载、故障注入与 Docker 构建。
+- 新增 `docs/real-provider-e2e-matrix.md`，说明已有 opt-in 真实端点测试的环境变量、单测试执行命令与凭据安全要求。该矩阵用于下一阶段在具备授权的用户环境执行；没有实际凭据时继续标记未测。

@@ -2,11 +2,11 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-28。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 最新通过的代码基线：`654416290a65090648080ffce3214bddb89b916f`（Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均通过）。
+> 最新通过的代码基线：`d89b94247e8b60164f28758a5da1142c5bafa054`（Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过；上一轮 Web UI 浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过，后续提交未改 Web 运行时代码）。
 
 ## 当前状态快照（2026-10-28）
 
-- 当前通过基线：`654416290a65090648080ffce3214bddb89b916f`；Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均成功，浏览器验收 52/52 项通过。
+- 当前通过基线：`d89b94247e8b60164f28758a5da1142c5bafa054`；Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 成功。上一轮 Web UI 浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过；之后仅改 OpenAPI/门禁与文档，未改前端运行时代码。
 - 当前没有开放 PR 或 Issue。保持 `dev` 为唯一集成分支，不强推、不改写历史。
 - 多 Provider 管理、密钥加密与脱敏、模型映射、并发/FIFO 队列、RPM/Token 预算、审计、流式错误处理和高风险配置/API 契约门禁均已实现。
 - Provider 热更新最后一轮审查没有发现正常有效配置能触发的 setter 失败；保持现有最小补偿顺序，不增加额外回滚框架。
@@ -1138,3 +1138,12 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - 新增 `docs/admin-polling-performance-plan.md`，定义无轮询、默认轮询、高频轮询三组对照与多次采样指标；明确现有 Go 微基准不代表管理台轮询或数据库性能。
 - 已存在 opt-in 真实 Provider 测试：OpenAI-compatible Chat/Responses 与 Anthropic Messages。默认跳过网络请求，需在有授权和预算的环境手动启用；CI Mock 不代替真实上游验收。
 - 这些文档是验收准备，不代表已执行生产部署、真实供应商请求或性能采样。
+
+
+## 43. 2026-10-28：认证响应契约与真实 Provider 验收矩阵
+
+- `GET /api/auth/status` 的稳定公开字段与 no-store 行为已进入 OpenAPI/Handler 高风险契约门禁。
+- `PUT /api/auth/credentials` 现在使用独立 `CredentialsMutationResponse`，明确声明 `user.username` 和 `password_enabled`；避免客户端按 `SessionUser` 忽略密码保护状态字段。
+- 最新代码基线 `d89b94247e8b60164f28758a5da1142c5bafa054` 的 Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过，覆盖契约检查、Go/race/vet、稳态负载、故障注入、Docker 构建和 Bundle 同步。
+- 新增 `docs/real-provider-e2e-matrix.md`，为 OpenAI-compatible Chat、Responses 与 Anthropic Messages opt-in 测试列出独立变量、执行命令、验收标准及凭据安全要求。文档不代表已执行真实供应商请求。
+- 继续保留生产 1Panel/OpenResty/llama.cpp 验收、真实 Provider 调用、管理台轮询性能测量为未完成环境项；不以 CI 替代。
