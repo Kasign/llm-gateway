@@ -2068,7 +2068,7 @@
       const j = await api("/api/hf/files?repo=" + encodeURIComponent(repo) + "&revision=" + encodeURIComponent(rev));
       const fs = j.data || [];
       $("filesMsg").textContent = `${fs.length} \u4E2A GGUF`;
-      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" onclick="${esc('chooseFile('+JSON.stringify(f.path)+','+JSON.stringify(repo)+')')}">\u9009\u62E9</button></td></tr>`).join(""));
+      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" onclick="${esc("chooseFile(" + JSON.stringify(f.path) + "," + JSON.stringify(repo) + ")")}">\u9009\u62E9</button></td></tr>`).join(""));
     } catch (e) {
       $("filesMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
     }
