@@ -76,12 +76,12 @@ try {
   page.on('console', message => {
     if (message.type() !== 'error' || /favicon\.ico/i.test(message.text())) return;
     const messageText = message.text();
-    if (expectedAdminKeyRejection &&
-        /Failed to load resource: the server responded with a status of 401 \\(Unauthorized\\)/.test(messageText)) {
+    if (/Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/.test(messageText) &&
+        (expectedAdminKeyRejection || report.expectedAuthFailures.some(entry => entry.url?.includes('/api/admin/keys')))) {
       report.expectedAuthFailures.push({ source: 'browser-console', message: messageText });
       return;
     }
-    if (/Failed to load resource: the server responded with a status of 502 \\(Bad Gateway\\)/.test(messageText)) {
+    if (/Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/.test(messageText)) {
       report.environmentConsoleWarnings.push(messageText);
       return;
     }
