@@ -443,6 +443,7 @@ try {
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
+  const mainSource = fs.readFileSync(path.resolve('web/js/app/main.js'), 'utf8');
   const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
   const keyPickerSource = fs.readFileSync(path.resolve('web/js/key-service-picker.js'), 'utf8');
   const keyPickerBundle = fs.readFileSync(path.resolve('web/static/dist/key-service-picker.js'), 'utf8');
@@ -533,6 +534,15 @@ try {
     requestsSource.includes('event.shiftKey && (active === first || !modal.contains(active))') &&
     appBundle.includes('detailTrigger = document.activeElement') &&
     appBundle.includes('event.key === "Escape"'));
+  check('性能测试参数抽屉具备焦点进入、Escape 关闭、焦点循环和返回触发按钮',
+    indexHtml.includes('id="benchParamsDrawer" class="drawer-root" aria-hidden="true" hidden') &&
+    mainSource.includes('function benchDrawerFocusable(root)') &&
+    mainSource.includes('benchDrawerTrigger=document.activeElement') &&
+    mainSource.includes('if(e.key===\'Escape\')') &&
+    mainSource.includes('if(e.shiftKey&&(active===first||!root.contains(active)))') &&
+    mainSource.includes('if(trigger?.isConnected)trigger.focus()') &&
+    appBundle.includes('function benchDrawerFocusable(root)') &&
+    appBundle.includes('benchDrawerTrigger = document.activeElement'));
   check('服务密钥编辑 Bundle 与源码一致，且具备 Escape、焦点返回、Tab 循环和异步关闭保护',
     keyPickerBundle === keyPickerSource &&
     keyPickerSource.includes('function restoreEditFocus()') &&
@@ -620,6 +630,27 @@ try {
         Math.max(...values) - Math.min(...values) <= 1 &&
         values.every(height => Math.abs(height - 42) <= 1),
         heights);
+    }
+
+    if (tab === 'benchmark') {
+      const opener = page.locator('#benchParamsOpenBtn');
+      await opener.click();
+      const drawer = page.locator('#benchParamsDrawer');
+      await drawer.waitFor({ state: 'visible', timeout: 5000 });
+      const closeButton = drawer.locator('.drawer-head button');
+      await page.waitForFunction(() => document.activeElement === document.querySelector('#benchParamsDrawer .drawer-head button'));
+      check('性能测试参数抽屉打开后将焦点移入关闭按钮',
+        await closeButton.evaluate(el => document.activeElement === el));
+      await page.keyboard.press('Shift+Tab');
+      check('性能测试参数抽屉 Shift+Tab 循环到最后一个控件',
+        await page.locator('#benchStop').evaluate(el => document.activeElement === el));
+      await page.keyboard.press('Tab');
+      check('性能测试参数抽屉 Tab 焦点循环回第一个控件',
+        await closeButton.evaluate(el => document.activeElement === el));
+      await page.keyboard.press('Escape');
+      await drawer.waitFor({ state: 'hidden', timeout: 5000 });
+      check('性能测试参数抽屉支持 Escape 并返回触发按钮',
+        await opener.evaluate(el => document.activeElement === el));
     }
 
     if (tab === 'requests') {
