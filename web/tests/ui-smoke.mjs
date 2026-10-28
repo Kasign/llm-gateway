@@ -490,6 +490,52 @@ try {
   check('核心文字颜色在五种主要深色表面达到 WCAG AA（≥4.5:1）',
     Object.values(textContrastAudit).every(value => Number.isFinite(value) && value >= 4.5),
     textContrastAudit);
+  const idleBadgeContrast = await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;background:var(--surface-2)';
+    const badge = document.createElement('span');
+    badge.className = 'pill pill-idle';
+    badge.textContent = '未加载';
+    host.appendChild(badge);
+    document.body.appendChild(host);
+
+    const parseRgb = value => (value.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+    const foreground = getComputedStyle(badge).color;
+    const background = getComputedStyle(badge).backgroundColor;
+    const surface = getComputedStyle(host).backgroundColor;
+    const fg = parseRgb(foreground);
+    const bg = parseRgb(background);
+    const base = parseRgb(surface);
+    if (fg.length < 3 || bg.length < 3 || base.length < 3) {
+      host.remove();
+      return { foreground, background, surface, ratio: Number.NaN };
+    }
+    const alpha = bg[3] ?? 1;
+    const composite = bg.slice(0, 3).map((channel, index) => channel * alpha + base[index] * (1 - alpha));
+    const luminance = channels => {
+      const linear = channels.map(channel => {
+        const srgb = channel / 255;
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const values = [luminance(fg), luminance(composite)].sort((a, b) => b - a);
+    const result = {
+      foreground,
+      background,
+      surface,
+      composite: composite.map(Math.round),
+      ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2))
+    };
+    host.remove();
+    return result;
+  });
+  check('空闲状态徽标在较亮的深色表面达到 WCAG AA（≥4.5:1）',
+    appCss.includes('.pill-idle{background:rgba(148,163,184,.1);color:var(--text-2)}') &&
+    Number.isFinite(idleBadgeContrast.ratio) &&
+    idleBadgeContrast.ratio >= 4.5,
+    idleBadgeContrast);
+
   const formLabelAudit = await page.evaluate(() => {
     const ids = [
       'beBackend', 'repo', 'revision', 'modelKey', 'displayName', 'quant', 'filename',
