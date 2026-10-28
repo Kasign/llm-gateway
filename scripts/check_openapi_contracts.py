@@ -23,6 +23,7 @@ AUDIT_METRICS_FILE = ROOT / "internal" / "audit" / "metrics.go"
 REQUEST_RETENTION_FILE = ROOT / "internal" / "server" / "request_retention.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
+AUTH_HANDLER_FILE = ROOT / "internal" / "server" / "admin_auth_http.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -103,6 +104,7 @@ def validate(
     request_analysis_source: str,
     audit_metrics_source: str,
     request_retention_source: str,
+    auth_handler: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -309,6 +311,7 @@ def validate(
         retention_decl = re.search(
             r"(?ms)^type requestRetentionStatusResponse struct \{(.*?)^\}",
             request_retention_source,
+            auth_handler,
         )
         if retention_decl is None:
             raise ValueError("internal/server/request_retention.go: type requestRetentionStatusResponse not found")
@@ -485,6 +488,76 @@ def validate(
                 schema_field_block(timing_schema, field)
             except ValueError:
                 errors.append(f"RequestTiming: missing helper field {field!r}")
+        # Public auth status must describe exactly the stable, non-secret fields emitted by the Handler.
+        auth_status_operation = operation_block(source, "/api/auth/status", "get")
+        auth_status_response = response_block(auth_status_operation, "200")
+        require(
+            '"#/components/schemas/AuthStatus"' in auth_status_response,
+            "GET /api/auth/status 200 must reference AuthStatus",
+        )
+        auth_status_schema = schema_block(source, "AuthStatus")
+        auth_status_handler = go_function(auth_handler, "func (s *Server) authStatusAPI(")
+        require(
+            '"password_enabled": snap.PasswordEnabled' in auth_status_handler,
+            "authStatusAPI must expose password_enabled from the current login snapshot",
+        )
+        require(
+            '"password_source":  snap.PasswordSource' in auth_status_handler,
+            "authStatusAPI must expose password_source from the current login snapshot",
+        )
+        require(
+            'w.Header().Set("Cache-Control", "no-store")' in auth_status_handler,
+            "authStatusAPI must prevent caching of current credential-source state",
+        )
+        for field, kind in (("password_enabled", "boolean"), ("password_source", "string")):
+            try:
+                field_schema = schema_field_block(auth_status_schema, field)
+                require(
+                    re.search(rf"(?m)^\\s*{field}:\\s*\\{{\\s*type:\\s*{kind}\\s*\\}}", field_schema) is not None
+                    or re.search(rf"(?m)^        {field}:\\s*$", field_schema) is not None,
+                    f"AuthStatus.{field} must declare type {kind}",
+                )
+            except ValueError as exc:
+                errors.append(f"AuthStatus: {exc}")
+        try:
+            source_field = schema_field_block(auth_status_schema, "password_source")
+            require(
+                "enum: [database, deployment]" in source_field,
+                "AuthStatus.password_source must enumerate database and deployment",
+            )
+        except ValueError as exc:
+            errors.append(f"AuthStatus: {exc}")
+
+        # Credential mutation response includes the updated password_enabled state;
+        # it must not be documented as SessionUser alone.
+        credentials_put = operation_block(source, "/api/auth/credentials", "put")
+        credentials_response = response_block(credentials_put, "200")
+        require(
+            '"#/components/schemas/CredentialsMutationResponse"' in credentials_response,
+            "PUT /api/auth/credentials 200 must reference CredentialsMutationResponse",
+        )
+        credentials_response_schema = schema_block(source, "CredentialsMutationResponse")
+        credentials_put_handler = go_function(auth_handler, "func (s *Server) authCredentialsPut(")
+        for field in ("user", "password_enabled"):
+            require(
+                re.search(rf'(?m)writeJSON\\(w, map\\[string\\]interface\\{{\\}}\\{{(?:(?!\\n\\t\\}}).)*"{field}"', credentials_put_handler, re.S) is not None
+                or f'"{field}":' in credentials_put_handler,
+                f"authCredentialsPut must return {field}",
+            )
+            try:
+                schema_field_block(credentials_response_schema, field)
+            except ValueError as exc:
+                errors.append(f"CredentialsMutationResponse: {exc}")
+        require(
+            '"username": webAdminIdentity' in credentials_put_handler,
+            "authCredentialsPut must include the updated user username field",
+        )
+        try:
+            user_field = schema_field_block(credentials_response_schema, "user")
+            require("username:" in user_field, "CredentialsMutationResponse.user must declare username")
+        except ValueError as exc:
+            errors.append(f"CredentialsMutationResponse: {exc}")
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -546,6 +619,7 @@ def main() -> int:
         request_analysis_source = REQUEST_ANALYSIS_FILE.read_text(encoding="utf-8")
         audit_metrics_source = AUDIT_METRICS_FILE.read_text(encoding="utf-8")
         request_retention_source = REQUEST_RETENTION_FILE.read_text(encoding="utf-8")
+        auth_handler = AUTH_HANDLER_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -574,7 +648,7 @@ def main() -> int:
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
         "request-list Provider filtering, request-cancel status contract, "
-        "/api/models GatewayModel fields, RequestLog fields, RequestDetail fields, RequestAnalysis/StreamEvent fields, AuditMetrics fields, and request retention status fields."
+        "/api/models GatewayModel fields, RequestLog fields, RequestDetail fields, RequestAnalysis/StreamEvent fields, AuditMetrics fields, and request retention status fields, public auth status and credential mutation response fields."
     )
     print(
         "Note: this is a focused gate; full field-level Go/OpenAPI schema equivalence "

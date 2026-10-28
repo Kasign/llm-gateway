@@ -706,11 +706,11 @@ paths:
               $ref: "#/components/schemas/CredentialsMutation"
       responses:
         "200":
-          description: 更新后的用户信息
+          description: 更新后的用户信息与密码保护状态
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionUser"
+                $ref: "#/components/schemas/CredentialsMutationResponse"
         "400":
           $ref: "#/components/responses/AdminError"
         "401":
@@ -2609,6 +2609,17 @@ components:
         can_change_via:
           type: string
           const: web
+    CredentialsMutationResponse:
+      type: object
+      required: [user, password_enabled]
+      properties:
+        user:
+          type: object
+          required: [username]
+          properties:
+            username: { type: string }
+        password_enabled: { type: boolean }
+      additionalProperties: false
     CredentialsMutation:
       type: object
       required: [password_enabled]
