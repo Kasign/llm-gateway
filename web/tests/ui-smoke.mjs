@@ -202,6 +202,10 @@ try {
   await page.screenshot({ path: screenshotName('keys-admin-key-desktop'), fullPage: true });
 
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
+  const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
+  check('远程 Provider 请求不会使用管理员服务密钥',
+    !providerBundle.includes('const adminKey = () =>') &&
+    !providerBundle.includes("headers['X-Admin-Key'] = adminKey()"));
   check('本地模型 Bundle 已移除来源列渲染逻辑',
     !appBundle.includes('llamaCatalogSourceLabel') &&
     !appBundle.includes(String.raw`<th>\u6765\u6E90</th>`));
