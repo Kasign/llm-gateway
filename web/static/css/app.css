@@ -905,3 +905,35 @@ body.auth-locked{overflow:hidden}
   #dashboard .gauge-title{font-size:11px;letter-spacing:.02em}
   #dashboard .gauge-sub{font-size:12px;overflow-wrap:anywhere}
 }
+
+
+/* Provider 表单：将首次创建需要的连接信息与低频高级设置分离。 */
+.provider-advanced-group{
+  border:1px solid var(--border);border-radius:12px;background:rgba(8,13,24,.24);
+  padding:0 14px;min-width:0;
+}
+.provider-advanced-group>summary{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:48px;padding:11px 0;cursor:pointer;list-style:none;font-size:13px;font-weight:650;
+}
+.provider-advanced-group>summary::-webkit-details-marker{display:none}
+.provider-advanced-group>summary::after{content:"展开";margin-left:auto;color:var(--text-3);font-size:12px;font-weight:500}
+.provider-advanced-group[open]>summary::after{content:"收起"}
+.provider-advanced-group>summary small{font-size:11px;color:var(--text-3);font-weight:400;text-align:right}
+.provider-advanced-group[open]>summary{border-bottom:1px solid var(--border);margin-bottom:14px}
+.provider-advanced-content{min-width:0;padding-bottom:14px}
+.provider-advanced-content>.field{margin:0}
+.provider-advanced-content .provider-grid{padding:0}
+.provider-security-note{margin:10px 0 0;line-height:1.5}
+
+/* 小屏操作区采用完整按钮布局，避免按钮标签被挤成两行。 */
+@media(max-width:560px){
+  #providers .card-head{flex-direction:column;align-items:stretch}
+  #providers .mm-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;justify-content:stretch}
+  #providers .mm-toolbar .btn{width:100%;min-width:0;padding-left:8px;padding-right:8px;white-space:nowrap}
+  #providers .provider-actions .btn{flex:1 1 140px;min-height:42px}
+  #dashboard .backend-toolbar{align-items:stretch;flex-direction:column;gap:10px}
+  #dashboard .backend-field{width:100%;min-width:0}
+  #dashboard .backend-actions{display:grid;grid-template-columns:minmax(0,1fr);width:100%}
+  #dashboard .backend-actions .btn{width:100%;min-height:42px}
+}
