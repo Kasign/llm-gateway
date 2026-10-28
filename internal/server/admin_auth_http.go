@@ -49,13 +49,19 @@ func (s *Server) adminUsernameFromRequest(ctx context.Context, r *http.Request) 
 	return name
 }
 
-// adminAuthorized 保护 /api/* 管理接口：Web 会话或 X-Admin-Key（自动化脚本）。
+// adminAPIKeyAllowedForPath 限定管理员 API Key 的用途：仅允许管理客户端服务密钥。
+// 其他管理 API 必须使用 Web Session，避免管理员 Key 意外成为通用控制台登录凭据。
+func adminAPIKeyAllowedForPath(path string) bool {
+	return path == "/api/admin/keys" || strings.HasPrefix(path, "/api/admin/keys/")
+}
+
+// adminAuthorized 保护管理 API：服务密钥管理可用管理员 API Key，其余页面必须使用 Web 会话。
 // 客户端调用 /v1/* 走 authenticate，仅校验 sk-llm- API Key，与会话无关。
 func (s *Server) adminAuthorized(ctx context.Context, r *http.Request) bool {
-	if s.cfg.Auth.AdminAPIKey != "" {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(s.cfg.Auth.AdminAPIKey)) == 1 {
-			return true
-		}
+	if s.cfg.Auth.AdminAPIKey != "" &&
+		adminAPIKeyAllowedForPath(r.URL.Path) &&
+		subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(s.cfg.Auth.AdminAPIKey)) == 1 {
+		return true
 	}
 	return s.adminUsernameFromRequest(ctx, r) != ""
 }
