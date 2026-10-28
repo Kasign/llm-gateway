@@ -313,3 +313,11 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 编辑服务密钥的动态加载/保存错误改用 assertive alert region，以便辅助技术及时播报错误。
 - Browser Smoke 增加抽屉的真实键盘交互检查、18 个主要表单控件标签关联检查，以及服务范围组名称/错误语义检查。上述用例已提交，尚未实际执行确认。
 - `web/js/app/main.js` 与 `web/static/dist/app.js` 已分别更新抽屉焦点管理；脚本缓存版本更新为 `20261028-benchmark-drawer-a11y-1`。当前只对这段抽屉逻辑做了对应 Bundle 修改，后续应通过正式构建与全量 Browser Smoke 验证源 Bundle 的整体一致性。
+
+### CI 构建差异定位与 Bundle 同步修复（2026-10-28）
+
+- 远端 `dev` 的 HEAD 为 `56c5a2de937b545e50a26bfc0e0f45b3bcfc504a`；修复前最新 Go CI（[run 40686015490](https://github.com/Kasign/llm-gateway/actions/runs/40686015490)）在前端 Bundle 一致性步骤失败，Go 测试、竞态检查、静态检查、负载/故障注入及 Docker 构建任务均完成并成功。
+- Browser Smoke（[run 40685998927](https://github.com/Kasign/llm-gateway/actions/runs/40685998927)）在“构建前端 Bundle 并验证同步”步骤发现 `web/static/dist/app.js` 与 `npm ci && npm run build` 结果不一致，后续真实 Gateway 与 Playwright 浏览器验收步骤被跳过；该 run 不能作为抽屉键盘回归通过的证据。
+- 已依据上述 CI 实际生成的完整差异同步 `web/static/dist/app.js`：包含请求详情弹窗焦点列表过滤隐藏/不可见控件，以及移除源码中已不存在的旧抽屉键盘监听等变化。差异也包含锁定版 esbuild 0.25.12 生成的转义与格式规范化。
+- `web/index.html` 的 app.js 查询版本更新为 `20261028-ui-bundle-sync-2`，避免浏览器继续复用旧 Bundle；服务密钥选择器源码与 `web/static/dist/key-service-picker.js` 的 Blob SHA 一致，本次无需改动该 Bundle。
+- Browser Smoke 已包含真实 Playwright 键盘交互（抽屉打开后焦点进入、Shift+Tab / Tab 循环、Escape 关闭并将焦点还给触发按钮），并检查表单标签关联及浏览器实际计算的核心文字对比度。但修复后的新一轮工作流结果需以该提交触发的 Actions 为准；本记录不把修复前失败或被跳过的步骤记为通过。

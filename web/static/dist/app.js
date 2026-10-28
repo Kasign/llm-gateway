@@ -364,7 +364,7 @@
     const tableEl = $("requestsTable");
     if (!tableEl) return;
     tableEl.setAttribute("aria-busy", "true");
-    tableEl.innerHTML = '<p class="muted small">\u6b63\u5728\u52a0\u8f7d\u8c03\u7528\u8bb0\u5f55\u2026</p>';
+    tableEl.innerHTML = '<p class="muted small">\u6B63\u5728\u52A0\u8F7D\u8C03\u7528\u8BB0\u5F55\u2026</p>';
     loadRequestStats();
     const q = new URLSearchParams();
     q.set("limit", "100");
@@ -375,20 +375,19 @@
     try {
       const j = await api("/api/requests?" + q);
       const rows = j.data || [];
-      tableEl.innerHTML = !rows.length ? emptyState("\u6682\u65e0\u8bb0\u5f55") : wrapTable(
-        "<tr><th>\u65f6\u95f4</th><th>\u5ba2\u6237\u7aef / \u5bc6\u94a5</th><th>\u8bf7\u6c42 URL</th><th>Provider / \u6a21\u578b</th><th>\u72b6\u6001 / \u6d41\u5f0f</th><th>HTTP</th><th>\u8017\u65f6 / TTFT</th><th>Token / \u4f53\u79ef</th><th>\u64cd\u4f5c</th></tr>" + rows.map((x) => {
+      tableEl.innerHTML = !rows.length ? emptyState("\u6682\u65E0\u8BB0\u5F55") : wrapTable(
+        "<tr><th>\u65F6\u95F4</th><th>\u5BA2\u6237\u7AEF / \u5BC6\u94A5</th><th>\u8BF7\u6C42 URL</th><th>Provider / \u6A21\u578B</th><th>\u72B6\u6001 / \u6D41\u5F0F</th><th>HTTP</th><th>\u8017\u65F6 / TTFT</th><th>Token / \u4F53\u79EF</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
           const rid = String(x.request_id || "");
           const ridShort = rid.length > 10 ? rid.slice(0, 8) + "\u2026" : rid;
           const target = displayRequestTarget(x);
           const model = displayUpstreamModel(x);
           const sz = (Number(x.request_bytes || 0) / 1024).toFixed(1) + " / " + (Number(x.response_bytes || 0) / 1024).toFixed(1) + " KB";
-          const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u7ed3\u675f</button>` : "";
-          return `<tr><td class="small req-time">${fmtDate(x.started_at)}</td><td><div class="req-cell-main">${esc(x.client_name || "\u2014")}</div><div class="req-cell-sub">\u5bc6\u94a5\uff1a${esc(x.api_key_name || "\u2014")}</div><div class="req-cell-sub" title="${esc(rid)}">ID\uff1a<code>${esc(ridShort)}</code></div></td><td class="small req-url" title="${esc(target)}">${esc(target)}</td><td><div class="req-cell-main"><code>${esc(x.provider_id || "\u2014")}</code></div><div class="req-cell-sub" title="${esc(model)}">\u6a21\u578b\uff1a${esc(model)}</div></td><td><div>${statusPill(x.status)}</div><div class="req-cell-sub">${x.stream ? "\u6d41\u5f0f" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63a8\u65ad\u6d41\u5f0f" : "\u975e\u6d41\u5f0f"}</div></td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td><div class="req-cell-main">${x.latency_ms != null ? x.latency_ms + " ms" : "\u2014"}</div><div class="req-cell-sub">TTFT\uff1a${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</div></td><td><div class="req-cell-main">${x.total_tokens ?? "\u2014"}</div><div class="req-cell-sub">\u4f53\u79ef\uff1a${sz}</div></td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u8be6\u60c5</button>${stopBtn}</div></td></tr>`;
+          const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u7ED3\u675F</button>` : "";
+          return `<tr><td class="small req-time">${fmtDate(x.started_at)}</td><td><div class="req-cell-main">${esc(x.client_name || "\u2014")}</div><div class="req-cell-sub">\u5BC6\u94A5\uFF1A${esc(x.api_key_name || "\u2014")}</div><div class="req-cell-sub" title="${esc(rid)}">ID\uFF1A<code>${esc(ridShort)}</code></div></td><td class="small req-url" title="${esc(target)}">${esc(target)}</td><td><div class="req-cell-main"><code>${esc(x.provider_id || "\u2014")}</code></div><div class="req-cell-sub" title="${esc(model)}">\u6A21\u578B\uFF1A${esc(model)}</div></td><td><div>${statusPill(x.status)}</div><div class="req-cell-sub">${x.stream ? "\u6D41\u5F0F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD\u6D41\u5F0F" : "\u975E\u6D41\u5F0F"}</div></td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td><div class="req-cell-main">${x.latency_ms != null ? x.latency_ms + " ms" : "\u2014"}</div><div class="req-cell-sub">TTFT\uFF1A${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</div></td><td><div class="req-cell-main">${x.total_tokens ?? "\u2014"}</div><div class="req-cell-sub">\u4F53\u79EF\uFF1A${sz}</div></td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
         }).join("")
       );
     } catch (e) {
-      tableEl.innerHTML = '<div class="msg err" role="alert"><span>\u52a0\u8f7d\u8c03\u7528\u8bb0\u5f55\u5931\u8d25\uff1a' + esc(e.message || "\u672a\u77e5\u9519\u8bef") +
-        '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">\u91cd\u8bd5</button></div>';
+      tableEl.innerHTML = '<div class="msg err" role="alert"><span>\u52A0\u8F7D\u8C03\u7528\u8BB0\u5F55\u5931\u8D25\uFF1A' + esc(e.message || "\u672A\u77E5\u9519\u8BEF") + '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">\u91CD\u8BD5</button></div>';
     } finally {
       tableEl.setAttribute("aria-busy", "false");
     }
@@ -870,8 +869,7 @@
           return;
         }
         if (event.key !== "Tab") return;
-        const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
-          .filter((el) => !el.hidden && el.getClientRects().length > 0);
+        const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')].filter((el) => !el.hidden && el.getClientRects().length > 0);
         if (!focusable.length) return;
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -2372,7 +2370,6 @@
     if (run) run.disabled = !!running;
     if (stop) stop.disabled = !running;
   }
-  let benchDrawerTrigger = null;
   function benchDrawerFocusable(root) {
     const panel = root?.querySelector(".drawer-panel");
     if (!panel) return [];
@@ -2399,26 +2396,6 @@
     benchDrawerTrigger = null;
     if (trigger?.isConnected) trigger.focus();
   }
-  document.addEventListener("keydown", (e) => {
-    const root = $("benchParamsDrawer");
-    if (!root?.classList.contains("open")) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeBenchParamsDrawer();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const focusable = benchDrawerFocusable(root);
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1], active = document.activeElement;
-    if (e.shiftKey && (active === first || !root.contains(active))) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && (active === last || !root.contains(active))) {
-      e.preventDefault();
-      first.focus();
-    }
-  });
   async function loadBenchPanel(opts = {}) {
     try {
       const beJ = await api("/api/admin/backend");
@@ -2707,7 +2684,7 @@
       if (token === benchPollToken) setBenchRunning(false);
     }
   }
-  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
+  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, benchDrawerTrigger, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
   var init_main = __esm({
     "js/app/main.js"() {
       init_dom();
@@ -3018,8 +2995,26 @@
       };
       benchPollToken = 0;
       benchCurrentBackend = "llamacpp";
+      benchDrawerTrigger = null;
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeBenchParamsDrawer();
+        const root = $("benchParamsDrawer");
+        if (!root?.classList.contains("open")) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeBenchParamsDrawer();
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = benchDrawerFocusable(root);
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1], active = document.activeElement;
+        if (e.shiftKey && (active === first || !root.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+          e.preventDefault();
+          first.focus();
+        }
       });
       ["benchPrompt", "benchTokens", "benchTemperature", "benchTopP", "benchTopK", "benchMinP", "benchFreqPen", "benchPresPen", "benchRepeatPen", "benchSeed", "benchThinking", "benchStop"].forEach((id) => {
         $(id)?.addEventListener("input", () => {
