@@ -39,7 +39,7 @@
     else localStorage.removeItem(SESSION_STORAGE_KEY);
   }
   function isAuthenticated() {
-    return !!getSessionToken();
+    return !!localStorage.getItem(ADMIN_KEY_STORAGE_KEY);
   }
   function initAdminKey() {
     const el = $("adminKey");
@@ -47,9 +47,13 @@
   }
   function redirectToLogin() {
     setSessionToken("");
+    localStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
+    const input = $("adminKey");
+    if (input) input.value = "";
     if (typeof globalThis.forceLoginScreen === "function") {
-      globalThis.forceLoginScreen();
+      globalThis.forceLoginScreen("\u7BA1\u7406\u5458 API Key \u65E0\u6548\u6216\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u8F93\u5165\u3002");
     }
+    if (typeof globalThis.adminKeyStatus === "function") globalThis.adminKeyStatus();
   }
   function apiPath(url) {
     try {
@@ -62,19 +66,16 @@
     const path = apiPath(url);
     if (!path.startsWith("/api/")) return;
     if (PUBLIC_API_PATHS.has(path)) return;
-    if (!getSessionToken()) {
+    if (!localStorage.getItem(ADMIN_KEY_STORAGE_KEY)) {
       redirectToLogin();
-      throw new Error("\u8BF7\u5148\u767B\u5F55");
+      throw new Error("\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key");
     }
   }
   function authHeaders(extra = {}) {
     const headers = { ...extra };
-    const session = getSessionToken();
-    if (session) headers.Authorization = `Bearer ${session}`;
-    else {
-      const k = getKey();
-      if (k) headers["X-Admin-Key"] = k;
-    }
+    delete headers.Authorization;
+    const key = localStorage.getItem(ADMIN_KEY_STORAGE_KEY) || "";
+    if (key) headers["X-Admin-Key"] = key;
     return headers;
   }
   async function apiPublic(url, opt = {}) {
@@ -106,11 +107,12 @@
     }
     return j;
   }
-  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSessionToken;
+  var SESSION_STORAGE_KEY, ADMIN_KEY_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSessionToken;
   var init_api = __esm({
     "js/core/api.js"() {
       init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
+      ADMIN_KEY_STORAGE_KEY = "llm_gateway_admin_key";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
       getKey = () => ($("adminKey")?.value || "").trim();
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
@@ -280,13 +282,21 @@
     if (app) app.hidden = show;
     document.body.classList.toggle("auth-locked", show);
   }
-  function forceLoginScreen() {
+  function forceLoginScreen(message = "") {
     currentUser = null;
+    setAuthScreenVisible(false);
     $("sidebarAccountBtn")?.classList.remove("active");
-    setAuthScreenVisible(true);
+    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
+    document.querySelector('.nav button[data-tab="keys"]')?.classList.add("active");
+    $("keys")?.classList.add("active");
+    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
+    const status = $("adminKeyMsg");
+    if (status && message) status.innerHTML = '<span class="warn">' + esc(message) + "</span>";
+    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
   }
   function updateAuthChrome() {
-    setAuthScreenVisible(!getSessionToken());
+    setAuthScreenVisible(false);
   }
   function openAccountSettings() {
     if (!getSessionToken()) {
@@ -367,38 +377,52 @@
     if (globalThis.refreshAll) globalThis.refreshAll();
     return response;
   }
-  async function initAuth() {
-    initPasswordToggles();
-    $("authLoginForm")?.addEventListener("submit", (event) => {
-      void submitLogin(event);
-    });
-    bindAccountPageActions();
+  async function submitAdminKey(event) {
+    event?.preventDefault?.();
+    const input = $("adminKey"), message = $("adminKeyMsg"), button = $("adminKeySaveButton");
+    const candidate = input?.value.trim() || "";
+    if (!candidate) {
+      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u7BA1\u7406\u5458 API Key</span>';
+      return;
+    }
+    if (button) button.disabled = true;
+    if (message) message.textContent = "\u6B63\u5728\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\u2026";
     try {
-      const status = await apiPublic("/api/auth/status");
-      passwordProtectionEnabled = status?.password_enabled !== false;
-    } catch {
-      passwordProtectionEnabled = true;
+      await apiPublic("/api/admin/keys", {
+        headers: { "X-Admin-Key": candidate },
+        cache: "no-store"
+      });
+      localStorage.setItem("llm_gateway_admin_key", candidate);
+      if (message) message.innerHTML = '<span class="ok">\u9A8C\u8BC1\u6210\u529F\uFF0C\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002</span>';
+      globalThis.adminKeyStatus?.();
+      if (globalThis.refreshAll) await globalThis.refreshAll();
+    } catch (error) {
+      if (message) message.innerHTML = '<span class="err">\u9A8C\u8BC1\u5931\u8D25\uFF1A' + esc(error.message) + "</span>";
+    } finally {
+      if (button) button.disabled = false;
     }
-    updateLoginModeUI();
-    if (getSessionToken()) {
-      try {
-        const response = await api("/api/auth/me");
-        currentUser = response.user || null;
-      } catch {
-        setSessionToken("");
-        currentUser = null;
-      }
-    }
-    if (!getSessionToken() && !passwordProtectionEnabled) {
-      const message = $("authMsg");
-      if (message) message.textContent = "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5173\u95ED\uFF0C\u6B63\u5728\u8FDB\u5165\u63A7\u5236\u53F0\u2026";
-      try {
-        await createWebSession("");
-      } catch (error) {
-        if (message) message.textContent = "\u6682\u65F6\u65E0\u6CD5\u8FDB\u5165\u63A7\u5236\u53F0\uFF1A" + error.message;
-      }
-    }
-    updateAuthChrome();
+  }
+  function clearAdminKey() {
+    localStorage.removeItem("llm_gateway_admin_key");
+    const input = $("adminKey"), message = $("adminKeyMsg");
+    if (input) input.value = "";
+    if (message) message.innerHTML = '<span class="muted">\u5DF2\u6E05\u9664\u672C\u5730\u4FDD\u5B58\u7684\u7BA1\u7406\u5458 API Key\u3002</span>';
+    globalThis.adminKeyStatus?.();
+    forceLoginScreen();
+  }
+  async function initAuth() {
+    setSessionToken("");
+    initAdminKey();
+    initPasswordToggles();
+    $("adminKeyForm")?.addEventListener("submit", (event) => {
+      void submitAdminKey(event);
+    });
+    $("adminKeyClearButton")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      clearAdminKey();
+    });
+    setAuthScreenVisible(false);
+    if (!isAuthenticated()) forceLoginScreen("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
   }
   async function submitLogin(event) {
     event?.preventDefault?.();
@@ -1426,16 +1450,10 @@
     const el = $("adminKeyStatus");
     if (!el) return;
     if (isAuthenticated()) {
-      el.innerHTML = '<span class="pill pill-success">Web \u5DF2\u767B\u5F55</span>';
+      el.innerHTML = '<span class="pill pill-success">\u5DF2\u4FDD\u5B58\u5230\u6B64\u6D4F\u89C8\u5668</span>';
       return;
     }
-    el.innerHTML = '<span class="pill">\u4EC5\u901A\u8FC7\u670D\u52A1\u7AEF\u73AF\u5883\u53D8\u91CF\u914D\u7F6E</span>';
-  }
-  function saveKey() {
-    localStorage.setItem("llm_gateway_admin_key", getKey());
-    adminKeyStatus();
-    onAdminKeySaved();
-    refreshAll();
+    el.innerHTML = '<span class="pill">\u5C1A\u672A\u914D\u7F6E\u7BA1\u7406\u5458 API Key</span>';
   }
   function setGgufMsg(kind, text) {
     const el = $("ggufMsg");
@@ -1455,7 +1473,8 @@
   async function refreshAll() {
     adminKeyStatus();
     if (!isAuthenticated()) {
-      setGlobalMsg($("dashboard")?.classList.contains("active") ? "" : '<span class="warn">\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0</span>');
+      setGlobalMsg('<span class="warn">\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key\u3002</span>');
+      globalThis.forceLoginScreen?.("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
       return;
     }
     try {
@@ -2850,12 +2869,11 @@
       init_format();
       init_requests();
       init_expose();
-      try {
-        localStorage.removeItem("llm_gateway_admin_key");
-      } catch {
-      }
-      initAdminKey();
       document.querySelectorAll(".nav button").forEach((b) => b.onclick = () => {
+        if (b.dataset.tab !== "keys" && !isAuthenticated()) {
+          globalThis.forceLoginScreen?.("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
+          return;
+        }
         document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
         $("sidebarAccountBtn")?.classList.remove("active");
         document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
@@ -2886,7 +2904,7 @@
           const gm = $("globalMsg");
           if (gm) gm.hidden = false;
         }
-        if (b.dataset.tab === "keys") loadKeysPanel().catch(() => {
+        if (b.dataset.tab === "keys" && isAuthenticated()) loadKeysPanel().catch(() => {
         });
         if (b.dataset.tab === "requests" && !requestsListHasRows()) loadRequests().catch(() => {
         });
@@ -3171,7 +3189,6 @@
       exposeGlobals({
         $,
         esc,
-        getKey,
         api,
         fmtSize,
         fmtDate,
@@ -3280,7 +3297,6 @@
         rotateKey,
         runBenchmark,
         saveBackend,
-        saveKey,
         scrollMmActionLog,
         selectGatewayModel,
         setBenchRunning,
@@ -3300,7 +3316,7 @@
       initDownloadsTableActions();
       adminKeyStatus();
       if (isAuthenticated()) refreshAll();
-      else setGlobalMsg($("dashboard")?.classList.contains("active") ? "" : '<span class="muted">\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0</span>');
+      else setGlobalMsg('<span class="muted">\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key\u3002</span>');
       REQUESTS_POLL_MS = 15e3;
       DOWNLOADS_POLL_MS = 5e3;
       setInterval(() => {

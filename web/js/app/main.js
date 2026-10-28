@@ -1,7 +1,6 @@
 import { $, esc } from '../core/dom.js';
-import { getKey, api, initAdminKey, isAuthenticated } from '../core/api.js';
+import { api, isAuthenticated } from '../core/api.js';
 import { setGlobalMsg } from '../core/notify.js';
-import { onAdminKeySaved } from '../features/auth.js';
 import { adminStore } from '../features/admin-store.js';
 import { fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable, displayUpstreamModel } from '../core/format.js';
 import {
@@ -26,9 +25,7 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 
-// 旧版把管理员 API Key 存在浏览器中，但它不能代替 Web Session；清理无效的旧副本。
-try { localStorage.removeItem('llm_gateway_admin_key'); } catch {}
-initAdminKey();
+// 管理台通过已保存的管理员 API Key 鉴权。
 function syncTopbarRefresh(){
   const btn=$('btnRefreshDashboard');
   if(!btn)return;
@@ -36,6 +33,10 @@ function syncTopbarRefresh(){
 }
 
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
+  if (b.dataset.tab !== 'keys' && !isAuthenticated()) {
+    globalThis.forceLoginScreen?.('请先输入服务端已配置的管理员 API Key。');
+    return;
+  }
   document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
   $('sidebarAccountBtn')?.classList.remove('active');
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -56,7 +57,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
     const gm=$('globalMsg');
     if(gm)gm.hidden=false;
   }
-  if(b.dataset.tab==='keys')loadKeysPanel().catch(()=>{});
+  if(b.dataset.tab==='keys'&&isAuthenticated())loadKeysPanel().catch(()=>{});
   // 调用记录已有数据行时不刷新；空白、暂无记录或加载失败才拉一次。
   if(b.dataset.tab==='requests'&&!requestsListHasRows())loadRequests().catch(()=>{});
   syncTopbarRefresh();
@@ -487,14 +488,8 @@ async function loadDashboardRecent(){
 function adminKeyStatus(){
   const el=$('adminKeyStatus');
   if(!el)return;
-  if(isAuthenticated()){el.innerHTML='<span class="pill pill-success">Web 已登录</span>';return}
-  el.innerHTML='<span class="pill">仅通过服务端环境变量配置</span>';
-}
-function saveKey(){
-  localStorage.setItem('llm_gateway_admin_key',getKey());
-  adminKeyStatus();
-  onAdminKeySaved();
-  refreshAll();
+  if(isAuthenticated()){el.innerHTML='<span class="pill pill-success">已保存到此浏览器</span>';return}
+  el.innerHTML='<span class="pill">尚未配置管理员 API Key</span>';
 }
 
 function setGgufMsg(kind,text){
@@ -511,7 +506,8 @@ async function refreshModelsOnly(){
 async function refreshAll(){
   adminKeyStatus();
   if(!isAuthenticated()){
-    setGlobalMsg($('dashboard')?.classList.contains('active')?'':'<span class="warn">请先登录控制台</span>');
+    setGlobalMsg('<span class="warn">请先在“服务密钥”页配置管理员 API Key。</span>');
+    globalThis.forceLoginScreen?.('请先输入服务端已配置的管理员 API Key。');
     return;
   }
   try{
@@ -1914,7 +1910,7 @@ async function runBenchmark(){
 }
 
 exposeGlobals({
-  $, esc, getKey, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
+  $, esc, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
   adminKeyStatus,
   appendActionLogTo,
   appendOpsLog,
@@ -2015,7 +2011,6 @@ exposeGlobals({
   rotateKey,
   runBenchmark,
   saveBackend,
-  saveKey,
   scrollMmActionLog,
   selectGatewayModel,
   setBenchRunning,
@@ -2036,7 +2031,7 @@ exposeGlobals({ setGlobalMsg, refreshAll, syncTopbarRefresh, dashboardPoll, admi
 initDownloadsTableActions();
 adminKeyStatus();
 if(isAuthenticated())refreshAll();
-else setGlobalMsg($('dashboard')?.classList.contains('active')?'':'<span class="muted">请先登录控制台</span>');
+else setGlobalMsg('<span class="muted">请先在“服务密钥”页配置管理员 API Key。</span>');
 const REQUESTS_POLL_MS=15000;
 const DOWNLOADS_POLL_MS=5000;
 setInterval(()=>{

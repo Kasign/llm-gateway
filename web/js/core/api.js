@@ -1,6 +1,7 @@
 import { $ } from './dom.js';
 
 const SESSION_STORAGE_KEY = 'llm_gateway_session_token';
+const ADMIN_KEY_STORAGE_KEY = 'llm_gateway_admin_key';
 
 /** 无需 Web 会话即可调用的管理 API（仅登录接口）。 */
 const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/status']);
@@ -15,9 +16,9 @@ export function setSessionToken(token) {
   else localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
-/** 控制台是否已 Web 登录（不含 API 密钥旁路）。 */
+/** 是否已在当前浏览器保存管理员 API Key。 */
 export function isAuthenticated() {
-  return !!getSessionToken();
+  return !!localStorage.getItem(ADMIN_KEY_STORAGE_KEY);
 }
 
 export function initAdminKey() {
@@ -27,9 +28,13 @@ export function initAdminKey() {
 
 export function redirectToLogin() {
   setSessionToken('');
+  localStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
+  const input = $('adminKey');
+  if (input) input.value = '';
   if (typeof globalThis.forceLoginScreen === 'function') {
-    globalThis.forceLoginScreen();
+    globalThis.forceLoginScreen('管理员 API Key 无效或已变更，请重新输入。');
   }
+  if (typeof globalThis.adminKeyStatus === 'function') globalThis.adminKeyStatus();
 }
 
 function apiPath(url) {
@@ -45,20 +50,17 @@ function requireWebSession(url) {
   const path = apiPath(url);
   if (!path.startsWith('/api/')) return;
   if (PUBLIC_API_PATHS.has(path)) return;
-  if (!getSessionToken()) {
+  if (!localStorage.getItem(ADMIN_KEY_STORAGE_KEY)) {
     redirectToLogin();
-    throw new Error('请先登录');
+    throw new Error('请先在“服务密钥”页配置管理员 API Key');
   }
 }
 
 function authHeaders(extra = {}) {
   const headers = { ...extra };
-  const session = getSessionToken();
-  if (session) headers.Authorization = `Bearer ${session}`;
-  else {
-    const k = getKey();
-    if (k) headers['X-Admin-Key'] = k;
-  }
+  delete headers.Authorization;
+  const key = localStorage.getItem(ADMIN_KEY_STORAGE_KEY) || '';
+  if (key) headers['X-Admin-Key'] = key;
   return headers;
 }
 

@@ -42,7 +42,7 @@ jobs:
       LLM_BACKEND: llamacpp
       LLAMA_REQUEST_TIMEOUT_SECONDS: "0"
       BROWSER_BASE_URL: http://127.0.0.1:8088
-      BROWSER_TEST_PASSWORD: ci-browser-pass
+      BROWSER_TEST_ADMIN_KEY: browser-smoke-admin-key-not-for-production
     services:
       redis:
         image: redis:7-alpine
