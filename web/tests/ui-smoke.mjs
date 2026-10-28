@@ -194,13 +194,13 @@ try {
   check('服务密钥请求使用管理员 Key 而非 Web Session',
     report.authHeaderUsage.some(item => item.path === '/api/admin/keys' && item.hasAdminKey && !item.hasSession),
     report.authHeaderUsage);
+  await page.screenshot({ path: screenshotName('keys-admin-key-desktop'), fullPage: true });
   await page.locator('.nav button[data-tab="dashboard"]').click();
   await page.waitForTimeout(500);
   check('其它管理 API 只使用 Web Session、不发送管理员 Key',
     report.authHeaderUsage.some(item => item.path.startsWith('/api/') &&
       item.path !== '/api/admin/keys' && !item.path.startsWith('/api/admin/keys/') &&
       item.hasSession && !item.hasAdminKey), report.authHeaderUsage);
-  await page.screenshot({ path: screenshotName('keys-admin-key-desktop'), fullPage: true });
 
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
