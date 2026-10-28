@@ -363,7 +363,11 @@ try {
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
+  const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
+  check('Provider 保存具备表单级重复提交锁和初始化防重入',
+    providersSource.includes("form.dataset.saving === 'true'") &&
+    providersSource.includes('globalThis.__llmGatewayProviderAdminInitialized'));
   check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
     requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
     requestsSource.includes('密钥：') && requestsSource.includes('ID：') &&
@@ -477,7 +481,18 @@ try {
     }
   }
 
-  // Provider 表单打开/取消只验证 UI；不创建远程供应商、不发送真实 Provider 请求。
+  // Provider 新增防重复回归：创建请求被 Mock 拦截，不会写入真实 Provider 配置。
+  let providerCreatePostCount = 0;
+  await page.route('**/api/admin/providers', async route => {
+    if (route.request().method() === 'POST') {
+      providerCreatePostCount += 1;
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{id:'deepseek'}})});
+      return;
+    }
+    await route.continue();
+  });
+
+  // Provider 表单打开/取消只验证 UI；新增请求使用 Mock，不创建真实远程供应商。
   await clickTab(page, 'providers', '远程 Provider');
   await page.locator('#providerCreate').click();
   const editorShown = await page.locator('#providerEditorCard').isVisible();
@@ -535,6 +550,19 @@ try {
       (await page.locator('#providerTemplateHelp').textContent()).includes('自定义模板'));
     await page.locator('#providerCancel').click();
     check('远程 Provider 表单可取消', await page.locator('#providerEditorCard').isHidden());
+
+    await page.locator('#providerCreate').click();
+    await page.locator('#providerTemplate').selectOption('deepseek');
+    await page.locator('#providerApiKey').fill('sk-mock-create-only');
+    await page.waitForTimeout(80);
+    check('选择固定模板只预填表单，不会自动创建 Provider', providerCreatePostCount === 0, providerCreatePostCount);
+    await page.locator('#providerForm').evaluate(form => {
+      form.requestSubmit();
+      form.requestSubmit();
+    });
+    await page.waitForFunction(() => document.getElementById('providerEditorCard')?.hidden, null, {timeout:10000});
+    check('连续触发表单提交只发送一次新增 Provider 请求', providerCreatePostCount === 1, providerCreatePostCount);
+    await page.unroute('**/api/admin/providers');
   }
 
   // 验证 HF 文件选择事件使用 data-* 属性传值，特殊字符不会进入内联 JavaScript。
