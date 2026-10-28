@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/adminuser"
 	"github.com/whl/llm-gateway/internal/audit"
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/ratelimit"
 )
 
 func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
@@ -23,7 +25,11 @@ func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Auth.AdminAPIKey = "test-admin-key"
-	s := &Server{cfg: cfg, audit: writer}
+	s := &Server{
+		cfg:      cfg,
+		audit:    writer,
+		webLogin: webLoginSnapshot{Username: webAdminIdentity, Revision: 1},
+	}
 
 	unauthorized := httptest.NewRecorder()
 	s.auditMetricsAPI(unauthorized, httptest.NewRequest(http.MethodGet, "/api/admin/audit/metrics", nil))
@@ -31,8 +37,38 @@ func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
 		t.Fatalf("unauthorized status = %d, want 401", unauthorized.Code)
 	}
 
+	// 管理员 API Key 只能管理服务密钥；其他管理端点必须使用网页登录会话。
+	adminKeyRequest := httptest.NewRequest(http.MethodGet, "/api/admin/audit/metrics", nil)
+	adminKeyRequest.Header.Set("X-Admin-Key", "test-admin-key")
+	adminKeyRecorder := httptest.NewRecorder()
+	s.auditMetricsAPI(adminKeyRecorder, adminKeyRequest)
+	if adminKeyRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("admin API Key status = %d, want 401 (key is scoped to /api/admin/keys)", adminKeyRecorder.Code)
+	}
+
+	// Web Session 存在 Redis 中；没有测试 Redis 时仍执行前面的鉴权边界断言。
+	addr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
+	if addr == "" {
+		t.Skip("REDIS_TEST_ADDR not set; skipping Web Session success assertions")
+	}
+	limiter := ratelimit.New(addr, "", 0)
+	t.Cleanup(func() { _ = limiter.Close() })
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer pingCancel()
+	if err := limiter.Ping(pingCtx); err != nil {
+		t.Fatalf("ping test Redis: %v", err)
+	}
+	s.limiter = limiter
+	token, err := adminuser.NewSessionToken()
+	if err != nil {
+		t.Fatalf("create session token: %v", err)
+	}
+	if err := limiter.SetSession(context.Background(), token, webAdminIdentity, 1, time.Minute); err != nil {
+		t.Fatalf("save test session: %v", err)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit/metrics", nil)
-	req.Header.Set("X-Admin-Key", "test-admin-key")
+	req.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	s.auditMetricsAPI(recorder, req)
 	if recorder.Code != http.StatusOK {
@@ -60,7 +96,7 @@ func TestAuditMetricsAPIRequiresAdminAndReturnsReadOnlySnapshot(t *testing.T) {
 	}
 
 	post := httptest.NewRequest(http.MethodPost, "/api/admin/audit/metrics", nil)
-	post.Header.Set("X-Admin-Key", "test-admin-key")
+	post.Header.Set("Authorization", "Bearer "+token)
 	methodRecorder := httptest.NewRecorder()
 	s.auditMetricsAPI(methodRecorder, post)
 	if methodRecorder.Code != http.StatusMethodNotAllowed {
