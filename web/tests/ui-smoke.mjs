@@ -362,6 +362,19 @@ try {
 
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
+  const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
+  const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
+  check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
+    requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
+    requestsSource.includes('密钥：') && requestsSource.includes('ID：') &&
+    requestsSource.includes('模型：') && requestsSource.includes('TTFT：') &&
+    requestsSource.includes('体积：'));
+  check('调用记录长 URL 单行截断且固定列宽只在表格内部滚动',
+    appCss.includes('#requests .table-wrap table{min-width:1262px;table-layout:fixed}') &&
+    appCss.includes('#requests .req-url{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'));
+  check('移动端导航规则禁止自动换行并把账号入口放在品牌同行',
+    appCss.includes('.nav{grid-column:1/-1;grid-row:2;flex-direction:row;flex-wrap:nowrap;') &&
+    appCss.includes('.sidebar-bottom{grid-column:2;grid-row:1;margin:0;padding:0}'));
   check('远程 Provider 请求不会使用管理员服务密钥',
     !providerBundle.includes('const adminKey = () =>') &&
     !providerBundle.includes("headers['X-Admin-Key'] = adminKey()"));
@@ -488,11 +501,36 @@ try {
       await page.locator('#providerApiKeyHeader').inputValue() === 'authorization');
     check('厂商模板不会自动填写 API Key',
       await page.locator('#providerApiKey').inputValue() === '');
+    await page.locator('#providerApiKey').fill('sk-template-switch-test');
+    await page.locator('#providerTemplate').selectOption('openai');
+    check('切换厂商且 Key 非空时先确认、不立即改动连接配置',
+      await page.locator('#providerTemplateKeyConfirm').isVisible() &&
+      await page.locator('#providerId').inputValue() === 'deepseek' &&
+      await page.locator('#providerBaseURL').inputValue() === 'https://api.deepseek.com');
+    await page.locator('#providerTemplateKeepKey').click();
+    check('明确选择保留 Key 后才切换到新厂商',
+      await page.locator('#providerId').inputValue() === 'openai' &&
+      await page.locator('#providerBaseURL').inputValue() === 'https://api.openai.com/v1' &&
+      await page.locator('#providerApiKey').inputValue() === 'sk-template-switch-test' &&
+      await page.locator('#providerTemplateKeyConfirm').isHidden());
     await page.locator('#providerTemplate').selectOption('custom');
-    check('自定义模板清空基础连接字段并保留手动配置能力',
+    check('自定义模板切换提供保留、清除和取消三种操作',
+      await page.locator('#providerTemplateKeyConfirm').isVisible() &&
+      await page.locator('#providerTemplateKeepKey').count() === 1 &&
+      await page.locator('#providerTemplateClearKey').count() === 1 &&
+      await page.locator('#providerTemplateCancel').count() === 1);
+    await page.locator('#providerTemplateCancel').click();
+    check('取消模板切换不会修改连接配置或清除 Key',
+      await page.locator('#providerTemplate').inputValue() === 'openai' &&
+      await page.locator('#providerId').inputValue() === 'openai' &&
+      await page.locator('#providerApiKey').inputValue() === 'sk-template-switch-test');
+    await page.locator('#providerTemplate').selectOption('custom');
+    await page.locator('#providerTemplateClearKey').click();
+    check('选择清除 Key 后切换自定义模板会清空 Key 与连接字段',
       await page.locator('#providerId').inputValue() === '' &&
       await page.locator('#providerBaseURL').inputValue() === '' &&
       await page.locator('#providerDefaultModel').inputValue() === '' &&
+      await page.locator('#providerApiKey').inputValue() === '' &&
       await page.locator('#providerApiKeyHeader').inputValue() === 'authorization' &&
       (await page.locator('#providerTemplateHelp').textContent()).includes('自定义模板'));
     await page.locator('#providerCancel').click();
@@ -574,6 +612,28 @@ try {
   // 窄屏布局：检查页面自身不横向溢出，表格可在自己的滚动容器内浏览。
   await page.setViewportSize({ width: 390, height: 844 });
   await clickTab(page, 'dashboard', '首页-窄屏');
+  const navLayout = await page.evaluate(() => {
+    const nav = document.querySelector('.sidebar .nav');
+    const brand = document.querySelector('.sidebar .brand')?.getBoundingClientRect();
+    const account = document.querySelector('.sidebar .sidebar-account-btn')?.getBoundingClientRect();
+    const navRect = nav?.getBoundingClientRect();
+    return {
+      navFlexWrap: nav ? getComputedStyle(nav).flexWrap : '',
+      navHeight: navRect?.height ?? 0,
+      navClientWidth: nav?.clientWidth ?? 0,
+      navScrollWidth: nav?.scrollWidth ?? 0,
+      brandTop: brand?.top ?? 0,
+      accountTop: account?.top ?? 0,
+      sidebarHeight: document.querySelector('.sidebar')?.getBoundingClientRect().height ?? 0
+    };
+  });
+  check('窄屏导航单行横向滚动，账号入口与品牌同行',
+    navLayout.navFlexWrap === 'nowrap' &&
+    navLayout.navHeight <= 56 &&
+    navLayout.navScrollWidth > navLayout.navClientWidth &&
+    Math.abs(navLayout.accountTop - navLayout.brandTop) < 12 &&
+    navLayout.sidebarHeight < 150,
+    navLayout);
   await recordLayout(page, '首页-mobile-390');
   const inferenceLayout = await page.locator('.sys-runtime-panel .inf-stack-compact').evaluate(stack => {
     const cards = [...stack.querySelectorAll('.inf-card-compact')];
