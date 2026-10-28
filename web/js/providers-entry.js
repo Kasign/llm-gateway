@@ -185,7 +185,7 @@
         (key === 'custom'
           ? '切换到自定义模板会清空 Provider ID 和 Base URL。'
           : '切换到 ' + template.label + ' 会修改 Provider ID 和 Base URL。') +
-        ' 当前已输入的 API Key 不会自动失效，请明确选择保留、清除或取消；密钥不会显示在提示中。';
+        ' 当前输入的 API Key 会随新连接配置保留；若不希望沿用，请选择清除。清除只会清空本表单输入，不会撤销上游已签发的密钥。';
       $('providerTemplateKeyConfirm').hidden = false;
       $('providerTemplate').disabled = true;
       $('providerTemplateHelp').textContent = '请先确认当前 API Key 的处理方式。';
