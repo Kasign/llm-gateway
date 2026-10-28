@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const state = { rows: [], editing: null, loading: false };
+  const state = { rows: [], editing: null, loading: false, activeTemplate: '', pendingTemplate: null };
   const PROVIDER_TEMPLATES = {
     openai: {
       label: 'OpenAI',
@@ -153,11 +153,13 @@
       $('providerBaseURL').value = '';
       $('providerDefaultModel').value = '';
       $('providerApiKeyHeader').value = 'authorization';
-      $('providerTemplateHelp').textContent = '自定义模板已清空 Provider ID、Base URL 和默认模型；请按上游文档手动填写。已输入的 API Key 不会被自动清除。';
+      $('providerTemplateHelp').textContent = '自定义模板已清空 Provider ID、Base URL 和默认模型；已输入的 API Key 不会被自动清除。';
+      state.activeTemplate = key;
       return;
     }
     if (!template) {
       $('providerTemplateHelp').textContent = '选择模板只会预填基础连接参数，不会自动填写 API Key；默认模型是示例值，保存前请核对。';
+      state.activeTemplate = '';
       return;
     }
     $('providerId').value = template.id;
@@ -165,9 +167,51 @@
     $('providerDefaultModel').value = template.default_model;
     $('providerApiKeyHeader').value = template.api_key_header;
     $('providerTemplateHelp').textContent = template.hint + ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。';
+    state.activeTemplate = key;
+  }
+  function requestProviderTemplateChange(key) {
+    if (!key) {
+      applyProviderTemplate('');
+      return;
+    }
+    const template = PROVIDER_TEMPLATES[key];
+    if (!template && key !== 'custom') return;
+    const nextID = key === 'custom' ? '' : template.id;
+    const nextURL = key === 'custom' ? '' : template.base_url;
+    const connectionChanged = nextID !== $('providerId').value || nextURL !== $('providerBaseURL').value;
+    if ($('providerApiKey').value.length > 0 && connectionChanged) {
+      state.pendingTemplate = key;
+      $('providerTemplateKeyConfirmText').textContent =
+        (key === 'custom'
+          ? '切换到自定义模板会清空 Provider ID 和 Base URL。'
+          : '切换到 ' + template.label + ' 会修改 Provider ID 和 Base URL。') +
+        ' 当前已输入的 API Key 不会自动失效，请明确选择保留、清除或取消；密钥不会显示在提示中。';
+      $('providerTemplateKeyConfirm').hidden = false;
+      $('providerTemplate').disabled = true;
+      $('providerTemplateHelp').textContent = '请先确认当前 API Key 的处理方式。';
+      return;
+    }
+    applyProviderTemplate(key);
+  }
+  function resolveProviderTemplateChange(action) {
+    if (state.pendingTemplate == null) return;
+    const nextTemplate = state.pendingTemplate;
+    state.pendingTemplate = null;
+    $('providerTemplateKeyConfirm').hidden = true;
+    $('providerTemplate').disabled = Boolean(state.editing);
+    if (action === 'cancel') {
+      $('providerTemplate').value = state.activeTemplate;
+      $('providerTemplateHelp').textContent = '已取消模板切换；当前 API Key 和连接配置保持不变。';
+      return;
+    }
+    if (action === 'clear') $('providerApiKey').value = '';
+    applyProviderTemplate(nextTemplate);
   }
   function showEditor(row = null) {
     state.editing = row ? row.id : null;
+    state.activeTemplate = '';
+    state.pendingTemplate = null;
+    $('providerTemplateKeyConfirm').hidden = true;
     $('providerForm').reset();
     $('providerTemplatePanel').hidden = !!row;
     $('providerTemplate').disabled = !!row;
@@ -200,6 +244,10 @@
   }
   function hideEditor() {
     $('providerEditorCard').hidden = true;
+    $('providerTemplateKeyConfirm').hidden = true;
+    $('providerTemplate').disabled = false;
+    state.activeTemplate = '';
+    state.pendingTemplate = null;
     state.editing = null;
     $('providerForm').reset();
   }
@@ -328,7 +376,10 @@
     document.head.appendChild(style);
     $('providerRefresh')?.addEventListener('click', loadProviders);
     $('providerCreate')?.addEventListener('click', () => showEditor());
-    $('providerTemplate')?.addEventListener('change', (event) => applyProviderTemplate(event.target.value));
+    $('providerTemplate')?.addEventListener('change', (event) => requestProviderTemplateChange(event.target.value));
+    $('providerTemplateKeepKey')?.addEventListener('click', () => resolveProviderTemplateChange('keep'));
+    $('providerTemplateClearKey')?.addEventListener('click', () => resolveProviderTemplateChange('clear'));
+    $('providerTemplateCancel')?.addEventListener('click', () => resolveProviderTemplateChange('cancel'));
     $('providerCancel')?.addEventListener('click', hideEditor);
     $('providerForm')?.addEventListener('submit', saveProvider);
     $('providerTestDraft')?.addEventListener('click', () => testProvider());
