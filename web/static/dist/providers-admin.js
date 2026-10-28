@@ -179,12 +179,19 @@
     $('providerBaseURL').value = template.base_url;
     $('providerDefaultModel').value = template.default_model;
     $('providerApiKeyHeader').value = template.api_key_header;
-    const existingProvider = !state.editing ? rowByID(template.id) : null;
-    $('providerTemplateHelp').textContent = template.hint + ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。' +
-      (existingProvider
-        ? ' 注意：Provider ID「' + template.id + '」已存在，不能再次新增。请返回列表，在已有项目上点击“配置”进行接管或编辑。'
-        : '');
     state.activeTemplate = key;
+    refreshProviderTemplateHelp();
+  }
+  function refreshProviderTemplateHelp() {
+    const template = PROVIDER_TEMPLATES[state.activeTemplate];
+    if (!template) return;
+    const id = $('providerId').value.trim();
+    const existingProvider = !state.editing && id ? rowByID(id) : null;
+    $('providerTemplateHelp').textContent = template.hint +
+      ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。' +
+      (existingProvider
+        ? ' 当前 Provider ID「' + id + '」已存在。若要新增另一套连接，请先填写未占用的唯一 ID；若要使用现有配置，请取消后回列表点击“配置”。'
+        : '');
   }
   function requestProviderTemplateChange(key) {
     if (!key) {
@@ -417,6 +424,7 @@
     $('providerRefresh')?.addEventListener('click', loadProviders);
     $('providerCreate')?.addEventListener('click', () => showEditor());
     $('providerTemplate')?.addEventListener('change', (event) => requestProviderTemplateChange(event.target.value));
+    $('providerId')?.addEventListener('input', refreshProviderTemplateHelp);
     $('providerTemplateKeepKey')?.addEventListener('click', () => resolveProviderTemplateChange('keep'));
     $('providerTemplateClearKey')?.addEventListener('click', () => resolveProviderTemplateChange('clear'));
     $('providerTemplateCancel')?.addEventListener('click', () => resolveProviderTemplateChange('cancel'));
