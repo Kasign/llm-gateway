@@ -200,6 +200,43 @@ try {
   check('正确管理员 Key 独立保存在浏览器', await page.evaluate(expected => localStorage.getItem('llm_gateway_admin_key') === expected, adminKey));
   check('管理员 Key 通过现有服务密钥接口验证', report.adminKeySuccesses.length >= 1, report.adminKeySuccesses);
 
+  await page.locator('#keyServicesList .key-service-option').first().waitFor({ state: 'visible', timeout: 15000 });
+  const servicePickerMetrics = await page.locator('#keyServicesList').evaluate(el => ({
+    count: el.querySelectorAll('input[type="checkbox"]').length,
+    overflowY: getComputedStyle(el).overflowY,
+    maxHeight: getComputedStyle(el).maxHeight,
+    hasLocalService: Boolean(el.querySelector('input[value="llamacpp"]')),
+    createDisabled: document.getElementById('keyCreateButton')?.disabled === true,
+    summary: document.getElementById('keyServicesSelectionSummary')?.textContent || ''
+  }));
+  check('新增密钥的服务范围是可上下滚动的多选列表', servicePickerMetrics.count >= 2 &&
+    servicePickerMetrics.overflowY === 'auto' && servicePickerMetrics.maxHeight !== 'none' &&
+    servicePickerMetrics.hasLocalService && servicePickerMetrics.createDisabled === false, servicePickerMetrics);
+  check('未选择服务时明确显示不限制', servicePickerMetrics.summary.includes('所有已配置服务'));
+  await page.locator('#keyServicesList input[value="llamacpp"]').check();
+  check('选中服务后同步到密钥权限字段', await page.locator('#keyModels').inputValue() === 'llamacpp');
+  await page.locator('#keyName').fill('browser-smoke-service-scope');
+  const scopedCreateResponsePromise = page.waitForResponse(response => {
+    try { return new URL(response.url()).pathname === '/api/admin/keys' && response.request().method() === 'POST'; }
+    catch { return false; }
+  });
+  await page.locator('#keyCreateButton').click();
+  const scopedCreateResponse = await scopedCreateResponsePromise;
+  let scopedKey = null; try { scopedKey = await scopedCreateResponse.json(); } catch {}
+  check('真实服务密钥接口收到所选服务权限', scopedCreateResponse.status() === 200 &&
+    JSON.stringify(scopedKey?.api_key?.allowed_models || []) === JSON.stringify(['llamacpp']),
+    {status:scopedCreateResponse.status(),allowed_models:scopedKey?.api_key?.allowed_models||null});
+  await page.waitForFunction(() => document.getElementById('newKeyBox')?.style.display === 'block', null, {timeout:10000});
+  if(scopedKey?.api_key?.id){
+    const cleanupStatus=await page.evaluate(async({key,id})=>{
+      const response=await fetch('/api/admin/keys/'+id,{method:'DELETE',headers:{'X-Admin-Key':key},cache:'no-store'});return response.status;
+    },{key:adminKey,id:scopedKey.api_key.id});
+    check('浏览器验收清理临时服务密钥',cleanupStatus===204,cleanupStatus);
+  }
+  await page.locator('#btnClearKeyServices').click();
+  check('清空服务选择恢复为不限制',await page.locator('#keyModels').inputValue()==='' &&
+    (await page.locator('#keyServicesSelectionSummary').textContent()).includes('所有已配置服务'));
+
   await page.evaluate(() => localStorage.removeItem('llm_gateway_session_token'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 10000 });

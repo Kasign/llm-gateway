@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LLM Gateway</title>
-<link rel="stylesheet" href="/static/css/app.css?v=20261028-admin-key-session-scope-1">
+<link rel="stylesheet" href="/static/css/app.css?v=20261028-key-service-access-picker-1">
 <link rel="stylesheet" href="/static/css/model-download.css">
 </head>
 <body>
@@ -328,9 +328,24 @@
           <div class="row">
             <div class="field"><label>名称</label><input id="keyName" placeholder="例如 Mac-Cursor"></div>
             <div class="field sm"><label>每分钟请求数</label><input id="keyRPM" type="number" value="60" min="1"></div>
-            <div class="field"><label>允许模型</label><input id="keyModels" placeholder="留空表示全部"></div>
             <div class="field"><label>过期时间（ISO）</label><input id="keyExpires"></div>
-            <button type="button" class="btn primary" onclick="createKey()">生成</button>
+            <button type="button" id="keyCreateButton" class="btn primary" onclick="createKey()" disabled>生成</button>
+          </div>
+          <div class="field key-service-field">
+            <div class="key-service-title-row">
+              <label>允许访问的服务</label>
+              <div class="key-service-actions">
+                <button type="button" class="btn sm ghost" id="btnSelectAllKeyServices">全选</button>
+                <button type="button" class="btn sm ghost" id="btnClearKeyServices">清空（不限制）</button>
+                <button type="button" class="btn sm ghost" id="btnRefreshKeyServices">刷新列表</button>
+              </div>
+            </div>
+            <p class="small muted key-service-help">勾选后，此服务密钥只能访问选中的服务；不勾选表示不限制。服务列表来自当前配置，旧的按模型 ID 设置仍然兼容。</p>
+            <div id="keyServicesList" class="key-service-list" role="group" aria-label="可访问的服务列表">
+              <div class="muted small">登录后加载服务列表…</div>
+            </div>
+            <div id="keyServicesSelectionSummary" class="small muted" role="status" aria-live="polite">正在读取服务列表。</div>
+            <input id="keyModels" type="hidden" value="">
           </div>
           <div id="newKeyBox" style="display:none;margin-top:10px"></div>
         </div>
@@ -454,5 +469,6 @@
 <script src="/static/dist/app.js?v=20261028-admin-key-session-scope-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
+<script src="/static/js/key-service-picker.js?v=20261028-key-service-access-picker-1"></script>
 </body>
 </html>

@@ -55,7 +55,7 @@ func agentModelListBody(route agentRoute, target proxyModelTarget, key *auth.Key
 		modelID = strings.TrimSpace(target.Model.ModelKey)
 	}
 	data := make([]map[string]interface{}, 0, 1)
-	if modelID != "" && modelAllowedForKey(key, modelID, target.UpstreamID, target.Hint) {
+	if modelID != "" && modelAllowedForKey(key, route.ProviderID, target.ProviderID, modelID, target.UpstreamID, target.Hint) {
 		data = append(data, map[string]interface{}{
 			"id": modelID, "object": "model", "created": time.Now().Unix(),
 			"owned_by": route.ProviderID, "display_name": target.UpstreamID,

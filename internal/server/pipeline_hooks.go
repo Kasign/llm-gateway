@@ -224,7 +224,7 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 // 列表项可以写网关 model_key、上游 ID 或管理台 hint，任一匹配即放行。
 func (s *Server) allowModelsGuard(key *auth.Key) core.Guard {
 	return func(_ context.Context, st core.State) error {
-		if modelAllowedForKey(key, st.Model.ModelKey, st.Model.UpstreamID, st.Model.Hint) {
+		if modelAllowedForKey(key, st.Model.ProviderID, st.Model.ModelKey, st.Model.UpstreamID, st.Model.Hint) {
 			return nil
 		}
 		return &core.Error{Status: http.StatusForbidden, Code: "model_not_allowed", Message: "model is not allowed for this api key"}

@@ -7,7 +7,7 @@ import (
 )
 
 // modelAllowedForKey 集中定义调用方的模型 ACL 语义，供推理 Guard 和 /v1/models 共用。
-// 空 allowed_models 表示不限制；非空时 model_key、上游模型 ID 或路由 hint 任一匹配即可。
+// 空 allowed_models 表示不限制；非空时服务 ID、model_key、上游模型 ID 或路由 hint 任一匹配即可。
 func modelAllowedForKey(key *auth.Key, candidates ...string) bool {
 	if key == nil || len(key.AllowedModels) == 0 {
 		return true

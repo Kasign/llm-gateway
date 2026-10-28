@@ -812,3 +812,19 @@ body.auth-locked{overflow:hidden}
   margin-top:7px;
   line-height:1.5;
 }
+
+
+/* 服务密钥创建：服务权限用固定高度的滚动多选列表展示。 */
+.key-service-field{flex:1 1 100%;min-width:0;margin-top:8px}
+.key-service-title-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.key-service-title-row>label{margin:0}
+.key-service-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.key-service-help{margin:6px 0 10px}
+.key-service-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:8px;max-height:220px;min-height:72px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:9px;border:1px solid var(--border);border-radius:10px;background:rgba(8,13,24,.46)}
+.key-service-option{display:flex;align-items:flex-start;gap:10px;min-width:0;padding:10px;border:1px solid var(--border);border-radius:9px;background:rgba(148,163,184,.035);cursor:pointer}
+.key-service-option:has(input:checked){border-color:rgba(99,102,241,.75);background:var(--accent-soft)}
+.key-service-option input[type="checkbox"]{flex:0 0 16px;width:16px;height:16px;min-height:16px;margin:2px 0 0;accent-color:var(--accent)}
+.key-service-option-copy{display:block;min-width:0;overflow-wrap:anywhere}
+.key-service-option-copy strong{display:block;font-size:13px;font-weight:650}
+.key-service-option-copy small{display:block;margin-top:3px;font-size:11px;line-height:1.45}
+.key-service-field #keyServicesSelectionSummary{margin-top:8px}

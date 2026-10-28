@@ -487,7 +487,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 		addModel(activeID, target.UpstreamID)
 		data := make([]map[string]interface{}, 0, len(models))
 		for _, item := range models {
-			if !modelAllowedForKey(key, item.publicID, item.upstreamID, item.publicID) { continue }
+			if !modelAllowedForKey(key, s.effectiveUpstream().Backend, item.publicID, item.upstreamID, item.publicID) { continue }
 			data = append(data, map[string]interface{}{
 				"id": item.publicID, "object": "model", "created": time.Now().Unix(),
 				"owned_by": s.effectiveUpstream().Backend, "display_name": item.upstreamID,
@@ -519,7 +519,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		upstreamID := model.UpstreamNameForBackend(m.RuntimeJSON, backend)
-		if !modelAllowedForKey(key, m.ModelKey, upstreamID, m.ModelKey) {
+		if !modelAllowedForKey(key, backend, m.ModelKey, upstreamID, m.ModelKey) {
 			continue
 		}
 		data = append(data, map[string]interface{}{"id": m.ModelKey, "object": "model", "created": m.CreatedAt.Unix(), "owned_by": "llm-gateway", "display_name": m.DisplayName})
@@ -540,7 +540,7 @@ func (s *Server) v1Models(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// 活动模型也必须经过同一套 ACL。未获授权时不加入模型列表。
-		if !modelAllowedForKey(key, id, target.UpstreamID, target.Hint) {
+		if !modelAllowedForKey(key, target.ProviderID, id, target.UpstreamID, target.Hint) {
 			found = true // 表示无需插入未授权模型。
 		}
 		// 不在列表里、已授权且不为空，就插到最前面
