@@ -41,10 +41,6 @@
   function isAuthenticated() {
     return !!getSessionToken();
   }
-  function initAdminKey() {
-    const el = $("adminKey");
-    if (el) el.value = localStorage.getItem("llm_gateway_admin_key") || "";
-  }
   function redirectToLogin() {
     setSessionToken("");
     if (typeof globalThis.forceLoginScreen === "function") {
@@ -71,10 +67,6 @@
     const headers = { ...extra };
     const session = getSessionToken();
     if (session) headers.Authorization = `Bearer ${session}`;
-    else {
-      const k = getKey();
-      if (k) headers["X-Admin-Key"] = k;
-    }
     return headers;
   }
   async function apiPublic(url, opt = {}) {
@@ -432,8 +424,6 @@
     $("dashboard")?.classList.add("active");
     document.querySelector('.nav button[data-tab="dashboard"]')?.classList.add("active");
     forceLoginScreen();
-  }
-  function onAdminKeySaved() {
   }
   function updateCredentialFormPolicy() {
     const enabledNow = $("accountPasswordEnabled")?.checked ?? passwordProtectionAtLoad;
@@ -1429,13 +1419,7 @@
       el.innerHTML = '<span class="pill pill-success">Web \u5DF2\u767B\u5F55</span>';
       return;
     }
-    el.innerHTML = getKey() ? '<span class="pill pill-success">\u5BC6\u94A5\u5DF2\u4FDD\u5B58</span>' : '<span class="pill pill-warn">\u672A\u914D\u7F6E</span>';
-  }
-  function saveKey() {
-    localStorage.setItem("llm_gateway_admin_key", getKey());
-    adminKeyStatus();
-    onAdminKeySaved();
-    refreshAll();
+    el.innerHTML = '<span class="pill">\u4EC5\u901A\u8FC7\u670D\u52A1\u7AEF\u73AF\u5883\u53D8\u91CF\u914D\u7F6E</span>';
   }
   function setGgufMsg(kind, text) {
     const el = $("ggufMsg");
@@ -2866,7 +2850,10 @@
       init_format();
       init_requests();
       init_expose();
-      initAdminKey();
+      try {
+        localStorage.removeItem("llm_gateway_admin_key");
+      } catch {
+      }
       document.querySelectorAll(".nav button").forEach((b) => b.onclick = () => {
         document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
         $("sidebarAccountBtn")?.classList.remove("active");
@@ -3178,7 +3165,6 @@
       exposeGlobals({
         $,
         esc,
-        getKey,
         api,
         fmtSize,
         fmtDate,
@@ -3287,7 +3273,6 @@
         rotateKey,
         runBenchmark,
         saveBackend,
-        saveKey,
         scrollMmActionLog,
         selectGatewayModel,
         setBenchRunning,

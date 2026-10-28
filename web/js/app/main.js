@@ -1,7 +1,6 @@
 import { $, esc } from '../core/dom.js';
-import { getKey, api, initAdminKey, isAuthenticated } from '../core/api.js';
+import { api, isAuthenticated } from '../core/api.js';
 import { setGlobalMsg } from '../core/notify.js';
-import { onAdminKeySaved } from '../features/auth.js';
 import { adminStore } from '../features/admin-store.js';
 import { fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable, displayUpstreamModel } from '../core/format.js';
 import {
@@ -26,7 +25,8 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 
-initAdminKey();
+// 旧版把管理员 API Key 存在浏览器中，但它不能代替 Web Session；清理无效的旧副本。
+try { localStorage.removeItem('llm_gateway_admin_key'); } catch {}
 function syncTopbarRefresh(){
   const btn=$('btnRefreshDashboard');
   if(!btn)return;
@@ -486,13 +486,7 @@ function adminKeyStatus(){
   const el=$('adminKeyStatus');
   if(!el)return;
   if(isAuthenticated()){el.innerHTML='<span class="pill pill-success">Web 已登录</span>';return}
-  el.innerHTML=getKey()?'<span class="pill pill-success">密钥已保存</span>':'<span class="pill pill-warn">未配置</span>';
-}
-function saveKey(){
-  localStorage.setItem('llm_gateway_admin_key',getKey());
-  adminKeyStatus();
-  onAdminKeySaved();
-  refreshAll();
+  el.innerHTML='<span class="pill">仅通过服务端环境变量配置</span>';
 }
 
 function setGgufMsg(kind,text){
@@ -1923,7 +1917,7 @@ async function runBenchmark(){
 }
 
 exposeGlobals({
-  $, esc, getKey, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
+  $, esc, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
   adminKeyStatus,
   appendActionLogTo,
   appendOpsLog,
@@ -2024,7 +2018,6 @@ exposeGlobals({
   rotateKey,
   runBenchmark,
   saveBackend,
-  saveKey,
   scrollMmActionLog,
   selectGatewayModel,
   setBenchRunning,

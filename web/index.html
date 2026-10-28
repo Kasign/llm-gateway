@@ -307,14 +307,8 @@
       <section id="keys" class="panel">
         <div class="card admin-auth-card">
           <div class="card-head">
-            <div><h2>API 管理员密钥（可选）</h2><p>脚本或自动化调用 <code>/api/*</code> 时使用，与 deploy/.env 中 <code>LLM_GATEWAY_ADMIN_API_KEY</code> 一致；浏览器登录请用全屏登录页账号</p></div>
+            <div><h2>API 管理员密钥（可选）</h2><p>仅供外部脚本或自动化调用管理 API。通过服务端环境变量 <code>LLM_GATEWAY_ADMIN_API_KEY</code> 配置，此页不会修改服务端密钥；浏览器管理操作始终使用网页登录建立的 Web Session。</p></div>
             <span id="adminKeyStatus"></span>
-          </div>
-          <div class="row">
-            <div class="field"><label>密钥</label>
-              <input id="adminKey" type="password" placeholder="粘贴管理员密钥" autocomplete="off">
-            </div>
-            <button type="button" class="btn primary" onclick="saveKey()">保存</button>
           </div>
         </div>
         <div class="card">
@@ -445,7 +439,7 @@
 </div>
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261028-hf-file-selection-1"></script>
+<script src="/static/dist/app.js?v=20261028-session-key-boundary-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 </body>
