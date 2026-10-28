@@ -828,3 +828,17 @@ body.auth-locked{overflow:hidden}
 .key-service-option-copy strong{display:block;font-size:13px;font-weight:650}
 .key-service-option-copy small{display:block;margin-top:3px;font-size:11px;line-height:1.45}
 .key-service-field #keyServicesSelectionSummary{margin-top:8px}
+
+
+/* 服务密钥编辑弹窗：保留与新增表单一致的服务多选样式。 */
+.key-edit-modal .card{max-width:760px}
+.key-edit-modal .card-head p{margin:4px 0 0}
+.key-edit-modal .key-service-list{max-height:220px}
+.key-edit-legacy{margin-top:10px;padding:10px 12px;border:1px solid rgba(245,158,11,.35);border-radius:9px;background:rgba(245,158,11,.06)}
+.key-edit-legacy p{margin:0 0 8px;line-height:1.5}
+.key-edit-legacy-toggle{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
+.key-edit-legacy-toggle input{flex:0 0 16px;width:16px;height:16px;min-height:16px}
+.key-edit-error{min-height:20px;margin:8px 0}
+.key-edit-footer{justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
+.key-edit-button{white-space:nowrap}
+@media(max-width:600px){.key-edit-modal{padding:10px}.key-edit-modal .card{max-height:95vh}.key-edit-footer .btn{flex:1 1 120px}}
