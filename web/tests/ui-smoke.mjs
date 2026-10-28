@@ -383,6 +383,9 @@ try {
     appCss.includes('.provider-advanced-group>summary') &&
     appCss.includes('#providers .mm-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))') &&
     appCss.includes('#dashboard .backend-actions{display:grid;grid-template-columns:minmax(0,1fr)'));
+  check('调用记录在手机端缩窄列宽并保留表格内部滚动',
+    appCss.includes('#requests .table-wrap table{min-width:950px;table-layout:fixed}') &&
+    appCss.includes('#requests .table-wrap th:nth-child(3),#requests .table-wrap td:nth-child(3){width:150px}'));
   check('辅助文字颜色已提升并有移动端首页紧凑布局规则',
     appCss.includes('--text-3:#8190a6;') &&
     appCss.includes('#dashboard .sys-dashboard .gauge-unit{') &&
