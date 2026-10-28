@@ -555,6 +555,57 @@ try {
     Number.isFinite(infoChipContrastAudit.ratio) && infoChipContrastAudit.ratio >= 4.5,
     infoChipContrastAudit);
 
+  const runtimeMetricContrastAudit = await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.className = 'runtime-hero runtime-hero-live';
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden';
+    const label = document.createElement('span');
+    label.className = 'runtime-metric-label';
+    label.textContent = '运行时指标';
+    const sub = document.createElement('span');
+    sub.className = 'runtime-metric-sub';
+    sub.textContent = '附加说明';
+    host.append(label, sub);
+    document.body.appendChild(host);
+    const channels = value => (value.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+    const surface = channels(getComputedStyle(host).backgroundColor);
+    const bgImage = getComputedStyle(host).backgroundImage;
+    const gradient = bgImage.match(/rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/i);
+    if (surface.length < 3 || !gradient) {
+      host.remove();
+      return { surface, bgImage, labelRatio: Number.NaN, subRatio: Number.NaN };
+    }
+    const base = surface.slice(0, 3);
+    const color = gradient.slice(1, 4).map(Number);
+    const alpha = Number(gradient[4]);
+    const composite = color.map((value, i) => value * alpha + base[i] * (1 - alpha));
+    const luminance = values => {
+      const linear = values.map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const calculate = element => {
+      const style = getComputedStyle(element);
+      const foreground = channels(style.color);
+      const opacity = Number(style.opacity || 1);
+      if (foreground.length < 3) return { color: style.color, opacity, ratio: Number.NaN };
+      const effective = foreground.slice(0, 3).map((value, i) => value * opacity + composite[i] * (1 - opacity));
+      const values = [luminance(effective), luminance(composite)].sort((a, b) => b - a);
+      return { color: style.color, opacity, effectiveForeground: effective.map(Math.round), ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2)) };
+    };
+    const result = { background: base, gradientColor: color, gradientOpacity: alpha, label: calculate(label), sub: calculate(sub) };
+    host.remove();
+    return result;
+  });
+  check('运行态 Hero 次级指标在最亮渐变端达到 WCAG AA（≥4.5:1）',
+    appCss.includes('.runtime-metric-label{font-size:11px;font-weight:600;color:var(--text-2);letter-spacing:.04em}') &&
+    appCss.includes('.runtime-metric-sub{font-size:11px;color:var(--text-2);line-height:1.35;max-width:12rem}') &&
+    Number.isFinite(runtimeMetricContrastAudit.label.ratio) && runtimeMetricContrastAudit.label.ratio >= 4.5 &&
+    Number.isFinite(runtimeMetricContrastAudit.sub.ratio) && runtimeMetricContrastAudit.sub.ratio >= 4.5,
+    runtimeMetricContrastAudit);
+
   const configNoteContrastAudit = await page.evaluate(() => {
     const host = document.createElement('div');
     host.className = 'inference-params-root';
