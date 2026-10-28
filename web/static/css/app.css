@@ -937,3 +937,24 @@ body.auth-locked{overflow:hidden}
   #dashboard .backend-actions{display:grid;grid-template-columns:minmax(0,1fr);width:100%}
   #dashboard .backend-actions .btn{width:100%;min-height:42px}
 }
+
+
+/* 窄屏高级配置摘要与调用记录列宽单独收敛，桌面诊断字段不受影响。 */
+@media(max-width:560px){
+  .provider-advanced-group>summary{
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;
+  }
+  .provider-advanced-group>summary small{grid-column:1/-1;text-align:left}
+  .provider-advanced-group>summary::after{grid-column:2;grid-row:1;align-self:center}
+  #requests .table-wrap table{min-width:950px;table-layout:fixed}
+  #requests .table-wrap th,#requests .table-wrap td{padding-left:6px;padding-right:6px}
+  #requests .table-wrap th:nth-child(1),#requests .table-wrap td:nth-child(1){width:100px}
+  #requests .table-wrap th:nth-child(2),#requests .table-wrap td:nth-child(2){width:130px}
+  #requests .table-wrap th:nth-child(3),#requests .table-wrap td:nth-child(3){width:150px}
+  #requests .table-wrap th:nth-child(4),#requests .table-wrap td:nth-child(4){width:130px}
+  #requests .table-wrap th:nth-child(5),#requests .table-wrap td:nth-child(5){width:98px}
+  #requests .table-wrap th:nth-child(6),#requests .table-wrap td:nth-child(6){width:56px}
+  #requests .table-wrap th:nth-child(7),#requests .table-wrap td:nth-child(7){width:104px}
+  #requests .table-wrap th:nth-child(8),#requests .table-wrap td:nth-child(8){width:100px}
+  #requests .table-wrap th:nth-child(9),#requests .table-wrap td:nth-child(9){width:82px}
+}
