@@ -270,6 +270,10 @@ try {
     await page.evaluate(()=>globalThis.loadKeys());
     await page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]').click();
     await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    // 弹窗会先显示、再异步读取密钥和服务；断言必须等旧权限提示加载后再执行。
+    await page.waitForFunction(() => document.getElementById('keyEditPreserveLegacy')?.checked === true &&
+      (document.getElementById('keyEditLegacyMessage')?.textContent || '').includes('legacy-model-id'),
+      null, {timeout:10000});
     check('编辑旧密钥时识别并默认保留遗留模型 ID',await page.locator('#keyEditPreserveLegacy').isChecked() &&
       (await page.locator('#keyEditLegacyMessage').textContent()).includes('legacy-model-id'));
     const preserveLegacyPromise=page.waitForResponse(response=>{
