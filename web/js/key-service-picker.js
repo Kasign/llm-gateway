@@ -7,11 +7,12 @@
   const editLegacyPanel=document.getElementById('keyEditLegacyPanel'), editLegacyMessage=document.getElementById('keyEditLegacyMessage');
   const preserveLegacy=document.getElementById('keyEditPreserveLegacy'), editError=document.getElementById('keyEditError');
   const editSave=document.getElementById('keyEditSave');
+  const editRefresh=document.getElementById('btnRefreshEditServices');
   const builtins=[
     {id:'llamacpp',name:'llama.cpp',description:'内置本地推理服务'},
     {id:'ollama',name:'Ollama',description:'内置本地推理服务'}
   ];
-  let services=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false,editTrigger=null,editTriggerKeyId='';
+  let services=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false,editTrigger=null,editTriggerKeyId='',editEpoch=0;
   const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   function selectedIds(target){return [...target.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value)}
   async function loadServiceCatalog(){
@@ -81,6 +82,8 @@
   }
   function hideEditModal(){
     if(!editModal||saving)return;
+    editEpoch+=1;
+    if(editRefresh)editRefresh.disabled=false;
     editModal.classList.remove('show');
     editModal.setAttribute('aria-hidden','true');
     editingKey=null;
@@ -89,6 +92,8 @@
   }
   function hideEditModalAfterSave(){
     if(!editModal)return;
+    editEpoch+=1;
+    if(editRefresh)editRefresh.disabled=false;
     editModal.classList.remove('show');
     editModal.setAttribute('aria-hidden','true');
     editingKey=null;
@@ -96,11 +101,22 @@
     restoreEditFocus();
   }
   async function openEditKey(id,button){
-    if(!editModal||!editForm||!editList)return;if(button)button.disabled=true;showEditModal(button);
-    editError.textContent='正在读取密钥和服务列表…';editSave.disabled=true;editList.innerHTML='<div class="muted small">正在读取服务列表…</div>';
+    if(!editModal||!editForm||!editList||saving)return;
+    const epoch=++editEpoch;
+    if(button)button.disabled=true;
+    if(editRefresh)editRefresh.disabled=true;
+    showEditModal(button);
+    editError.textContent='正在读取密钥和服务列表…';
+    editSave.disabled=true;
+    editList.innerHTML='<div class="muted small">正在读取服务列表…</div>';
     try{
-      const [keyResponse]=await Promise.all([serviceKeyRequest('/api/admin/keys',{cache:'no-store'}),loadServiceCatalog()]);
-      const key=(keyResponse?.data||[]).find(item=>Number(item.id)===Number(id));if(!key)throw new Error('未找到这把密钥，刷新列表后重试');
+      const [keyResponse]=await Promise.all([
+        serviceKeyRequest('/api/admin/keys',{cache:'no-store'}),
+        loadServiceCatalog()
+      ]);
+      if(epoch!==editEpoch||!editModal.classList.contains('show'))return;
+      const key=(keyResponse?.data||[]).find(item=>Number(item.id)===Number(id));
+      if(!key)throw new Error('未找到这把密钥，刷新列表后重试');
       editingKey=key;
       const current=[...new Set((key.allowed_models||[]).map(v=>String(v).trim()).filter(Boolean))];
       const known=new Set(services.map(s=>s.id)),selected=current.filter(v=>known.has(v));
@@ -114,10 +130,23 @@
         editLegacyPanel.hidden=false;
         editLegacyMessage.textContent='检测到旧模型 ID 权限：'+editingLegacyModels.join('、')+'。默认保留以避免意外改变现有权限；保留时，模型 ID 规则仍可能允许未勾选的服务。';
         preserveLegacy.checked=true;
-      }else{editLegacyPanel.hidden=true;editLegacyMessage.textContent='';preserveLegacy.checked=false}
-      editError.textContent='';editSave.disabled=false;syncEditSelection();document.getElementById('keyEditName')?.focus();
-    }catch(e){editError.textContent=e?.message||'读取密钥信息失败';editSave.disabled=true}
-    finally{if(button)button.disabled=false}
+      }else{
+        editLegacyPanel.hidden=true;
+        editLegacyMessage.textContent='';
+        preserveLegacy.checked=false;
+      }
+      editError.textContent='';
+      editSave.disabled=false;
+      syncEditSelection();
+      document.getElementById('keyEditName')?.focus();
+    }catch(e){
+      if(epoch!==editEpoch||!editModal.classList.contains('show'))return;
+      editError.textContent=e?.message||'读取密钥信息失败';
+      editSave.disabled=true;
+    }finally{
+      if(button)button.disabled=false;
+      if(epoch===editEpoch&&editRefresh)editRefresh.disabled=false;
+    }
   }
   async function saveEditKey(event){
     event?.preventDefault?.();if(!editingKey||saving||!editForm.reportValidity())return;
@@ -144,9 +173,21 @@
   list.addEventListener('change',syncCreateSelection);
   document.getElementById('btnSelectAllEditServices')?.addEventListener('click',()=>{editList?.querySelectorAll('input[type="checkbox"]').forEach(x=>x.checked=true);syncEditSelection()});
   document.getElementById('btnClearEditServices')?.addEventListener('click',()=>{editList?.querySelectorAll('input[type="checkbox"]').forEach(x=>x.checked=false);if(preserveLegacy)preserveLegacy.checked=false;syncEditSelection()});
-  document.getElementById('btnRefreshEditServices')?.addEventListener('click',async()=>{
-    try{const keep=selectedIds(editList);await loadServiceCatalog();renderServiceOptions(editList,keep.filter(id=>services.some(s=>s.id===id)));syncEditSelection();editError.textContent='';editSave.disabled=false}
-    catch(e){editError.textContent=e?.message||'刷新服务列表失败';editSave.disabled=true}
+  editRefresh?.addEventListener('click',async()=>{
+    const epoch=editEpoch;
+    const keep=selectedIds(editList);
+    try{
+      await loadServiceCatalog();
+      if(epoch!==editEpoch||!editModal?.classList.contains('show'))return;
+      renderServiceOptions(editList,keep.filter(id=>services.some(s=>s.id===id)));
+      syncEditSelection();
+      editError.textContent='';
+      editSave.disabled=!editingKey;
+    }catch(e){
+      if(epoch!==editEpoch||!editModal?.classList.contains('show'))return;
+      editError.textContent=e?.message||'刷新服务列表失败';
+      editSave.disabled=true;
+    }
   });
   editList?.addEventListener('change',syncEditSelection);preserveLegacy?.addEventListener('change',syncEditSelection);
   editForm?.addEventListener('submit',saveEditKey);
