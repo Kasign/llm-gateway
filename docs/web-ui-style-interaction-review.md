@@ -361,3 +361,9 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 在模型推理参数表单中发现 placeholder 使用 `color:var(--text-3);opacity:.85`。文字色 `#8190a6` 在 `--surface-2` 上原本约为 4.90:1，但透明度衰减后合成前景约为 `#717f95`，实际对比度降至约 3.92:1。
 - 将 placeholder 透明度恢复为 1，不更改主题色和控件背景，并更新 `model-download.css` 缓存版本为 `20261028-placeholder-contrast-1`。
 - Browser Smoke 新增浏览器计算样式审计：读取 `::placeholder` 前景色/透明度与实际输入控件背景，执行 alpha 合成及 WCAG 对比度计算，要求至少 4.5:1。该回归在本提交触发的 Actions 结束前不标记通过。
+
+### 来自配置的参数提示文字对比度修复（2026-10-28）
+
+- `from-config` 参数提示原使用 `--accent`（`#6366f1`）并叠加 `opacity:.95`，在深色参数卡片上计算约为 3.59:1，低于普通文字 WCAG AA 4.5:1。
+- 改为可读性更高的浅紫蓝 `#a5b4fc` 并将文字透明度设为 1；在 `--surface` / `--surface-2` 上的对比度分别约为 8.63:1 / 7.97:1。模型参数样式缓存版本更新为 `20261028-config-note-contrast-1`。
+- Browser Smoke 增加从实际计算样式读取提示文字与卡片背景、合成透明度并检查对比度的用例；新用例是否通过以最新提交的 Actions 结果为准。
