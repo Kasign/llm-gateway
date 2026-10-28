@@ -441,7 +441,7 @@
           <div class="field bench-prompt-block" style="margin-top:12px">
             <div class="bench-prompt-head">
               <label for="benchPrompt">提示词</label>
-              <button type="button" class="btn sm ghost" id="benchParamsOpenBtn" onclick="openBenchParamsDrawer()">推理参数</button>
+              <button type="button" class="btn sm ghost" id="benchParamsOpenBtn" aria-haspopup="dialog" aria-controls="benchParamsDrawer" onclick="openBenchParamsDrawer()">推理参数</button>
             </div>
             <textarea id="benchPrompt" rows="4">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea>
           </div>
