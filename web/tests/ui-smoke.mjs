@@ -180,25 +180,33 @@ try {
     }
 
     if (tab === 'providers') {
-      const badges = await page.evaluate(() => ({
-        statusColumnWhiteSpace: getComputedStyle(document.querySelector('#providers td:nth-child(3)') || document.createElement('td')).whiteSpace,
-        badgeCount: document.querySelectorAll('#providers .table-wrap tbody .pill').length,
-        badges: [...document.querySelectorAll('#providers .table-wrap tbody .pill')].map(el => {
-          const rect = el.getBoundingClientRect();
-          return { text: el.textContent.trim(), height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace };
-        }),
-        sample: (() => {
-          const el = document.createElement('span');
-          el.className = 'pill pill-active';
-          el.textContent = '已启用';
-          el.style.cssText = 'position:absolute;visibility:hidden;left:-10000px;top:0';
-          document.body.appendChild(el);
-          const rect = el.getBoundingClientRect();
-          const result = { height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace, width: rect.width };
-          el.remove();
-          return result;
-        })()
-      }));
+      const badges = await page.evaluate(() => {
+        const section = document.querySelector('#providers');
+        const probeTable = document.createElement('table');
+        probeTable.innerHTML = '<tbody><tr><td>占位</td><td>占位</td><td>状态</td></tr></tbody>';
+        section.appendChild(probeTable);
+        const statusColumnWhiteSpace = getComputedStyle(probeTable.querySelector('td:nth-child(3)')).whiteSpace;
+        probeTable.remove();
+        return {
+          statusColumnWhiteSpace,
+          badgeCount: document.querySelectorAll('#providers .table-wrap tbody .pill').length,
+          badges: [...document.querySelectorAll('#providers .table-wrap tbody .pill')].map(el => {
+            const rect = el.getBoundingClientRect();
+            return { text: el.textContent.trim(), height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace };
+          }),
+          sample: (() => {
+            const el = document.createElement('span');
+            el.className = 'pill pill-active';
+            el.textContent = '已启用';
+            el.style.cssText = 'position:absolute;visibility:hidden;left:-10000px;top:0';
+            document.body.appendChild(el);
+            const rect = el.getBoundingClientRect();
+            const result = { height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace, width: rect.width };
+            el.remove();
+            return result;
+          })()
+        };
+      });
       check('Provider 状态徽标保持单行且高度正常',
         badges.statusColumnWhiteSpace === 'nowrap' &&
         badges.sample.whiteSpace === 'nowrap' &&
