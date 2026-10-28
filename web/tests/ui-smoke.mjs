@@ -443,6 +443,31 @@ try {
   const keyPickerBundle = fs.readFileSync(path.resolve('web/static/dist/key-service-picker.js'), 'utf8');
   const indexHtml = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
+  // 从浏览器实际加载的 CSS 变量计算核心文字与主要深色表面的 WCAG 对比度。
+  const textContrastAudit = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const color = name => root.getPropertyValue('--' + name).trim();
+    const linear = value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    const luminance = hex => {
+      if (!/^#[0-9a-f]{6}$/i.test(hex)) return Number.NaN;
+      const rgb = [1, 3, 5].map(offset => linear(parseInt(hex.slice(offset, offset + 2), 16) / 255));
+      return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    };
+    const ratio = (foreground, background) => {
+      const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+      return Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2));
+    };
+    const result = {};
+    for (const foreground of ['text', 'text-2', 'text-3']) {
+      for (const background of ['bg', 'bg-2', 'sidebar', 'surface', 'surface-2']) {
+        result[foreground + ' / ' + background] = ratio(color(foreground), color(background));
+      }
+    }
+    return result;
+  });
+  check('核心文字颜色在五种主要深色表面达到 WCAG AA（≥4.5:1）',
+    Object.values(textContrastAudit).every(value => Number.isFinite(value) && value >= 4.5),
+    textContrastAudit);
   const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
   const providerIdPatternValid = await page.evaluate(pattern => {
     try { new RegExp(pattern, 'v'); return true; }
