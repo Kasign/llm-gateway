@@ -714,7 +714,7 @@ try {
         host.appendChild(label);
         document.body.appendChild(host);
 
-        const channels = value => (value.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
+        const channels = value => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
         const luminance = value => {
           const rgb = channels(value);
           if (rgb.length !== 3) return Number.NaN;

@@ -335,3 +335,9 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 将密钥“已配置”状态改用已存在的主题成功色 `var(--ok,#34d399)`，同时同步 `web/static/dist/providers-admin.js`；更新 HTML 中 Provider Bundle 查询版本为 `20261028-provider-key-contrast-1`。
 - Browser Smoke 增加运行时样式对比度检查：实际加载 Provider 管理模块后，创建测试文本并读取浏览器计算后的前景色/深色表面背景色，计算对比度；只有使用正确主题色且达到 4.5:1 才通过。
 - 前一提交 `2dc8a12` 的 Browser Smoke 已实际通过 143/143 检查（[run 40688715310](https://github.com/Kasign/llm-gateway/actions/runs/40688715310)）；同提交 Go CI 五个任务全部成功（[run 40688715333](https://github.com/Kasign/llm-gateway/actions/runs/40688715333)）。本节新增的对比度用例尚未在新提交上执行，必须以后续 Actions 结果为准。
+
+### 对比度回归中的 RGB 解析修正（2026-10-28）
+
+- 复查 `5afa772` 新增的 Provider 状态色对比度用例时，发现 RGB 解析正则的反斜杠多转义了一层，不能正确提取浏览器返回的 `rgb(...)` 通道值。
+- 已修正为直接匹配数字与小数点的正则，避免计算结果成为 `NaN`；前景色/背景色仍从浏览器实际计算样式读取，不改为硬编码通过值。
+- `5afa772` 对应的 CI/Browser Smoke 尚未完成，不能据此判定该用例通过。修正后的验证以此提交触发的工作流为准。
