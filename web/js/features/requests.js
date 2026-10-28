@@ -99,9 +99,9 @@ export async function loadRequests() {
                   ' KB';
                 const stopBtn =
                   x.status === 'running'
-                    ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">结束</button>`
+                    ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">结束</button>`
                     : '';
-                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || '—')}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">详情</button>${stopBtn}</div></td></tr>`;
+                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || '—')}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">详情</button>${stopBtn}</div></td></tr>`;
               })
               .join(''),
         );
@@ -284,7 +284,7 @@ function detailSections(j) {
     add(
       'running',
       'swap',
-      `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid)}')">结束这条调用</button></p>`,
+      `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid).replace(/'/g, "%27")}')">结束这条调用</button></p>`,
     );
   }
   if (j.payload_note) add('note', 'swap', `<p class="req-note warn" style="margin:0 0 10px">${esc(j.payload_note)}</p>`);

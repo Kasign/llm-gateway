@@ -623,8 +623,8 @@
           const ridShort = rid.length > 10 ? rid.slice(0, 8) + "\u2026" : rid;
           const target = displayRequestTarget(x);
           const sz = (Number(x.request_bytes || 0) / 1024).toFixed(1) + " / " + (Number(x.response_bytes || 0) / 1024).toFixed(1) + " KB";
-          const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id)}')">\u7ED3\u675F</button>` : "";
-          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || "\u2014")}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id)}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
+          const stopBtn = x.status === "running" ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u7ED3\u675F</button>` : "";
+          return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || "\u2014")}</td><td>${esc(x.api_key_name || "\u2014")}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || "\u2014")}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? "\u662F" : x.ttft_ms != null && x.ttft_ms > 0 ? "\u63A8\u65AD" : "\u5426"}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? " / " + x.upstream_http_status : ""}</td><td>${x.ttft_ms != null ? x.ttft_ms + " ms" : "\u2014"}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? "\u2014"}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">\u8BE6\u60C5</button>${stopBtn}</div></td></tr>`;
         }).join("")
       );
     } catch (e) {
@@ -777,7 +777,7 @@
       add(
         "running",
         "swap",
-        `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid)}')">\u7ED3\u675F\u8FD9\u6761\u8C03\u7528</button></p>`
+        `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid).replace(/'/g, "%27")}')">\u7ED3\u675F\u8FD9\u6761\u8C03\u7528</button></p>`
       );
     }
     if (j.payload_note) add("note", "swap", `<p class="req-note warn" style="margin:0 0 10px">${esc(j.payload_note)}</p>`);
@@ -2718,7 +2718,7 @@
       j.stream_event_count ? `<span class="pill">\u4E8B\u4EF6 ${j.stream_event_count}</span>` : "",
       j.http_status ? `<span class="pill">HTTP ${j.http_status}</span>` : "",
       j.llama_model ? `<span class="pill mono small">${esc(j.llama_model)}</span>` : "",
-      j.request_id ? `<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id)}')">\u5B8C\u6574\u8C03\u7528\u8BB0\u5F55</button>` : ""
+      j.request_id ? `<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">\u5B8C\u6574\u8C03\u7528\u8BB0\u5F55</button>` : ""
     ].filter(Boolean).join("");
     const rawBody = j.response || "";
     $("benchRaw").textContent = rawBody.trim().startsWith("data:") ? rawBody : JSON.stringify({ analysis: wrap.analysis, job: j, stream_events: evs, response: tryParse(rawBody) || rawBody }, null, 2);

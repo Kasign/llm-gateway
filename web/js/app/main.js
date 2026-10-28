@@ -1808,7 +1808,7 @@ function renderBenchResult(wrap){
     j.stream_event_count?`<span class="pill">事件 ${j.stream_event_count}</span>`:'',
     j.http_status?`<span class="pill">HTTP ${j.http_status}</span>`:'',
     j.llama_model?`<span class="pill mono small">${esc(j.llama_model)}</span>`:'',
-    j.request_id?`<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id)}')">完整调用记录</button>`:'',
+    j.request_id?`<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">完整调用记录</button>`:'',
   ].filter(Boolean).join('');
   const rawBody=j.response||'';
   $('benchRaw').textContent=rawBody.trim().startsWith('data:')?rawBody:JSON.stringify({analysis:wrap.analysis,job:j,stream_events:evs,response:tryParse(rawBody)||rawBody},null,2);
