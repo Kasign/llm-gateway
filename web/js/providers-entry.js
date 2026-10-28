@@ -279,6 +279,10 @@
   }
   async function saveProvider(event) {
     event.preventDefault();
+    const form = $('providerForm');
+    // 同一表单只能有一个保存请求在途；即使重复绑定监听器或快速双击也只提交一次。
+    if (!form || form.dataset.saving === 'true') return;
+    form.dataset.saving = 'true';
     const button = $('providerSave');
     button.disabled = true;
     try {
@@ -294,6 +298,7 @@
       setStatus(error instanceof SyntaxError ? '模型映射 JSON 格式错误。' : (error.message || '保存失败。'), 'err', true);
     } finally {
       button.disabled = false;
+      form.dataset.saving = 'false';
     }
   }
   async function testProvider(row = null) {
@@ -347,8 +352,11 @@
     }
   }
   function init() {
+    // 防止同一页面重复加载 Bundle 时重复绑定事件并发送多次保存请求。
+    if (globalThis.__llmGatewayProviderAdminInitialized) return;
     const nav = document.querySelector('.nav button[data-tab="providers"]');
     if (!nav || !$('providers')) return;
+    globalThis.__llmGatewayProviderAdminInitialized = true;
     const style = document.createElement('style');
     style.textContent = [
       '.provider-form{display:flex;flex-direction:column;gap:14px}',
