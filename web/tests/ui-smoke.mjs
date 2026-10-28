@@ -139,7 +139,8 @@ try {
     const headers = request.headers();
     report.authHeaderUsage.push({
       path: pathname, hasAdminKey: Boolean(headers['x-admin-key']),
-      hasSession: Boolean(headers.authorization && headers.authorization.startsWith('Bearer '))
+      hasSession: Boolean(headers.authorization && headers.authorization.startsWith('Bearer ')),
+      expectedUnauthorizedProbe: expectedNonServiceKeyRejection && pathname === '/api/admin/runtime'
     });
   });
 
@@ -245,7 +246,8 @@ try {
       item.path !== '/api/admin/keys' && !item.path.startsWith('/api/admin/keys/') &&
       item.hasSession && !item.hasAdminKey), report.authHeaderUsage);
   const adminKeyOutsideServiceKeyRequests = report.authHeaderUsage.filter(item => item.hasAdminKey &&
-    item.path !== '/api/admin/keys' && !item.path.startsWith('/api/admin/keys/'));
+    item.path !== '/api/admin/keys' && !item.path.startsWith('/api/admin/keys/') &&
+    !item.expectedUnauthorizedProbe);
   check('X-Admin-Key 只出现在服务密钥管理请求',
     adminKeyOutsideServiceKeyRequests.length === 0, adminKeyOutsideServiceKeyRequests);
 
