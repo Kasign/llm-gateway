@@ -11,7 +11,7 @@
     {id:'llamacpp',name:'llama.cpp',description:'内置本地推理服务'},
     {id:'ollama',name:'Ollama',description:'内置本地推理服务'}
   ];
-  let services=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false;
+  let services=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false,editTrigger=null,editTriggerKeyId='';
   const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   function selectedIds(target){return [...target.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value)}
   async function loadServiceCatalog(){
@@ -58,11 +58,45 @@
     else if(selected.length)editSummary.textContent='仅保留所选服务范围：'+selected.join('、')+'。';
     else editSummary.textContent='当前未限制访问服务：该密钥可访问所有已配置服务。';
   }
-  function showEditModal(){if(!editModal)return;editModal.classList.add('show');editModal.setAttribute('aria-hidden','false');editError.textContent=''}
-  function hideEditModal(){if(!editModal||saving)return;editModal.classList.remove('show');editModal.setAttribute('aria-hidden','true');editingKey=null;editingLegacyModels=[]}
-  function hideEditModalAfterSave(){if(!editModal)return;editModal.classList.remove('show');editModal.setAttribute('aria-hidden','true');editingKey=null;editingLegacyModels=[]}
+  function showEditModal(trigger){
+    if(!editModal)return;
+    editTrigger=trigger||document.activeElement;
+    editTriggerKeyId=String(editTrigger?.dataset?.keyId||'');
+    editModal.classList.add('show');
+    editModal.setAttribute('aria-hidden','false');
+    editError.textContent='';
+    document.getElementById('keyEditClose')?.focus();
+  }
+  function restoreEditFocus(){
+    const trigger=editTrigger;
+    const id=editTriggerKeyId;
+    editTrigger=null;
+    editTriggerKeyId='';
+    const refreshedTrigger=id?document.querySelector('#keyTable .key-edit-button[data-key-id="'+id+'"]'):null;
+    const target=trigger?.isConnected?trigger:refreshedTrigger;
+    if(target){
+      if(target.disabled)target.disabled=false;
+      target.focus();
+    }
+  }
+  function hideEditModal(){
+    if(!editModal||saving)return;
+    editModal.classList.remove('show');
+    editModal.setAttribute('aria-hidden','true');
+    editingKey=null;
+    editingLegacyModels=[];
+    restoreEditFocus();
+  }
+  function hideEditModalAfterSave(){
+    if(!editModal)return;
+    editModal.classList.remove('show');
+    editModal.setAttribute('aria-hidden','true');
+    editingKey=null;
+    editingLegacyModels=[];
+    restoreEditFocus();
+  }
   async function openEditKey(id,button){
-    if(!editModal||!editForm||!editList)return;if(button)button.disabled=true;showEditModal();
+    if(!editModal||!editForm||!editList)return;if(button)button.disabled=true;showEditModal(button);
     editError.textContent='正在读取密钥和服务列表…';editSave.disabled=true;editList.innerHTML='<div class="muted small">正在读取服务列表…</div>';
     try{
       const [keyResponse]=await Promise.all([serviceKeyRequest('/api/admin/keys',{cache:'no-store'}),loadServiceCatalog()]);
@@ -81,7 +115,7 @@
         editLegacyMessage.textContent='检测到旧模型 ID 权限：'+editingLegacyModels.join('、')+'。默认保留以避免意外改变现有权限；保留时，模型 ID 规则仍可能允许未勾选的服务。';
         preserveLegacy.checked=true;
       }else{editLegacyPanel.hidden=true;editLegacyMessage.textContent='';preserveLegacy.checked=false}
-      editError.textContent='';editSave.disabled=false;syncEditSelection();
+      editError.textContent='';editSave.disabled=false;syncEditSelection();document.getElementById('keyEditName')?.focus();
     }catch(e){editError.textContent=e?.message||'读取密钥信息失败';editSave.disabled=true}
     finally{if(button)button.disabled=false}
   }
@@ -119,7 +153,17 @@
   document.getElementById('keyEditCancel')?.addEventListener('click',hideEditModal);
   document.getElementById('keyEditClose')?.addEventListener('click',hideEditModal);
   editModal?.addEventListener('click',event=>{if(event.target===editModal)hideEditModal()});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&editModal?.classList.contains('show'))hideEditModal()});
+  document.addEventListener('keydown',event=>{
+    if(!editModal?.classList.contains('show'))return;
+    if(event.key==='Escape'){event.preventDefault();hideEditModal();return}
+    if(event.key!=='Tab')return;
+    const focusable=[...editModal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
+      .filter(el=>!el.hidden&&el.getClientRects().length>0);
+    if(!focusable.length)return;
+    const first=focusable[0],last=focusable[focusable.length-1],active=document.activeElement;
+    if(event.shiftKey&&(active===first||!editModal.contains(active))){event.preventDefault();last.focus()}
+    else if(!event.shiftKey&&(active===last||!editModal.contains(active))){event.preventDefault();first.focus()}
+  });
   const keyTable=document.getElementById('keyTable');
   function enhanceKeyTable(){
     const table=keyTable?.querySelector('table');if(!table)return;
