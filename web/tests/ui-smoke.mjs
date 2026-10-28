@@ -299,6 +299,11 @@ try {
     await page.keyboard.press('Shift+Tab');
     check('服务密钥编辑弹窗的 Shift+Tab 焦点循环留在弹窗内',
       await page.locator('#keyEditSave').evaluate(el => document.activeElement === el));
+    check('键盘焦点在主要操作按钮上有清晰可见的轮廓',
+      await page.locator('#keyEditSave').evaluate(el => {
+        const style = getComputedStyle(el);
+        return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;
+      }));
     await page.keyboard.press('Escape');
     await page.locator('#keyEditModal').waitFor({state:'hidden',timeout:5000});
     check('服务密钥编辑弹窗支持 Escape 并返回触发按钮',
@@ -550,6 +555,10 @@ try {
     appCss.includes('--text-3:#8190a6;') &&
     appCss.includes('#dashboard .sys-dashboard .gauge-unit{') &&
     appCss.includes('grid-template-columns:minmax(0,128px) minmax(0,1fr)'));
+  check('主要交互元素声明通用键盘焦点可见样式',
+    appCss.includes('button:focus-visible,a[href]:focus-visible') &&
+    appCss.includes('outline:2px solid var(--accent-2)') &&
+    appCss.includes('outline-offset:2px'));
   check('远程 Provider 请求不会使用管理员服务密钥',
     !providerBundle.includes('const adminKey = () =>') &&
     !providerBundle.includes("headers['X-Admin-Key'] = adminKey()"));
