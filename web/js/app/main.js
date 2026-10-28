@@ -223,7 +223,7 @@ async function loadMmBackendPills(){
     el.innerHTML=`<span class="pill pill-running">${esc(be)}</span>`+
       (mn?`<span class="pill pill-loaded">当前 ${esc(mn)}</span>`:`<span class="pill">未加载模型</span>`);
   }catch{
-    el.innerHTML='<span class="pill pill-warn">请先配置管理员密钥</span>';
+    el.innerHTML='<span class="pill pill-warn">上游信息暂不可用，请检查服务状态后刷新</span>';
   }
 }
 /** 网关模型 + 上游 runtime 快照：列表/大小/加载态统一从此读取，避免各 Tab 各拉一套逻辑 */

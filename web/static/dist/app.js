@@ -1283,7 +1283,7 @@
       const mn = (a.model_name || "").trim();
       el.innerHTML = `<span class="pill pill-running">${esc(be)}</span>` + (mn ? `<span class="pill pill-loaded">\u5F53\u524D ${esc(mn)}</span>` : `<span class="pill">\u672A\u52A0\u8F7D\u6A21\u578B</span>`);
     } catch {
-      el.innerHTML = '<span class="pill pill-warn">\u8BF7\u5148\u914D\u7F6E\u7BA1\u7406\u5458\u5BC6\u94A5</span>';
+      el.innerHTML = '<span class="pill pill-warn">\u4E0A\u6E38\u4FE1\u606F\u6682\u4E0D\u53EF\u7528\uFF0C\u8BF7\u68C0\u67E5\u670D\u52A1\u72B6\u6001\u540E\u5237\u65B0</span>';
     }
   }
   function modelsNavActive() {
