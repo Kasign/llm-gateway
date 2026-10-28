@@ -391,3 +391,14 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 复核渐变与半透明叠色时发现 `.inf-chip em` 使用 `--text-3`。该文字实际处在 `.inf-card` 半透明底色、左上角靛蓝渐变及 `.inf-chip` 半透明靛蓝底层之上，按最大渐变不透明度合成后对比度约 4.18:1，低于 WCAG AA 4.5:1。
 - 将次级文字色改为现有 `--text-2`，保留标签主文字、背景色和布局不变；主 CSS 缓存版本更新为 `20261028-inf-chip-em-contrast-1`。
 - Browser Smoke 新增叠色计算：从浏览器读取实际计算样式中的背景 RGB/alpha、渐变首色 alpha 与文字颜色，按最亮的渐变位置计算保守合成结果，并要求对比度至少 4.5:1。新用例以对应提交触发的 Actions 结果为准。
+
+
+### 性能测试参数抽屉入口语义与本轮验收状态（2026-10-28）
+
+- 「推理参数」按钮新增 `aria-haspopup="dialog"` 和 `aria-controls="benchParamsDrawer"`，明确其打开的内容是对话框，并关联目标节点。抽屉面板本身已有 `role="dialog"`、`aria-modal="true"` 与 `aria-labelledby="benchParamsDrawerTitle"`。
+- Browser Smoke 使用真实 Playwright 页面新增三项断言：按钮弹出类型和控制目标、打开时模态对话框的角色/可访问名称/显示状态、Escape 关闭后根节点同步恢复 `hidden` 与 `aria-hidden="true"`。既有焦点进入、Shift+Tab/Tab 循环、Escape 关闭和焦点返回断言保留；表单标签与多组对比度断言仍在同一脚本中执行。
+- 已核对 `web/index.html` 的 app.js 缓存标识为 `20261028-visible-focus-filter-1`，与当前 Bundle 中已经同步的隐藏控件焦点过滤实现相符。本轮未改动 app.js，因此没有无理由地变更静态资源缓存标识。
+- `web/js/key-service-picker.js` 与 `web/static/dist/key-service-picker.js` 的 Blob SHA 相同：`c9feb43bddd09475b56102526176b7ab38f6874e`。性能测试抽屉的焦点过滤实现已逐项核对源码与 Bundle，当前函数均过滤不可见控件和未展开的 `details` 内容。
+- 本轮起始远端 HEAD 是 `b33e34d3f0473ab97cc4b518bbdc9753e5f50133`；相较交接时提供的 `0c28a69baf8416fa0e4a18e25b6c7003e938594e`，`dev` 已前进 15 个提交。后续改动仅推送至 `dev`。
+- 对新增回归所在提交 `097f96831f6bfda02eb0a7235a7d99ccab75e215` 查询时，Commit Status 返回空列表；提交关联的 workflow runs 查询也返回空列表。该 workflow-runs 查询仅返回 PR 触发的运行记录，不能代表分支 push 运行，因此**最新 Browser Smoke / CI 仍为未知，未标记通过**。需以实际 Actions 中对应提交的完整运行结果为准。
+- 未完成验收仍包括：Provider 重复创建的真实后端链路、渐变/半透明叠色/状态徽标与运行时注入样式的全面对比度审计，以及本次新增浏览器断言在 CI 中的实际执行结果。
