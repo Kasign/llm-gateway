@@ -90,15 +90,18 @@ jobs:
 
       - name: 准备隔离的 Gateway 测试配置
         run: |
-          echo "CONFIG_FILE=${RUNNER_TEMP}/config.yaml" >> "$GITHUB_ENV"
-          echo "BROWSER_ARTIFACT_DIR=${RUNNER_TEMP}/web-ui-artifacts" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/models" "${RUNNER_TEMP}/web-ui-artifacts"
+          CONFIG_FILE="${RUNNER_TEMP}/config.yaml"
+          BROWSER_ARTIFACT_DIR="${RUNNER_TEMP}/web-ui-artifacts"
+          echo "CONFIG_FILE=${CONFIG_FILE}" >> "$GITHUB_ENV"
+          echo "BROWSER_ARTIFACT_DIR=${BROWSER_ARTIFACT_DIR}" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/models" "${BROWSER_ARTIFACT_DIR}"
           sed \
             -e "s#/app/migrations/001_init.sql#${GITHUB_WORKSPACE}/migrations/001_init.sql#" \
             -e "s#/data/models#${RUNNER_TEMP}/models#" \
             config.example.yaml > "${CONFIG_FILE}"
           test -f "${GITHUB_WORKSPACE}/migrations/001_init.sql"
           test -d "${RUNNER_TEMP}/models"
+          test -s "${CONFIG_FILE}"
 
       - name: 构建 Gateway 并生成临时网页登录密码哈希
         run: |
