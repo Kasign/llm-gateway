@@ -422,7 +422,7 @@
             <button type="button" class="btn" onclick="loadRequests()">查询 / 更新统计</button>
           </div>
           <div id="requestStats" style="margin-top:14px"><p class="muted small">选择统计范围后点击查询，可查看请求量、延迟分布和 Token 来源统计。</p></div>
-          <div id="requestsTable" style="margin-top:12px"></div>
+          <div id="requestsTable" style="margin-top:12px" role="status" aria-live="polite" aria-busy="false"></div>
         </div>
       </section>
 
@@ -529,8 +529,8 @@
 
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261028-ui-priority-p1-1"></script>
-<script src="/static/dist/providers-admin.js?v=20261028-provider-key-confirm-1"></script>
+<script src="/static/dist/app.js?v=20261028-ui-status-feedback-1"></script>
+<script src="/static/dist/providers-admin.js?v=20261028-provider-duplicate-id-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-access-picker-edit-1"></script>
 </body>
