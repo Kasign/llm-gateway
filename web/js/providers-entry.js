@@ -179,7 +179,11 @@
     $('providerBaseURL').value = template.base_url;
     $('providerDefaultModel').value = template.default_model;
     $('providerApiKeyHeader').value = template.api_key_header;
-    $('providerTemplateHelp').textContent = template.hint + ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。';
+    const existingProvider = !state.editing ? rowByID(template.id) : null;
+    $('providerTemplateHelp').textContent = template.hint + ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。' +
+      (existingProvider
+        ? ' 注意：Provider ID「' + template.id + '」已存在，不能再次新增。请返回列表，在已有项目上点击“配置”进行接管或编辑。'
+        : '');
     state.activeTemplate = key;
   }
   function requestProviderTemplateChange(key) {
@@ -300,6 +304,18 @@
     button.disabled = true;
     try {
       const payload = payloadFromForm();
+      if (!state.editing) {
+        const existingProvider = rowByID(payload.id);
+        if (existingProvider) {
+          const isDeployment = existingProvider.source === 'deployment' || existingProvider.editable === false;
+          throw new Error(
+            'Provider ID「' + payload.id + '」已存在，不能重复新增。' +
+            (isDeployment
+              ? '请返回 Provider 列表，在该项点击“配置”接管现有部署配置。'
+              : '请返回 Provider 列表，在该项点击“配置”编辑现有配置。')
+          );
+        }
+      }
       const endpoint = state.editing
         ? '/api/admin/providers/' + encodeURIComponent(state.editing)
         : '/api/admin/providers';
