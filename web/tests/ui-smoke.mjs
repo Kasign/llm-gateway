@@ -379,6 +379,10 @@ try {
   check('移动端导航规则禁止自动换行并把账号入口放在品牌同行',
     appCss.includes('flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden') &&
     appCss.includes('.sidebar-bottom{grid-column:2;grid-row:1;margin:0;padding:0}'));
+  check('辅助文字颜色已提升并有移动端首页紧凑布局规则',
+    appCss.includes('--text-3:#8190a6;') &&
+    appCss.includes('#dashboard .sys-dashboard .gauge-unit{') &&
+    appCss.includes('grid-template-columns:minmax(0,128px) minmax(0,1fr)'));
   check('远程 Provider 请求不会使用管理员服务密钥',
     !providerBundle.includes('const adminKey = () =>') &&
     !providerBundle.includes("headers['X-Admin-Key'] = adminKey()"));
@@ -663,6 +667,17 @@ try {
     navLayout.sidebarHeight < 150,
     navLayout);
   await recordLayout(page, '首页-mobile-390');
+  const compactGaugeLayout = await page.locator('#dashboard .gauge-unit').evaluateAll(units => units.map(unit => {
+    const rect = unit.getBoundingClientRect();
+    const svg = unit.querySelector('.gauge-svg')?.getBoundingClientRect();
+    return { height: rect.height, width: rect.width, svgWidth: svg?.width ?? 0 };
+  }));
+  check('窄屏首页三项资源仪表盘已紧凑化，数值与仪表图均可见',
+    compactGaugeLayout.length === 3 &&
+    compactGaugeLayout.every(item => item.height < 180 && item.svgWidth > 0 && item.width > item.svgWidth + 20),
+    compactGaugeLayout);
+  const secondaryColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-3').trim());
+  check('窄屏辅助文字使用增强后的对比度颜色', secondaryColor === '#8190a6', secondaryColor);
   const inferenceLayout = await page.locator('.sys-runtime-panel .inf-stack-compact').evaluate(stack => {
     const cards = [...stack.querySelectorAll('.inf-card-compact')];
     const rects = cards.map(card => {
