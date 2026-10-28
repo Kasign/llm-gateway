@@ -420,4 +420,11 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 
 - 已为运行时动态注入的 `.provider-state-on`、`.provider-state-off`、`.provider-state-bad` 添加 Playwright 计算样式断言；分别读取真实前景色和背景色，计算 WCAG 对比度并要求每类 ≥4.5:1。
 - 与已有 `.provider-key-set` 检查结合，Provider 页面中“已配置”文字及启用/停用/异常三种状态徽标的运行时注入色均进入自动化回归。
-- 后端真实创建/重复拦截/清理链路已在 run [40696170716](https://github.com/Kasign/llm-gateway/actions/runs/40696170716) 以 163/163 通过；本节新增三个状态徽标的对比度断言需由本次新提交触发的 Browser Smoke 实际确认后才能标记通过。
+- 三种状态徽标的浏览器计算样式回归已通过 run [40696945378](https://github.com/Kasign/llm-gateway/actions/runs/40696945378)：报告 **164/164，`failures=[]`**；对应 Go CI run [40696945371](https://github.com/Kasign/llm-gateway/actions/runs/40696945371) 已成功。
+
+### 本轮最终验收快照（2026-10-28）
+
+- `dev` 头部提交 `38f41a8` 的 Browser Smoke run [40696945378](https://github.com/Kasign/llm-gateway/actions/runs/40696945378) 已成功：桌面、窄屏与核心交互合计 **164/164**，`failures=[]`。本轮包含 Provider 启用/停用/异常三类运行时注入徽标的实际计算样式对比度检查。
+- 同提交 Go CI run [40696945371](https://github.com/Kasign/llm-gateway/actions/runs/40696945371) 已成功；稳态负载、审计持久化等任务均以该 run 的最终结果为准，未把空状态视为通过。
+- 真实 Gateway Provider 创建、真实列表唯一性、UI 阻止第二次 POST 与 204 删除清理在前一轮 Browser Smoke run [40696170716](https://github.com/Kasign/llm-gateway/actions/runs/40696170716) 中随 **163/163** 总报告通过。
+- 仍未完成的全面审计：所有页面的渐变/多层半透明叠色组合、运行时注入样式的全量色值、不同缩放比例下的手动视觉检查，以及 Provider 防重复在用户部署环境的手动验收。自动化结果不能替代真实部署配置差异的验收。
