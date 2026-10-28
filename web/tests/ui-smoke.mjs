@@ -88,19 +88,20 @@ try {
 
   page.on('pageerror', error => report.pageErrors.push(String(error && (error.stack || error.message) || error)));
   page.on('console', message => {
-    if (message.type() !== 'error' || /favicon\\.ico/i.test(message.text())) return;
+    if (message.type() !== 'error' || /favicon\.ico/i.test(message.text())) return;
     const messageText = message.text();
-    if (/Failed to load resource: the server responded with a status of 401 \\(Unauthorized\\)/.test(messageText) &&
+    if (/Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/.test(messageText) &&
         (expectedAdminKeyRejection || report.expectedAuthFailures.length > 0)) {
       report.expectedAuthFailures.push({ source: 'browser-console', message: messageText });
       return;
     }
-    if (/Failed to load resource: the server responded with a status of 502 \\(Bad Gateway\\)/.test(messageText)) {
+    if (/Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/.test(messageText)) {
       report.environmentConsoleWarnings.push(messageText);
       return;
     }
     report.consoleErrors.push(messageText);
   });
+  
   page.on('dialog', dialog => {
     report.unexpectedDialogs.push(dialog.type() + ': ' + dialog.message());
     dialog.dismiss().catch(() => {});

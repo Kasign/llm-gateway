@@ -25,8 +25,7 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 
-// 旧版把管理员 API Key 存在浏览器中，但它不能代替 Web Session；清理无效的旧副本。
-try { localStorage.removeItem('llm_gateway_admin_key'); } catch {}
+// 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
 initAdminKey();
 function syncTopbarRefresh(){
   const btn=$('btnRefreshDashboard');
@@ -2073,7 +2072,6 @@ exposeGlobals({
 
 exposeGlobals({ setGlobalMsg, refreshAll, syncTopbarRefresh, dashboardPoll, adminStore });
 initDownloadsTableActions();
-initAdminKey();
 adminKeyStatus();
 if(isAuthenticated())refreshAll();
 else setGlobalMsg($('dashboard')?.classList.contains('active')?'':'<span class="muted">请先登录控制台</span>');
