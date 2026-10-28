@@ -227,10 +227,78 @@ try {
     JSON.stringify(scopedKey?.api_key?.allowed_models || []) === JSON.stringify(['llamacpp']),
     {status:scopedCreateResponse.status(),allowed_models:scopedKey?.api_key?.allowed_models||null});
   await page.waitForFunction(() => document.getElementById('newKeyBox')?.style.display === 'block', null, {timeout:10000});
+
   if(scopedKey?.api_key?.id){
+    const scopedId = scopedKey.api_key.id;
+    const editButton = page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]');
+    await editButton.waitFor({state:'visible',timeout:10000});
+    await editButton.click();
+    await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    check('编辑弹窗会恢复当前服务权限', await page.locator('#keyEditServicesList input[value="llamacpp"]').isChecked());
+    await page.locator('#keyEditServicesList input[value="llamacpp"]').uncheck();
+    await page.locator('#keyEditServicesList input[value="ollama"]').check();
+    await page.locator('#keyEditName').fill('browser-smoke-service-scope-edited');
+    await page.locator('#keyEditRPM').fill('120');
+    const firstUpdatePromise = page.waitForResponse(response => {
+      try { return new URL(response.url()).pathname === '/api/admin/keys/' + scopedId && response.request().method() === 'PUT'; }
+      catch { return false; }
+    });
+    await page.locator('#keyEditSave').click();
+    const firstUpdate = await firstUpdatePromise;
+    check('已有密钥可以通过编辑表单保存服务、限流和名称', firstUpdate.status() === 200, {status:firstUpdate.status()});
+    await page.waitForFunction(id => {
+      const row = document.querySelector('#keyTable .key-edit-button[data-key-id="' + id + '"]')?.closest('tr');
+      return Boolean(row && row.innerText.includes('browser-smoke-service-scope-edited') && row.innerText.includes('ollama'));
+    }, scopedId, {timeout:10000});
+
+    const getEditedKey = async () => page.evaluate(async({key,id}) => {
+      const response=await fetch('/api/admin/keys',{headers:{'X-Admin-Key':key},cache:'no-store'});
+      const body=await response.json();
+      return (body.data||[]).find(item=>Number(item.id)===Number(id))||null;
+    },{key:adminKey,id:scopedId});
+    let editedKey=await getEditedKey();
+    check('保存后服务范围与 RPM 已写入后端',editedKey?.name==='browser-smoke-service-scope-edited' &&
+      Number(editedKey?.rpm)===120 && JSON.stringify(editedKey?.allowed_models||[])===JSON.stringify(['ollama']),
+      {name:editedKey?.name,rpm:editedKey?.rpm,allowed_models:editedKey?.allowed_models});
+
+    const legacySeedStatus=await page.evaluate(async({key,id})=>{
+      const response=await fetch('/api/admin/keys/'+id,{method:'PUT',headers:{'X-Admin-Key':key,'Content-Type':'application/json'},
+        body:JSON.stringify({name:'browser-smoke-service-scope-edited',rpm:120,allowed_models:['ollama','legacy-model-id'],expires_at:null})});
+      return response.status;
+    },{key:adminKey,id:scopedId});
+    check('为旧模型权限兼容测试准备测试密钥',legacySeedStatus===200,legacySeedStatus);
+    await page.evaluate(()=>globalThis.loadKeys());
+    await page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]').click();
+    await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    check('编辑旧密钥时识别并默认保留遗留模型 ID',await page.locator('#keyEditPreserveLegacy').isChecked() &&
+      (await page.locator('#keyEditLegacyMessage').textContent()).includes('legacy-model-id'));
+    const preserveLegacyPromise=page.waitForResponse(response=>{
+      try{return new URL(response.url()).pathname==='/api/admin/keys/'+scopedId&&response.request().method()==='PUT'}catch{return false}
+    });
+    await page.locator('#keyEditSave').click();
+    const preserveLegacyResponse=await preserveLegacyPromise;
+    editedKey=await getEditedKey();
+    check('保存时不会静默丢弃旧模型 ID 权限',preserveLegacyResponse.status()===200 &&
+      (editedKey?.allowed_models||[]).includes('legacy-model-id')&&(editedKey?.allowed_models||[]).includes('ollama'),
+      {status:preserveLegacyResponse.status(),allowed_models:editedKey?.allowed_models});
+
+    await page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]').click();
+    await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    await page.locator('#keyEditPreserveLegacy').uncheck();
+    const dropLegacyPromise=page.waitForResponse(response=>{
+      try{return new URL(response.url()).pathname==='/api/admin/keys/'+scopedId&&response.request().method()==='PUT'}catch{return false}
+    });
+    await page.locator('#keyEditSave').click();
+    const dropLegacyResponse=await dropLegacyPromise;
+    editedKey=await getEditedKey();
+    check('明确取消保留旧权限后可转换为仅服务范围',dropLegacyResponse.status()===200 &&
+      JSON.stringify(editedKey?.allowed_models||[])===JSON.stringify(['ollama']),
+      {status:dropLegacyResponse.status(),allowed_models:editedKey?.allowed_models});
+
     const cleanupStatus=await page.evaluate(async({key,id})=>{
-      const response=await fetch('/api/admin/keys/'+id,{method:'DELETE',headers:{'X-Admin-Key':key},cache:'no-store'});return response.status;
-    },{key:adminKey,id:scopedKey.api_key.id});
+      const response=await fetch('/api/admin/keys/'+id,{method:'DELETE',headers:{'X-Admin-Key':key},cache:'no-store'});
+      return response.status;
+    },{key:adminKey,id:scopedId});
     check('浏览器验收清理临时服务密钥',cleanupStatus===204,cleanupStatus);
   }
   await page.locator('#btnClearKeyServices').click();
