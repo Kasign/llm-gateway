@@ -401,10 +401,17 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - `web/js/key-service-picker.js` 与 `web/static/dist/key-service-picker.js` 的 Blob SHA 相同：`c9feb43bddd09475b56102526176b7ab38f6874e`。性能测试抽屉的焦点过滤实现已逐项核对源码与 Bundle，当前函数均过滤不可见控件和未展开的 `details` 内容。
 - 本轮起始远端 HEAD 是 `b33e34d3f0473ab97cc4b518bbdc9753e5f50133`；相较交接时提供的 `0c28a69baf8416fa0e4a18e25b6c7003e938594e`，`dev` 已前进 15 个提交。后续改动仅推送至 `dev`。
 - `097f96831f6bfda02eb0a7235a7d99ccab75e215` 的 Browser Smoke（run [40694183458](https://github.com/Kasign/llm-gateway/actions/runs/40694183458)）已完成成功，实际报告为 **158/158，failures=[]**，包括性能参数抽屉语义及键盘回归。`0e40b7035114e4bf8c5723da968ce17237c5f0df` 的 Go CI（run [40694244989](https://github.com/Kasign/llm-gateway/actions/runs/40694244989)）五个任务全部成功；该提交只更新文档，前端文件树与 `097f968` 一致。
-- 未完成验收仍包括：Provider 重复创建的真实后端链路、渐变/半透明叠色/状态徽标与运行时注入样式的全面对比度审计，以及本次新增浏览器断言在 CI 中的实际执行结果。
+- Provider 真实后端链路已补充为 Browser Smoke 用例：通过已登录 Session 创建停用临时 Provider、从真实 API 列表读取、验证网页对已有 ID 阻止第二次 POST，并在 finally 中调用真实 DELETE 清理。该链路必须以本提交的 CI 实际结果验收；渐变/半透明叠色/状态徽标与运行时注入样式仍未全面审计。
 
 ### 运行态 Hero 次级指标对比度加固（2026-10-28）
 
 - 运行态 Hero 使用 `linear-gradient(135deg, rgba(99,102,241,.08), transparent 42%), var(--surface-2)`。`runtime-metric-label` 与 `runtime-metric-sub` 原使用 `--text-3`，在最亮渐变起点合成背景约 `#1e2745` 上，对比度仅约 4.52:1，虽然过线但几乎没有余量。
 - 两处文字颜色统一改为已有的 `--text-2`，维持 11px 字号、字重与布局不变；主 CSS 缓存版本更新为 `20261028-runtime-metric-contrast-1`。
 - Browser Smoke 增加实际计算样式测试：读取 Hero 背景色、渐变首色及 alpha，将渐变与底色合成后分别计算两个指标文字的 WCAG 对比度，必须达到 4.5:1。该断言待本次新提交触发的 Browser Smoke 实测。
+
+### Provider 真实 Gateway 创建与重复防护验收（2026-10-28）
+
+- Browser Smoke 在真实 Gateway、真实 Web Session 与真实配置 API 上创建一条 `enabled=false` 的临时 Provider（使用保留的 `.invalid` 域名，不会发起上游请求），并从真实列表确认同 ID 仅出现一条。
+- 随后通过真实 Provider 管理页刷新列表、打开新增表单并输入相同 ID；检查表单报出“已存在”，且页面没有再发出第二次 `POST /api/admin/providers`。
+- 后端当前 `POST /api/admin/providers` 是按 ID 保存/更新（upsert），并不约定重复 ID 返回 HTTP 409；本测试按真实契约验证前端防重和实际后端持久化/读取链路，不伪造 409 结果。
+- 临时 Provider 在 `finally` 中通过真实 `DELETE /api/admin/providers/{id}` 清理，要求返回 204。新链路的通过状态以本提交 Browser Smoke 实际报告为准。

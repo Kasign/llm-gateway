@@ -1312,10 +1312,91 @@ try {
     check('Provider 刷新测试只注入并记录一次预期 503',
       expectedProviderListRefreshResponseCount === 1,
       { count: expectedProviderListRefreshResponseCount, failures: report.expectedProviderFailures });
-    await page.unroute('**/api/admin/providers');
+  }
+  // 真实 Gateway 验收：只创建停用的临时 Provider；确认网页看到真实列表项后，重复新增必须在前端被阻止。
+  await page.unroute('**/api/admin/providers');
+  const liveProviderID = 'browser-smoke-live-' + Date.now().toString(36);
+  const liveProviderPayload = {
+    id: liveProviderID, enabled: false, base_url: 'https://browser-smoke.invalid/v1',
+    api_key: '', api_key_header: 'authorization', default_model: 'browser-smoke-model',
+    model_mappings: {}, allow_insecure_http: false, allow_private_network: false,
+    max_response_bytes: 0, max_concurrent_requests: 1, max_queue_size: 0,
+    queue_wait_timeout_seconds: 0, requests_per_minute: 0, token_budget_per_day: 0, request_timeout_seconds: 0
+  };
+  const liveCreateResult = await page.evaluate(async ({ id, payload }) => {
+    const token = localStorage.getItem('llm_gateway_session_token');
+    if (!token) return { tokenPresent: false, createStatus: 0, listStatus: 0, matches: 0, error: 'Web Session 不存在' };
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    let createResponse, createBody = null, listResponse, listBody = null;
+    try {
+      createResponse = await fetch('/api/admin/providers', { method: 'POST', headers, body: JSON.stringify(payload) });
+      try { createBody = await createResponse.json(); } catch { /* 无 JSON 响应 */ }
+      listResponse = await fetch('/api/admin/providers', { headers: { Authorization: `Bearer ${token}` } });
+      try { listBody = await listResponse.json(); } catch { /* 无 JSON 响应 */ }
+      const rows = Array.isArray(listBody?.data) ? listBody.data : [];
+      return {
+        tokenPresent: true, createStatus: createResponse.status, listStatus: listResponse.status,
+        matches: rows.filter(row => row.id === id).length,
+        createdDisabled: rows.find(row => row.id === id)?.enabled === false,
+        error: createBody?.error?.message || createBody?.message || ''
+      };
+    } catch (error) {
+      return { tokenPresent: true, createStatus: createResponse?.status || 0, listStatus: listResponse?.status || 0, matches: 0, error: String(error) };
+    }
+  }, { id: liveProviderID, payload: liveProviderPayload });
+  check('真实 Gateway API 可创建停用的临时 Provider，并在真实列表中唯一出现',
+    liveCreateResult.tokenPresent && liveCreateResult.createStatus === 201 &&
+    liveCreateResult.listStatus === 200 && liveCreateResult.matches === 1 && liveCreateResult.createdDisabled,
+    liveCreateResult);
+  if (liveCreateResult.createStatus === 201) {
+    let duplicateLivePostCount = 0;
+    let liveProviderCleanupStatus = 0;
+    const countLiveDuplicatePost = request => {
+      if (new URL(request.url()).pathname === '/api/admin/providers' && request.method() === 'POST') duplicateLivePostCount += 1;
+    };
+    try {
+      await clickTab(page, 'providers', '远程 Provider');
+      await page.locator('#providerRefresh').click();
+      await page.waitForFunction(id => (document.getElementById('providerRows')?.textContent || '').includes(id),
+        liveProviderID, { timeout: 10000 });
+      await page.locator('#providerCreate').click();
+      await page.locator('#providerTemplate').selectOption('custom');
+      await page.locator('#providerId').fill(liveProviderID);
+      await page.locator('#providerBaseURL').fill('https://browser-smoke.invalid/v1');
+      await page.locator('#providerDefaultModel').fill('browser-smoke-model');
+      page.on('request', countLiveDuplicatePost);
+      await page.locator('#providerForm').evaluate(form => form.requestSubmit());
+      await page.waitForFunction(() => (document.getElementById('providerEditorStatus')?.textContent || '').includes('已存在'),
+        null, { timeout: 10000 });
+      await page.waitForTimeout(100);
+      const liveDuplicateState = {
+        postCount: duplicateLivePostCount,
+        editorVisible: await page.locator('#providerEditorCard').isVisible(),
+        message: await page.locator('#providerEditorStatus').textContent()
+      };
+      check('真实 Provider 列表中的同 ID 再次新增被拦截且没有发出第二个 POST',
+        liveDuplicateState.postCount === 0 && liveDuplicateState.editorVisible &&
+        liveDuplicateState.message.includes('已存在') && liveDuplicateState.message.includes('编辑现有配置'),
+        liveDuplicateState);
+      await page.locator('#providerCancel').click();
+    } finally {
+      page.off('request', countLiveDuplicatePost);
+      const cleanup = await page.evaluate(async id => {
+        const token = localStorage.getItem('llm_gateway_session_token');
+        if (!token) return { status: 0, error: 'Web Session 不存在' };
+        try {
+          const response = await fetch('/api/admin/providers/' + encodeURIComponent(id), {
+            method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
+          });
+          return { status: response.status, error: response.status === 204 ? '' : await response.text() };
+        } catch (error) { return { status: 0, error: String(error) }; }
+      }, liveProviderID);
+      liveProviderCleanupStatus = cleanup.status;
+      check('真实 Gateway 验收后已删除临时 Provider 配置', cleanup.status === 204, cleanup);
+    }
   }
 
-  // 验证 HF 文件选择事件使用 data-* 属性传值，特殊字符不会进入内联 JavaScript。
+  // 验证 HF 文件选择事件使用 data-* 属性传值，特殊字符不会进入内联 JavaScript.
   await clickTab(page, 'models-download', '模型下载');
   const transfer = await page.evaluate(() => {
     const box = document.getElementById('filesBox');
