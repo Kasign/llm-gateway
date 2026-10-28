@@ -2644,10 +2644,6 @@
       init_format();
       init_requests();
       init_expose();
-      try {
-        localStorage.removeItem("llm_gateway_admin_key");
-      } catch {
-      }
       initAdminKey();
       document.querySelectorAll(".nav button").forEach((b) => b.onclick = () => {
         document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
@@ -3093,7 +3089,6 @@
       });
       exposeGlobals({ setGlobalMsg, refreshAll, syncTopbarRefresh, dashboardPoll, adminStore });
       initDownloadsTableActions();
-      initAdminKey();
       adminKeyStatus();
       if (isAuthenticated()) refreshAll();
       else setGlobalMsg($("dashboard")?.classList.contains("active") ? "" : '<span class="muted">\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0</span>');
