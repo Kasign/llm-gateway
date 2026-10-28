@@ -1,10 +1,10 @@
 # LLM Gateway 未关闭问题与后续验收台账
 
-> 更新日期：2026-10-27。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
+> 更新日期：2026-10-28。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
 
 ## 当前基线
 
-- 最近一次完整通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`；Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过。当前 `dev` 起始 Head 为 `3b895d9b8c70af30af350d332566381a47b27f1c`；Actions [#257](https://github.com/Kasign/llm-gateway/actions/runs/40456414099) 在两次尝试中均有 5 个 Job 在实际步骤开始前立即失败，无法据此判断代码通过/失败；不把 #256 的旧绿色结果代替当前验收。
+- 最新代码基线：`654416290a65090648080ffce3214bddb89b916f`（2026-10-28）。Go CI [运行 40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [运行 40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均通过；浏览器报告 52/52 项通过。早期 Actions #257 的 Runner 启动失败属于历史状态，不再代表当前基线。
 - 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
 - Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
 - Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
@@ -472,3 +472,11 @@
 - 新增临时 `LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV=true`，启用时跳过数据库中的旧登录凭据并使用部署哈希。账号设置保存新密码后，必须撤销该开关并重建容器。
 - `/api/auth/status` 返回不含秘密的 `password_source`，启动日志同时记录来源、密码保护状态与哈希格式，不记录哈希内容。
 - 新增恢复环境变量解析与默认哈希的回归测试；已运行独立 Go 密码包测试，尚未运行完整 Go 测试或 Docker 构建。
+
+## 2026-10-28 最新基线与收尾任务
+
+- 当前 `dev` HEAD：`654416290a65090648080ffce3214bddb89b916f`。Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均成功；浏览器验收报告为 52/52 项通过，未发现页面 JS 异常、控制台错误或静态资源加载失败。
+- 2026-10-28 表单视觉修复：普通输入框与下拉框统一为 42px 高度；调用记录与模型下载页增加控件高度一致性断言；Provider 状态徽标设置为不换行，并加入样式探针验证。CSS 缓存版本同步更新。对应提交：[6544162](https://github.com/Kasign/llm-gateway/commit/654416290a65090648080ffce3214bddb89b916f)。
+- 浏览器验收使用 GitHub Actions 隔离环境。Provider 列表在 CI 中不保证有真实配置，状态徽标断言验证公共样式规则与探针，不视为真实 Provider UI/网络端到端验收。
+- 当前没有开放 PR 或 Issue。代码级工作暂不继续扩大；待办优先级为：P1 生产 1Panel/OpenResty/llama.cpp 实际部署验收；P1 真实 Provider opt-in E2E；P2 管理台轮询性能基准；P2 按风险分批补齐 OpenAPI 字段级契约。
+- 生产验收需要实际部署权限、有效供应商凭据和慢模型环境；本次 CI 不会自动证明这些项目通过。自动重试/Provider 故障转移、Agent 级权限/多别名、全量目录迁移继续暂缓。

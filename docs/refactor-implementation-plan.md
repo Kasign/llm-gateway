@@ -1,13 +1,13 @@
 # LLM Gateway 重构实施计划与进度
 
 > 目标分支：`dev`
-> 更新日期：2026-10-27。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 本批修改前最近通过的 CI 基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`（Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753)，全部通过）。
+> 更新日期：2026-10-28。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
+> 最新通过的代码基线：`654416290a65090648080ffce3214bddb89b916f`（Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均通过）。
 
-## 当前状态快照（2026-10-27）
+## 当前状态快照（2026-10-28）
 
-- 本批修改前最近通过的代码基线：`62780c7bab6c3245ec4783a9b0ccbcc7a61d865f`，Actions [#256](https://github.com/Kasign/llm-gateway/actions/runs/40453353753) 全部通过；当前收尾提交的代码级结果以新 Head 的 Actions 为准。
-- 当前没有开放 PR。保持 `dev` 为唯一集成分支，不强推、不改写历史。
+- 当前通过基线：`654416290a65090648080ffce3214bddb89b916f`；Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 均成功，浏览器验收 52/52 项通过。
+- 当前没有开放 PR 或 Issue。保持 `dev` 为唯一集成分支，不强推、不改写历史。
 - 多 Provider 管理、密钥加密与脱敏、模型映射、并发/FIFO 队列、RPM/Token 预算、审计、流式错误处理和高风险配置/API 契约门禁均已实现。
 - Provider 热更新最后一轮审查没有发现正常有效配置能触发的 setter 失败；保持现有最小补偿顺序，不增加额外回滚框架。
 - 整体 Review 发现并修复一个配置语义缺陷：显式 `llama.request_timeout_seconds: 0` 原先被代理层强制转换为一小时 Deadline。本批让其真正表示“不增加整体时限”，同时保留未配置时的一小时默认和父 Context 取消语义，并增加定向回归覆盖。
@@ -1122,3 +1122,11 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - 增加 `LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV` 临时恢复开关；开启时启动登录状态跳过数据库旧凭据，使用部署哈希，并记录明确但不含秘密的日志。
 - `/api/auth/status` 增加 `password_source` 字段，便于无登录会话时判断当前密码来源。恢复后必须关闭环境开关、用账号设置保存新密码，再重启回到数据库优先模式。
 - 已对当前配置中的默认哈希进行 Go 单元级验证；未运行完整项目测试或 Docker 构建。
+
+## 41. 2026-10-28 收尾基线与并行后续任务
+
+- 最新 HEAD 为 `654416290a65090648080ffce3214bddb89b916f`。Go CI [40631304311](https://github.com/Kasign/llm-gateway/actions/runs/40631304311) 与浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 全部通过；浏览器报告 52/52 项通过。
+- 表单视觉修复将常规 input/select 统一为 42px，修复 Provider 状态徽标窄列换行；为模型下载、调用记录和 Provider 状态样式添加浏览器断言。实际 Provider 配置与生产部署不在隔离 CI 的保证范围内。
+- 代码级 Review 和自动化回归已到可暂停扩展的状态。剩余工作按独立任务并行推进：①整理生产部署验收步骤与结果记录模板；②准备真实 Provider E2E 的 opt-in 验收矩阵；③设计管理台轮询性能基准采样方案；④OpenAPI 继续按实际使用接口分批补齐契约。前 3 项不应把未执行的真实环境检查标记为通过。
+- 生产部署、真实供应商调用与公网 OpenResty 行为需要可访问的用户环境和凭据；没有这些条件时只准备检查清单与安全执行方案，不宣称完成实测。
+- 自动重试/Provider 故障转移、Agent 级权限/多别名与全量目录迁移继续暂缓，除非出现明确需求或已复现缺陷。
