@@ -400,6 +400,7 @@ try {
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
   const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
+  const keyPickerSource = fs.readFileSync(path.resolve('web/js/key-service-picker.js'), 'utf8');
   const indexHtml = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
   const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
