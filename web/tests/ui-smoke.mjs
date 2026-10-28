@@ -1027,6 +1027,49 @@ try {
         Number.isFinite(providerKeyContrast.ratio) &&
         providerKeyContrast.ratio >= 4.5,
         providerKeyContrast);
+
+      const providerStateBadgeContrast = await page.evaluate(() => {
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;background:var(--surface)';
+        const variants = [
+          { name: 'enabled', className: 'provider-state-on' },
+          { name: 'disabled', className: 'provider-state-off' },
+          { name: 'warning', className: 'provider-state-bad' }
+        ];
+        for (const variant of variants) {
+          const badge = document.createElement('span');
+          badge.className = 'provider-state ' + variant.className;
+          badge.textContent = variant.name;
+          host.appendChild(badge);
+        }
+        document.body.appendChild(host);
+        const channels = value => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+        const luminance = value => {
+          const rgb = channels(value);
+          if (rgb.length !== 3) return Number.NaN;
+          const linear = rgb.map(channel => {
+            const srgb = channel / 255;
+            return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+        };
+        const results = [...host.querySelectorAll('.provider-state')].map((badge, index) => {
+          const foreground = getComputedStyle(badge).color;
+          const background = getComputedStyle(badge).backgroundColor;
+          const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+          return { name: variants[index].name, foreground, background, ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2)) };
+        });
+        host.remove();
+        return results;
+      });
+      check('运行时注入的 Provider 启用、停用、异常徽标均达到 WCAG AA（≥4.5:1）',
+        providersSource.includes("'.provider-state-on{background:#e3f5e9;color:#176d3a}'") &&
+        providersSource.includes("'.provider-state-off{background:#edf0f4;color:#596273}'") &&
+        providersSource.includes("'.provider-state-bad{background:#fff0df;color:#925300}'") &&
+        providerStateBadgeContrast.length === 3 &&
+        providerStateBadgeContrast.every(item => Number.isFinite(item.ratio) && item.ratio >= 4.5),
+        providerStateBadgeContrast);
+
     }
 
     if (['dashboard', 'models-local', 'models-download', 'requests', 'providers'].includes(tab)) {
