@@ -380,3 +380,8 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 在请求详情弹窗和性能参数抽屉中统一过滤：元素本身可见且未禁用、CSS visibility 不是 hidden，并且不处于未展开的 `details` 内容内；折叠面板的 `summary` 标题仍保留为有效焦点项。
 - 同步原生 JS 源码和 esbuild Bundle，更新 `web/index.html` 的 app.js 缓存版本为 `20261028-visible-focus-filter-1`。Browser Smoke 的可见焦点候选计算也采用同一判定逻辑，覆盖请求详情真实 Tab / Shift+Tab / Escape 路径与抽屉焦点循环。
 - 修复前的失败 run 为 [40691604477](https://github.com/Kasign/llm-gateway/actions/runs/40691604477)，只有请求详情弹窗相关的 3 条新断言失败；其余 151/154 通过。修复后的工作流需以本提交实际结果验收。
+
+### Bundle 生成格式复核（2026-10-28）
+
+- 提交 `2720f16` 的 Browser Smoke 在 Bundle 同步校验阶段发现 `web/static/dist/app.js` 中性能参数抽屉的焦点筛选函数仅存在缩进差异（esbuild 按模块源码结构缩进输出）；请求详情弹窗的 Bundle 对应实现已匹配。
+- 已依照 CI 生成 diff 对齐抽屉焦点筛选函数的三行 Bundle 缩进；前一次 Browser Smoke 的真实交互阶段被跳过，不能用于证明焦点回归通过。只有新提交完成的 Browser Smoke 才是本次修复的验收证据。
