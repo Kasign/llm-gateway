@@ -1675,13 +1675,22 @@ function setBenchRunning(running){
   if(run)run.disabled=!!running;
   if(stop)stop.disabled=!running;
 }
+let benchDrawerTrigger = null;
+function benchDrawerFocusable(root){
+  const panel=root?.querySelector('.drawer-panel');
+  if(!panel)return [];
+  return [...panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
+    .filter(el=>!el.hidden&&el.getClientRects().length>0);
+}
 function openBenchParamsDrawer(){
   const root=$('benchParamsDrawer');
   if(!root||root.classList.contains('open'))return;
+  benchDrawerTrigger=document.activeElement;
   root.hidden=false;
   root.classList.add('open');
   root.setAttribute('aria-hidden','false');
   document.body.classList.add('drawer-open');
+  root.querySelector('.drawer-head button')?.focus();
 }
 function closeBenchParamsDrawer(){
   const root=$('benchParamsDrawer');
@@ -1690,9 +1699,29 @@ function closeBenchParamsDrawer(){
   root.hidden=true;
   root.setAttribute('aria-hidden','true');
   document.body.classList.remove('drawer-open');
+  const trigger=benchDrawerTrigger;
+  benchDrawerTrigger=null;
+  if(trigger?.isConnected)trigger.focus();
 }
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape')closeBenchParamsDrawer();
+  const root=$('benchParamsDrawer');
+  if(!root?.classList.contains('open'))return;
+  if(e.key==='Escape'){
+    e.preventDefault();
+    closeBenchParamsDrawer();
+    return;
+  }
+  if(e.key!=='Tab')return;
+  const focusable=benchDrawerFocusable(root);
+  if(!focusable.length)return;
+  const first=focusable[0],last=focusable[focusable.length-1],active=document.activeElement;
+  if(e.shiftKey&&(active===first||!root.contains(active))){
+    e.preventDefault();
+    last.focus();
+  }else if(!e.shiftKey&&(active===last||!root.contains(active))){
+    e.preventDefault();
+    first.focus();
+  }
 });
 async function loadBenchPanel(opts={}){
   try{
