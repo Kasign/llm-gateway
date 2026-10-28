@@ -667,6 +667,12 @@ try {
       await page.locator('#providerApiKeyHeader').inputValue() === 'authorization');
     check('固定模板 ID 与已有部署 Provider 冲突时明确提示复用现有配置',
       (await page.locator('#providerTemplateHelp').textContent()).includes('Provider ID「deepseek」已存在'));
+    await page.locator('#providerId').fill('deepseek-browser-test');
+    check('修改为唯一 Provider ID 后自动清除重名提示',
+      !(await page.locator('#providerTemplateHelp').textContent()).includes('Provider ID「'));
+    await page.locator('#providerId').fill('deepseek');
+    check('恢复已占用 Provider ID 后重新显示重名提示',
+      (await page.locator('#providerTemplateHelp').textContent()).includes('Provider ID「deepseek」已存在'));
     check('厂商模板不会自动填写 API Key',
       await page.locator('#providerApiKey').inputValue() === '');
     await page.locator('#providerApiKey').fill('sk-template-switch-test');
