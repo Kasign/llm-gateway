@@ -112,7 +112,7 @@
       init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
-      getKey = () => $("adminKey")?.value || "";
+      getKey = () => ($("adminKey")?.value || "").trim();
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
     }
   });
