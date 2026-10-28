@@ -73,6 +73,10 @@ async function loadRequestStats() {
 }
 
 export async function loadRequests() {
+  const tableEl = $('requestsTable');
+  if (!tableEl) return;
+  tableEl.setAttribute('aria-busy', 'true');
+  tableEl.innerHTML = '<p class="muted small">正在加载调用记录…</p>';
   loadRequestStats();
   const q = new URLSearchParams();
   q.set('limit', '100');
@@ -83,7 +87,7 @@ export async function loadRequests() {
   try {
     const j = await api('/api/requests?' + q);
     const rows = j.data || [];
-    $('requestsTable').innerHTML = !rows.length
+    tableEl.innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
           '<tr><th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th><th>Provider / 模型</th><th>状态 / 流式</th><th>HTTP</th><th>耗时 / TTFT</th><th>Token / 体积</th><th>操作</th></tr>' +
@@ -107,7 +111,10 @@ export async function loadRequests() {
               .join(''),
         );
   } catch (e) {
-    $('requestsTable').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+    tableEl.innerHTML = '<div class="msg err" role="alert"><span>加载调用记录失败：' + esc(e.message || '未知错误') +
+      '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">重试</button></div>';
+  } finally {
+    tableEl.setAttribute('aria-busy', 'false');
   }
 }
 
