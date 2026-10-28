@@ -169,6 +169,14 @@ input:focus,select:focus,textarea:focus{
 }
 textarea{min-height:88px;resize:vertical}
 
+/* 统一常规表单控件尺寸，避免浏览器对 input 与 select 的默认行高差异。 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
+select{
+  height:42px;min-height:42px;padding:0 11px;line-height:1.4;
+}
+textarea{height:auto;min-height:88px;padding:9px 11px;line-height:1.5}
+input[type="checkbox"],input[type="radio"]{padding:0}
+
 button.btn{
   cursor:pointer;border-radius:var(--radius-sm);padding:9px 14px;
   border:1px solid var(--border);background:var(--surface-2);color:var(--text);
@@ -199,12 +207,15 @@ th{
 tbody tr:hover td{background:rgba(255,255,255,.02)}
 tbody tr:last-child td{border-bottom:0}
 .td-actions{display:flex;flex-wrap:nowrap;gap:6px;white-space:nowrap}
+/* Provider 状态列保持单行，避免窄列把“已启用”徽标挤成竖向胶囊。 */
+#providers td:nth-child(3){white-space:nowrap}
 td.req-url{max-width:28rem;word-break:break-all;line-height:1.45}
 code{font-family:var(--mono);font-size:12px;color:var(--accent-2)}
 
 .pill{
   display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;
   font-size:11px;font-weight:650;background:rgba(148,163,184,.12);color:var(--text-2);
+  white-space:nowrap;flex-shrink:0;
 }
 .pill::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7}
 .pill-loaded,.pill-success{background:var(--ok-soft);color:var(--ok)}

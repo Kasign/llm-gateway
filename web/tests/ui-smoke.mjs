@@ -146,6 +146,67 @@ try {
   for (const [tab, title] of tabs) {
     await clickTab(page, tab, title);
     await recordLayout(page, title + '-desktop');
+
+    if (tab === 'models-download') {
+      const heights = await page.evaluate(() => {
+        const selectors = ['#catalogQuery', '#catalogSource', '#catalogSort', '#catalogHfGguf'];
+        return selectors.map(selector => {
+          const el = document.querySelector(selector);
+          return { selector, height: el?.getBoundingClientRect().height ?? null };
+        });
+      });
+      const values = heights.map(item => item.height).filter(value => value != null);
+      check('发现模型筛选输入框与下拉框高度统一',
+        heights.length === 4 && values.length === 4 &&
+        Math.max(...values) - Math.min(...values) <= 1 &&
+        values.every(height => Math.abs(height - 42) <= 1),
+        heights);
+    }
+
+    if (tab === 'requests') {
+      const heights = await page.evaluate(() => {
+        const selectors = ['#rqProvider', '#rqModel', '#rqStatus', '#rqKey', '#rqStatsRange'];
+        return selectors.map(selector => {
+          const el = document.querySelector(selector);
+          return { selector, height: el?.getBoundingClientRect().height ?? null };
+        });
+      });
+      const values = heights.map(item => item.height).filter(value => value != null);
+      check('调用记录筛选输入框与下拉框高度统一',
+        heights.length === 5 && values.length === 5 &&
+        Math.max(...values) - Math.min(...values) <= 1 &&
+        values.every(height => Math.abs(height - 42) <= 1),
+        heights);
+    }
+
+    if (tab === 'providers') {
+      const badges = await page.evaluate(() => ({
+        statusColumnWhiteSpace: getComputedStyle(document.querySelector('#providers td:nth-child(3)') || document.createElement('td')).whiteSpace,
+        badgeCount: document.querySelectorAll('#providers .table-wrap tbody .pill').length,
+        badges: [...document.querySelectorAll('#providers .table-wrap tbody .pill')].map(el => {
+          const rect = el.getBoundingClientRect();
+          return { text: el.textContent.trim(), height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace };
+        }),
+        sample: (() => {
+          const el = document.createElement('span');
+          el.className = 'pill pill-active';
+          el.textContent = '已启用';
+          el.style.cssText = 'position:absolute;visibility:hidden;left:-10000px;top:0';
+          document.body.appendChild(el);
+          const rect = el.getBoundingClientRect();
+          const result = { height: rect.height, whiteSpace: getComputedStyle(el).whiteSpace, width: rect.width };
+          el.remove();
+          return result;
+        })()
+      }));
+      check('Provider 状态徽标保持单行且高度正常',
+        badges.statusColumnWhiteSpace === 'nowrap' &&
+        badges.sample.whiteSpace === 'nowrap' &&
+        badges.sample.height <= 28 &&
+        badges.badges.every(item => item.whiteSpace === 'nowrap' && item.height <= 28),
+        badges);
+    }
+
     if (['dashboard', 'models-local', 'models-download', 'requests', 'providers'].includes(tab)) {
       await page.screenshot({ path: screenshotName(tab + '-desktop'), fullPage: true });
     }
