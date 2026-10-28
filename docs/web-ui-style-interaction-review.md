@@ -328,3 +328,10 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 失败原因是该断言对 esbuild 输出中的 Unicode 转义十六进制大小写进行了固定匹配；esbuild 0.25.12 将 `\\u` 转义的十六进制字母规范化为大写，导致检查误报，源码中的交互实现、失败重试按钮和 `aria-busy` 状态本身均已在该次浏览器检查中通过对应的 DOM / 页面行为路径之外的其他校验。
 - 已将 Bundle 字符串断言改为大小写不敏感比较，不改变实际应用代码。新一轮 Browser Smoke 必须重新实际执行后，才能确认此误报已消除；先前的 142/143 仍按失败记录。
 - 性能测试参数抽屉的焦点进入、Shift+Tab / Tab 循环、Escape 关闭及焦点返回没有出现在失败列表中；本轮仍以新工作流最终结果为准。
+
+### Provider 密钥状态文字对比度修复（2026-10-28）
+
+- 在运行时注入的 Provider 管理台样式中发现 `.provider-key-set` 引用了根主题未定义的 `--success`，最终回退到深绿色 `#238752`。以 `--surface` / `--surface-2` 为背景计算时，对比度约为 3.82:1 / 3.53:1，低于普通文本 WCAG AA 4.5:1 门槛。
+- 将密钥“已配置”状态改用已存在的主题成功色 `var(--ok,#34d399)`，同时同步 `web/static/dist/providers-admin.js`；更新 HTML 中 Provider Bundle 查询版本为 `20261028-provider-key-contrast-1`。
+- Browser Smoke 增加运行时样式对比度检查：实际加载 Provider 管理模块后，创建测试文本并读取浏览器计算后的前景色/深色表面背景色，计算对比度；只有使用正确主题色且达到 4.5:1 才通过。
+- 前一提交 `2dc8a12` 的 Browser Smoke 已实际通过 143/143 检查（[run 40688715310](https://github.com/Kasign/llm-gateway/actions/runs/40688715310)）；同提交 Go CI 五个任务全部成功（[run 40688715333](https://github.com/Kasign/llm-gateway/actions/runs/40688715333)）。本节新增的对比度用例尚未在新提交上执行，必须以后续 Actions 结果为准。

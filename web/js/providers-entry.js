@@ -416,7 +416,7 @@
       '.provider-state-on{background:#e3f5e9;color:#176d3a}',
       '.provider-state-off{background:#edf0f4;color:#596273}',
       '.provider-state-bad{background:#fff0df;color:#925300}',
-      '.provider-key-set{color:var(--success,#238752)}',
+      '.provider-key-set{color:var(--ok,#34d399)}',
       '.provider-footnote{font-size:12px;line-height:1.6;margin:10px 2px}',
       '@media(max-width:720px){.provider-grid{grid-template-columns:1fr}.provider-row-actions{min-width:200px}}',
     ].join('');

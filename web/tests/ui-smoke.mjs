@@ -703,6 +703,43 @@ try {
         badges.sample.height <= 28 &&
         badges.badges.every(item => item.whiteSpace === 'nowrap' && item.height <= 28),
         badges);
+
+      // 检查运行时注入的 Provider 密钥状态文字，而不只检查主题 CSS 变量。
+      const providerKeyContrast = await page.evaluate(() => {
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;background:var(--surface)';
+        const label = document.createElement('span');
+        label.className = 'provider-key-set';
+        label.textContent = '已配置';
+        host.appendChild(label);
+        document.body.appendChild(host);
+
+        const channels = value => (value.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
+        const luminance = value => {
+          const rgb = channels(value);
+          if (rgb.length !== 3) return Number.NaN;
+          const linear = rgb.map(channel => {
+            const srgb = channel / 255;
+            return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+        };
+        const foreground = getComputedStyle(label).color;
+        const background = getComputedStyle(host).backgroundColor;
+        const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+        const result = {
+          foreground,
+          background,
+          ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2))
+        };
+        host.remove();
+        return result;
+      });
+      check('Provider 密钥已配置状态文字在深色表面达到 WCAG AA（≥4.5:1）',
+        providersSource.includes("'.provider-key-set{color:var(--ok,#34d399)}'") &&
+        Number.isFinite(providerKeyContrast.ratio) &&
+        providerKeyContrast.ratio >= 4.5,
+        providerKeyContrast);
     }
 
     if (['dashboard', 'models-local', 'models-download', 'requests', 'providers'].includes(tab)) {
