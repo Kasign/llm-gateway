@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "build": "esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=static/dist/app.js && cp js/providers-entry.js static/dist/providers-admin.js && cp js/password-toggle.js static/dist/password-toggle.js"
+    "build": "esbuild js/entry.js --bundle --format=iife --target=es2020 --outfile=static/dist/app.js && cp js/providers-entry.js static/dist/providers-admin.js && cp js/password-toggle.js static/dist/password-toggle.js && cp js/key-service-picker.js static/dist/key-service-picker.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

@@ -64,6 +64,7 @@ jobs:
           node --check web/js/providers-entry.js
           node --check web/static/dist/providers-admin.js
           node --check web/static/dist/app.js
+          node --check web/static/dist/key-service-picker.js
           grep -q 'api_key_ciphertext' internal/server/admin_providers_http.go
           grep -q 'clear-key' web/js/providers-entry.js
           grep -q 'model_mappings' web/static/dist/providers-admin.js
@@ -74,7 +75,7 @@ jobs:
           grep -q 'configured_remote' web/js/app/main.js
           grep -q 'available_backends' web/static/dist/app.js
           grep -q 'configured_remote' web/static/dist/app.js
-          if ! git diff --quiet -- web/static/dist/app.js web/static/dist/providers-admin.js; then
+          if ! git diff --quiet -- web/static/dist/app.js web/static/dist/providers-admin.js web/static/dist/key-service-picker.js; then
             echo "::error::提交的前端部署 Bundle 与当前源码构建结果不一致，请重新生成并提交"
             git diff -- web/static/dist/app.js web/static/dist/providers-admin.js | head -120 || true
             exit 1

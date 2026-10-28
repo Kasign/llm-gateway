@@ -87,7 +87,7 @@ jobs:
         run: |
           npm ci
           npm run build
-          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js
+          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js static/dist/key-service-picker.js
 
       - name: 准备隔离的 Gateway 测试配置
         run: |
