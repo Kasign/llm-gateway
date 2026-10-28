@@ -890,6 +890,96 @@ try {
     }
   }
 
+  // 请求详情弹窗使用只读 Mock 验证真实键盘路径，不写入 Gateway 审计记录。
+  const smokeRequestID = 'browser-smoke-detail-1';
+  await page.route('**/api/requests*', async route => {
+    const request = route.request();
+    if (request.method() !== 'GET') return route.continue();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/requests/stats') {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          requests: { total_requests: 1, running_requests: 0, success_rate_percent: 100, success_requests: 1, completed_requests: 1, error_requests: 0, cancelled_requests: 0 },
+          latency: { average_ms: 120, sample_count: 1, buckets: [] },
+          tokens: { upstream_usage: { total_tokens: 12, requests: 1, input_tokens: 5, output_tokens: 7 }, llama_timings: {}, unknown_source: {} }
+        })
+      });
+      return;
+    }
+    if (pathname === '/api/requests') {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ data: [{
+          request_id: smokeRequestID, status: 'completed', started_at: '2026-10-28T12:00:00Z',
+          client_name: 'Browser Smoke', api_key_name: 'Smoke Key',
+          request_url: 'https://example.test/v1/chat/completions', provider_id: 'mock-provider',
+          model_requested: 'mock-model', model_actual: 'mock-model', http_status: 200,
+          latency_ms: 120, ttft_ms: 15, total_tokens: 12, request_bytes: 128, response_bytes: 512, stream: false
+        }] })
+      });
+      return;
+    }
+    if (pathname === '/api/requests/' + smokeRequestID) {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          summary: { request_id: smokeRequestID, status: 'completed', http_status: 200, method: 'POST', request_url: 'https://example.test/v1/chat/completions', api_key: 'Smoke Key', client_name: 'Browser Smoke', provider_id: 'mock-provider', model_requested: 'mock-model' },
+          timing: { started_at: '2026-10-28T12:00:00Z', finished_at: '2026-10-28T12:00:01Z', latency_ms: 120, ttft_ms: 15, input_tokens: 5, output_tokens: 7, total_tokens: 12 },
+          request_params: { model_client: 'mock-model', model_upstream: 'mock-model', stream_label: '非流式' }
+        })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await clickTab(page, 'requests', '调用记录');
+  const detailTrigger = page.locator('#requestsTable button').filter({ hasText: '详情' }).first();
+  await detailTrigger.waitFor({ state: 'visible', timeout: 10000 });
+  await detailTrigger.focus();
+  await detailTrigger.click();
+  const detailModal = page.locator('#detailModal');
+  await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
+  check('请求详情弹窗打开后将焦点移入关闭按钮',
+    await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
+  const focusState = await detailModal.evaluate(root => {
+    const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+    const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+    if (!visible.length) return { count: 0, firstIsActive: false, lastIsActive: false };
+    visible[visible.length - 1].focus();
+    const lastIsActive = document.activeElement === visible[visible.length - 1];
+    return { count: visible.length, lastIsActive, firstIsActive: false };
+  });
+  check('请求详情弹窗具有可实际聚焦的键盘控件', focusState.count > 0 && focusState.lastIsActive, focusState);
+  await page.keyboard.press('Tab');
+  check('请求详情弹窗 Tab 从最后一个控件循环到第一个',
+    await detailModal.evaluate(root => {
+      const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+      const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+      return visible.length > 0 && document.activeElement === visible[0];
+    }));
+  const firstFocusState = await detailModal.evaluate(root => {
+    const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+    const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+    if (!visible.length) return { count: 0, firstIsActive: false, lastIsActive: false };
+    visible[0].focus();
+    return { count: visible.length, firstIsActive: document.activeElement === visible[0], lastIsActive: false };
+  });
+  await page.keyboard.press('Shift+Tab');
+  check('请求详情弹窗 Shift+Tab 从第一个控件循环到最后一个',
+    firstFocusState.count > 0 && firstFocusState.firstIsActive && await detailModal.evaluate(root => {
+      const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+      const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+      return visible.length > 0 && document.activeElement === visible[visible.length - 1];
+    }));
+  await page.keyboard.press('Escape');
+  await page.locator('#detailModal').waitFor({ state: 'hidden', timeout: 5000 });
+  check('请求详情弹窗 Escape 关闭并将焦点返回触发按钮',
+    await detailTrigger.evaluate(el => document.activeElement === el) &&
+    await page.locator('#detailModal').getAttribute('aria-hidden') === 'true');
+  await page.unroute('**/api/requests*');
+
   // Provider 新增防重复回归：创建请求被 Mock 拦截，不会写入真实 Provider 配置。
   let providerCreatePostCount = 0;
   let failNextProviderListGet = false;
