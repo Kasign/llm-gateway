@@ -309,7 +309,7 @@ def validate(
             "RequestRetentionStatus.runtime must reference RequestRetentionRuntimeStatus",
         )
         retention_decl = re.search(
-            r"(?ms)^type requestRetentionStatusResponse struct \\{(.*?)^\\}",
+            r"(?ms)^type requestRetentionStatusResponse struct \{(.*?)^\}",
             request_retention_source,
         )
         if retention_decl is None:
