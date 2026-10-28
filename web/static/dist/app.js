@@ -2099,16 +2099,6 @@
       $("filesMsg").innerHTML = '<span class="err">' + esc(msg.includes("\u5DF2\u5B58\u5728") ? msg : "\u5B89\u88C5\u5931\u8D25\uFF1A" + msg) + "</span>";
     }
   }
-  function llamaCatalogSourceLabel(item, managed) {
-    const source = String(item?.source || "").split("+").filter(Boolean);
-    const labels = [];
-    if (source.includes("router")) labels.push("Router \u6CE8\u518C");
-    if (source.includes("disk")) labels.push("\u5171\u4EAB\u78C1\u76D8");
-    if (source.includes("gateway")) labels.push("Gateway \u767B\u8BB0");
-    if (source.includes("upstream")) labels.push("\u5F53\u524D\u4E0A\u6E38");
-    if (!labels.length && managed) labels.push("Gateway \u767B\u8BB0");
-    return labels.join(" + ") || "\u672A\u786E\u8BA4\u6765\u6E90";
-  }
   function renderGatewayModelTable() {
     const el = $("modelTable");
     if (!el) return;
@@ -2123,7 +2113,7 @@
       warnings.hidden = !notices.length;
     }
     el.innerHTML = !rows.length ? modelHub.rowsError ? "" : emptyState("\u6682\u65E0 GGUF \u6A21\u578B\uFF1B\u8BF7\u68C0\u67E5\u5171\u4EAB\u6A21\u578B\u76EE\u5F55\u6216\u4ECE\u300C\u6A21\u578B\u4E0B\u8F7D\u300D\u5B89\u88C5") : wrapTable(
-      "<tr><th>\u6A21\u578B\u540D\u79F0</th><th>\u6765\u6E90</th><th>\u6A21\u578B ID / \u952E</th><th>\u5927\u5C0F</th><th>\u72B6\u6001</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
+      "<tr><th>\u6A21\u578B\u540D\u79F0</th><th>\u6A21\u578B ID / \u952E</th><th>\u5927\u5C0F</th><th>\u72B6\u6001</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => {
         const rt = x._runtime || modelHub.runtimeItemForRow(x);
         const managed = x._managed === true;
         const modelKey = String(x.model_key || "").trim();
@@ -2137,7 +2127,7 @@
         const unloadButton = canOperate && rt.loaded ? inferButtonHtml("llamacpp", "unload", { modelId, modelKey, title: "Llama \u6A21\u578B \xB7 \u5378\u8F7D \xB7 " + (modelId || modelKey), confirmMsg: "\u4ECE llama.cpp \u5378\u8F7D " + (modelId || modelKey) + "\uFF1F", label: "\u5378\u8F7D" }) : "";
         const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key="' + esc(modelKey) + '">\u5220\u9664</button>' : rt?.disk_present && rt?.path ? '<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path="' + esc(String(rt.path)) + '">\u5220\u9664</button>' : "";
         const defaultPill = rt?.active ? ' <span class="pill pill-active">Gateway \u9ED8\u8BA4</span>' : "";
-        return "<tr><td>" + esc(name) + (x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : "") + defaultPill + "</td><td>" + esc(llamaCatalogSourceLabel(rt, managed)) + "</td><td><code>" + esc(modelKey || modelId || "\u2014") + '</code></td><td class="tabular-nums">' + fmtSize(sizeBytes) + "</td><td>" + ggufLoadPill(st) + '</td><td><div class="td-actions">' + loadButton + unloadButton + deleteButton + "</div></td></tr>";
+        return "<tr><td>" + esc(name) + (x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : "") + defaultPill + "</td><td><code>" + esc(modelKey || modelId || "\u2014") + '</code></td><td class="tabular-nums">' + fmtSize(sizeBytes) + "</td><td>" + ggufLoadPill(st) + '</td><td><div class="td-actions">' + loadButton + unloadButton + deleteButton + "</div></td></tr>";
       }).join("")
     );
   }

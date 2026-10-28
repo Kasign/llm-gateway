@@ -1208,16 +1208,6 @@ async function installModel(){
   }
 }
 
-function llamaCatalogSourceLabel(item,managed){
-  const source=String(item?.source||'').split('+').filter(Boolean);
-  const labels=[];
-  if(source.includes('router'))labels.push('Router 注册');
-  if(source.includes('disk'))labels.push('共享磁盘');
-  if(source.includes('gateway'))labels.push('Gateway 登记');
-  if(source.includes('upstream'))labels.push('当前上游');
-  if(!labels.length&&managed)labels.push('Gateway 登记');
-  return labels.join(' + ')||'未确认来源';
-}
 function renderGatewayModelTable(){
   const el=$('modelTable');if(!el)return;
   const rows=modelHub.tableRows();
@@ -1231,7 +1221,7 @@ function renderGatewayModelTable(){
     warnings.hidden=!notices.length;
   }
   el.innerHTML=!rows.length?(modelHub.rowsError?'':emptyState('暂无 GGUF 模型；请检查共享模型目录或从「模型下载」安装')):wrapTable(
-    '<tr><th>模型名称</th><th>来源</th><th>模型 ID / 键</th><th>大小</th><th>状态</th><th>操作</th></tr>'+
+    '<tr><th>模型名称</th><th>模型 ID / 键</th><th>大小</th><th>状态</th><th>操作</th></tr>'+
     rows.map(x=>{
       const rt=x._runtime||modelHub.runtimeItemForRow(x);
       const managed=x._managed===true;
@@ -1255,7 +1245,6 @@ function renderGatewayModelTable(){
           :'';
       const defaultPill=rt?.active?' <span class="pill pill-active">Gateway 默认</span>':'';
       return '<tr><td>'+esc(name)+(x.quantization?'<div class="small muted">'+esc(x.quantization)+'</div>':'')+defaultPill+'</td>'+
-        '<td>'+esc(llamaCatalogSourceLabel(rt,managed))+'</td>'+
         '<td><code>'+esc(modelKey||modelId||'—')+'</code></td>'+
         '<td class="tabular-nums">'+fmtSize(sizeBytes)+'</td>'+
         '<td>'+ggufLoadPill(st)+'</td>'+

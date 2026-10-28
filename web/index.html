@@ -307,7 +307,7 @@
       <section id="keys" class="panel">
         <div class="card admin-auth-card">
           <div class="card-head">
-            <div><h2>API 管理员密钥（可选）</h2><p>仅供外部脚本或自动化调用管理 API。通过服务端环境变量 <code>LLM_GATEWAY_ADMIN_API_KEY</code> 配置，此页不会修改服务端密钥；浏览器管理操作始终使用网页登录建立的 Web Session。</p></div>
+            <div><h2>服务端 API 管理员密钥（可选）</h2><p>仅供外部脚本或自动化调用管理 API。请在部署环境的 <code>LLM_GATEWAY_ADMIN_API_KEY</code> 中配置；网页不提供录入/保存入口，修改后需重建或重启 Gateway。下方「服务密钥」是客户端调用 <code>/v1/*</code> 的 Key，与管理员密钥不同。网页管理操作使用密码登录后的 Web Session。</p></div>
             <span id="adminKeyStatus"></span>
           </div>
         </div>
@@ -439,7 +439,7 @@
 </div>
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261028-session-key-boundary-1"></script>
+<script src="/static/dist/app.js?v=20261028-admin-key-model-source-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 </body>

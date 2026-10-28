@@ -129,8 +129,17 @@ try {
   check('密码登录建立 Web Session', await page.locator('#appShell').isVisible());
   const legacyKey = await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key'));
   check('浏览器未保留旧版管理员 API Key', legacyKey === null, legacyKey);
-  check('控制台不存在虚假的管理员 Key 保存表单',
+  const adminKeyPanelText = await page.locator('#keys .admin-auth-card').evaluate(el => el.textContent || '');
+  check('管理员 API Key 明确标注服务端配置边界',
+    adminKeyPanelText.includes('LLM_GATEWAY_ADMIN_API_KEY') &&
+    adminKeyPanelText.includes('网页不提供录入/保存入口') &&
+    adminKeyPanelText.includes('Web Session') &&
     await page.locator('#keys input#adminKey, #keys button[onclick="saveKey()"]').count() === 0);
+
+  const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
+  check('本地模型 Bundle 已移除来源列渲染逻辑',
+    !appBundle.includes('llamaCatalogSourceLabel') &&
+    !appBundle.includes(String.raw`<th>\u6765\u6E90</th>`));
 
   // 桌面主要 Tab：验证可切换、实际渲染以及页面不向右撑破视口。
   const tabs = [
@@ -146,6 +155,13 @@ try {
   for (const [tab, title] of tabs) {
     await clickTab(page, tab, title);
     await recordLayout(page, title + '-desktop');
+
+    if (tab === 'models-local') {
+      const sourceHeaders = await page.locator('#modelTable th').evaluateAll(
+        headers => headers.map(header => (header.textContent || '').trim()).filter(label => label === '来源')
+      );
+      check('本地模型表不展示来源列', sourceHeaders.length === 0, sourceHeaders);
+    }
 
     if (tab === 'models-download') {
       const heights = await page.evaluate(() => {
