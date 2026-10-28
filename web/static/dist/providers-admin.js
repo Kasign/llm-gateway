@@ -7,11 +7,11 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[ch]);
   const token = () => localStorage.getItem('llm_gateway_session_token') || '';
-  const adminKey = () => localStorage.getItem('llm_gateway_admin_key') || $('adminKey')?.value?.trim() || '';
+  // Provider 管理接口只使用已登录的 Web Session，不回退到管理员服务密钥。
   const authHeaders = (extra = {}) => {
     const headers = { ...extra };
+    delete headers['X-Admin-Key'];
     if (token()) headers.Authorization = 'Bearer ' + token();
-    else if (adminKey()) headers['X-Admin-Key'] = adminKey();
     return headers;
   };
   async function api(url, options = {}) {
