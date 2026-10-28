@@ -144,7 +144,7 @@
               </div>
             </div>
             <div class="provider-grid">
-              <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._\\x2d]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；保存后不可修改。</small></div>
+              <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._\x2d]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；保存后不可修改。</small></div>
               <div class="field"><label for="providerBaseURL">Base URL</label><input id="providerBaseURL" name="base_url" type="url" placeholder="https://api.example.com/v1" required></div>
               <div class="field"><label for="providerDefaultModel">默认模型 ID</label><input id="providerDefaultModel" name="default_model" required maxlength="255"></div>
               <div class="field"><label for="providerApiKey">API Key</label><input id="providerApiKey" name="api_key" type="password" autocomplete="new-password" placeholder="新增时填写；编辑留空保留旧 Key"><small id="providerKeyHelp">Key 仅发送到服务端一次加密保存，API 不回传密钥内容。</small></div>
