@@ -559,7 +559,7 @@ try {
     requestsSource.includes('onclick="loadRequests()"') &&
     requestsSource.includes("setAttribute('aria-busy', 'true')") &&
     requestsSource.includes("setAttribute('aria-busy', 'false')") &&
-    appBundle.includes('\\u6b63\\u5728\\u52a0\\u8f7d\\u8c03\\u7528\\u8bb0\\u5f55\\u2026') &&
+    appBundle.toLowerCase().includes('\\u6b63\\u5728\\u52a0\\u8f7d\\u8c03\\u7528\\u8bb0\\u5f55\\u2026') &&
     indexHtml.includes('id="requestsTable" style="margin-top:12px" role="status" aria-live="polite" aria-busy="false"'));
   check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
     requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
