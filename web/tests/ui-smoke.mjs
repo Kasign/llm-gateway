@@ -253,14 +253,28 @@ try {
     scrollWidth: wrap.scrollWidth,
     overflowX: getComputedStyle(wrap).overflowX
   }));
-  check('窄屏最近调用表保留可读宽度并在容器内滚动',
-    recentTableLayout.tableWidth >= 460 &&
-    recentTableLayout.scrollWidth > recentTableLayout.clientWidth &&
-    ['auto', 'scroll'].includes(recentTableLayout.overflowX),
+  check('窄屏最近调用表四列均可见且不触发横向滚动',
+    recentTableLayout.tableWidth > 0 &&
+    recentTableLayout.tableWidth <= recentTableLayout.clientWidth + 1 &&
+    recentTableLayout.scrollWidth <= recentTableLayout.clientWidth + 1,
     recentTableLayout);
   await page.screenshot({ path: screenshotName('dashboard-mobile-390'), fullPage: true });
   await clickTab(page, 'providers', '远程 Provider-窄屏');
   await recordLayout(page, 'Provider-mobile-390');
+  const providerTableLayout = await page.locator('#providers .table-wrap').first().evaluate(wrap => ({
+    tableWidth: wrap.querySelector('table')?.getBoundingClientRect().width || 0,
+    clientWidth: wrap.clientWidth,
+    scrollWidth: wrap.scrollWidth,
+    overflowX: getComputedStyle(wrap).overflowX,
+    hintVisible: (wrap.innerText || '').includes('左右滑动可查看完整表格') ||
+      getComputedStyle(wrap, '::after').content.includes('左右滑动')
+  }));
+  check('窄屏 Provider 宽表保留列宽并明确提示横向查看',
+    providerTableLayout.tableWidth >= 1000 &&
+    providerTableLayout.scrollWidth > providerTableLayout.clientWidth &&
+    ['auto', 'scroll'].includes(providerTableLayout.overflowX) &&
+    providerTableLayout.hintVisible,
+    providerTableLayout);
   await page.screenshot({ path: screenshotName('providers-mobile-390'), fullPage: true });
   await clickTab(page, 'requests', '调用记录-窄屏');
   await recordLayout(page, '调用记录-mobile-390');
