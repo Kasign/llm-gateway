@@ -505,6 +505,56 @@ try {
     Number.isFinite(placeholderContrastAudit.ratio) && placeholderContrastAudit.ratio >= 4.5,
     placeholderContrastAudit);
 
+  const infoChipContrastAudit = await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;background:var(--surface-2)';
+    const card = document.createElement('div');
+    card.className = 'inf-card';
+    const chip = document.createElement('span');
+    chip.className = 'inf-chip';
+    const suffix = document.createElement('em');
+    suffix.textContent = '来源';
+    chip.appendChild(suffix);
+    card.appendChild(chip);
+    host.appendChild(card);
+    document.body.appendChild(host);
+    const channels = value => (value.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+    const surface = channels(getComputedStyle(host).backgroundColor);
+    const cardBackground = channels(getComputedStyle(card).backgroundColor);
+    const cardImage = getComputedStyle(card).backgroundImage;
+    const gradientMatch = cardImage.match(/rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/i);
+    const chipBackground = channels(getComputedStyle(chip).backgroundColor);
+    const textStyle = getComputedStyle(suffix);
+    const foreground = channels(textStyle.color);
+    const textOpacity = Number(textStyle.opacity || 1);
+    if (surface.length < 3 || cardBackground.length < 4 || chipBackground.length < 4 || foreground.length < 3 || !gradientMatch) {
+      host.remove();
+      return { cardImage, textColor: textStyle.color, ratio: Number.NaN };
+    }
+    const blend = (top, bottom, alpha) => top.slice(0, 3).map((value, i) => value * alpha + bottom[i] * (1 - alpha));
+    const cardComposite = blend(cardBackground, surface, cardBackground[3]);
+    const gradientColor = gradientMatch.slice(1, 4).map(Number);
+    const gradientOpacity = Number(gradientMatch[4]);
+    const gradientComposite = blend(gradientColor, cardComposite, gradientOpacity);
+    const chipComposite = blend(chipBackground, gradientComposite, chipBackground[3]);
+    const effectiveForeground = blend(foreground, chipComposite, textOpacity);
+    const luminance = values => {
+      const linear = values.map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const values = [luminance(effectiveForeground), luminance(chipComposite)].sort((a, b) => b - a);
+    const result = { textColor: textStyle.color, textOpacity, surface, cardBackground, gradientOpacity, chipBackground, effectiveForeground: effectiveForeground.map(Math.round), compositeBackground: chipComposite.map(Math.round), ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2)) };
+    host.remove();
+    return result;
+  });
+  check('推理信息标签次级文字在渐变与半透明叠色后达到 WCAG AA（≥4.5:1）',
+    appCss.includes('.inf-chip em{font-style:normal;font-size:10px;font-weight:650;color:var(--text-2);margin-left:4px}') &&
+    Number.isFinite(infoChipContrastAudit.ratio) && infoChipContrastAudit.ratio >= 4.5,
+    infoChipContrastAudit);
+
   const configNoteContrastAudit = await page.evaluate(() => {
     const host = document.createElement('div');
     host.className = 'inference-params-root';
