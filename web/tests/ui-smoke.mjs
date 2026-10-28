@@ -393,6 +393,11 @@ try {
   check('Provider 保存具备表单级重复提交锁和初始化防重入',
     providersSource.includes("form.dataset.saving === 'true'") &&
     providersSource.includes('globalThis.__llmGatewayProviderAdminInitialized'));
+  check('Provider 列表区分首次加载失败与刷新失败并声明 aria-busy',
+    providersSource.includes('Provider 列表加载失败，请点击“刷新”重试') &&
+    providersSource.includes('仍保留上次成功加载的数据') &&
+    providersSource.includes("setAttribute('aria-busy', 'true')") &&
+    html.includes('id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false"'));
   check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
     requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
     requestsSource.includes('密钥：') && requestsSource.includes('ID：') &&
@@ -519,10 +524,20 @@ try {
 
   // Provider 新增防重复回归：创建请求被 Mock 拦截，不会写入真实 Provider 配置。
   let providerCreatePostCount = 0;
+  let failNextProviderListGet = false;
   await page.route('**/api/admin/providers', async route => {
     if (route.request().method() === 'POST') {
       providerCreatePostCount += 1;
       await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{id:'deepseek'}})});
+      return;
+    }
+    if (route.request().method() === 'GET' && failNextProviderListGet) {
+      failNextProviderListGet = false;
+      await route.fulfill({
+        status:503,
+        contentType:'application/json',
+        body:JSON.stringify({error:{message:'测试刷新失败'}})
+      });
       return;
     }
     await route.continue();
@@ -615,6 +630,27 @@ try {
     });
     await page.waitForFunction(() => document.getElementById('providerEditorCard')?.hidden, null, {timeout:10000});
     check('连续触发表单提交只发送一次新增 Provider 请求', providerCreatePostCount === 1, providerCreatePostCount);
+
+    const providerRowsBeforeRefreshFailure = await page.locator('#providerRows').innerText();
+    failNextProviderListGet = true;
+    await page.locator('#providerRefresh').click();
+    await page.waitForFunction(() =>
+      document.getElementById('providerStatus')?.textContent.includes('刷新失败'),
+      null, {timeout:10000});
+    const providerRefreshFailure = await page.evaluate(() => ({
+      message: document.getElementById('providerStatus')?.textContent || '',
+      busy: document.getElementById('providerStatus')?.getAttribute('aria-busy'),
+      refreshDisabled: document.getElementById('providerRefresh')?.disabled
+    }));
+    check('Provider 刷新失败提示重试且保留上次数据', 
+      providerRefreshFailure.message.includes('仍保留上次成功加载的数据') &&
+      providerRefreshFailure.message.includes('点击“刷新”重试') &&
+      await page.locator('#providerRows').innerText() === providerRowsBeforeRefreshFailure,
+      providerRefreshFailure);
+    check('Provider 刷新结束后清除忙碌状态并恢复刷新按钮',
+      providerRefreshFailure.busy === 'false' &&
+      providerRefreshFailure.refreshDisabled === false,
+      providerRefreshFailure);
     await page.unroute('**/api/admin/providers');
   }
 

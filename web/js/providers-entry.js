@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const state = { rows: [], editing: null, loading: false, activeTemplate: '', pendingTemplate: null };
+  const state = { rows: [], editing: null, loading: false, loaded: false, activeTemplate: '', pendingTemplate: null };
   const PROVIDER_TEMPLATES = {
     openai: {
       label: 'OpenAI',
@@ -132,17 +132,30 @@
   }
   async function loadProviders() {
     if (state.loading) return;
+    const hasPreviousData = state.loaded;
     state.loading = true;
+    const status = $('providerStatus');
+    if (status) status.setAttribute('aria-busy', 'true');
     $('providerRefresh').disabled = true;
+    setStatus(hasPreviousData ? '正在刷新 Provider 列表…' : '正在加载 Provider 列表…', 'muted');
     try {
       const result = await api('/api/admin/providers');
       state.rows = Array.isArray(result?.data) ? result.data : [];
+      state.loaded = true;
       renderRows();
       setStatus('已加载 ' + state.rows.length + ' 个 Provider。Web API 不返回任何 Key 明文或密文；加密密钥' + (result?.encryption_available ? '已配置。' : '未配置，新增/修改 Key 时需要先配置。'), result?.encryption_available ? 'ok' : 'warn');
     } catch (error) {
-      setStatus(error.message || '加载 Provider 列表失败。', 'err');
+      const reason = error.message || '未知错误';
+      if (!state.loaded) {
+        const target = $('providerRows');
+        if (target) target.innerHTML = '<tr><td colspan="10" class="muted">Provider 列表加载失败。请点击上方“刷新”重试。</td></tr>';
+        setStatus('Provider 列表加载失败，请点击“刷新”重试。原因：' + reason, 'err');
+      } else {
+        setStatus('Provider 列表刷新失败，仍保留上次成功加载的数据。点击“刷新”重试。原因：' + reason, 'err');
+      }
     } finally {
       state.loading = false;
+      if (status) status.setAttribute('aria-busy', 'false');
       $('providerRefresh').disabled = false;
     }
   }
