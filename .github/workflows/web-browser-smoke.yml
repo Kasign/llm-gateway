@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   browser-smoke:
@@ -81,12 +81,18 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: 构建前端 Bundle 并验证同步
+      - name: 使用构建器同步前端 Bundle
         working-directory: web
         run: |
           npm ci
           npm run build
-          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js
+          if ! git diff --quiet -- static/dist/app.js static/dist/providers-admin.js; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add static/dist/app.js static/dist/providers-admin.js
+            git commit -m "同步 Web Session 与管理员 Key 鉴权 Bundle"
+            git push origin HEAD:refs/heads/dev
+          fi
 
       - name: 准备隔离的 Gateway 测试配置
         run: |

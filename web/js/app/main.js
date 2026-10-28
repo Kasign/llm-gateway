@@ -1,5 +1,5 @@
 import { $, esc } from '../core/dom.js';
-import { api, isAuthenticated } from '../core/api.js';
+import { getKey, getSavedAdminKey, api, apiPublic, apiServiceKeys, initAdminKey, isAuthenticated } from '../core/api.js';
 import { setGlobalMsg } from '../core/notify.js';
 import { adminStore } from '../features/admin-store.js';
 import { fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable, displayUpstreamModel } from '../core/format.js';
@@ -25,7 +25,9 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 
-// 管理台通过已保存的管理员 API Key 鉴权。
+// 旧版把管理员 API Key 存在浏览器中，但它不能代替 Web Session；清理无效的旧副本。
+try { localStorage.removeItem('llm_gateway_admin_key'); } catch {}
+initAdminKey();
 function syncTopbarRefresh(){
   const btn=$('btnRefreshDashboard');
   if(!btn)return;
@@ -33,10 +35,6 @@ function syncTopbarRefresh(){
 }
 
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
-  if (b.dataset.tab !== 'keys' && !isAuthenticated()) {
-    globalThis.forceLoginScreen?.('请先输入服务端已配置的管理员 API Key。');
-    return;
-  }
   document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
   $('sidebarAccountBtn')?.classList.remove('active');
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -57,7 +55,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
     const gm=$('globalMsg');
     if(gm)gm.hidden=false;
   }
-  if(b.dataset.tab==='keys'&&isAuthenticated())loadKeysPanel().catch(()=>{});
+  if(b.dataset.tab==='keys')loadKeysPanel().catch(()=>{});
   // 调用记录已有数据行时不刷新；空白、暂无记录或加载失败才拉一次。
   if(b.dataset.tab==='requests'&&!requestsListHasRows())loadRequests().catch(()=>{});
   syncTopbarRefresh();
@@ -488,10 +486,44 @@ async function loadDashboardRecent(){
 function adminKeyStatus(){
   const el=$('adminKeyStatus');
   if(!el)return;
-  if(isAuthenticated()){el.innerHTML='<span class="pill pill-success">已保存到此浏览器</span>';return}
-  el.innerHTML='<span class="pill">尚未配置管理员 API Key</span>';
+  if(getSavedAdminKey()){
+    el.innerHTML='<span class="pill pill-success">管理员 Key 已配置</span>';
+    return;
+  }
+  el.innerHTML='<span class="pill">未配置管理员 Key</span>';
 }
-
+async function saveKey(event){
+  event?.preventDefault?.();
+  const input=$('adminKey'), message=$('adminKeyMsg'), button=$('adminKeySaveButton');
+  const candidate=getKey();
+  if(!candidate){
+    if(message)message.innerHTML='<span class="err">请输入管理员 API Key</span>';
+    return;
+  }
+  if(button)button.disabled=true;
+  if(message)message.textContent='正在验证管理员 API Key…';
+  try{
+    await apiPublic('/api/admin/keys',{headers:{'X-Admin-Key':candidate},cache:'no-store'});
+    localStorage.setItem('llm_gateway_admin_key',candidate);
+    if(input)input.value=candidate;
+    adminKeyStatus();
+    if(message)message.innerHTML='<span class="ok">验证成功，已保存到当前浏览器。该 Key 只用于服务密钥管理。</span>';
+    await loadKeysPanel();
+  }catch(e){
+    if(message)message.innerHTML='<span class="err">验证失败：'+esc(e.message)+'</span>';
+  }finally{
+    if(button)button.disabled=false;
+  }
+}
+function clearAdminKey(){
+  localStorage.removeItem('llm_gateway_admin_key');
+  const input=$('adminKey'), message=$('adminKeyMsg');
+  if(input)input.value='';
+  if(message)message.innerHTML='<span class="muted">管理员 Key 已清除；Web 登录状态不受影响。</span>';
+  adminKeyStatus();
+  const table=$('keyTable');
+  if(table)table.innerHTML=emptyState('请先输入并验证管理员 API Key，再管理服务密钥');
+}
 function setGgufMsg(kind,text){
   const el=$('ggufMsg');if(!el)return;
   if(!text){el.innerHTML='';return}
@@ -506,8 +538,7 @@ async function refreshModelsOnly(){
 async function refreshAll(){
   adminKeyStatus();
   if(!isAuthenticated()){
-    setGlobalMsg('<span class="warn">请先在“服务密钥”页配置管理员 API Key。</span>');
-    globalThis.forceLoginScreen?.('请先输入服务端已配置的管理员 API Key。');
+    setGlobalMsg($('dashboard')?.classList.contains('active')?'':'<span class="warn">请先登录控制台</span>');
     return;
   }
   try{
@@ -1435,22 +1466,33 @@ async function retryOllamaPull(name,btn){
 
 async function loadKeysPanel(){
   adminKeyStatus();
+  if(!getSavedAdminKey()){
+    const table=$('keyTable');
+    if(table)table.innerHTML=emptyState('请先在上方输入并验证管理员 API Key，再管理服务密钥');
+    return;
+  }
   await loadKeys();
 }
 async function loadKeys(){
-  const j=await api('/api/admin/keys');const rows=j.data||[];
-  $('keyTable').innerHTML=!rows.length?emptyState('暂无密钥'):wrapTable('<tr><th>名称</th><th>前缀</th><th>状态</th><th>限流</th><th>允许模型</th><th>过期</th><th>操作</th></tr>'+rows.map(x=>`<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}…</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/分钟</td><td class="small">${esc((x.allowed_models||[]).join(', ')||'全部')}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status==='active'?'disable':'enable'}')">${x.status==='active'?'禁用':'启用'}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">轮换</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">删除</button></div></td></tr>`).join(''));
+  const table=$('keyTable');
+  try{
+    const j=await apiServiceKeys('/api/admin/keys');const rows=j.data||[];
+    table.innerHTML=!rows.length?emptyState('暂无密钥'):wrapTable('<tr><th>名称</th><th>前缀</th><th>状态</th><th>限流</th><th>允许模型</th><th>过期</th><th>操作</th></tr>'+rows.map(x=>`<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}…</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/分钟</td><td class="small">${esc((x.allowed_models||[]).join(', ')||'全部')}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status==='active'?'disable':'enable'}')">${x.status==='active'?'禁用':'启用'}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">轮换</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">删除</button></div></td></tr>`).join(''));
+  }catch(e){
+    if(table)table.innerHTML='<div class="msg"><span class="err">'+esc(e.message)+'</span></div>';
+    throw e;
+  }
 }
 async function createKey(){
   const models=$('keyModels').value.split(',').map(x=>x.trim()).filter(Boolean);
   try{
-    const j=await api('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,expires_at:$('keyExpires').value.trim()||null})});
-    $('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<div class="keybox">'+esc(j.key)+'</div><div class="msg muted">请立即复制</div>';loadKeys();
+    const j=await apiServiceKeys('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,expires_at:$('keyExpires').value.trim()||null})});
+    $('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<div class="keybox">'+esc(j.key)+'</div><div class="msg muted">请立即复制</div>';loadKeys().catch(()=>{});
   }catch(e){$('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
 }
-async function toggleKey(id,a){try{await api('/api/admin/keys/'+id+'/'+a,{method:'POST'});loadKeys()}catch(e){alert(e.message)}}
-async function rotateKey(id){if(!confirm('轮换后旧密钥立即失效，继续？'))return;try{const j=await api('/api/admin/keys/'+id+'/rotate',{method:'POST'});alert('新密钥：\n\n'+j.key);loadKeys()}catch(e){alert(e.message)}}
-async function deleteKey(id){if(!confirm('确定删除该密钥？'))return;try{await api('/api/admin/keys/'+id,{method:'DELETE'});loadKeys()}catch(e){alert(e.message)}}
+async function toggleKey(id,a){try{await apiServiceKeys('/api/admin/keys/'+id+'/'+a,{method:'POST'});loadKeys().catch(()=>{})}catch(e){alert(e.message)}}
+async function rotateKey(id){if(!confirm('轮换后旧密钥立即失效，继续？'))return;try{const j=await apiServiceKeys('/api/admin/keys/'+id+'/rotate',{method:'POST'});alert('新密钥：\\n\\n'+j.key);loadKeys().catch(()=>{})}catch(e){alert(e.message)}}
+async function deleteKey(id){if(!confirm('确定删除该密钥？'))return;try{await apiServiceKeys('/api/admin/keys/'+id,{method:'DELETE'});loadKeys().catch(()=>{})}catch(e){alert(e.message)}}
 
 const BENCH_STORE_KEY='llm-gateway.bench.v1';
 const BENCH_SHARED={
@@ -1910,7 +1952,7 @@ async function runBenchmark(){
 }
 
 exposeGlobals({
-  $, esc, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
+  $, esc, getKey, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,
   adminKeyStatus,
   appendActionLogTo,
   appendOpsLog,
@@ -2011,6 +2053,8 @@ exposeGlobals({
   rotateKey,
   runBenchmark,
   saveBackend,
+  saveKey,
+  clearAdminKey,
   scrollMmActionLog,
   selectGatewayModel,
   setBenchRunning,
@@ -2029,9 +2073,10 @@ exposeGlobals({
 
 exposeGlobals({ setGlobalMsg, refreshAll, syncTopbarRefresh, dashboardPoll, adminStore });
 initDownloadsTableActions();
+initAdminKey();
 adminKeyStatus();
 if(isAuthenticated())refreshAll();
-else setGlobalMsg('<span class="muted">请先在“服务密钥”页配置管理员 API Key。</span>');
+else setGlobalMsg($('dashboard')?.classList.contains('active')?'':'<span class="muted">请先登录控制台</span>');
 const REQUESTS_POLL_MS=15000;
 const DOWNLOADS_POLL_MS=5000;
 setInterval(()=>{

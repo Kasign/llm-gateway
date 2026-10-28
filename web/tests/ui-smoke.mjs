@@ -4,6 +4,7 @@ import process from 'node:process';
 import { chromium } from 'playwright';
 
 const baseURL = process.env.BROWSER_BASE_URL || 'http://127.0.0.1:8088';
+const password = process.env.BROWSER_TEST_PASSWORD || 'ci-browser-pass';
 const adminKey = process.env.BROWSER_TEST_ADMIN_KEY || 'browser-smoke-admin-key-not-for-production';
 const artifactDir = process.env.BROWSER_ARTIFACT_DIR || path.resolve('web-ui-artifacts');
 fs.mkdirSync(artifactDir, { recursive: true });
@@ -20,6 +21,8 @@ const report = {
   authFailures: [],
   expectedAuthFailures: [],
   adminKeySuccesses: [],
+  adminKeyRequests: [],
+  authHeaderUsage: [],
   serverErrors: [],
   unexpectedDialogs: [],
   layouts: [],
@@ -67,6 +70,17 @@ async function clickTab(page, tab, title) {
   return active;
 }
 
+async function login(page) {
+  const field = page.locator('#authLoginPass');
+  await field.fill(password);
+  await page.locator('#authLoginBtn').click();
+  await page.waitForFunction(() => {
+    const shell = document.querySelector('#appShell');
+    const auth = document.querySelector('#authScreen');
+    return Boolean(shell && !shell.hidden && auth && !auth.classList.contains('show'));
+  }, null, { timeout: 20000 });
+}
+
 try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -74,14 +88,14 @@ try {
 
   page.on('pageerror', error => report.pageErrors.push(String(error && (error.stack || error.message) || error)));
   page.on('console', message => {
-    if (message.type() !== 'error' || /favicon\.ico/i.test(message.text())) return;
+    if (message.type() !== 'error' || /favicon\\.ico/i.test(message.text())) return;
     const messageText = message.text();
-    if (/Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/.test(messageText) &&
-        (expectedAdminKeyRejection || report.expectedAuthFailures.some(entry => entry.url?.includes('/api/admin/keys')))) {
+    if (/Failed to load resource: the server responded with a status of 401 \\(Unauthorized\\)/.test(messageText) &&
+        (expectedAdminKeyRejection || report.expectedAuthFailures.length > 0)) {
       report.expectedAuthFailures.push({ source: 'browser-console', message: messageText });
       return;
     }
-    if (/Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/.test(messageText)) {
+    if (/Failed to load resource: the server responded with a status of 502 \\(Bad Gateway\\)/.test(messageText)) {
       report.environmentConsoleWarnings.push(messageText);
       return;
     }
@@ -93,23 +107,29 @@ try {
   });
   page.on('response', response => {
     const url = response.url();
-    if (url.includes('/static/') && response.status() >= 400) {
-      report.failedStaticAssets.push({ status: response.status(), url });
-    }
-    if (url.includes('/api/admin/keys') && response.status() === 200) {
-      report.adminKeySuccesses.push({ status: response.status(), url });
-    }
-    if (url.includes('/api/') && response.status() === 401 &&
+    let pathname = '';
+    try { pathname = new URL(url).pathname; } catch {}
+    if (url.includes('/static/') && response.status() >= 400) report.failedStaticAssets.push({ status: response.status(), url });
+    if (pathname === '/api/admin/keys' || pathname.startsWith('/api/admin/keys/')) {
+      report.adminKeyRequests.push({ status: response.status(), url });
+      if (response.status() === 200) report.adminKeySuccesses.push({ status: response.status(), url });
+      if (response.status() === 401 && expectedAdminKeyRejection) report.expectedAuthFailures.push({ status: response.status(), url });
+      else if (response.status() === 401) report.authFailures.push({ status: response.status(), url });
+    } else if (url.includes('/api/') && response.status() === 401 &&
         !url.includes('/api/auth/status') && !url.includes('/api/auth/login')) {
-      if (expectedAdminKeyRejection && url.includes('/api/admin/keys')) {
-        report.expectedAuthFailures.push({ status: response.status(), url });
-      } else {
-        report.authFailures.push({ status: response.status(), url });
-      }
+      report.authFailures.push({ status: response.status(), url });
     }
-    if (url.includes('/api/') && response.status() >= 500) {
-      report.serverErrors.push({ status: response.status(), url });
-    }
+    if (url.includes('/api/') && response.status() >= 500) report.serverErrors.push({ status: response.status(), url });
+  });
+  page.on('request', request => {
+    let pathname = '';
+    try { pathname = new URL(request.url()).pathname; } catch {}
+    if (!pathname.startsWith('/api/')) return;
+    const headers = request.headers();
+    report.authHeaderUsage.push({
+      path: pathname, hasAdminKey: Boolean(headers['x-admin-key']),
+      hasSession: Boolean(headers.authorization && headers.authorization.startsWith('Bearer '))
+    });
   });
 
   // 外部模型目录不是浏览器布局验收的依赖；其它 API 请求仍走真实 Gateway。
@@ -119,19 +139,26 @@ try {
 
   const response = await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
   check('首页 HTTP 状态', Boolean(response && response.status() === 200), response ? response.status() : null);
-  await page.locator('#appShell').waitFor({ state: 'visible', timeout: 15000 });
-  check('管理台无需 Web 密码登录即可打开',
-    await page.locator('#appShell').isVisible() && await page.locator('#authScreen, #authLoginForm').count() === 0);
-  check('未配置管理员 Key 时自动进入服务密钥页',
-    await page.locator('#keys').evaluate(el => el.classList.contains('active')));
-  check('初始状态未保存管理员 Key',
+  await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 15000 });
+  check('未登录时显示独立登录页', await page.locator('#authLoginForm').isVisible());
+  check('未登录时管理台被隐藏', await page.locator('#appShell').evaluate(el => el.hidden));
+  const loginPassword = page.locator('#authLoginPass'), loginToggle = page.locator('#authScreen .password-toggle');
+  await loginToggle.click();
+  check('登录密码可显示明文', await loginPassword.evaluate(el => el.type === 'text'));
+  await loginToggle.click();
+  check('登录密码可恢复隐藏', await loginPassword.evaluate(el => el.type === 'password'));
+  await login(page);
+  check('密码登录建立 Web Session', await page.locator('#appShell').isVisible());
+  check('管理员 Key 与登录凭据独立',
+    Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) &&
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
   await clickTab(page, 'keys', '服务密钥');
-  const adminKeyField = page.locator('#adminKey');
-  const keyToggle = page.locator('#adminKey').locator('xpath=..').locator('.password-toggle');
-  check('管理员 Key 输入框存在且默认隐藏',
-    await adminKeyField.count() === 1 && await adminKeyField.evaluate(el => el.type === 'password'));
+  const panelText = await page.locator('#keys .admin-auth-card').evaluate(el => el.textContent || '');
+  check('管理员 API Key 只用于服务密钥管理', panelText.includes('仅用于服务密钥管理') &&
+    panelText.includes('不用于控制台登录或其他管理页面'));
+  const adminKeyField = page.locator('#adminKey'), keyToggle = page.locator('#adminKey').locator('xpath=..').locator('.password-toggle');
+  check('管理员 Key 输入框存在且默认隐藏', await adminKeyField.count() === 1 && await adminKeyField.evaluate(el => el.type === 'password'));
   await keyToggle.click();
   check('管理员 Key 可显示明文', await adminKeyField.evaluate(el => el.type === 'text'));
   await keyToggle.click();
@@ -142,18 +169,36 @@ try {
   await page.locator('#adminKeySaveButton').click();
   await page.waitForFunction(() => (document.getElementById('adminKeyMsg')?.textContent || '').includes('验证失败'), null, { timeout: 15000 });
   expectedAdminKeyRejection = false;
-  check('错误管理员 Key 不会保存到浏览器',
-    await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
-  check('错误管理员 Key 被现有服务端接口拒绝', report.expectedAuthFailures.length >= 1, report.expectedAuthFailures);
+  check('错误管理员 Key 不会保存到浏览器', await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
+  check('错误管理员 Key 被服务密钥接口拒绝', report.expectedAuthFailures.some(x => x.status === 401), report.expectedAuthFailures);
 
   await adminKeyField.fill(adminKey);
   await page.locator('#adminKeySaveButton').click();
   await page.waitForFunction(expected => localStorage.getItem('llm_gateway_admin_key') === expected,
     adminKey, { timeout: 15000 });
   await page.waitForFunction(() => (document.getElementById('adminKeyMsg')?.textContent || '').includes('验证成功'), null, { timeout: 15000 });
-  check('正确管理员 Key 验证后保存在浏览器',
+  check('正确管理员 Key 独立保存在浏览器', await page.evaluate(expected => localStorage.getItem('llm_gateway_admin_key') === expected, adminKey));
+  check('管理员 Key 通过现有服务密钥接口验证', report.adminKeySuccesses.length >= 1, report.adminKeySuccesses);
+
+  await page.evaluate(() => localStorage.removeItem('llm_gateway_session_token'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 10000 });
+  check('已有管理员 Key 不能绕过 Web 密码登录', await page.locator('#authScreen').isVisible() &&
     await page.evaluate(expected => localStorage.getItem('llm_gateway_admin_key') === expected, adminKey));
-  check('保存管理员 Key 后管理 API 返回成功', report.adminKeySuccesses.length >= 1, report.adminKeySuccesses);
+  await login(page);
+  check('重新登录成功且管理员 Key 仍保留', await page.locator('#appShell').isVisible() &&
+    await page.evaluate(expected => localStorage.getItem('llm_gateway_admin_key') === expected, adminKey));
+  await clickTab(page, 'keys', '服务密钥-再次加载');
+  await page.waitForTimeout(300);
+  check('服务密钥请求使用管理员 Key 而非 Web Session',
+    report.authHeaderUsage.some(item => item.path === '/api/admin/keys' && item.hasAdminKey && !item.hasSession),
+    report.authHeaderUsage);
+  await page.locator('.nav button[data-tab="dashboard"]').click();
+  await page.waitForTimeout(500);
+  check('其它管理 API 只使用 Web Session、不发送管理员 Key',
+    report.authHeaderUsage.some(item => item.path.startsWith('/api/') &&
+      item.path !== '/api/admin/keys' && !item.path.startsWith('/api/admin/keys/') &&
+      item.hasSession && !item.hasAdminKey), report.authHeaderUsage);
   await page.screenshot({ path: screenshotName('keys-admin-key-desktop'), fullPage: true });
 
   const appBundle = fs.readFileSync(path.resolve('web/static/dist/app.js'), 'utf8');
@@ -297,7 +342,38 @@ try {
     transfer.repository === 'org/repo "quoted" & test' &&
     transfer.installVisible, transfer);
 
-  check('页面不再展示 Web 密码登录或账号密码设置', await page.locator('#authScreen, #authLoginForm, #account, #sidebarAccountBtn').count() === 0);
+  // 账号页的密码显隐、登出和再次登录流程。
+  await page.locator('#sidebarAccountBtn').click();
+  await page.waitForTimeout(250);
+  check('账号设置页可打开',
+    await page.locator('#account').evaluate(el => el.classList.contains('active')));
+  const newPassword = page.locator('#acctNewPass');
+  if (await newPassword.count()) {
+    const toggle = page.locator('#acctNewPass').locator('xpath=..').locator('.password-toggle');
+    const visible = await toggle.count();
+    if (visible) {
+      await toggle.first().click();
+      check('账号设置新密码可显示明文', await newPassword.evaluate(el => el.type === 'text'));
+      await toggle.first().click();
+      check('账号设置新密码可恢复隐藏', await newPassword.evaluate(el => el.type === 'password'));
+    } else {
+      check('账号设置新密码显隐按钮存在', false);
+    }
+  } else {
+    check('账号设置新密码输入框存在', false);
+  }
+  await page.screenshot({ path: screenshotName('account-desktop'), fullPage: true });
+
+  const logout = page.locator('#btnAccountLogout');
+  if (await logout.isVisible()) {
+    await logout.click();
+    await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 10000 });
+    check('退出登录后返回登录页', true);
+    await login(page);
+    check('退出后可以再次登录', await page.locator('#appShell').isVisible());
+  } else {
+    check('密码保护开启时登出按钮可用', false);
+  }
 
   // 窄屏布局：检查页面自身不横向溢出，表格可在自己的滚动容器内浏览。
   await page.setViewportSize({ width: 390, height: 844 });
@@ -353,12 +429,10 @@ try {
   await clickTab(page, 'requests', '调用记录-窄屏');
   await recordLayout(page, '调用记录-mobile-390');
 
-  await clickTab(page, 'keys', '服务密钥-清除 Key');
+  await clickTab(page, 'keys', '服务密钥-清除管理员 Key');
   await page.locator('#adminKeyClearButton').click();
-  check('清除管理员 Key 后本地凭据已移除',
-    await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
-  check('清除管理员 Key 后停留在服务密钥页',
-    await page.locator('#keys').evaluate(el => el.classList.contains('active')));
+  check('清除管理员 Key 后本地 Key 已移除', await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
+  check('清除管理员 Key 不会退出 Web 登录', Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) && await page.locator('#appShell').isVisible());
 
   const expectedUnavailableUpstreamPaths = new Set([
     '/api/admin/runtime',
@@ -373,7 +447,7 @@ try {
   check('无浏览器未捕获异常', report.pageErrors.length === 0, report.pageErrors);
   check('无浏览器 JavaScript 控制台错误', report.consoleErrors.length === 0, report.consoleErrors);
   check('所有静态 JS/CSS 资源成功加载', report.failedStaticAssets.length === 0, report.failedStaticAssets);
-  check('无非预期管理员 Key 鉴权失败', report.authFailures.length === 0, report.authFailures);
+  check('无非预期管理 API 401', report.authFailures.length === 0, report.authFailures);
   check('无非预期管理 API 5xx', unexpectedServerErrors.length === 0, unexpectedServerErrors);
   check('未触发意外浏览器弹窗', report.unexpectedDialogs.length === 0, report.unexpectedDialogs);
 } catch (error) {
@@ -395,6 +469,10 @@ console.log(JSON.stringify({
   consoleErrors: report.consoleErrors,
   failedStaticAssets: report.failedStaticAssets,
   authFailures: report.authFailures,
+  expectedAuthFailures: report.expectedAuthFailures,
+  adminKeyRequests: report.adminKeyRequests,
+  adminKeySuccesses: report.adminKeySuccesses,
+  authHeaderUsage: report.authHeaderUsage,
   serverErrors: report.serverErrors,
   artifactDir
 }, null, 2));

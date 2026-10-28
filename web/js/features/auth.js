@@ -1,5 +1,5 @@
 import { $, esc } from '../core/dom.js';
-import { api, apiPublic, getSessionToken, setSessionToken, isAuthenticated, initAdminKey } from '../core/api.js';
+import { api, apiPublic, getSessionToken, setSessionToken } from '../core/api.js';
 
 let currentUser = null;
 let passwordProtectionEnabled = true;
@@ -36,20 +36,12 @@ function setAuthScreenVisible(show) {
   if (app) app.hidden = show;
   document.body.classList.toggle('auth-locked', show);
 }
-export function forceLoginScreen(message = '') {
+export function forceLoginScreen() {
   currentUser = null;
-  setAuthScreenVisible(false);
   $('sidebarAccountBtn')?.classList.remove('active');
-  document.querySelectorAll('.nav button').forEach((x) => x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach((x) => x.classList.remove('active'));
-  document.querySelector('.nav button[data-tab="keys"]')?.classList.add('active');
-  $('keys')?.classList.add('active');
-  if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
-  const status = $('adminKeyMsg');
-  if (status && message) status.innerHTML = '<span class="warn">' + esc(message) + '</span>';
-  if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
+  setAuthScreenVisible(true);
 }
-function updateAuthChrome() { setAuthScreenVisible(false); }
+function updateAuthChrome() { setAuthScreenVisible(!getSessionToken()); }
 
 export function openAccountSettings() {
   if (!getSessionToken()) { forceLoginScreen(); return; }
@@ -121,52 +113,35 @@ async function createWebSession(password = '') {
   if (globalThis.refreshAll) globalThis.refreshAll();
   return response;
 }
-async function submitAdminKey(event) {
-  event?.preventDefault?.();
-  const input = $('adminKey'), message = $('adminKeyMsg'), button = $('adminKeySaveButton');
-  const candidate = input?.value.trim() || '';
-  if (!candidate) {
-    if (message) message.innerHTML = '<span class="err">请输入管理员 API Key</span>';
-    return;
-  }
-  if (button) button.disabled = true;
-  if (message) message.textContent = '正在验证管理员 API Key…';
-  try {
-    await apiPublic('/api/admin/keys', {
-      headers: { 'X-Admin-Key': candidate },
-      cache: 'no-store',
-    });
-    localStorage.setItem('llm_gateway_admin_key', candidate);
-    if (message) message.innerHTML = '<span class="ok">验证成功，已保存在当前浏览器。</span>';
-    globalThis.adminKeyStatus?.();
-    if (globalThis.refreshAll) await globalThis.refreshAll();
-  } catch (error) {
-    if (message) message.innerHTML = '<span class="err">验证失败：' + esc(error.message) + '</span>';
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-function clearAdminKey() {
-  localStorage.removeItem('llm_gateway_admin_key');
-  const input = $('adminKey'), message = $('adminKeyMsg');
-  if (input) input.value = '';
-  if (message) message.innerHTML = '<span class="muted">已清除本地保存的管理员 API Key。</span>';
-  globalThis.adminKeyStatus?.();
-  forceLoginScreen();
-}
-
 export async function initAuth() {
-  setSessionToken('');
-  initAdminKey();
   initPasswordToggles();
-  $('adminKeyForm')?.addEventListener('submit', (event) => { void submitAdminKey(event); });
-  $('adminKeyClearButton')?.addEventListener('click', (event) => {
-    event.preventDefault();
-    clearAdminKey();
-  });
-  setAuthScreenVisible(false);
-  if (!isAuthenticated()) forceLoginScreen('请先输入服务端已配置的管理员 API Key。');
+  $('authLoginForm')?.addEventListener('submit', (event) => { void submitLogin(event); });
+  bindAccountPageActions();
+  try {
+    const status = await apiPublic('/api/auth/status');
+    passwordProtectionEnabled = status?.password_enabled !== false;
+  } catch {
+    // 状态接口不可用时采取安全默认值，不自动创建无密码会话。
+    passwordProtectionEnabled = true;
+  }
+  updateLoginModeUI();
+  if (getSessionToken()) {
+    try {
+      const response = await api('/api/auth/me');
+      currentUser = response.user || null;
+    } catch {
+      setSessionToken('');
+      currentUser = null;
+    }
+  }
+  if (!getSessionToken() && !passwordProtectionEnabled) {
+    const message = $('authMsg');
+    if (message) message.textContent = '密码保护已关闭，正在进入控制台…';
+    try { await createWebSession(''); } catch (error) {
+      if (message) message.textContent = '暂时无法进入控制台：' + error.message;
+    }
+  }
+  updateAuthChrome();
 }
 export async function submitLogin(event) {
   event?.preventDefault?.();

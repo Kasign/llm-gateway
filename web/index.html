@@ -4,11 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LLM Gateway</title>
-<link rel="stylesheet" href="/static/css/app.css?v=20261028-admin-api-key-auth-1">
+<link rel="stylesheet" href="/static/css/app.css?v=20261028-admin-key-session-scope-1">
 <link rel="stylesheet" href="/static/css/model-download.css">
 </head>
 <body>
-<div id="appShell" class="shell">
+<div id="authScreen" class="auth-page show" aria-hidden="false">
+  <div class="auth-page-layout">
+    <section class="auth-page-hero" aria-hidden="true">
+      <div class="auth-page-hero-inner">
+        <div class="logo auth-page-logo">GW</div>
+        <h1>LLM Gateway</h1>
+        <p>管理控制台</p>
+      </div>
+    </section>
+    <main class="auth-page-main">
+      <div class="auth-page-form-wrap">
+        <h2 class="auth-page-title">登录</h2>
+        <div id="authMsg" class="auth-page-msg"></div>
+        <form id="authLoginForm" class="auth-page-form" method="post" action="/">
+          <div class="field auth-field" id="authPasswordField">
+            <label for="authLoginPass">密码</label>
+            <span class="password-input-wrap">
+              <input id="authLoginPass" name="password" type="password" autocomplete="current-password" required>
+              <button type="button" class="password-toggle" title="显示明文" aria-label="显示明文" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </span>
+          </div>
+          <button type="submit" id="authLoginBtn" class="btn primary auth-page-submit">登录</button>
+        </form>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="appShell" class="shell" hidden>
   <aside class="sidebar">
     <div class="brand">
       <div class="logo">GW</div>
@@ -24,6 +54,13 @@
       <button type="button" data-tab="benchmark"><span class="dot"></span>性能测试</button>
       <button type="button" data-tab="providers"><span class="dot"></span>远程 Provider</button>
     </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-account">
+        <button type="button" id="sidebarAccountBtn" class="sidebar-account-btn" onclick="openAccountSettings()">
+          <span class="dot"></span>账号
+        </button>
+      </div>
+    </div>
   </aside>
 
   <div class="main">
@@ -233,20 +270,56 @@
         </div>
       </section>
 
+      <section id="account" class="panel">
+        <div class="card admin-auth-card">
+          <div class="card-head">
+            <div><h2>控制台访问保护</h2><p>仅使用密码登录，无需用户名。设置会保存在数据库中；客户端 <code>/v1</code> API Key 不受影响。</p></div>
+            <button type="button" id="btnAccountLogout" class="btn ghost sm">登出</button>
+          </div>
+          <div id="accountCurrent" class="small muted" style="margin-bottom:12px">正在读取设置…</div>
+          <form id="accountForm" class="account-form" method="post" action="/">
+            <div class="field auth-field">
+              <label class="password-policy-toggle" for="accountPasswordEnabled">
+                <input id="accountPasswordEnabled" type="checkbox">
+                启用密码保护
+              </label>
+              <small class="muted">关闭后，打开控制台地址的人无需密码即可进入并使用管理功能。请只在内网或已有访问限制时关闭。</small>
+            </div>
+            <div class="field auth-field" id="acctCurrentPassField">
+              <label for="acctCurrentPass">当前密码</label>
+              <input id="acctCurrentPass" type="password" autocomplete="current-password">
+            </div>
+            <div class="field auth-field">
+              <label for="acctNewPass">新密码（至少 8 个字符）</label>
+              <input id="acctNewPass" type="password" autocomplete="new-password" minlength="8">
+            </div>
+            <div class="field auth-field">
+              <label for="acctNewPass2">确认新密码</label>
+              <input id="acctNewPass2" type="password" autocomplete="new-password" minlength="8">
+            </div>
+            <button type="submit" id="accountSaveButton" class="btn primary">保存设置</button>
+          </form>
+          <div id="accountMsg" class="msg" style="margin-top:10px"></div>
+        </div>
+      </section>
+
       <!-- Keys -->
       <section id="keys" class="panel">
-        <div class="card admin-auth-card" id="adminKeyCard">
+        <div class="card admin-auth-card">
           <div class="card-head">
-            <div><h2>管理员 API Key</h2><p>输入部署环境中已配置的 <code>LLM_GATEWAY_ADMIN_API_KEY</code>，通过现有管理 API 校验。Key 仅保存在当前浏览器本地存储，并通过 <code>X-Admin-Key</code> 发送给 Gateway；不会修改服务端配置。请勿在公共设备保存。</p></div>
+            <div><h2>管理员 API Key（仅用于服务密钥管理）</h2><p>与控制台密码登录完全独立。输入部署环境已配置的 <code>LLM_GATEWAY_ADMIN_API_KEY</code>，验证后仅用于本页生成、轮换、启用、禁用和删除客户端 <code>/v1/*</code> 服务密钥，不用于控制台登录或其他管理页面。Key 仅保存在当前浏览器。</p></div>
             <span id="adminKeyStatus"></span>
           </div>
-          <form id="adminKeyForm" class="row admin-key-form">
+          <form id="adminKeyForm" class="row admin-key-form" onsubmit="saveKey(event);return false">
             <div class="field">
               <label for="adminKey">管理员 API Key</label>
-              <input id="adminKey" name="admin_key" type="password" autocomplete="off" placeholder="粘贴已有的管理员 API Key">
+              <span class="password-input-wrap">
+                <input id="adminKey" name="admin_key" type="password" autocomplete="off" placeholder="粘贴已有的管理员 API Key">
+                <button type="button" class="password-toggle" title="显示明文" aria-label="显示明文" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+              </span>
             </div>
             <button type="submit" id="adminKeySaveButton" class="btn primary">保存并验证</button>
-            <button type="button" id="adminKeyClearButton" class="btn ghost">清除</button>
+            <button type="button" id="adminKeyClearButton" class="btn ghost" onclick="clearAdminKey()">清除</button>
           </form>
           <div id="adminKeyMsg" class="msg small" role="status" aria-live="polite" style="margin-top:10px"></div>
         </div>
@@ -378,7 +451,7 @@
 </div>
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261028-admin-key-auth-1"></script>
+<script src="/static/dist/app.js?v=20261028-admin-key-session-scope-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 </body>
