@@ -86,12 +86,13 @@ export async function loadRequests() {
     $('requestsTable').innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
-          '<tr><th>时间</th><th>Request ID</th><th>客户端</th><th>密钥</th><th>请求 URL</th><th>Provider</th><th>模型</th><th>流式</th><th>状态</th><th>HTTP 网关/上游</th><th>TTFT</th><th>耗时</th><th>Token</th><th>体积</th><th>操作</th></tr>' +
+          '<tr><th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th><th>Provider / 模型</th><th>状态 / 流式</th><th>HTTP</th><th>耗时 / TTFT</th><th>Token / 体积</th><th>操作</th></tr>' +
             rows
               .map((x) => {
                 const rid = String(x.request_id || '');
                 const ridShort = rid.length > 10 ? rid.slice(0, 8) + '…' : rid;
                 const target = displayRequestTarget(x);
+                const model = displayUpstreamModel(x);
                 const sz =
                   (Number(x.request_bytes || 0) / 1024).toFixed(1) +
                   ' / ' +
@@ -101,7 +102,7 @@ export async function loadRequests() {
                   x.status === 'running'
                     ? `<button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">结束</button>`
                     : '';
-                return `<tr><td class="small">${fmtDate(x.started_at)}</td><td class="small" title="${esc(rid)}"><code>${esc(ridShort)}</code></td><td>${esc(x.client_name || '—')}</td><td>${esc(x.api_key_name || '—')}</td><td class="small req-url">${esc(target)}</td><td><code>${esc(x.provider_id || '—')}</code></td><td>${esc(displayUpstreamModel(x))}</td><td>${x.stream ? '是' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断' : '否'}</td><td>${statusPill(x.status)}</td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td>${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</td><td>${x.latency_ms} ms</td><td>${x.total_tokens ?? '—'}</td><td class="small">${sz}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">详情</button>${stopBtn}</div></td></tr>`;
+                return `<tr><td class="small req-time">${fmtDate(x.started_at)}</td><td><div class="req-cell-main">${esc(x.client_name || '—')}</div><div class="req-cell-sub">密钥：${esc(x.api_key_name || '—')}</div><div class="req-cell-sub" title="${esc(rid)}">ID：<code>${esc(ridShort)}</code></div></td><td class="small req-url" title="${esc(target)}">${esc(target)}</td><td><div class="req-cell-main"><code>${esc(x.provider_id || '—')}</code></div><div class="req-cell-sub" title="${esc(model)}">模型：${esc(model)}</div></td><td><div>${statusPill(x.status)}</div><div class="req-cell-sub">${x.stream ? '流式' : x.ttft_ms != null && x.ttft_ms > 0 ? '推断流式' : '非流式'}</div></td><td>${x.http_status}${x.upstream_http_status != null && x.upstream_http_status !== x.http_status ? ' / ' + x.upstream_http_status : ''}</td><td><div class="req-cell-main">${x.latency_ms != null ? x.latency_ms + ' ms' : '—'}</div><div class="req-cell-sub">TTFT：${x.ttft_ms != null ? x.ttft_ms + ' ms' : '—'}</div></td><td><div class="req-cell-main">${x.total_tokens ?? '—'}</div><div class="req-cell-sub">体积：${sz}</div></td><td><div class="td-actions"><button type="button" class="btn sm" onclick="showDetail('${encodeURIComponent(x.request_id).replace(/'/g, "%27")}')">详情</button>${stopBtn}</div></td></tr>`;
               })
               .join(''),
         );
