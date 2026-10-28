@@ -409,14 +409,25 @@ try {
     !providerIdSamples.OpenAI && !providerIdSamples['has space'] && !providerIdSamples['bad/slash'],
     providerIdSamples);
 
-  check('Provider 保存具备表单级重复提交锁和初始化防重入',
+  check('Provider 保存具备表单级防重入、重复 ID 校验和加载失败保护',
     providersSource.includes("form.dataset.saving === 'true'") &&
-    providersSource.includes('globalThis.__llmGatewayProviderAdminInitialized'));
+    providersSource.includes('globalThis.__llmGatewayProviderAdminInitialized') &&
+    providersSource.includes("if (!state.loaded)") &&
+    providersSource.includes("const existingProvider = rowByID(payload.id)") &&
+    providerBundle.includes("不能重复新增"));
   check('Provider 列表区分首次加载失败与刷新失败并声明 aria-busy',
     providersSource.includes('Provider 列表加载失败，请点击“刷新”重试') &&
     providersSource.includes('仍保留上次成功加载的数据') &&
     providersSource.includes("setAttribute('aria-busy', 'true')") &&
     indexHtml.includes('id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false"'));
+  check('调用记录有明确的加载中、失败重试与无障碍忙碌状态',
+    requestsSource.includes('正在加载调用记录…') &&
+    requestsSource.includes('role="alert"') &&
+    requestsSource.includes('onclick="loadRequests()"') &&
+    requestsSource.includes("setAttribute('aria-busy', 'true')") &&
+    requestsSource.includes("setAttribute('aria-busy', 'false')") &&
+    appBundle.includes('\\u6b63\\u5728\\u52a0\\u8f7d\\u8c03\\u7528\\u8bb0\\u5f55\\u2026') &&
+    indexHtml.includes('id="requestsTable" style="margin-top:12px" role="status" aria-live="polite" aria-busy="false"'));
   check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
     requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
     requestsSource.includes('密钥：') && requestsSource.includes('ID：') &&
