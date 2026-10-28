@@ -41,6 +41,10 @@
   function isAuthenticated() {
     return !!getSessionToken();
   }
+  function initAdminKey() {
+    const el = $("adminKey");
+    if (el) el.value = localStorage.getItem("llm_gateway_admin_key") || "";
+  }
   function redirectToLogin() {
     setSessionToken("");
     if (typeof globalThis.forceLoginScreen === "function") {
@@ -67,6 +71,10 @@
     const headers = { ...extra };
     const session = getSessionToken();
     if (session) headers.Authorization = `Bearer ${session}`;
+    else {
+      const k = getKey();
+      if (k) headers["X-Admin-Key"] = k;
+    }
     return headers;
   }
   async function apiPublic(url, opt = {}) {
@@ -98,11 +106,13 @@
     }
     return j;
   }
-  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getSessionToken;
+  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSessionToken;
   var init_api = __esm({
     "js/core/api.js"() {
+      init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
+      getKey = () => $("adminKey")?.value || "";
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
     }
   });
@@ -422,6 +432,8 @@
     $("dashboard")?.classList.add("active");
     document.querySelector('.nav button[data-tab="dashboard"]')?.classList.add("active");
     forceLoginScreen();
+  }
+  function onAdminKeySaved() {
   }
   function updateCredentialFormPolicy() {
     const enabledNow = $("accountPasswordEnabled")?.checked ?? passwordProtectionAtLoad;
@@ -1418,6 +1430,12 @@
       return;
     }
     el.innerHTML = '<span class="pill">\u4EC5\u901A\u8FC7\u670D\u52A1\u7AEF\u73AF\u5883\u53D8\u91CF\u914D\u7F6E</span>';
+  }
+  function saveKey() {
+    localStorage.setItem("llm_gateway_admin_key", getKey());
+    adminKeyStatus();
+    onAdminKeySaved();
+    refreshAll();
   }
   function setGgufMsg(kind, text) {
     const el = $("ggufMsg");
@@ -2846,6 +2864,7 @@
         localStorage.removeItem("llm_gateway_admin_key");
       } catch {
       }
+      initAdminKey();
       document.querySelectorAll(".nav button").forEach((b) => b.onclick = () => {
         document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
         $("sidebarAccountBtn")?.classList.remove("active");
@@ -3162,6 +3181,7 @@
       exposeGlobals({
         $,
         esc,
+        getKey,
         api,
         fmtSize,
         fmtDate,
@@ -3270,6 +3290,7 @@
         rotateKey,
         runBenchmark,
         saveBackend,
+        saveKey,
         scrollMmActionLog,
         selectGatewayModel,
         setBenchRunning,
