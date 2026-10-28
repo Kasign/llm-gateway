@@ -305,6 +305,9 @@
     try {
       const payload = payloadFromForm();
       if (!state.editing) {
+        if (!state.loaded) {
+          throw new Error('尚未成功加载 Provider 列表，暂时无法检查同名配置。请先刷新列表后再保存。');
+        }
         const existingProvider = rowByID(payload.id);
         if (existingProvider) {
           const isDeployment = existingProvider.source === 'deployment' || existingProvider.editable === false;
