@@ -473,6 +473,23 @@ try {
   check('核心文字颜色在五种主要深色表面达到 WCAG AA（≥4.5:1）',
     Object.values(textContrastAudit).every(value => Number.isFinite(value) && value >= 4.5),
     textContrastAudit);
+  const formLabelAudit = await page.evaluate(() => {
+    const ids = [
+      'beBackend', 'repo', 'revision', 'modelKey', 'displayName', 'quant', 'filename',
+      'keyName', 'keyRPM', 'keyExpires', 'rqProvider', 'rqModel', 'rqStatus', 'rqKey',
+      'rqStatsRange', 'keyEditName', 'keyEditRPM', 'keyEditExpires'
+    ];
+    return Object.fromEntries(ids.map(id => {
+      const control = document.getElementById(id);
+      return [id, Boolean(control && control.labels && control.labels.length > 0)];
+    }));
+  });
+  check('主要表单控件均关联可访问名称', Object.values(formLabelAudit).every(Boolean), formLabelAudit);
+  check('服务范围多选组使用可见标题作为无障碍名称',
+    indexHtml.includes('id="keyServicesList" class="key-service-list" role="group" aria-labelledby="keyServicesLabel"') &&
+    indexHtml.includes('id="keyEditServicesList" class="key-service-list" role="group" aria-labelledby="keyEditServicesLabel"'));
+  check('编辑密钥的错误状态使用 assertive live region',
+    indexHtml.includes('id="keyEditError" class="msg key-edit-error" role="alert" aria-live="assertive"'));
   const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
   const providerIdPatternValid = await page.evaluate(pattern => {
     try { new RegExp(pattern, 'v'); return true; }
