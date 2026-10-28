@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LLM Gateway</title>
-<link rel="stylesheet" href="/static/css/app.css?v=20261028-key-service-access-picker-1">
+<link rel="stylesheet" href="/static/css/app.css?v=20261028-key-service-access-picker-edit-1">
 <link rel="stylesheet" href="/static/css/model-download.css">
 </head>
 <body>
@@ -464,11 +464,31 @@
     </div>
   </aside>
 </div>
+
+<div id="keyEditModal" class="modal key-edit-modal" aria-hidden="true">
+  <section class="card" role="dialog" aria-modal="true" aria-labelledby="keyEditTitle">
+    <div class="card-head"><div><h2 id="keyEditTitle">编辑服务密钥</h2><p>修改名称、限流、过期时间及可访问服务。</p></div><button type="button" id="keyEditClose" class="btn sm ghost">关闭</button></div>
+    <form id="keyEditForm">
+      <input id="keyEditId" type="hidden">
+      <div class="row"><div class="field"><label for="keyEditName">名称</label><input id="keyEditName" required maxlength="120"></div><div class="field sm"><label for="keyEditRPM">每分钟请求数</label><input id="keyEditRPM" type="number" min="1" step="1" required></div></div>
+      <div class="field"><label for="keyEditExpires">过期时间（RFC3339 / ISO 8601；留空表示永不过期）</label><input id="keyEditExpires" placeholder="2026-12-31T23:59:59Z"></div>
+      <div class="field key-service-field">
+        <div class="key-service-title-row"><label>允许访问的服务</label><div class="key-service-actions"><button type="button" class="btn sm ghost" id="btnSelectAllEditServices">全选</button><button type="button" class="btn sm ghost" id="btnClearEditServices">清空（不限制）</button><button type="button" class="btn sm ghost" id="btnRefreshEditServices">刷新列表</button></div></div>
+        <div id="keyEditServicesList" class="key-service-list" role="group" aria-label="编辑可访问的服务范围"><div class="muted small">正在读取服务列表…</div></div>
+        <div id="keyEditLegacyPanel" class="key-edit-legacy" hidden><p id="keyEditLegacyMessage" class="small muted"></p><label class="key-edit-legacy-toggle"><input id="keyEditPreserveLegacy" type="checkbox" checked> 保留现有旧模型 ID 权限</label></div>
+        <div id="keyEditServiceSummary" class="small muted" role="status" aria-live="polite"></div>
+      </div>
+      <div id="keyEditError" class="msg key-edit-error" role="status" aria-live="polite"></div>
+      <div class="td-actions key-edit-footer"><button type="button" id="keyEditCancel" class="btn ghost">取消</button><button type="submit" id="keyEditSave" class="btn primary" disabled>保存修改</button></div>
+    </form>
+  </section>
+</div>
+
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
 <script src="/static/dist/app.js?v=20261028-admin-key-session-scope-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
-<script src="/static/dist/key-service-picker.js?v=20261028-key-service-access-picker-2"></script>
+<script src="/static/dist/key-service-picker.js?v=20261028-key-service-access-picker-edit-1"></script>
 </body>
 </html>
