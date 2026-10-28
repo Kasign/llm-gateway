@@ -465,6 +465,46 @@ try {
   check('静态样式引用的主题变量均已定义或提供 fallback',
     unresolvedThemeVariables.length === 0,
     [...new Set(unresolvedThemeVariables)]);
+
+  const placeholderContrastAudit = await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.className = 'inference-params-root';
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden';
+    const field = document.createElement('div');
+    field.className = 'param-control';
+    const input = document.createElement('input');
+    input.placeholder = '示例占位文字';
+    field.appendChild(input);
+    host.appendChild(field);
+    document.body.appendChild(host);
+    const pseudo = getComputedStyle(input, '::placeholder');
+    const foreground = pseudo.color;
+    const opacity = Number(pseudo.opacity || 1);
+    const background = getComputedStyle(input).backgroundColor;
+    const channels = value => (value.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+    const fg = channels(foreground), bg = channels(background);
+    if (fg.length < 3 || bg.length < 3) {
+      host.remove();
+      return { foreground, opacity, background, ratio: Number.NaN };
+    }
+    const effective = fg.slice(0, 3).map((v, i) => v * opacity + bg[i] * (1 - opacity));
+    const luminance = values => {
+      const linear = values.map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const values = [luminance(effective), luminance(bg.slice(0, 3))].sort((a, b) => b - a);
+    const result = { foreground, opacity, background, effectiveForeground: effective.map(Math.round), ratio: Number(((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2)) };
+    host.remove();
+    return result;
+  });
+  check('模型参数输入框占位文字在半透明合成后达到 WCAG AA（≥4.5:1）',
+    modelDownloadCss.includes('::placeholder{color:var(--text-3);opacity:1}') &&
+    Number.isFinite(placeholderContrastAudit.ratio) && placeholderContrastAudit.ratio >= 4.5,
+    placeholderContrastAudit);
+
   // 从浏览器实际加载的 CSS 变量计算核心文字与主要深色表面的 WCAG 对比度。
   const textContrastAudit = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);

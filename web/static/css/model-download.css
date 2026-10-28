@@ -46,7 +46,7 @@
 }
 .inference-params-root .param-control textarea{max-width:100%;min-height:72px;resize:vertical;font-family:inherit}
 .inference-params-root .param-control input::placeholder,
-.inference-params-root .param-control textarea::placeholder{color:var(--text-3);opacity:.85}
+.inference-params-root .param-control textarea::placeholder{color:var(--text-3);opacity:1}
 .inference-params-root .param-input-note{margin:6px 0 0;font-size:11px;line-height:1.45;color:var(--text-3)}
 .inference-params-root .param-input-note.from-config{color:var(--accent);opacity:.95}
 .inference-params-root .param-input-note.from-factory{color:var(--text-2)}

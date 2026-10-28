@@ -355,3 +355,9 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 将其文字色从 `--text-3` 调整为现有的 `--text-2`，不改变徽标背景、尺寸和布局；更新主 CSS 缓存版本为 `20261028-pill-idle-contrast-1`。
 - Browser Smoke 新增真实浏览器计算样式的对比度检查：在 `--surface-2` 背景上读取徽标前景色、RGBA 背景与 alpha，计算合成后的实际背景亮度；只有比例达到 4.5:1 才通过。
 - `a89acac` 的主题变量修复和本节徽标调整目前都需以最新提交的 Browser Smoke / Go CI 结果为准，本节对应的新断言尚未实际运行。
+
+### 模型参数占位文字对比度修复（2026-10-28）
+
+- 在模型推理参数表单中发现 placeholder 使用 `color:var(--text-3);opacity:.85`。文字色 `#8190a6` 在 `--surface-2` 上原本约为 4.90:1，但透明度衰减后合成前景约为 `#717f95`，实际对比度降至约 3.92:1。
+- 将 placeholder 透明度恢复为 1，不更改主题色和控件背景，并更新 `model-download.css` 缓存版本为 `20261028-placeholder-contrast-1`。
+- Browser Smoke 新增浏览器计算样式审计：读取 `::placeholder` 前景色/透明度与实际输入控件背景，执行 alpha 合成及 WCAG 对比度计算，要求至少 4.5:1。该回归在本提交触发的 Actions 结束前不标记通过。
