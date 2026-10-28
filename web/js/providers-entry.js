@@ -2,6 +2,72 @@
   'use strict';
 
   const state = { rows: [], editing: null, loading: false };
+  const PROVIDER_TEMPLATES = {
+    openai: {
+      label: 'OpenAI',
+      id: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      default_model: 'gpt-4.1-mini',
+      api_key_header: 'authorization',
+      hint: 'OpenAI 官方 API；请按账号实际可用模型调整。'
+    },
+    deepseek: {
+      label: 'DeepSeek',
+      id: 'deepseek',
+      base_url: 'https://api.deepseek.com',
+      default_model: 'deepseek-chat',
+      api_key_header: 'authorization',
+      hint: 'DeepSeek API；保存前确认模型 ID 与账号权限一致。'
+    },
+    siliconflow: {
+      label: '硅基流动 SiliconFlow',
+      id: 'siliconflow',
+      base_url: 'https://api.siliconflow.cn/v1',
+      default_model: 'Qwen/Qwen3-8B',
+      api_key_header: 'authorization',
+      hint: '硅基流动 OpenAI 兼容接口；模型示例可替换为平台模型列表中的 ID。'
+    },
+    openrouter: {
+      label: 'OpenRouter',
+      id: 'openrouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      default_model: 'openai/gpt-4.1-mini',
+      api_key_header: 'authorization',
+      hint: 'OpenRouter 模型 ID 通常需要包含供应方前缀，例如 openai/...。'
+    },
+    dashscope: {
+      label: '阿里云百炼（兼容模式）',
+      id: 'dashscope',
+      base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      default_model: 'qwen-plus',
+      api_key_header: 'authorization',
+      hint: '使用百炼 OpenAI 兼容模式；模型 ID 请以账号当前可用列表为准。'
+    },
+    volcengine: {
+      label: '火山方舟（需 Endpoint ID）',
+      id: 'volcengine',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      default_model: 'ep-your-endpoint-id',
+      api_key_header: 'authorization',
+      hint: '火山方舟通常使用推理接入点 ID；请将 ep-your-endpoint-id 替换为真实 Endpoint ID。'
+    },
+    groq: {
+      label: 'Groq',
+      id: 'groq',
+      base_url: 'https://api.groq.com/openai/v1',
+      default_model: 'llama-3.3-70b-versatile',
+      api_key_header: 'authorization',
+      hint: 'Groq OpenAI 兼容接口；模型示例可能随平台下线策略变化。'
+    },
+    mistral: {
+      label: 'Mistral AI',
+      id: 'mistral',
+      base_url: 'https://api.mistral.ai/v1',
+      default_model: 'mistral-small-latest',
+      api_key_header: 'authorization',
+      hint: 'Mistral AI OpenAI 兼容接口；模型 ID 请以账号实际可用列表为准。'
+    }
+  };
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -80,9 +146,33 @@
       $('providerRefresh').disabled = false;
     }
   }
+  function applyProviderTemplate(key) {
+    const template = PROVIDER_TEMPLATES[key];
+    if (key === 'custom') {
+      $('providerId').value = '';
+      $('providerBaseURL').value = '';
+      $('providerDefaultModel').value = '';
+      $('providerApiKeyHeader').value = 'authorization';
+      $('providerTemplateHelp').textContent = '自定义模板已清空 Provider ID、Base URL 和默认模型；请按上游文档手动填写。已输入的 API Key 不会被自动清除。';
+      return;
+    }
+    if (!template) {
+      $('providerTemplateHelp').textContent = '选择模板只会预填基础连接参数，不会自动填写 API Key；默认模型是示例值，保存前请核对。';
+      return;
+    }
+    $('providerId').value = template.id;
+    $('providerBaseURL').value = template.base_url;
+    $('providerDefaultModel').value = template.default_model;
+    $('providerApiKeyHeader').value = template.api_key_header;
+    $('providerTemplateHelp').textContent = template.hint + ' 模板不会自动填入 API Key；如模型名称已变化，请修改默认模型 ID。';
+  }
   function showEditor(row = null) {
     state.editing = row ? row.id : null;
     $('providerForm').reset();
+    $('providerTemplatePanel').hidden = !!row;
+    $('providerTemplate').disabled = !!row;
+    $('providerTemplate').value = '';
+    $('providerTemplateHelp').textContent = '选择模板只会预填基础连接参数，不会自动填写 API Key；默认模型是示例值，保存前请核对。';
     $('providerEditorTitle').textContent = row ? '编辑 Provider：' + row.id : '新增 Provider';
     $('providerId').disabled = !!row;
     $('providerId').value = row?.id || '';
@@ -214,6 +304,10 @@
     const style = document.createElement('style');
     style.textContent = [
       '.provider-form{display:flex;flex-direction:column;gap:14px}',
+      '.provider-template-panel{padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}',
+      '.provider-template-panel .field{max-width:760px;margin:0}',
+      '.provider-template-panel select{min-height:42px}',
+      '.provider-template-label{font-weight:650}',
       '.provider-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}',
       '.provider-form .field{min-width:0}',
       '.provider-form input:not([type=checkbox]),.provider-form select,.provider-form textarea{width:100%;box-sizing:border-box}',
@@ -234,6 +328,7 @@
     document.head.appendChild(style);
     $('providerRefresh')?.addEventListener('click', loadProviders);
     $('providerCreate')?.addEventListener('click', () => showEditor());
+    $('providerTemplate')?.addEventListener('change', (event) => applyProviderTemplate(event.target.value));
     $('providerCancel')?.addEventListener('click', hideEditor);
     $('providerForm')?.addEventListener('submit', saveProvider);
     $('providerTestDraft')?.addEventListener('click', () => testProvider());

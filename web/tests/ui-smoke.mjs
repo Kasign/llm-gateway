@@ -470,6 +470,27 @@ try {
       await page.locator('#providerId').count() === 1 &&
       await page.locator('#providerBaseURL').count() === 1 &&
       await page.locator('#providerDefaultModel').count() === 1);
+    const templates = await page.locator('#providerTemplate option').evaluateAll(options =>
+      options.map(option => ({value:option.value,label:(option.textContent||'').trim()}))
+    );
+    check('新增 Provider 提供常见厂商与自定义模板',
+      ['openai','deepseek','siliconflow','openrouter','dashscope','volcengine','groq','mistral','custom']
+        .every(value => templates.some(option => option.value === value)), templates);
+    await page.locator('#providerTemplate').selectOption('deepseek');
+    check('DeepSeek 模板预填 ID、Base URL、模型及鉴权 Header',
+      await page.locator('#providerId').inputValue() === 'deepseek' &&
+      await page.locator('#providerBaseURL').inputValue() === 'https://api.deepseek.com' &&
+      await page.locator('#providerDefaultModel').inputValue() === 'deepseek-chat' &&
+      await page.locator('#providerApiKeyHeader').inputValue() === 'authorization');
+    check('厂商模板不会自动填写 API Key',
+      await page.locator('#providerApiKey').inputValue() === '');
+    await page.locator('#providerTemplate').selectOption('custom');
+    check('自定义模板清空基础连接字段并保留手动配置能力',
+      await page.locator('#providerId').inputValue() === '' &&
+      await page.locator('#providerBaseURL').inputValue() === '' &&
+      await page.locator('#providerDefaultModel').inputValue() === '' &&
+      await page.locator('#providerApiKeyHeader').inputValue() === 'authorization' &&
+      (await page.locator('#providerTemplateHelp').textContent()).includes('自定义模板'));
     await page.locator('#providerCancel').click();
     check('远程 Provider 表单可取消', await page.locator('#providerEditorCard').isHidden());
   }

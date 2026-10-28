@@ -117,6 +117,24 @@
         <div class="card" id="providerEditorCard" hidden>
           <div class="card-head"><div><h2 id="providerEditorTitle">新增 Provider</h2><p>Key 留空表示保留原值；要删除已保存的 Key，请使用单独的“清除 Key”操作。</p></div><button type="button" class="btn sm ghost" id="providerCancel">取消</button></div>
           <form id="providerForm" class="provider-form">
+            <div id="providerTemplatePanel" class="provider-template-panel">
+              <div class="field">
+                <label for="providerTemplate" class="provider-template-label">厂商模板</label>
+                <select id="providerTemplate" name="provider_template">
+                  <option value="">选择常用厂商模板…</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="siliconflow">硅基流动 SiliconFlow</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="dashscope">阿里云百炼（兼容模式）</option>
+                  <option value="volcengine">火山方舟（需替换 Endpoint ID）</option>
+                  <option value="groq">Groq</option>
+                  <option value="mistral">Mistral AI</option>
+                  <option value="custom">自定义模板（手动填写）</option>
+                </select>
+                <small id="providerTemplateHelp" role="status">选择模板只会预填基础连接参数，不会自动填写 API Key；默认模型是示例值，保存前请核对。</small>
+              </div>
+            </div>
             <div class="provider-grid">
               <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._-]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；保存后不可修改。</small></div>
               <div class="field"><label for="providerBaseURL">Base URL</label><input id="providerBaseURL" name="base_url" type="url" placeholder="https://api.example.com/v1" required></div>
@@ -487,7 +505,7 @@
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
 <script src="/static/dist/app.js?v=20261028-admin-key-session-scope-1"></script>
-<script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
+<script src="/static/dist/providers-admin.js?v=20261028-provider-vendor-templates-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-access-picker-edit-1"></script>
 </body>
