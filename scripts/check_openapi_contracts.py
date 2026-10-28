@@ -513,8 +513,7 @@ def validate(
             try:
                 field_schema = schema_field_block(auth_status_schema, field)
                 require(
-                    re.search(rf"(?m)^\\s*{field}:\\s*\\{{\\s*type:\\s*{kind}\\s*\\}}", field_schema) is not None
-                    or re.search(rf"(?m)^        {field}:\\s*$", field_schema) is not None,
+                    f"type: {kind}" in field_schema,
                     f"AuthStatus.{field} must declare type {kind}",
                 )
             except ValueError as exc:
@@ -540,8 +539,7 @@ def validate(
         credentials_put_handler = go_function(auth_handler, "func (s *Server) authCredentialsPut(")
         for field in ("user", "password_enabled"):
             require(
-                re.search(rf'(?m)writeJSON\\(w, map\\[string\\]interface\\{{\\}}\\{{(?:(?!\\n\\t\\}}).)*"{field}"', credentials_put_handler, re.S) is not None
-                or f'"{field}":' in credentials_put_handler,
+                f'"{field}":' in credentials_put_handler,
                 f"authCredentialsPut must return {field}",
             )
             try:
