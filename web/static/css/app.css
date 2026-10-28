@@ -7,7 +7,7 @@
   --border:rgba(148,163,184,.16);
   --text:#e8edf7;
   --text-2:#94a3b8;
-  --text-3:#64748b;
+  --text-3:#8190a6;
   --accent:#6366f1;
   --accent-2:#22d3ee;
   --accent-soft:rgba(99,102,241,.15);
@@ -888,3 +888,20 @@ body.auth-locked{overflow:hidden}
 #requests .req-cell-main{min-width:0;overflow-wrap:anywhere;line-height:1.4}
 #requests .req-cell-sub{margin-top:4px;font-size:11px;line-height:1.4;color:var(--text-3);overflow-wrap:anywhere}
 #requests .req-cell-sub code{font-size:10px}
+
+
+/* 移动端首页：保留三项资源指标，但改为紧凑的仪表盘摘要。 */
+@media(max-width:560px){
+  .content{padding:12px 12px 20px}
+  #dashboard .sys-dashboard{gap:8px}
+  #dashboard .sys-dashboard .gauge-unit{
+    min-height:0;height:auto;display:grid;grid-template-columns:minmax(0,128px) minmax(0,1fr);
+    align-items:center;gap:10px;padding:8px 10px;text-align:left;
+  }
+  #dashboard .gauge-unit .gauge-svg{width:128px;max-width:100%;height:auto;margin:0}
+  #dashboard .gauge-foot{min-width:0;padding:0;text-align:left}
+  #dashboard .gauge-readout{font-size:1.2rem;margin:0}
+  #dashboard .gauge-caption{justify-content:flex-start;gap:4px;margin-top:6px}
+  #dashboard .gauge-title{font-size:11px;letter-spacing:.02em}
+  #dashboard .gauge-sub{font-size:12px;overflow-wrap:anywhere}
+}
