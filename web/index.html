@@ -108,7 +108,7 @@
       <section id="providers" class="panel">
         <div class="card">
           <div class="card-head">
-            <div><h2>远程 Provider</h2><p>部署 YAML / .env 托管项只读；Web 项可动态新增、编辑和管理。新增 Provider 不会自动切换当前上游。</p></div>
+            <div><h2>远程 Provider</h2><p>部署 YAML / .env 托管项可接管为 Web 配置或从 Gateway 运行时移除；Web 项可动态新增、配置和管理。部署文件本身不会被修改。新增 Provider 不会自动切换当前上游。</p></div>
             <div class="mm-toolbar"><button type="button" class="btn sm ghost" id="providerRefresh">刷新</button><button type="button" class="btn sm" id="providerCreate">新增 Provider</button></div>
           </div>
           <div id="providerStatus" class="msg muted" role="status">尚未加载 Provider 列表。</div>
@@ -445,8 +445,8 @@
 </div>
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261027-auth-toggle-3"></script>
-<script src="/static/dist/providers-admin.js"></script>
+<script src="/static/dist/app.js?v=20261028-session-ui-review-1"></script>
+<script src="/static/dist/providers-admin.js?v=20261028-provider-actions-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 </body>
 </html>

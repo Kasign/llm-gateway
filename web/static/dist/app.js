@@ -2346,11 +2346,6 @@
   }
   async function loadKeysPanel() {
     adminKeyStatus();
-    if (!getKey()) {
-      const el = $("keyTable");
-      if (el) el.innerHTML = emptyState("\u8BF7\u5148\u4FDD\u5B58\u7BA1\u7406\u5458\u5BC6\u94A5");
-      return;
-    }
     await loadKeys();
   }
   async function loadKeys() {
@@ -3073,7 +3068,7 @@
           }
         },
         start(opts = {}) {
-          if (!getKey()) return;
+          if (!isAuthenticated()) return;
           this.active = true;
           if (opts.skipImmediate) this.schedule(this.intervalMs);
           else this.schedule(0);
@@ -3105,7 +3100,7 @@
           if (changed && this.active && !this.inFlight) this.schedule(this.intervalMs);
         },
         async tick() {
-          if (!getKey() || !$("dashboard")?.classList.contains("active")) {
+          if (!isAuthenticated() || !$("dashboard")?.classList.contains("active")) {
             this.stop();
             return;
           }

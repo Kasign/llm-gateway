@@ -1013,7 +1013,7 @@ const dashboardPoll={
     if(this.timer){clearTimeout(this.timer);this.timer=null;}
   },
   start(opts={}){
-    if(!getKey())return;
+    if(!isAuthenticated())return;
     this.active=true;
     if(opts.skipImmediate)this.schedule(this.intervalMs);
     else this.schedule(0);
@@ -1042,7 +1042,7 @@ const dashboardPoll={
     if(changed&&this.active&&!this.inFlight)this.schedule(this.intervalMs);
   },
   async tick(){
-    if(!getKey()||!$('dashboard')?.classList.contains('active')){this.stop();return;}
+    if(!isAuthenticated()||!$('dashboard')?.classList.contains('active')){this.stop();return;}
     if(this.inFlight){this.schedule();return;}
     this.inFlight=true;
     try{
@@ -1442,11 +1442,6 @@ async function retryOllamaPull(name,btn){
 
 async function loadKeysPanel(){
   adminKeyStatus();
-  if(!getKey()){
-    const el=$('keyTable');
-    if(el)el.innerHTML=emptyState('请先保存管理员密钥');
-    return;
-  }
   await loadKeys();
 }
 async function loadKeys(){
