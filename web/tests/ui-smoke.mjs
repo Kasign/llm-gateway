@@ -832,9 +832,40 @@ try {
 
     if (tab === 'benchmark') {
       const opener = page.locator('#benchParamsOpenBtn');
-      await opener.click();
       const drawer = page.locator('#benchParamsDrawer');
+      const launcherSemantics = await opener.evaluate(el => ({
+        popup: el.getAttribute('aria-haspopup'),
+        controls: el.getAttribute('aria-controls'),
+        targetExists: Boolean(document.getElementById(el.getAttribute('aria-controls')))
+      }));
+      check('性能测试参数入口声明对话框类型与关联目标',
+        launcherSemantics.popup === 'dialog' &&
+        launcherSemantics.controls === 'benchParamsDrawer' &&
+        launcherSemantics.targetExists,
+        launcherSemantics);
+
+      await opener.click();
       await drawer.waitFor({ state: 'visible', timeout: 5000 });
+      const dialogSemantics = await drawer.evaluate(root => {
+        const dialog = root.querySelector('.drawer-panel');
+        const titleId = dialog?.getAttribute('aria-labelledby');
+        return {
+          hidden: root.hidden,
+          ariaHidden: root.getAttribute('aria-hidden'),
+          role: dialog?.getAttribute('role'),
+          modal: dialog?.getAttribute('aria-modal'),
+          labelledBy: titleId,
+          accessibleName: titleId ? document.getElementById(titleId)?.textContent.trim() : ''
+        };
+      });
+      check('性能测试参数抽屉打开后具有已命名的模态对话框语义',
+        !dialogSemantics.hidden &&
+        dialogSemantics.ariaHidden === 'false' &&
+        dialogSemantics.role === 'dialog' &&
+        dialogSemantics.modal === 'true' &&
+        dialogSemantics.labelledBy === 'benchParamsDrawerTitle' &&
+        dialogSemantics.accessibleName === '推理参数',
+        dialogSemantics);
       const closeButton = drawer.locator('.drawer-head button');
       await page.waitForFunction(() => document.activeElement === document.querySelector('#benchParamsDrawer .drawer-head button'));
       check('性能测试参数抽屉打开后将焦点移入关闭按钮',
@@ -847,6 +878,13 @@ try {
         await closeButton.evaluate(el => document.activeElement === el));
       await page.keyboard.press('Escape');
       await drawer.waitFor({ state: 'hidden', timeout: 5000 });
+      const closedSemantics = await drawer.evaluate(root => ({
+        hidden: root.hidden,
+        ariaHidden: root.getAttribute('aria-hidden')
+      }));
+      check('性能测试参数抽屉关闭后从辅助技术树隐藏',
+        closedSemantics.hidden && closedSemantics.ariaHidden === 'true',
+        closedSemantics);
       check('性能测试参数抽屉支持 Escape 并返回触发按钮',
         await opener.evaluate(el => document.activeElement === el));
     }
