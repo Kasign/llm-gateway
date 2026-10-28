@@ -379,6 +379,10 @@ try {
   check('移动端导航规则禁止自动换行并把账号入口放在品牌同行',
     appCss.includes('flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden') &&
     appCss.includes('.sidebar-bottom{grid-column:2;grid-row:1;margin:0;padding:0}'));
+  check('Provider 高级配置分组与窄屏按钮样式已声明',
+    appCss.includes('.provider-advanced-group>summary') &&
+    appCss.includes('#providers .mm-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))') &&
+    appCss.includes('#dashboard .backend-actions{display:grid;grid-template-columns:minmax(0,1fr)'));
   check('辅助文字颜色已提升并有移动端首页紧凑布局规则',
     appCss.includes('--text-3:#8190a6;') &&
     appCss.includes('#dashboard .sys-dashboard .gauge-unit{') &&
@@ -512,6 +516,23 @@ try {
     check('新增 Provider 提供常见厂商与自定义模板',
       ['openai','deepseek','siliconflow','openrouter','dashscope','volcengine','groq','mistral','custom']
         .every(value => templates.some(option => option.value === value)), templates);
+    const limitSummary = await page.locator('#providerConcurrency').evaluate(el =>
+      el.closest('details')?.querySelector('summary')?.textContent || '');
+    const mappingSummary = await page.locator('#providerMappings').evaluate(el =>
+      el.closest('details')?.querySelector('summary')?.textContent || '');
+    const securitySummary = await page.locator('#providerAllowPrivate').evaluate(el =>
+      el.closest('details')?.querySelector('summary')?.textContent || '');
+    check('Provider 高级限流、模型映射与网络安全设置分组存在',
+      limitSummary.includes('限流与资源控制') &&
+      mappingSummary.includes('模型 ID 映射') &&
+      securitySummary.includes('网络与安全'),
+      {limitSummary,mappingSummary,securitySummary});
+    check('Provider 首屏保留基础连接信息，启用状态仍可直接修改',
+      await page.locator('#providerId').count() === 1 &&
+      await page.locator('#providerBaseURL').count() === 1 &&
+      await page.locator('#providerDefaultModel').count() === 1 &&
+      await page.locator('#providerApiKey').count() === 1 &&
+      await page.locator('#providerEnabled').count() === 1);
     await page.locator('#providerTemplate').selectOption('deepseek');
     check('DeepSeek 模板预填 ID、Base URL、模型及鉴权 Header',
       await page.locator('#providerId').inputValue() === 'deepseek' &&
@@ -710,6 +731,20 @@ try {
   await page.screenshot({ path: screenshotName('dashboard-mobile-390'), fullPage: true });
   await clickTab(page, 'providers', '远程 Provider-窄屏');
   await recordLayout(page, 'Provider-mobile-390');
+  const providerActionsLayout = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('#providers #providerCreate, #providers #providerRefresh')];
+    return buttons.map(button => ({
+      text: button.textContent.trim(),
+      width: button.getBoundingClientRect().width,
+      height: button.getBoundingClientRect().height,
+      whiteSpace: getComputedStyle(button).whiteSpace,
+      overflow: button.scrollWidth > button.clientWidth + 1
+    }));
+  });
+  check('窄屏 Provider 顶部操作按钮保持单行且没有文字溢出',
+    providerActionsLayout.length === 2 &&
+    providerActionsLayout.every(button => button.whiteSpace === 'nowrap' && !button.overflow && button.width > button.height),
+    providerActionsLayout);
   const providerTableLayout = await page.locator('#providers .table-wrap').first().evaluate(wrap => ({
     tableWidth: wrap.querySelector('table')?.getBoundingClientRect().width || 0,
     clientWidth: wrap.clientWidth,
