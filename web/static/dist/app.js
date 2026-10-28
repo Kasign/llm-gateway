@@ -39,7 +39,7 @@
     else localStorage.removeItem(SESSION_STORAGE_KEY);
   }
   function isAuthenticated() {
-    return !!localStorage.getItem(ADMIN_KEY_STORAGE_KEY);
+    return !!getSessionToken();
   }
   function initAdminKey() {
     const el = $("adminKey");
@@ -47,13 +47,9 @@
   }
   function redirectToLogin() {
     setSessionToken("");
-    localStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
-    const input = $("adminKey");
-    if (input) input.value = "";
     if (typeof globalThis.forceLoginScreen === "function") {
-      globalThis.forceLoginScreen("\u7BA1\u7406\u5458 API Key \u65E0\u6548\u6216\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u8F93\u5165\u3002");
+      globalThis.forceLoginScreen();
     }
-    if (typeof globalThis.adminKeyStatus === "function") globalThis.adminKeyStatus();
   }
   function apiPath(url) {
     try {
@@ -66,16 +62,16 @@
     const path = apiPath(url);
     if (!path.startsWith("/api/")) return;
     if (PUBLIC_API_PATHS.has(path)) return;
-    if (!localStorage.getItem(ADMIN_KEY_STORAGE_KEY)) {
+    if (!getSessionToken()) {
       redirectToLogin();
-      throw new Error("\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key");
+      throw new Error("\u8BF7\u5148\u767B\u5F55");
     }
   }
   function authHeaders(extra = {}) {
     const headers = { ...extra };
-    delete headers.Authorization;
-    const key = localStorage.getItem(ADMIN_KEY_STORAGE_KEY) || "";
-    if (key) headers["X-Admin-Key"] = key;
+    delete headers["X-Admin-Key"];
+    const session = getSessionToken();
+    if (session) headers.Authorization = `Bearer ${session}`;
     return headers;
   }
   async function apiPublic(url, opt = {}) {
@@ -107,13 +103,41 @@
     }
     return j;
   }
-  var SESSION_STORAGE_KEY, ADMIN_KEY_STORAGE_KEY, PUBLIC_API_PATHS, getSessionToken;
+  async function apiServiceKeys(url, opt = {}) {
+    const path = apiPath(url);
+    if (path !== "/api/admin/keys" && !path.startsWith("/api/admin/keys/")) {
+      throw new Error("\u7BA1\u7406\u5458 API Key \u4EC5\u5141\u8BB8\u7528\u4E8E\u670D\u52A1\u5BC6\u94A5\u7BA1\u7406\u63A5\u53E3");
+    }
+    const key = getSavedAdminKey();
+    if (!key) throw new Error("\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u9762\u8F93\u5165\u5E76\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key");
+    const headers = { ...opt.headers || {} };
+    delete headers.Authorization;
+    headers["X-Admin-Key"] = key;
+    const response = await fetch(url, { ...opt, headers });
+    let result = null;
+    try {
+      result = await response.json();
+    } catch {
+    }
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem("llm_gateway_admin_key");
+        const input = $("adminKey");
+        if (input) input.value = "";
+        if (typeof globalThis.adminKeyStatus === "function") globalThis.adminKeyStatus();
+      }
+      throw new Error(result?.error?.message || result?.message || `HTTP ${response.status}`);
+    }
+    return result;
+  }
+  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSavedAdminKey, getSessionToken;
   var init_api = __esm({
     "js/core/api.js"() {
       init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
-      ADMIN_KEY_STORAGE_KEY = "llm_gateway_admin_key";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
+      getKey = () => ($("adminKey")?.value || "").trim();
+      getSavedAdminKey = () => localStorage.getItem("llm_gateway_admin_key") || "";
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
     }
   });
@@ -1155,11 +1179,43 @@
   function adminKeyStatus() {
     const el = $("adminKeyStatus");
     if (!el) return;
-    if (isAuthenticated()) {
-      el.innerHTML = '<span class="pill pill-success">\u5DF2\u4FDD\u5B58\u5230\u6B64\u6D4F\u89C8\u5668</span>';
+    if (getSavedAdminKey()) {
+      el.innerHTML = '<span class="pill pill-success">\u7BA1\u7406\u5458 Key \u5DF2\u914D\u7F6E</span>';
       return;
     }
-    el.innerHTML = '<span class="pill">\u5C1A\u672A\u914D\u7F6E\u7BA1\u7406\u5458 API Key</span>';
+    el.innerHTML = '<span class="pill">\u672A\u914D\u7F6E\u7BA1\u7406\u5458 Key</span>';
+  }
+  async function saveKey(event) {
+    event?.preventDefault?.();
+    const input = $("adminKey"), message = $("adminKeyMsg"), button = $("adminKeySaveButton");
+    const candidate = getKey();
+    if (!candidate) {
+      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u7BA1\u7406\u5458 API Key</span>';
+      return;
+    }
+    if (button) button.disabled = true;
+    if (message) message.textContent = "\u6B63\u5728\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\u2026";
+    try {
+      await apiPublic("/api/admin/keys", { headers: { "X-Admin-Key": candidate }, cache: "no-store" });
+      localStorage.setItem("llm_gateway_admin_key", candidate);
+      if (input) input.value = candidate;
+      adminKeyStatus();
+      if (message) message.innerHTML = '<span class="ok">\u9A8C\u8BC1\u6210\u529F\uFF0C\u5DF2\u4FDD\u5B58\u5230\u5F53\u524D\u6D4F\u89C8\u5668\u3002\u8BE5 Key \u53EA\u7528\u4E8E\u670D\u52A1\u5BC6\u94A5\u7BA1\u7406\u3002</span>';
+      await loadKeysPanel();
+    } catch (e) {
+      if (message) message.innerHTML = '<span class="err">\u9A8C\u8BC1\u5931\u8D25\uFF1A' + esc(e.message) + "</span>";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+  function clearAdminKey() {
+    localStorage.removeItem("llm_gateway_admin_key");
+    const input = $("adminKey"), message = $("adminKeyMsg");
+    if (input) input.value = "";
+    if (message) message.innerHTML = '<span class="muted">\u7BA1\u7406\u5458 Key \u5DF2\u6E05\u9664\uFF1BWeb \u767B\u5F55\u72B6\u6001\u4E0D\u53D7\u5F71\u54CD\u3002</span>';
+    adminKeyStatus();
+    const table = $("keyTable");
+    if (table) table.innerHTML = emptyState("\u8BF7\u5148\u8F93\u5165\u5E76\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\uFF0C\u518D\u7BA1\u7406\u670D\u52A1\u5BC6\u94A5");
   }
   function setGgufMsg(kind, text) {
     const el = $("ggufMsg");
@@ -1179,8 +1235,7 @@
   async function refreshAll() {
     adminKeyStatus();
     if (!isAuthenticated()) {
-      setGlobalMsg('<span class="warn">\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key\u3002</span>');
-      globalThis.forceLoginScreen?.("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
+      setGlobalMsg($("dashboard")?.classList.contains("active") ? "" : '<span class="warn">\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0</span>');
       return;
     }
     try {
@@ -2061,20 +2116,32 @@
   }
   async function loadKeysPanel() {
     adminKeyStatus();
+    if (!getSavedAdminKey()) {
+      const table = $("keyTable");
+      if (table) table.innerHTML = emptyState("\u8BF7\u5148\u5728\u4E0A\u65B9\u8F93\u5165\u5E76\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\uFF0C\u518D\u7BA1\u7406\u670D\u52A1\u5BC6\u94A5");
+      return;
+    }
     await loadKeys();
   }
   async function loadKeys() {
-    const j = await api("/api/admin/keys");
-    const rows = j.data || [];
-    $("keyTable").innerHTML = !rows.length ? emptyState("\u6682\u65E0\u5BC6\u94A5") : wrapTable("<tr><th>\u540D\u79F0</th><th>\u524D\u7F00</th><th>\u72B6\u6001</th><th>\u9650\u6D41</th><th>\u5141\u8BB8\u6A21\u578B</th><th>\u8FC7\u671F</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => `<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}\u2026</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/\u5206\u949F</td><td class="small">${esc((x.allowed_models || []).join(", ") || "\u5168\u90E8")}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status === "active" ? "disable" : "enable"}')">${x.status === "active" ? "\u7981\u7528" : "\u542F\u7528"}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">\u8F6E\u6362</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">\u5220\u9664</button></div></td></tr>`).join(""));
+    const table = $("keyTable");
+    try {
+      const j = await apiServiceKeys("/api/admin/keys");
+      const rows = j.data || [];
+      table.innerHTML = !rows.length ? emptyState("\u6682\u65E0\u5BC6\u94A5") : wrapTable("<tr><th>\u540D\u79F0</th><th>\u524D\u7F00</th><th>\u72B6\u6001</th><th>\u9650\u6D41</th><th>\u5141\u8BB8\u6A21\u578B</th><th>\u8FC7\u671F</th><th>\u64CD\u4F5C</th></tr>" + rows.map((x) => `<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}\u2026</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/\u5206\u949F</td><td class="small">${esc((x.allowed_models || []).join(", ") || "\u5168\u90E8")}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status === "active" ? "disable" : "enable"}')">${x.status === "active" ? "\u7981\u7528" : "\u542F\u7528"}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">\u8F6E\u6362</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">\u5220\u9664</button></div></td></tr>`).join(""));
+    } catch (e) {
+      if (table) table.innerHTML = '<div class="msg"><span class="err">' + esc(e.message) + "</span></div>";
+      throw e;
+    }
   }
   async function createKey() {
     const models = $("keyModels").value.split(",").map((x) => x.trim()).filter(Boolean);
     try {
-      const j = await api("/api/admin/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("keyName").value.trim(), rpm: Number($("keyRPM").value) || 60, allowed_models: models, expires_at: $("keyExpires").value.trim() || null }) });
+      const j = await apiServiceKeys("/api/admin/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("keyName").value.trim(), rpm: Number($("keyRPM").value) || 60, allowed_models: models, expires_at: $("keyExpires").value.trim() || null }) });
       $("newKeyBox").style.display = "block";
       $("newKeyBox").innerHTML = '<div class="keybox">' + esc(j.key) + '</div><div class="msg muted">\u8BF7\u7ACB\u5373\u590D\u5236</div>';
-      loadKeys();
+      loadKeys().catch(() => {
+      });
     } catch (e) {
       $("newKeyBox").style.display = "block";
       $("newKeyBox").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
@@ -2082,8 +2149,9 @@
   }
   async function toggleKey(id, a) {
     try {
-      await api("/api/admin/keys/" + id + "/" + a, { method: "POST" });
-      loadKeys();
+      await apiServiceKeys("/api/admin/keys/" + id + "/" + a, { method: "POST" });
+      loadKeys().catch(() => {
+      });
     } catch (e) {
       alert(e.message);
     }
@@ -2091,9 +2159,10 @@
   async function rotateKey(id) {
     if (!confirm("\u8F6E\u6362\u540E\u65E7\u5BC6\u94A5\u7ACB\u5373\u5931\u6548\uFF0C\u7EE7\u7EED\uFF1F")) return;
     try {
-      const j = await api("/api/admin/keys/" + id + "/rotate", { method: "POST" });
-      alert("\u65B0\u5BC6\u94A5\uFF1A\n\n" + j.key);
-      loadKeys();
+      const j = await apiServiceKeys("/api/admin/keys/" + id + "/rotate", { method: "POST" });
+      alert("\u65B0\u5BC6\u94A5\uFF1A\\n\\n" + j.key);
+      loadKeys().catch(() => {
+      });
     } catch (e) {
       alert(e.message);
     }
@@ -2101,8 +2170,9 @@
   async function deleteKey(id) {
     if (!confirm("\u786E\u5B9A\u5220\u9664\u8BE5\u5BC6\u94A5\uFF1F")) return;
     try {
-      await api("/api/admin/keys/" + id, { method: "DELETE" });
-      loadKeys();
+      await apiServiceKeys("/api/admin/keys/" + id, { method: "DELETE" });
+      loadKeys().catch(() => {
+      });
     } catch (e) {
       alert(e.message);
     }
@@ -2574,11 +2644,12 @@
       init_format();
       init_requests();
       init_expose();
+      try {
+        localStorage.removeItem("llm_gateway_admin_key");
+      } catch {
+      }
+      initAdminKey();
       document.querySelectorAll(".nav button").forEach((b) => b.onclick = () => {
-        if (b.dataset.tab !== "keys" && !isAuthenticated()) {
-          globalThis.forceLoginScreen?.("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
-          return;
-        }
         document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
         $("sidebarAccountBtn")?.classList.remove("active");
         document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
@@ -2609,7 +2680,7 @@
           const gm = $("globalMsg");
           if (gm) gm.hidden = false;
         }
-        if (b.dataset.tab === "keys" && isAuthenticated()) loadKeysPanel().catch(() => {
+        if (b.dataset.tab === "keys") loadKeysPanel().catch(() => {
         });
         if (b.dataset.tab === "requests" && !requestsListHasRows()) loadRequests().catch(() => {
         });
@@ -2894,6 +2965,7 @@
       exposeGlobals({
         $,
         esc,
+        getKey,
         api,
         fmtSize,
         fmtDate,
@@ -3002,6 +3074,8 @@
         rotateKey,
         runBenchmark,
         saveBackend,
+        saveKey,
+        clearAdminKey,
         scrollMmActionLog,
         selectGatewayModel,
         setBenchRunning,
@@ -3019,9 +3093,10 @@
       });
       exposeGlobals({ setGlobalMsg, refreshAll, syncTopbarRefresh, dashboardPoll, adminStore });
       initDownloadsTableActions();
+      initAdminKey();
       adminKeyStatus();
       if (isAuthenticated()) refreshAll();
-      else setGlobalMsg('<span class="muted">\u8BF7\u5148\u5728\u201C\u670D\u52A1\u5BC6\u94A5\u201D\u9875\u914D\u7F6E\u7BA1\u7406\u5458 API Key\u3002</span>');
+      else setGlobalMsg($("dashboard")?.classList.contains("active") ? "" : '<span class="muted">\u8BF7\u5148\u767B\u5F55\u63A7\u5236\u53F0</span>');
       REQUESTS_POLL_MS = 15e3;
       DOWNLOADS_POLL_MS = 5e3;
       setInterval(() => {
@@ -3545,21 +3620,13 @@
     if (app) app.hidden = show;
     document.body.classList.toggle("auth-locked", show);
   }
-  function forceLoginScreen(message = "") {
+  function forceLoginScreen() {
     currentUser = null;
-    setAuthScreenVisible(false);
     $("sidebarAccountBtn")?.classList.remove("active");
-    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
-    document.querySelector('.nav button[data-tab="keys"]')?.classList.add("active");
-    $("keys")?.classList.add("active");
-    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
-    const status = $("adminKeyMsg");
-    if (status && message) status.innerHTML = '<span class="warn">' + esc(message) + "</span>";
-    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
+    setAuthScreenVisible(true);
   }
   function updateAuthChrome() {
-    setAuthScreenVisible(false);
+    setAuthScreenVisible(!getSessionToken());
   }
   function openAccountSettings() {
     if (!getSessionToken()) {
@@ -3576,6 +3643,17 @@
     if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
     loadAccountSettings().catch(() => {
     });
+  }
+  function bindAccountPageActions() {
+    $("btnAccountLogout")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      logout();
+    });
+    $("accountForm")?.addEventListener("submit", (event) => {
+      void submitAccountCredentials(event);
+    });
+    $("accountPasswordEnabled")?.addEventListener("change", updateCredentialFormPolicy);
+    $("acctNewPass")?.addEventListener("input", updateCredentialFormPolicy);
   }
   function initPasswordToggles() {
     document.querySelectorAll('input[type="password"]').forEach((input) => {
@@ -3629,52 +3707,38 @@
     if (globalThis.refreshAll) globalThis.refreshAll();
     return response;
   }
-  async function submitAdminKey(event) {
-    event?.preventDefault?.();
-    const input = $("adminKey"), message = $("adminKeyMsg"), button = $("adminKeySaveButton");
-    const candidate = input?.value.trim() || "";
-    if (!candidate) {
-      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u7BA1\u7406\u5458 API Key</span>';
-      return;
-    }
-    if (button) button.disabled = true;
-    if (message) message.textContent = "\u6B63\u5728\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\u2026";
-    try {
-      await apiPublic("/api/admin/keys", {
-        headers: { "X-Admin-Key": candidate },
-        cache: "no-store"
-      });
-      localStorage.setItem("llm_gateway_admin_key", candidate);
-      if (message) message.innerHTML = '<span class="ok">\u9A8C\u8BC1\u6210\u529F\uFF0C\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002</span>';
-      globalThis.adminKeyStatus?.();
-      if (globalThis.refreshAll) await globalThis.refreshAll();
-    } catch (error) {
-      if (message) message.innerHTML = '<span class="err">\u9A8C\u8BC1\u5931\u8D25\uFF1A' + esc(error.message) + "</span>";
-    } finally {
-      if (button) button.disabled = false;
-    }
-  }
-  function clearAdminKey() {
-    localStorage.removeItem("llm_gateway_admin_key");
-    const input = $("adminKey"), message = $("adminKeyMsg");
-    if (input) input.value = "";
-    if (message) message.innerHTML = '<span class="muted">\u5DF2\u6E05\u9664\u672C\u5730\u4FDD\u5B58\u7684\u7BA1\u7406\u5458 API Key\u3002</span>';
-    globalThis.adminKeyStatus?.();
-    forceLoginScreen();
-  }
   async function initAuth() {
-    setSessionToken("");
-    initAdminKey();
     initPasswordToggles();
-    $("adminKeyForm")?.addEventListener("submit", (event) => {
-      void submitAdminKey(event);
+    $("authLoginForm")?.addEventListener("submit", (event) => {
+      void submitLogin(event);
     });
-    $("adminKeyClearButton")?.addEventListener("click", (event) => {
-      event.preventDefault();
-      clearAdminKey();
-    });
-    setAuthScreenVisible(false);
-    if (!isAuthenticated()) forceLoginScreen("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
+    bindAccountPageActions();
+    try {
+      const status = await apiPublic("/api/auth/status");
+      passwordProtectionEnabled = status?.password_enabled !== false;
+    } catch {
+      passwordProtectionEnabled = true;
+    }
+    updateLoginModeUI();
+    if (getSessionToken()) {
+      try {
+        const response = await api("/api/auth/me");
+        currentUser = response.user || null;
+      } catch {
+        setSessionToken("");
+        currentUser = null;
+      }
+    }
+    if (!getSessionToken() && !passwordProtectionEnabled) {
+      const message = $("authMsg");
+      if (message) message.textContent = "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5173\u95ED\uFF0C\u6B63\u5728\u8FDB\u5165\u63A7\u5236\u53F0\u2026";
+      try {
+        await createWebSession("");
+      } catch (error) {
+        if (message) message.textContent = "\u6682\u65F6\u65E0\u6CD5\u8FDB\u5165\u63A7\u5236\u53F0\uFF1A" + error.message;
+      }
+    }
+    updateAuthChrome();
   }
   async function submitLogin(event) {
     event?.preventDefault?.();

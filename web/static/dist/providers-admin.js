@@ -7,10 +7,11 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[ch]);
   const token = () => localStorage.getItem('llm_gateway_session_token') || '';
+  const adminKey = () => localStorage.getItem('llm_gateway_admin_key') || $('adminKey')?.value?.trim() || '';
   const authHeaders = (extra = {}) => {
     const headers = { ...extra };
-    delete headers['X-Admin-Key'];
     if (token()) headers.Authorization = 'Bearer ' + token();
+    else if (adminKey()) headers['X-Admin-Key'] = adminKey();
     return headers;
   };
   async function api(url, options = {}) {
