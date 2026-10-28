@@ -27,7 +27,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      CONFIG_FILE: ${{ runner.temp }}/config.yaml
       MARIADB_ROOT_PASSWORD: gateway-browser-root-pass
       LLM_GATEWAY_DB_PASSWORD: gateway-browser-db-pass
       LLM_GATEWAY_DB_HOST: 127.0.0.1
@@ -44,7 +43,6 @@ jobs:
       LLAMA_REQUEST_TIMEOUT_SECONDS: "0"
       BROWSER_BASE_URL: http://127.0.0.1:8088
       BROWSER_TEST_PASSWORD: ci-browser-pass
-      BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/web-ui-artifacts
     services:
       redis:
         image: redis:7-alpine
@@ -92,6 +90,8 @@ jobs:
 
       - name: 准备隔离的 Gateway 测试配置
         run: |
+          echo "CONFIG_FILE=${RUNNER_TEMP}/config.yaml" >> "$GITHUB_ENV"
+          echo "BROWSER_ARTIFACT_DIR=${RUNNER_TEMP}/web-ui-artifacts" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/models" "${RUNNER_TEMP}/web-ui-artifacts"
           sed \
             -e "s#/app/migrations/001_init.sql#${GITHUB_WORKSPACE}/migrations/001_init.sql#" \
