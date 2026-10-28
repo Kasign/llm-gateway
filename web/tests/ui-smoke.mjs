@@ -547,7 +547,12 @@ try {
   await page.route('**/api/admin/providers', async route => {
     if (route.request().method() === 'POST') {
       providerCreatePostCount += 1;
-      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{id:'deepseek'}})});
+      const payload = route.request().postDataJSON();
+      await route.fulfill({
+        status:200,
+        contentType:'application/json',
+        body:JSON.stringify({data:{id:payload.id}})
+      });
       return;
     }
     if (route.request().method() === 'GET' && failNextProviderListGet) {
@@ -556,6 +561,21 @@ try {
         status:503,
         contentType:'application/json',
         body:JSON.stringify({error:{message:'测试刷新失败'}})
+      });
+      return;
+    }
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status:200,
+        contentType:'application/json',
+        body:JSON.stringify({
+          data:[{
+            id:'deepseek', source:'deployment', editable:false, enabled:true,
+            base_url:'https://api.deepseek.com', default_model:'deepseek-chat',
+            api_key_configured:true, requests_per_minute:0, token_budget_per_day:0
+          }],
+          encryption_available:true
+        })
       });
       return;
     }
@@ -601,6 +621,8 @@ try {
       await page.locator('#providerBaseURL').inputValue() === 'https://api.deepseek.com' &&
       await page.locator('#providerDefaultModel').inputValue() === 'deepseek-chat' &&
       await page.locator('#providerApiKeyHeader').inputValue() === 'authorization');
+    check('固定模板 ID 与已有部署 Provider 冲突时明确提示复用现有配置',
+      (await page.locator('#providerTemplateHelp').textContent()).includes('Provider ID「deepseek」已存在'));
     check('厂商模板不会自动填写 API Key',
       await page.locator('#providerApiKey').inputValue() === '');
     await page.locator('#providerApiKey').fill('sk-template-switch-test');
@@ -643,6 +665,21 @@ try {
     await page.locator('#providerApiKey').fill('sk-mock-create-only');
     await page.waitForTimeout(80);
     check('选择固定模板只预填表单，不会自动创建 Provider', providerCreatePostCount === 0, providerCreatePostCount);
+    await page.locator('#providerForm').evaluate(form => form.requestSubmit());
+    await page.waitForTimeout(80);
+    const duplicateCreateState = {
+      postCount: providerCreatePostCount,
+      editorHidden: await page.locator('#providerEditorCard').isHidden(),
+      message: await page.locator('#providerEditorStatus').textContent()
+    };
+    check('新增同名部署 Provider 被阻止且不会发送 POST',
+      duplicateCreateState.postCount === 0 &&
+      !duplicateCreateState.editorHidden &&
+      duplicateCreateState.message.includes('已存在') &&
+      duplicateCreateState.message.includes('点击“配置”'),
+      duplicateCreateState);
+    await page.locator('#providerTemplate').selectOption('openai');
+    await page.locator('#providerTemplateKeepKey').click();
     await page.locator('#providerForm').evaluate(form => {
       form.requestSubmit();
       form.requestSubmit();
