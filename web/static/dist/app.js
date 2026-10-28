@@ -783,6 +783,7 @@
   }
   async function showDetail(id) {
     let epoch = 0;
+    detailTrigger = document.activeElement;
     try {
       id = decodeURIComponent(id);
       stopDetailPoll();
@@ -791,7 +792,10 @@
       detailPollId = id;
       const j = await refreshDetailBody(id);
       if (epoch !== detailEpoch) return;
-      $("detailModal")?.classList.add("show");
+      const modal = $("detailModal");
+      modal?.classList.add("show");
+      modal?.setAttribute("aria-hidden", "false");
+      modal?.querySelector(".card-head button")?.focus();
       if (j.live) {
         detailPollTimer = setInterval(async () => {
           if (epoch !== detailEpoch || detailPollId !== id) return;
@@ -810,6 +814,7 @@
       }
     } catch (e) {
       if (epoch && epoch !== detailEpoch) return;
+      detailTrigger = null;
       alert(e.message);
     }
   }
@@ -824,9 +829,14 @@
   function closeModal() {
     stopDetailPoll();
     resetDetailView();
-    $("detailModal")?.classList.remove("show");
+    const modal = $("detailModal");
+    modal?.classList.remove("show");
+    modal?.setAttribute("aria-hidden", "true");
+    const trigger = detailTrigger;
+    detailTrigger = null;
+    if (trigger?.isConnected) trigger.focus();
   }
-  var detailPollTimer, detailPollId, detailEpoch;
+  var detailPollTimer, detailPollId, detailEpoch, detailTrigger;
   var init_requests = __esm({
     "js/features/requests.js"() {
       init_dom();
@@ -836,6 +846,7 @@
       detailPollTimer = null;
       detailPollId = "";
       detailEpoch = 0;
+      detailTrigger = null;
       $("detailModal")?.addEventListener("click", (e) => {
         if (e.target.id === "detailModal") closeModal();
         const copyBtn = e.target.closest?.("[data-req-copy]");
@@ -848,6 +859,29 @@
         if (copyAllSse) {
           e.preventDefault();
           copyReqStreamAll(copyAllSse);
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        const modal = $("detailModal");
+        if (!modal?.classList.contains("show")) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeModal();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
+          .filter((el) => !el.hidden && el.getClientRects().length > 0);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !modal.contains(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !modal.contains(active))) {
+          event.preventDefault();
+          first.focus();
         }
       });
     }
