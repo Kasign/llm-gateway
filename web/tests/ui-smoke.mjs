@@ -373,7 +373,7 @@ try {
     appCss.includes('#requests .table-wrap table{min-width:1262px;table-layout:fixed}') &&
     appCss.includes('#requests .req-url{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'));
   check('移动端导航规则禁止自动换行并把账号入口放在品牌同行',
-    appCss.includes('.nav{grid-column:1/-1;grid-row:2;flex-direction:row;flex-wrap:nowrap;') &&
+    appCss.includes('flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden') &&
     appCss.includes('.sidebar-bottom{grid-column:2;grid-row:1;margin:0;padding:0}'));
   check('远程 Provider 请求不会使用管理员服务密钥',
     !providerBundle.includes('const adminKey = () =>') &&
