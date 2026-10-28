@@ -219,7 +219,10 @@ try {
   expectedExpiredSessionRejection = true;
   await page.evaluate(() => localStorage.setItem('llm_gateway_session_token', 'invalid-expired-browser-session'));
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForFunction(() =>
+    document.getElementById('authScreen')?.classList.contains('show') &&
+    localStorage.getItem('llm_gateway_session_token') === null,
+    null, { timeout: 15000 });
   expectedExpiredSessionRejection = false;
   check('无效或过期的 Web Session 会被拒绝并清除',
     await page.evaluate(() => localStorage.getItem('llm_gateway_session_token')) === null &&
