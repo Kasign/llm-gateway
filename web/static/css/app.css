@@ -729,7 +729,26 @@ body.auth-locked{overflow:hidden}
 .account-form .auth-field{flex:none;width:100%;min-width:0}
 .account-form input{width:100%}
 
-@media(max-width:900px){.layout-2{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.sidebar{height:auto;position:relative}.nav{flex-direction:row;flex-wrap:wrap}}
+@media(max-width:900px){
+  .layout-2{grid-template-columns:1fr}
+  .shell{grid-template-columns:1fr}
+  .sidebar{
+    height:auto;position:relative;padding:10px 12px 8px;gap:8px;
+    display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+  }
+  .brand{min-width:0;padding:2px 4px;gap:9px}
+  .brand .logo{width:36px;height:36px;border-radius:10px}
+  .brand h1{font-size:14px}
+  .brand p{display:none}
+  .nav{
+    grid-column:1/-1;grid-row:2;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;
+    min-width:0;flex:0 0 auto;gap:6px;padding:2px 2px 6px;overscroll-behavior-x:contain;
+    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+  }
+  .nav button{flex:0 0 auto;white-space:nowrap;padding:8px 10px;font-size:12px}
+  .sidebar-bottom{grid-column:2;grid-row:1;margin:0;padding:0}
+  .sidebar-account-btn{width:auto;padding:8px 10px;border-radius:10px}
+}
 
 /* 密码/密钥输入框：默认隐藏，允许用户按需切换明文。 */
 .password-input-wrap{
@@ -842,3 +861,30 @@ body.auth-locked{overflow:hidden}
 .key-edit-footer{justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
 .key-edit-button{white-space:nowrap}
 @media(max-width:600px){.key-edit-modal{padding:10px}.key-edit-modal .card{max-height:95vh}.key-edit-footer .btn{flex:1 1 120px}}
+
+
+/* Provider 模板切换：在凭据已输入时，显式确认保留或清除。 */
+.provider-template-key-confirm{
+  margin-top:10px;padding:12px;border:1px solid rgba(251,191,36,.38);border-radius:10px;
+  background:rgba(251,191,36,.07);
+}
+.provider-template-key-confirm p{margin:0;line-height:1.5;font-size:12px;color:var(--text-2)}
+.provider-template-key-confirm-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.provider-template-key-confirm-actions .btn{white-space:nowrap}
+
+/* 调用记录：紧凑摘要列保留完整诊断字段，长 URL 单行截断。 */
+#requests .table-wrap table{min-width:1262px;table-layout:fixed}
+#requests .table-wrap th{font-size:10px;letter-spacing:.03em;white-space:nowrap}
+#requests .table-wrap th:nth-child(1),#requests .table-wrap td:nth-child(1){width:126px}
+#requests .table-wrap th:nth-child(2),#requests .table-wrap td:nth-child(2){width:165px}
+#requests .table-wrap th:nth-child(3),#requests .table-wrap td:nth-child(3){width:220px}
+#requests .table-wrap th:nth-child(4),#requests .table-wrap td:nth-child(4){width:180px}
+#requests .table-wrap th:nth-child(5),#requests .table-wrap td:nth-child(5){width:112px}
+#requests .table-wrap th:nth-child(6),#requests .table-wrap td:nth-child(6){width:90px}
+#requests .table-wrap th:nth-child(7),#requests .table-wrap td:nth-child(7){width:118px}
+#requests .table-wrap th:nth-child(8),#requests .table-wrap td:nth-child(8){width:125px}
+#requests .table-wrap th:nth-child(9),#requests .table-wrap td:nth-child(9){width:126px}
+#requests .req-url{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#requests .req-cell-main{min-width:0;overflow-wrap:anywhere;line-height:1.4}
+#requests .req-cell-sub{margin-top:4px;font-size:11px;line-height:1.4;color:var(--text-3);overflow-wrap:anywhere}
+#requests .req-cell-sub code{font-size:10px}
