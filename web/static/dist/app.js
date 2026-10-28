@@ -98,13 +98,11 @@
     }
     return j;
   }
-  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSessionToken;
+  var SESSION_STORAGE_KEY, PUBLIC_API_PATHS, getSessionToken;
   var init_api = __esm({
     "js/core/api.js"() {
-      init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
-      getKey = () => ($("adminKey")?.value || "").trim();
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
     }
   });
@@ -2068,12 +2066,6 @@
       $("filesMsg").innerHTML = '<span class="warn">\u672C\u5730\u5DF2\u5B58\u5728\u8BE5 GGUF\uFF08' + esc(repo + " / " + file) + "\uFF09\uFF0C\u65E0\u9700\u91CD\u590D\u4E0B\u8F7D</span>";
     }
   }
-  $("filesBox")?.addEventListener("click", (ev) => {
-    const btn = ev.target.closest?.('button[data-hf-file]');
-    if (!btn) return;
-    chooseFile(btn.dataset.hfFile || "", btn.dataset.hfRepo || "");
-  });
-
   async function installModel() {
     const b = { model_key: $("modelKey").value.trim(), display_name: $("displayName").value.trim(), repo: $("repo").value.trim(), revision: $("revision").value.trim() || "main", filename: $("filename").value.trim(), quantization: $("quant").value.trim() };
     if (globalThis.ModelDownload?.isGgufLocal?.(b.repo, b.filename)) {
@@ -3116,6 +3108,11 @@
           }
         }
       };
+      $("filesBox")?.addEventListener("click", (ev) => {
+        const btn = ev.target.closest?.("button[data-hf-file]");
+        if (!btn) return;
+        chooseFile(btn.dataset.hfFile || "", btn.dataset.hfRepo || "");
+      });
       BENCH_STORE_KEY = "llm-gateway.bench.v1";
       BENCH_SHARED = {
         prompt: "Write a small, correct Objective-C function and explain why it is thread-safe.",

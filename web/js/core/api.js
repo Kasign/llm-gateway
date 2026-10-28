@@ -1,11 +1,7 @@
-import { $ } from './dom.js';
-
 const SESSION_STORAGE_KEY = 'llm_gateway_session_token';
 
 /** 无需 Web 会话即可调用的管理 API（仅登录接口）。 */
 const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/status']);
-
-export const getKey = () => ($('adminKey')?.value || '').trim();
 
 export const getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || '';
 
@@ -18,11 +14,6 @@ export function setSessionToken(token) {
 /** 控制台是否已 Web 登录（不含 API 密钥旁路）。 */
 export function isAuthenticated() {
   return !!getSessionToken();
-}
-
-export function initAdminKey() {
-  const el = $('adminKey');
-  if (el) el.value = localStorage.getItem('llm_gateway_admin_key') || '';
 }
 
 export function redirectToLogin() {
@@ -55,10 +46,6 @@ function authHeaders(extra = {}) {
   const headers = { ...extra };
   const session = getSessionToken();
   if (session) headers.Authorization = `Bearer ${session}`;
-  else {
-    const k = getKey();
-    if (k) headers['X-Admin-Key'] = k;
-  }
   return headers;
 }
 
