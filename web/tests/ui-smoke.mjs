@@ -24,6 +24,7 @@ const report = {
   adminKeyRequests: [],
   authHeaderUsage: [],
   serverErrors: [],
+  expectedProviderFailures: [],
   unexpectedDialogs: [],
   layouts: [],
   notes: [
@@ -38,6 +39,9 @@ let expectedAdminKeyRejection = false;
 let expectedLoginRejection = false;
 let expectedNonServiceKeyRejection = false;
 let expectedExpiredSessionRejection = false;
+let expectedProviderListRefreshFailure = false;
+let expectedProviderListRefreshConsoleCount = 0;
+let expectedProviderListRefreshResponseCount = 0;
 
 function check(name, condition, detail) {
   report.checks.push({ name, passed: Boolean(condition), detail: detail ?? null });
@@ -98,6 +102,12 @@ try {
       report.expectedAuthFailures.push({ source: 'browser-console', message: messageText });
       return;
     }
+    if (/Failed to load resource: the server responded with a status of 503 \(Service Unavailable\)/.test(messageText) &&
+        expectedProviderListRefreshFailure && expectedProviderListRefreshConsoleCount === 0) {
+      expectedProviderListRefreshConsoleCount += 1;
+      report.expectedProviderFailures.push({ source: 'browser-console', message: messageText });
+      return;
+    }
     if (/Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/.test(messageText)) {
       report.environmentConsoleWarnings.push(messageText);
       return;
@@ -130,7 +140,15 @@ try {
         !expectedAuthFailure && pathname !== '/api/auth/status') {
       report.authFailures.push({ status: response.status(), url });
     }
-    if (url.includes('/api/') && response.status() >= 500) report.serverErrors.push({ status: response.status(), url });
+    if (url.includes('/api/') && response.status() >= 500) {
+      if (response.status() === 503 && pathname === '/api/admin/providers' &&
+          expectedProviderListRefreshFailure && expectedProviderListRefreshResponseCount === 0) {
+        expectedProviderListRefreshResponseCount += 1;
+        report.expectedProviderFailures.push({ status: response.status(), url });
+      } else {
+        report.serverErrors.push({ status: response.status(), url });
+      }
+    }
   });
   page.on('request', request => {
     let pathname = '';
@@ -633,6 +651,7 @@ try {
     check('连续触发表单提交只发送一次新增 Provider 请求', providerCreatePostCount === 1, providerCreatePostCount);
 
     const providerRowsBeforeRefreshFailure = await page.locator('#providerRows').innerText();
+    expectedProviderListRefreshFailure = true;
     failNextProviderListGet = true;
     await page.locator('#providerRefresh').click();
     await page.waitForFunction(() =>
@@ -652,6 +671,9 @@ try {
       providerRefreshFailure.busy === 'false' &&
       providerRefreshFailure.refreshDisabled === false,
       providerRefreshFailure);
+    check('Provider 刷新测试只注入并记录一次预期 503',
+      expectedProviderListRefreshResponseCount === 1,
+      { count: expectedProviderListRefreshResponseCount, failures: report.expectedProviderFailures });
     await page.unroute('**/api/admin/providers');
   }
 
@@ -868,6 +890,7 @@ console.log(JSON.stringify({
   adminKeySuccesses: report.adminKeySuccesses,
   authHeaderUsage: report.authHeaderUsage,
   serverErrors: report.serverErrors,
+  expectedProviderFailures: report.expectedProviderFailures,
   artifactDir
 }, null, 2));
 
