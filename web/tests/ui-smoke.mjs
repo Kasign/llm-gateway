@@ -250,6 +250,45 @@ try {
     const scopedId = scopedKey.api_key.id;
     const editButton = page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]');
     await editButton.waitFor({state:'visible',timeout:10000});
+
+    // 模拟编辑弹窗关闭时，密钥读取请求仍在进行；迟到的响应不得回写隐藏表单。
+    let delayNextKeyRead = false;
+    let releaseDelayedKeyRead;
+    let resolveDelayedKeyReadStarted;
+    const delayedKeyReadStarted = new Promise(resolve => { resolveDelayedKeyReadStarted = resolve; });
+    const delayedKeyReadGate = new Promise(resolve => { releaseDelayedKeyRead = resolve; });
+    await page.route('**/api/admin/keys*', async route => {
+      const request = route.request();
+      let pathname = '';
+      try { pathname = new URL(request.url()).pathname; } catch {}
+      if (delayNextKeyRead && request.method() === 'GET' && pathname === '/api/admin/keys') {
+        delayNextKeyRead = false;
+        resolveDelayedKeyReadStarted();
+        await delayedKeyReadGate;
+      }
+      await route.continue();
+    });
+    const editNameBeforeDelayedOpen = await page.locator('#keyEditName').inputValue();
+    delayNextKeyRead = true;
+    await editButton.click();
+    await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
+    await delayedKeyReadStarted;
+    await page.keyboard.press('Escape');
+    await page.locator('#keyEditModal').waitFor({state:'hidden',timeout:5000});
+    const delayedKeyListResponse = page.waitForResponse(response => {
+      try { return new URL(response.url()).pathname === '/api/admin/keys' && response.request().method() === 'GET'; }
+      catch { return false; }
+    });
+    releaseDelayedKeyRead();
+    await delayedKeyListResponse;
+    await page.waitForTimeout(100);
+    check('关闭服务密钥弹窗后忽略迟到的读取响应',
+      await page.locator('#keyEditModal').getAttribute('aria-hidden') === 'true' &&
+      await page.locator('#keyEditSave').isDisabled() &&
+      await page.locator('#keyEditName').inputValue() === editNameBeforeDelayedOpen &&
+      await editButton.isEnabled());
+    await page.unroute('**/api/admin/keys*');
+
     await editButton.click();
     await page.locator('#keyEditModal.show').waitFor({state:'visible',timeout:10000});
     await page.waitForFunction(() => {
@@ -447,11 +486,14 @@ try {
     requestsSource.includes('event.shiftKey && (active === first || !modal.contains(active))') &&
     appBundle.includes('detailTrigger = document.activeElement') &&
     appBundle.includes('event.key === "Escape"'));
-  check('服务密钥编辑 Bundle 与源码一致，且具备 Escape、焦点返回和 Tab 循环',
+  check('服务密钥编辑 Bundle 与源码一致，且具备 Escape、焦点返回、Tab 循环和异步关闭保护',
     keyPickerBundle === keyPickerSource &&
     keyPickerSource.includes('function restoreEditFocus()') &&
     keyPickerSource.includes("if(event.key==='Escape')") &&
     keyPickerSource.includes("event.shiftKey&&(active===first||!editModal.contains(active))") &&
+    keyPickerSource.includes('const epoch=++editEpoch;') &&
+    keyPickerSource.includes('if(epoch!==editEpoch||!editModal.classList.contains(\'show\'))return;') &&
+    keyPickerSource.includes('editEpoch+=1;') &&
     keyPickerSource.includes('showEditModal(button)'));
   check('调用记录有明确的加载中、失败重试与无障碍忙碌状态',
     requestsSource.includes('正在加载调用记录…') &&
