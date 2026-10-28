@@ -364,6 +364,7 @@ try {
   const providerBundle = fs.readFileSync(path.resolve('web/static/dist/providers-admin.js'), 'utf8');
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
   const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
+  const indexHtml = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
   const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
   const providerIdPatternValid = await page.evaluate(pattern => {
@@ -397,7 +398,7 @@ try {
     providersSource.includes('Provider 列表加载失败，请点击“刷新”重试') &&
     providersSource.includes('仍保留上次成功加载的数据') &&
     providersSource.includes("setAttribute('aria-busy', 'true')") &&
-    html.includes('id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false"'));
+    indexHtml.includes('id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false"'));
   check('调用记录使用九列摘要并将密钥、请求 ID、模型、TTFT 与体积保留为次级信息',
     requestsSource.includes('<th>时间</th><th>客户端 / 密钥</th><th>请求 URL</th>') &&
     requestsSource.includes('密钥：') && requestsSource.includes('ID：') &&
