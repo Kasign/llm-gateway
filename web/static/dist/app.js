@@ -107,14 +107,13 @@
     }
     return j;
   }
-  var SESSION_STORAGE_KEY, ADMIN_KEY_STORAGE_KEY, PUBLIC_API_PATHS, getKey, getSessionToken;
+  var SESSION_STORAGE_KEY, ADMIN_KEY_STORAGE_KEY, PUBLIC_API_PATHS, getSessionToken;
   var init_api = __esm({
     "js/core/api.js"() {
       init_dom();
       SESSION_STORAGE_KEY = "llm_gateway_session_token";
       ADMIN_KEY_STORAGE_KEY = "llm_gateway_admin_key";
       PUBLIC_API_PATHS = /* @__PURE__ */ new Set(["/api/auth/login", "/api/auth/status"]);
-      getKey = () => ($("adminKey")?.value || "").trim();
       getSessionToken = () => localStorage.getItem(SESSION_STORAGE_KEY) || "";
     }
   });
@@ -256,299 +255,6 @@
           this.host = null;
         }
       };
-    }
-  });
-
-  // js/features/auth.js
-  function resetPasswordField(id) {
-    const input = $(id);
-    if (!input) return;
-    input.value = "";
-    input.type = "password";
-    const button = input.closest(".password-input-wrap")?.querySelector(".password-toggle");
-    if (!button) return;
-    button.innerHTML = passwordEyeIcon;
-    button.title = "\u663E\u793A\u660E\u6587";
-    button.setAttribute("aria-label", "\u663E\u793A\u660E\u6587");
-    button.setAttribute("aria-pressed", "false");
-  }
-  function setAuthScreenVisible(show) {
-    const screen = $("authScreen");
-    const app = $("appShell");
-    if (screen) {
-      screen.classList.toggle("show", show);
-      screen.setAttribute("aria-hidden", show ? "false" : "true");
-    }
-    if (app) app.hidden = show;
-    document.body.classList.toggle("auth-locked", show);
-  }
-  function forceLoginScreen(message = "") {
-    currentUser = null;
-    setAuthScreenVisible(false);
-    $("sidebarAccountBtn")?.classList.remove("active");
-    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
-    document.querySelector('.nav button[data-tab="keys"]')?.classList.add("active");
-    $("keys")?.classList.add("active");
-    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
-    const status = $("adminKeyMsg");
-    if (status && message) status.innerHTML = '<span class="warn">' + esc(message) + "</span>";
-    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
-  }
-  function updateAuthChrome() {
-    setAuthScreenVisible(false);
-  }
-  function openAccountSettings() {
-    if (!getSessionToken()) {
-      forceLoginScreen();
-      return;
-    }
-    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
-    $("account")?.classList.add("active");
-    $("sidebarAccountBtn")?.classList.add("active");
-    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
-    const message = $("globalMsg");
-    if (message) message.hidden = false;
-    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
-    loadAccountSettings().catch(() => {
-    });
-  }
-  function bindAccountPageActions() {
-    $("btnAccountLogout")?.addEventListener("click", (event) => {
-      event.preventDefault();
-      logout();
-    });
-    $("accountForm")?.addEventListener("submit", (event) => {
-      void submitAccountCredentials(event);
-    });
-    $("accountPasswordEnabled")?.addEventListener("change", updateCredentialFormPolicy);
-    $("acctNewPass")?.addEventListener("input", updateCredentialFormPolicy);
-  }
-  function initPasswordToggles() {
-    document.querySelectorAll('input[type="password"]').forEach((input) => {
-      let wrapper = input.closest(".password-input-wrap");
-      if (!wrapper) {
-        wrapper = document.createElement("span");
-        wrapper.className = "password-input-wrap";
-        input.parentNode.insertBefore(wrapper, input);
-        wrapper.appendChild(input);
-      }
-      let button = wrapper.querySelector(".password-toggle");
-      if (!button) {
-        button = document.createElement("button");
-        button.type = "button";
-        button.className = "password-toggle";
-        wrapper.appendChild(button);
-      }
-      button.innerHTML = passwordEyeIcon;
-      button.title = "\u663E\u793A\u660E\u6587";
-      button.setAttribute("aria-label", "\u663E\u793A\u660E\u6587");
-      button.setAttribute("aria-pressed", "false");
-      if (button.dataset.passwordToggleBound === "true") return;
-      button.dataset.passwordToggleBound = "true";
-      button.addEventListener("click", () => {
-        const show = input.type === "password";
-        input.type = show ? "text" : "password";
-        button.innerHTML = show ? passwordEyeOffIcon : passwordEyeIcon;
-        button.title = show ? "\u9690\u85CF\u660E\u6587" : "\u663E\u793A\u660E\u6587";
-        button.setAttribute("aria-label", button.title);
-        button.setAttribute("aria-pressed", String(show));
-      });
-    });
-  }
-  function updateLoginModeUI() {
-    const field = $("authPasswordField"), password = $("authLoginPass"), button = $("authLoginBtn");
-    if (field) field.hidden = !passwordProtectionEnabled;
-    if (password) password.required = passwordProtectionEnabled;
-    if (button) button.textContent = passwordProtectionEnabled ? "\u767B\u5F55" : "\u76F4\u63A5\u8FDB\u5165\u63A7\u5236\u53F0";
-  }
-  async function createWebSession(password = "") {
-    const response = await apiPublic("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password })
-    });
-    setSessionToken(response.token);
-    currentUser = response.user || { username: "admin" };
-    resetPasswordField("authLoginPass");
-    $("sidebarAccountBtn")?.classList.remove("active");
-    updateAuthChrome();
-    if (globalThis.refreshAll) globalThis.refreshAll();
-    return response;
-  }
-  async function submitAdminKey(event) {
-    event?.preventDefault?.();
-    const input = $("adminKey"), message = $("adminKeyMsg"), button = $("adminKeySaveButton");
-    const candidate = input?.value.trim() || "";
-    if (!candidate) {
-      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u7BA1\u7406\u5458 API Key</span>';
-      return;
-    }
-    if (button) button.disabled = true;
-    if (message) message.textContent = "\u6B63\u5728\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\u2026";
-    try {
-      await apiPublic("/api/admin/keys", {
-        headers: { "X-Admin-Key": candidate },
-        cache: "no-store"
-      });
-      localStorage.setItem("llm_gateway_admin_key", candidate);
-      if (message) message.innerHTML = '<span class="ok">\u9A8C\u8BC1\u6210\u529F\uFF0C\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002</span>';
-      globalThis.adminKeyStatus?.();
-      if (globalThis.refreshAll) await globalThis.refreshAll();
-    } catch (error) {
-      if (message) message.innerHTML = '<span class="err">\u9A8C\u8BC1\u5931\u8D25\uFF1A' + esc(error.message) + "</span>";
-    } finally {
-      if (button) button.disabled = false;
-    }
-  }
-  function clearAdminKey() {
-    localStorage.removeItem("llm_gateway_admin_key");
-    const input = $("adminKey"), message = $("adminKeyMsg");
-    if (input) input.value = "";
-    if (message) message.innerHTML = '<span class="muted">\u5DF2\u6E05\u9664\u672C\u5730\u4FDD\u5B58\u7684\u7BA1\u7406\u5458 API Key\u3002</span>';
-    globalThis.adminKeyStatus?.();
-    forceLoginScreen();
-  }
-  async function initAuth() {
-    setSessionToken("");
-    initAdminKey();
-    initPasswordToggles();
-    $("adminKeyForm")?.addEventListener("submit", (event) => {
-      void submitAdminKey(event);
-    });
-    $("adminKeyClearButton")?.addEventListener("click", (event) => {
-      event.preventDefault();
-      clearAdminKey();
-    });
-    setAuthScreenVisible(false);
-    if (!isAuthenticated()) forceLoginScreen("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
-  }
-  async function submitLogin(event) {
-    event?.preventDefault?.();
-    const message = $("authMsg"), password = $("authLoginPass")?.value || "";
-    if (passwordProtectionEnabled && !password) {
-      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u5BC6\u7801</span>';
-      return;
-    }
-    if (message) message.textContent = "";
-    const button = $("authLoginBtn");
-    if (button) button.disabled = true;
-    try {
-      await createWebSession(password);
-    } catch (error) {
-      if (message) message.innerHTML = '<span class="err">' + esc(error.message) + "</span>";
-    } finally {
-      if (button) button.disabled = false;
-    }
-  }
-  async function logout() {
-    try {
-      if (getSessionToken()) await api("/api/auth/logout", { method: "POST" });
-    } catch {
-    }
-    const { adminStore: adminStore2 } = await Promise.resolve().then(() => (init_admin_store(), admin_store_exports));
-    adminStore2.reset();
-    setSessionToken("");
-    currentUser = null;
-    $("sidebarAccountBtn")?.classList.remove("active");
-    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
-    $("dashboard")?.classList.add("active");
-    document.querySelector('.nav button[data-tab="dashboard"]')?.classList.add("active");
-    forceLoginScreen();
-  }
-  function onAdminKeySaved() {
-  }
-  function updateCredentialFormPolicy() {
-    const enabledNow = $("accountPasswordEnabled")?.checked ?? passwordProtectionAtLoad;
-    const currentField = $("acctCurrentPassField"), currentPassword = $("acctCurrentPass");
-    const newPassword = $("acctNewPass"), confirmPassword = $("acctNewPass2");
-    if (currentField) currentField.hidden = !passwordProtectionAtLoad;
-    if (currentPassword) currentPassword.required = passwordProtectionAtLoad;
-    if (newPassword) newPassword.required = enabledNow && !passwordProtectionAtLoad;
-    if (confirmPassword) confirmPassword.required = Boolean(newPassword?.value) || enabledNow && !passwordProtectionAtLoad;
-  }
-  async function loadAccountSettings() {
-    const status = $("accountCurrent"), message = $("accountMsg"), logoutButton = $("btnAccountLogout");
-    if (message) message.textContent = "";
-    if (!getSessionToken()) {
-      if (status) status.textContent = "\u8BF7\u5148\u8FDB\u5165\u63A7\u5236\u53F0\uFF0C\u518D\u4FEE\u6539\u5BC6\u7801\u4FDD\u62A4\u8BBE\u7F6E\u3002";
-      if (logoutButton) logoutButton.hidden = true;
-      return;
-    }
-    try {
-      const response = await api("/api/auth/credentials");
-      passwordProtectionAtLoad = response.password_enabled !== false;
-      passwordProtectionEnabled = passwordProtectionAtLoad;
-      updateLoginModeUI();
-      const toggle = $("accountPasswordEnabled");
-      if (toggle) toggle.checked = passwordProtectionAtLoad;
-      if (status) {
-        const source = response.stored_in_db ? "\u5DF2\u4FDD\u5B58" : "\u4F7F\u7528\u521D\u59CB\u90E8\u7F72\u8BBE\u7F6E";
-        status.textContent = (passwordProtectionAtLoad ? "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5F00\u542F\u3002" : "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5173\u95ED\u3002") + source + "\u3002";
-      }
-      if (logoutButton) logoutButton.hidden = !passwordProtectionAtLoad;
-      updateCredentialFormPolicy();
-    } catch (error) {
-      if (status) status.textContent = error.message;
-    }
-  }
-  async function submitAccountCredentials(event) {
-    event?.preventDefault?.();
-    const message = $("accountMsg"), targetEnabled = $("accountPasswordEnabled")?.checked === true;
-    const currentPassword = $("acctCurrentPass")?.value || "";
-    const newPassword = $("acctNewPass")?.value || "", confirmPassword = $("acctNewPass2")?.value || "";
-    if (newPassword !== confirmPassword) {
-      if (message) message.innerHTML = '<span class="err">\u4E24\u6B21\u65B0\u5BC6\u7801\u4E0D\u4E00\u81F4</span>';
-      return;
-    }
-    if (passwordProtectionAtLoad && !currentPassword) {
-      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u5F53\u524D\u5BC6\u7801</span>';
-      return;
-    }
-    if (!passwordProtectionAtLoad && targetEnabled && !newPassword) {
-      if (message) message.innerHTML = '<span class="err">\u5F00\u542F\u5BC6\u7801\u4FDD\u62A4\u65F6\uFF0C\u8BF7\u5148\u8BBE\u7F6E\u65B0\u5BC6\u7801</span>';
-      return;
-    }
-    if (!targetEnabled && newPassword) {
-      if (message) message.innerHTML = '<span class="err">\u5173\u95ED\u5BC6\u7801\u4FDD\u62A4\u65F6\uFF0C\u8BF7\u6E05\u7A7A\u65B0\u5BC6\u7801\u8F93\u5165\u6846</span>';
-      return;
-    }
-    if (targetEnabled === passwordProtectionAtLoad && !newPassword) {
-      if (message) message.innerHTML = '<span class="err">\u6CA1\u6709\u9700\u8981\u4FDD\u5B58\u7684\u66F4\u6539</span>';
-      return;
-    }
-    const button = $("accountSaveButton");
-    if (button) button.disabled = true;
-    try {
-      const body = { current_password: currentPassword, password_enabled: targetEnabled };
-      if (newPassword) body.new_password = newPassword;
-      await api("/api/auth/credentials", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      resetPasswordField("acctCurrentPass");
-      resetPasswordField("acctNewPass");
-      resetPasswordField("acctNewPass2");
-      if (message) message.innerHTML = '<span class="ok">\u8BBE\u7F6E\u5DF2\u4FDD\u5B58</span>';
-      await loadAccountSettings();
-    } catch (error) {
-      if (message) message.innerHTML = '<span class="err">' + esc(error.message) + "</span>";
-    } finally {
-      if (button) button.disabled = false;
-    }
-  }
-  var currentUser, passwordProtectionEnabled, passwordProtectionAtLoad, passwordEyeIcon, passwordEyeOffIcon;
-  var init_auth = __esm({
-    "js/features/auth.js"() {
-      init_dom();
-      init_api();
-      currentUser = null;
-      passwordProtectionEnabled = true;
-      passwordProtectionAtLoad = true;
-      passwordEyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-      passwordEyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.1 3.8"></path><path d="M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1 0 1.9-.2 2.8-.5"></path></svg>';
     }
   });
 
@@ -2864,7 +2570,6 @@
       init_dom();
       init_api();
       init_notify();
-      init_auth();
       init_admin_store();
       init_format();
       init_requests();
@@ -3810,8 +3515,282 @@
   }
   var InferenceParams = { load };
 
+  // js/features/auth.js
+  init_dom();
+  init_api();
+  var currentUser = null;
+  var passwordProtectionEnabled = true;
+  var passwordProtectionAtLoad = true;
+  var passwordEyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var passwordEyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.1 3.8"></path><path d="M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1 0 1.9-.2 2.8-.5"></path></svg>';
+  function resetPasswordField(id) {
+    const input = $(id);
+    if (!input) return;
+    input.value = "";
+    input.type = "password";
+    const button = input.closest(".password-input-wrap")?.querySelector(".password-toggle");
+    if (!button) return;
+    button.innerHTML = passwordEyeIcon;
+    button.title = "\u663E\u793A\u660E\u6587";
+    button.setAttribute("aria-label", "\u663E\u793A\u660E\u6587");
+    button.setAttribute("aria-pressed", "false");
+  }
+  function setAuthScreenVisible(show) {
+    const screen = $("authScreen");
+    const app = $("appShell");
+    if (screen) {
+      screen.classList.toggle("show", show);
+      screen.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+    if (app) app.hidden = show;
+    document.body.classList.toggle("auth-locked", show);
+  }
+  function forceLoginScreen(message = "") {
+    currentUser = null;
+    setAuthScreenVisible(false);
+    $("sidebarAccountBtn")?.classList.remove("active");
+    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
+    document.querySelector('.nav button[data-tab="keys"]')?.classList.add("active");
+    $("keys")?.classList.add("active");
+    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
+    const status = $("adminKeyMsg");
+    if (status && message) status.innerHTML = '<span class="warn">' + esc(message) + "</span>";
+    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
+  }
+  function updateAuthChrome() {
+    setAuthScreenVisible(false);
+  }
+  function openAccountSettings() {
+    if (!getSessionToken()) {
+      forceLoginScreen();
+      return;
+    }
+    document.querySelectorAll(".nav button").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
+    $("account")?.classList.add("active");
+    $("sidebarAccountBtn")?.classList.add("active");
+    if (globalThis.dashboardPoll) globalThis.dashboardPoll.stop();
+    const message = $("globalMsg");
+    if (message) message.hidden = false;
+    if (globalThis.syncTopbarRefresh) globalThis.syncTopbarRefresh();
+    loadAccountSettings().catch(() => {
+    });
+  }
+  function initPasswordToggles() {
+    document.querySelectorAll('input[type="password"]').forEach((input) => {
+      let wrapper = input.closest(".password-input-wrap");
+      if (!wrapper) {
+        wrapper = document.createElement("span");
+        wrapper.className = "password-input-wrap";
+        input.parentNode.insertBefore(wrapper, input);
+        wrapper.appendChild(input);
+      }
+      let button = wrapper.querySelector(".password-toggle");
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "password-toggle";
+        wrapper.appendChild(button);
+      }
+      button.innerHTML = passwordEyeIcon;
+      button.title = "\u663E\u793A\u660E\u6587";
+      button.setAttribute("aria-label", "\u663E\u793A\u660E\u6587");
+      button.setAttribute("aria-pressed", "false");
+      if (button.dataset.passwordToggleBound === "true") return;
+      button.dataset.passwordToggleBound = "true";
+      button.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        button.innerHTML = show ? passwordEyeOffIcon : passwordEyeIcon;
+        button.title = show ? "\u9690\u85CF\u660E\u6587" : "\u663E\u793A\u660E\u6587";
+        button.setAttribute("aria-label", button.title);
+        button.setAttribute("aria-pressed", String(show));
+      });
+    });
+  }
+  function updateLoginModeUI() {
+    const field = $("authPasswordField"), password = $("authLoginPass"), button = $("authLoginBtn");
+    if (field) field.hidden = !passwordProtectionEnabled;
+    if (password) password.required = passwordProtectionEnabled;
+    if (button) button.textContent = passwordProtectionEnabled ? "\u767B\u5F55" : "\u76F4\u63A5\u8FDB\u5165\u63A7\u5236\u53F0";
+  }
+  async function createWebSession(password = "") {
+    const response = await apiPublic("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+    setSessionToken(response.token);
+    currentUser = response.user || { username: "admin" };
+    resetPasswordField("authLoginPass");
+    $("sidebarAccountBtn")?.classList.remove("active");
+    updateAuthChrome();
+    if (globalThis.refreshAll) globalThis.refreshAll();
+    return response;
+  }
+  async function submitAdminKey(event) {
+    event?.preventDefault?.();
+    const input = $("adminKey"), message = $("adminKeyMsg"), button = $("adminKeySaveButton");
+    const candidate = input?.value.trim() || "";
+    if (!candidate) {
+      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u7BA1\u7406\u5458 API Key</span>';
+      return;
+    }
+    if (button) button.disabled = true;
+    if (message) message.textContent = "\u6B63\u5728\u9A8C\u8BC1\u7BA1\u7406\u5458 API Key\u2026";
+    try {
+      await apiPublic("/api/admin/keys", {
+        headers: { "X-Admin-Key": candidate },
+        cache: "no-store"
+      });
+      localStorage.setItem("llm_gateway_admin_key", candidate);
+      if (message) message.innerHTML = '<span class="ok">\u9A8C\u8BC1\u6210\u529F\uFF0C\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002</span>';
+      globalThis.adminKeyStatus?.();
+      if (globalThis.refreshAll) await globalThis.refreshAll();
+    } catch (error) {
+      if (message) message.innerHTML = '<span class="err">\u9A8C\u8BC1\u5931\u8D25\uFF1A' + esc(error.message) + "</span>";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+  function clearAdminKey() {
+    localStorage.removeItem("llm_gateway_admin_key");
+    const input = $("adminKey"), message = $("adminKeyMsg");
+    if (input) input.value = "";
+    if (message) message.innerHTML = '<span class="muted">\u5DF2\u6E05\u9664\u672C\u5730\u4FDD\u5B58\u7684\u7BA1\u7406\u5458 API Key\u3002</span>';
+    globalThis.adminKeyStatus?.();
+    forceLoginScreen();
+  }
+  async function initAuth() {
+    setSessionToken("");
+    initAdminKey();
+    initPasswordToggles();
+    $("adminKeyForm")?.addEventListener("submit", (event) => {
+      void submitAdminKey(event);
+    });
+    $("adminKeyClearButton")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      clearAdminKey();
+    });
+    setAuthScreenVisible(false);
+    if (!isAuthenticated()) forceLoginScreen("\u8BF7\u5148\u8F93\u5165\u670D\u52A1\u7AEF\u5DF2\u914D\u7F6E\u7684\u7BA1\u7406\u5458 API Key\u3002");
+  }
+  async function submitLogin(event) {
+    event?.preventDefault?.();
+    const message = $("authMsg"), password = $("authLoginPass")?.value || "";
+    if (passwordProtectionEnabled && !password) {
+      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u5BC6\u7801</span>';
+      return;
+    }
+    if (message) message.textContent = "";
+    const button = $("authLoginBtn");
+    if (button) button.disabled = true;
+    try {
+      await createWebSession(password);
+    } catch (error) {
+      if (message) message.innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+  async function logout() {
+    try {
+      if (getSessionToken()) await api("/api/auth/logout", { method: "POST" });
+    } catch {
+    }
+    const { adminStore: adminStore2 } = await Promise.resolve().then(() => (init_admin_store(), admin_store_exports));
+    adminStore2.reset();
+    setSessionToken("");
+    currentUser = null;
+    $("sidebarAccountBtn")?.classList.remove("active");
+    document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
+    $("dashboard")?.classList.add("active");
+    document.querySelector('.nav button[data-tab="dashboard"]')?.classList.add("active");
+    forceLoginScreen();
+  }
+  function updateCredentialFormPolicy() {
+    const enabledNow = $("accountPasswordEnabled")?.checked ?? passwordProtectionAtLoad;
+    const currentField = $("acctCurrentPassField"), currentPassword = $("acctCurrentPass");
+    const newPassword = $("acctNewPass"), confirmPassword = $("acctNewPass2");
+    if (currentField) currentField.hidden = !passwordProtectionAtLoad;
+    if (currentPassword) currentPassword.required = passwordProtectionAtLoad;
+    if (newPassword) newPassword.required = enabledNow && !passwordProtectionAtLoad;
+    if (confirmPassword) confirmPassword.required = Boolean(newPassword?.value) || enabledNow && !passwordProtectionAtLoad;
+  }
+  async function loadAccountSettings() {
+    const status = $("accountCurrent"), message = $("accountMsg"), logoutButton = $("btnAccountLogout");
+    if (message) message.textContent = "";
+    if (!getSessionToken()) {
+      if (status) status.textContent = "\u8BF7\u5148\u8FDB\u5165\u63A7\u5236\u53F0\uFF0C\u518D\u4FEE\u6539\u5BC6\u7801\u4FDD\u62A4\u8BBE\u7F6E\u3002";
+      if (logoutButton) logoutButton.hidden = true;
+      return;
+    }
+    try {
+      const response = await api("/api/auth/credentials");
+      passwordProtectionAtLoad = response.password_enabled !== false;
+      passwordProtectionEnabled = passwordProtectionAtLoad;
+      updateLoginModeUI();
+      const toggle = $("accountPasswordEnabled");
+      if (toggle) toggle.checked = passwordProtectionAtLoad;
+      if (status) {
+        const source = response.stored_in_db ? "\u5DF2\u4FDD\u5B58" : "\u4F7F\u7528\u521D\u59CB\u90E8\u7F72\u8BBE\u7F6E";
+        status.textContent = (passwordProtectionAtLoad ? "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5F00\u542F\u3002" : "\u5BC6\u7801\u4FDD\u62A4\u5DF2\u5173\u95ED\u3002") + source + "\u3002";
+      }
+      if (logoutButton) logoutButton.hidden = !passwordProtectionAtLoad;
+      updateCredentialFormPolicy();
+    } catch (error) {
+      if (status) status.textContent = error.message;
+    }
+  }
+  async function submitAccountCredentials(event) {
+    event?.preventDefault?.();
+    const message = $("accountMsg"), targetEnabled = $("accountPasswordEnabled")?.checked === true;
+    const currentPassword = $("acctCurrentPass")?.value || "";
+    const newPassword = $("acctNewPass")?.value || "", confirmPassword = $("acctNewPass2")?.value || "";
+    if (newPassword !== confirmPassword) {
+      if (message) message.innerHTML = '<span class="err">\u4E24\u6B21\u65B0\u5BC6\u7801\u4E0D\u4E00\u81F4</span>';
+      return;
+    }
+    if (passwordProtectionAtLoad && !currentPassword) {
+      if (message) message.innerHTML = '<span class="err">\u8BF7\u8F93\u5165\u5F53\u524D\u5BC6\u7801</span>';
+      return;
+    }
+    if (!passwordProtectionAtLoad && targetEnabled && !newPassword) {
+      if (message) message.innerHTML = '<span class="err">\u5F00\u542F\u5BC6\u7801\u4FDD\u62A4\u65F6\uFF0C\u8BF7\u5148\u8BBE\u7F6E\u65B0\u5BC6\u7801</span>';
+      return;
+    }
+    if (!targetEnabled && newPassword) {
+      if (message) message.innerHTML = '<span class="err">\u5173\u95ED\u5BC6\u7801\u4FDD\u62A4\u65F6\uFF0C\u8BF7\u6E05\u7A7A\u65B0\u5BC6\u7801\u8F93\u5165\u6846</span>';
+      return;
+    }
+    if (targetEnabled === passwordProtectionAtLoad && !newPassword) {
+      if (message) message.innerHTML = '<span class="err">\u6CA1\u6709\u9700\u8981\u4FDD\u5B58\u7684\u66F4\u6539</span>';
+      return;
+    }
+    const button = $("accountSaveButton");
+    if (button) button.disabled = true;
+    try {
+      const body = { current_password: currentPassword, password_enabled: targetEnabled };
+      if (newPassword) body.new_password = newPassword;
+      await api("/api/auth/credentials", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      resetPasswordField("acctCurrentPass");
+      resetPasswordField("acctNewPass");
+      resetPasswordField("acctNewPass2");
+      if (message) message.innerHTML = '<span class="ok">\u8BBE\u7F6E\u5DF2\u4FDD\u5B58</span>';
+      await loadAccountSettings();
+    } catch (error) {
+      if (message) message.innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   // js/entry.js
-  init_auth();
   function stripEmptyQueryFromUrl() {
     if (typeof location === "undefined" || typeof history === "undefined") return;
     const { pathname, search: search2, hash } = location;
