@@ -6,6 +6,7 @@ import { setGlobalMsg, showToast } from '../core/notify.js';
 let detailPollTimer = null;
 let detailPollId = '';
 let detailEpoch = 0;
+let detailTrigger = null;
 
 export function requestsListHasRows() {
   return !!$('requestsTable')?.querySelector('table td');
@@ -553,6 +554,7 @@ function stopDetailPoll() {
 
 export async function showDetail(id) {
   let epoch = 0;
+  detailTrigger = document.activeElement;
   try {
     id = decodeURIComponent(id);
     stopDetailPoll();
@@ -561,7 +563,10 @@ export async function showDetail(id) {
     detailPollId = id;
     const j = await refreshDetailBody(id);
     if (epoch !== detailEpoch) return;
-    $('detailModal')?.classList.add('show');
+    const modal = $('detailModal');
+    modal?.classList.add('show');
+    modal?.setAttribute('aria-hidden', 'false');
+    modal?.querySelector('.card-head button')?.focus();
     if (j.live) {
       detailPollTimer = setInterval(async () => {
         if (epoch !== detailEpoch || detailPollId !== id) return;
@@ -580,6 +585,7 @@ export async function showDetail(id) {
     }
   } catch (e) {
     if (epoch && epoch !== detailEpoch) return;
+    detailTrigger = null;
     alert(e.message);
   }
 }
@@ -596,7 +602,12 @@ function resetDetailView() {
 export function closeModal() {
   stopDetailPoll();
   resetDetailView();
-  $('detailModal')?.classList.remove('show');
+  const modal = $('detailModal');
+  modal?.classList.remove('show');
+  modal?.setAttribute('aria-hidden', 'true');
+  const trigger = detailTrigger;
+  detailTrigger = null;
+  if (trigger?.isConnected) trigger.focus();
 }
 
 $('detailModal')?.addEventListener('click', (e) => {
@@ -611,5 +622,30 @@ $('detailModal')?.addEventListener('click', (e) => {
   if (copyAllSse) {
     e.preventDefault();
     copyReqStreamAll(copyAllSse);
+  }
+});
+
+
+document.addEventListener('keydown', (event) => {
+  const modal = $('detailModal');
+  if (!modal?.classList.contains('show')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeModal();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
+    .filter((el) => !el.hidden && el.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !modal.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !modal.contains(active))) {
+    event.preventDefault();
+    first.focus();
   }
 });
