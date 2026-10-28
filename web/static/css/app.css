@@ -307,7 +307,19 @@ code{font-family:var(--mono);font-size:12px;color:var(--accent-2)}
   .sys-runtime-panel .sys-runtime-deps-row .sys-status-chip{height:auto;min-height:56px}
 }
 @media(max-width:480px){
-  .inf-stack{grid-template-columns:1fr}
+  /* 手机端推理卡片纵向排布，避免标题和状态徽标挤在同一行。 */
+  .sys-runtime-panel .inf-stack-compact{
+    grid-template-columns:minmax(0,1fr);height:auto;min-height:0;gap:8px;
+  }
+  .sys-runtime-panel .inf-card-compact{height:auto;min-height:58px}
+  .sys-runtime-panel .inf-card-compact .inf-card-head{
+    align-items:flex-start;flex-wrap:wrap;gap:8px;
+  }
+  .sys-runtime-panel .inf-card-tags{
+    justify-content:flex-start;flex-shrink:1;min-width:0;
+  }
+  /* 最近调用表保留可读列宽，在表格容器内横向滚动，不撑宽整个页面。 */
+  #dashRecentRequests table{min-width:460px}
 }
 .gauge-unit .gauge-svg{max-width:100%;width:min(100%,300px)}
 .gauge-svg{width:100%;max-width:300px;height:auto;display:block;margin:0 auto}

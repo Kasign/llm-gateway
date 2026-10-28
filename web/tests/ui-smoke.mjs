@@ -229,6 +229,35 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await clickTab(page, 'dashboard', '首页-窄屏');
   await recordLayout(page, '首页-mobile-390');
+  const inferenceLayout = await page.locator('.sys-runtime-panel .inf-stack-compact').evaluate(stack => {
+    const cards = [...stack.querySelectorAll('.inf-card-compact')];
+    const rects = cards.map(card => {
+      const r = card.getBoundingClientRect();
+      const title = card.querySelector('.inf-card-head h4')?.getBoundingClientRect();
+      const tags = card.querySelector('.inf-card-tags')?.getBoundingClientRect();
+      const overlap = Boolean(title && tags && title.left < tags.right && tags.left < title.right &&
+        title.top < tags.bottom && tags.top < title.bottom);
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, overlap };
+    });
+    return { cardCount: cards.length, rects };
+  });
+  check('窄屏推理内存卡片纵向排列且标题与徽标不重叠',
+    inferenceLayout.cardCount === 2 &&
+    inferenceLayout.rects[0].left === inferenceLayout.rects[1].left &&
+    inferenceLayout.rects[1].top >= inferenceLayout.rects[0].bottom - 1 &&
+    inferenceLayout.rects.every(card => !card.overlap),
+    inferenceLayout);
+  const recentTableLayout = await page.locator('#dashRecentRequests .table-wrap').evaluate(wrap => ({
+    tableWidth: wrap.querySelector('table')?.getBoundingClientRect().width || 0,
+    clientWidth: wrap.clientWidth,
+    scrollWidth: wrap.scrollWidth,
+    overflowX: getComputedStyle(wrap).overflowX
+  }));
+  check('窄屏最近调用表保留可读宽度并在容器内滚动',
+    recentTableLayout.tableWidth >= 460 &&
+    recentTableLayout.scrollWidth > recentTableLayout.clientWidth &&
+    ['auto', 'scroll'].includes(recentTableLayout.overflowX),
+    recentTableLayout);
   await page.screenshot({ path: screenshotName('dashboard-mobile-390'), fullPage: true });
   await clickTab(page, 'providers', '远程 Provider-窄屏');
   await recordLayout(page, 'Provider-mobile-390');
