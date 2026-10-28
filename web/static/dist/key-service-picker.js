@@ -144,7 +144,7 @@
       editError.textContent=e?.message||'读取密钥信息失败';
       editSave.disabled=true;
     }finally{
-      if(button)button.disabled=false;
+      if(epoch===editEpoch&&button)button.disabled=false;
       if(epoch===editEpoch&&editRefresh)editRefresh.disabled=false;
     }
   }
