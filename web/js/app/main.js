@@ -1171,7 +1171,7 @@ async function listFiles(){
   try{
     const j=await api('/api/hf/files?repo='+encodeURIComponent(repo)+'&revision='+encodeURIComponent(rev));
     const fs=j.data||[];$('filesMsg').textContent=`${fs.length} 个 GGUF`;
-    $('filesBox').innerHTML=!fs.length?emptyState('无文件'):wrapTable('<tr><th>文件</th><th>大小</th><th>SHA256</th><th></th></tr>'+fs.map(f=>`<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256||'—')}</td><td><button type="button" class="btn sm" onclick="${esc('chooseFile('+JSON.stringify(f.path)+','+JSON.stringify(repo)+')')}">选择</button></td></tr>`).join(''));
+    $('filesBox').innerHTML=!fs.length?emptyState('无文件'):wrapTable('<tr><th>文件</th><th>大小</th><th>SHA256</th><th></th></tr>'+fs.map(f=>`<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256||'—')}</td><td><button type="button" class="btn sm" data-hf-file="${esc(f.path)}" data-hf-repo="${esc(repo)}">选择</button></td></tr>`).join(''));
   }catch(e){$('filesMsg').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
 }
 function chooseFile(file,repo){
@@ -1184,6 +1184,12 @@ function chooseFile(file,repo){
     $('filesMsg').innerHTML='<span class="warn">本地已存在该 GGUF（'+esc(repo+' / '+file)+'），无需重复下载</span>';
   }
 }
+$('filesBox')?.addEventListener('click',ev=>{
+  const btn=ev.target.closest?.('button[data-hf-file]');
+  if(!btn)return;
+  chooseFile(btn.dataset.hfFile||'',btn.dataset.hfRepo||'');
+});
+
 async function installModel(){
   const b={model_key:$('modelKey').value.trim(),display_name:$('displayName').value.trim(),repo:$('repo').value.trim(),revision:$('revision').value.trim()||'main',filename:$('filename').value.trim(),quantization:$('quant').value.trim()};
   if(globalThis.ModelDownload?.isGgufLocal?.(b.repo,b.filename)){

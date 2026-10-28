@@ -2068,7 +2068,7 @@
       const j = await api("/api/hf/files?repo=" + encodeURIComponent(repo) + "&revision=" + encodeURIComponent(rev));
       const fs = j.data || [];
       $("filesMsg").textContent = `${fs.length} \u4E2A GGUF`;
-      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" onclick="${esc("chooseFile(" + JSON.stringify(f.path) + "," + JSON.stringify(repo) + ")")}">\u9009\u62E9</button></td></tr>`).join(""));
+      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" data-hf-file="${esc(f.path)}" data-hf-repo="${esc(repo)}">\u9009\u62E9</button></td></tr>`).join(""));
     } catch (e) {
       $("filesMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
     }
@@ -2084,6 +2084,12 @@
       $("filesMsg").innerHTML = '<span class="warn">\u672C\u5730\u5DF2\u5B58\u5728\u8BE5 GGUF\uFF08' + esc(repo + " / " + file) + "\uFF09\uFF0C\u65E0\u9700\u91CD\u590D\u4E0B\u8F7D</span>";
     }
   }
+  $("filesBox")?.addEventListener("click", (ev) => {
+    const btn = ev.target.closest?.('button[data-hf-file]');
+    if (!btn) return;
+    chooseFile(btn.dataset.hfFile || "", btn.dataset.hfRepo || "");
+  });
+
   async function installModel() {
     const b = { model_key: $("modelKey").value.trim(), display_name: $("displayName").value.trim(), repo: $("repo").value.trim(), revision: $("revision").value.trim() || "main", filename: $("filename").value.trim(), quantization: $("quant").value.trim() };
     if (globalThis.ModelDownload?.isGgufLocal?.(b.repo, b.filename)) {
