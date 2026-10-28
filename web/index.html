@@ -475,8 +475,8 @@
   </div>
 </div>
 
-<div id="detailModal" class="modal"><div class="card">
-  <div class="card-head"><h2 style="margin:0">请求详情</h2><button type="button" class="btn sm" onclick="closeModal()">关闭</button></div>
+<div id="detailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="requestDetailTitle" aria-hidden="true"><div class="card" tabindex="-1">
+  <div class="card-head"><h2 id="requestDetailTitle" style="margin:0">请求详情</h2><button type="button" class="btn sm" onclick="closeModal()">关闭</button></div>
   <div id="detailBody" class="req-detail"></div>
 </div></div>
 
@@ -532,6 +532,6 @@
 <script src="/static/dist/app.js?v=20261028-ui-status-feedback-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-duplicate-id-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
-<script src="/static/dist/key-service-picker.js?v=20261028-key-service-access-picker-edit-1"></script>
+<script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-modal-focus-1"></script>
 </body>
 </html>
