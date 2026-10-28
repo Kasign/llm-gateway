@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   browser-smoke:
@@ -42,6 +42,7 @@ jobs:
       LLM_BACKEND: llamacpp
       LLAMA_REQUEST_TIMEOUT_SECONDS: "0"
       BROWSER_BASE_URL: http://127.0.0.1:8088
+      BROWSER_TEST_PASSWORD: ci-browser-pass
       BROWSER_TEST_ADMIN_KEY: browser-smoke-admin-key-not-for-production
     services:
       redis:
@@ -81,18 +82,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: 使用构建器同步前端 Bundle
+      - name: 构建前端 Bundle 并验证同步
         working-directory: web
         run: |
           npm ci
           npm run build
-          if ! git diff --quiet -- static/dist/app.js static/dist/providers-admin.js; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add static/dist/app.js static/dist/providers-admin.js
-            git commit -m "同步 Web Session 与管理员 Key 鉴权 Bundle"
-            git push origin HEAD:refs/heads/dev
-          fi
+          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js
 
       - name: 准备隔离的 Gateway 测试配置
         run: |
