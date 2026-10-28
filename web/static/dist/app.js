@@ -869,7 +869,10 @@
           return;
         }
         if (event.key !== "Tab") return;
-        const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')].filter((el) => !el.hidden && el.getClientRects().length > 0);
+        const focusable = [...modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')].filter((el) => {
+          const closedDetails = el.closest("details:not([open])");
+          return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && (!closedDetails || el.matches("details:not([open]) > summary"));
+        });
         if (!focusable.length) return;
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -2373,7 +2376,10 @@
   function benchDrawerFocusable(root) {
     const panel = root?.querySelector(".drawer-panel");
     if (!panel) return [];
-    return [...panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')].filter((el) => !el.hidden && el.getClientRects().length > 0);
+    return [...panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')].filter((el) => {
+          const closedDetails = el.closest("details:not([open])");
+          return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && (!closedDetails || el.matches("details:not([open]) > summary"));
+        });
   }
   function openBenchParamsDrawer() {
     const root = $("benchParamsDrawer");

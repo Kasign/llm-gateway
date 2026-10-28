@@ -1680,7 +1680,10 @@ function benchDrawerFocusable(root){
   const panel=root?.querySelector('.drawer-panel');
   if(!panel)return [];
   return [...panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')]
-    .filter(el=>!el.hidden&&el.getClientRects().length>0);
+    .filter(el=>{
+      const closedDetails=el.closest('details:not([open])');
+      return !el.hidden&&el.getClientRects().length>0&&getComputedStyle(el).visibility!=='hidden'&&(!closedDetails||el.matches('details:not([open]) > summary'));
+    });
 }
 function openBenchParamsDrawer(){
   const root=$('benchParamsDrawer');

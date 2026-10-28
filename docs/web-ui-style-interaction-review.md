@@ -373,3 +373,10 @@ Provider 新增/编辑表单同时展示连接信息、API Key、模型映射、
 - 新增 Browser Smoke 隔离 Mock：仅拦截只读 `/api/requests`、`/api/requests/stats` 与单条请求详情接口，不写入真实审计记录或修改 Gateway 状态。
 - 在真实 Playwright 页面上打开一条模拟调用记录详情，验证焦点进入关闭按钮、Tab 从末项循环到首项、Shift+Tab 从首项循环到末项、Escape 关闭，以及焦点返回原「详情」按钮；测试根据弹窗实际可见的可聚焦元素集合计算首末项，不依赖某个固定 DOM 结构。
 - 此前请求详情焦点行为主要由源码/Bundle 契约断言覆盖；本次新增的真实交互检查尚未由后续 CI 执行确认，不能预先标记通过。
+
+### 修复折叠详情中的隐藏控件误入焦点循环（2026-10-28）
+
+- Browser Smoke 的请求详情弹窗实际交互失败（151/154）：详情面板始终带有折叠的“API 原始 JSON”区，其中复制按钮虽然不可见、无法获得焦点，但 `getClientRects().length > 0` 仍让它进入焦点候选集合。Tab 与 Shift+Tab 因错误的末项判断而离开预期循环。
+- 在请求详情弹窗和性能参数抽屉中统一过滤：元素本身可见且未禁用、CSS visibility 不是 hidden，并且不处于未展开的 `details` 内容内；折叠面板的 `summary` 标题仍保留为有效焦点项。
+- 同步原生 JS 源码和 esbuild Bundle，更新 `web/index.html` 的 app.js 缓存版本为 `20261028-visible-focus-filter-1`。Browser Smoke 的可见焦点候选计算也采用同一判定逻辑，覆盖请求详情真实 Tab / Shift+Tab / Escape 路径与抽屉焦点循环。
+- 修复前的失败 run 为 [40691604477](https://github.com/Kasign/llm-gateway/actions/runs/40691604477)，只有请求详情弹窗相关的 3 条新断言失败；其余 151/154 通过。修复后的工作流需以本提交实际结果验收。

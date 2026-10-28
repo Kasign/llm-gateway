@@ -675,11 +675,16 @@ try {
     requestsSource.includes('detailTrigger = document.activeElement') &&
     requestsSource.includes("event.key === 'Escape'") &&
     requestsSource.includes('event.shiftKey && (active === first || !modal.contains(active))') &&
+    requestsSource.includes("const closedDetails = el.closest('details:not([open])')") &&
+    requestsSource.includes("!closedDetails || el.matches('details:not([open]) > summary')") &&
+    appBundle.includes('details:not([open]) > summary') &&
     appBundle.includes('detailTrigger = document.activeElement') &&
     appBundle.includes('event.key === "Escape"'));
   check('性能测试参数抽屉具备焦点进入、Escape 关闭、焦点循环和返回触发按钮',
     indexHtml.includes('id="benchParamsDrawer" class="drawer-root" aria-hidden="true" hidden') &&
     mainSource.includes('function benchDrawerFocusable(root)') &&
+    mainSource.includes("const closedDetails=el.closest('details:not([open])')") &&
+    mainSource.includes("!closedDetails||el.matches('details:not([open]) > summary')") &&
     mainSource.includes('benchDrawerTrigger=document.activeElement') &&
     mainSource.includes('if(e.key===\'Escape\')') &&
     mainSource.includes('if(e.shiftKey&&(active===first||!root.contains(active)))') &&
@@ -945,7 +950,10 @@ try {
     await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
   const focusState = await detailModal.evaluate(root => {
     const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
-    const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+    const visible = [...root.querySelectorAll(selector)].filter(el => {
+      const closedDetails = el.closest('details:not([open])');
+      return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && (!closedDetails || el.matches('details:not([open]) > summary'));
+    });
     if (!visible.length) return { count: 0, firstIsActive: false, lastIsActive: false };
     visible[visible.length - 1].focus();
     const lastIsActive = document.activeElement === visible[visible.length - 1];
@@ -956,12 +964,18 @@ try {
   check('请求详情弹窗 Tab 从最后一个控件循环到第一个',
     await detailModal.evaluate(root => {
       const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
-      const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+      const visible = [...root.querySelectorAll(selector)].filter(el => {
+      const closedDetails = el.closest('details:not([open])');
+      return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && (!closedDetails || el.matches('details:not([open]) > summary'));
+    });
       return visible.length > 0 && document.activeElement === visible[0];
     }));
   const firstFocusState = await detailModal.evaluate(root => {
     const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
-    const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+    const visible = [...root.querySelectorAll(selector)].filter(el => {
+      const closedDetails = el.closest('details:not([open])');
+      return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && (!closedDetails || el.matches('details:not([open]) > summary'));
+    });
     if (!visible.length) return { count: 0, firstIsActive: false, lastIsActive: false };
     visible[0].focus();
     return { count: visible.length, firstIsActive: document.activeElement === visible[0], lastIsActive: false };
@@ -970,7 +984,10 @@ try {
   check('请求详情弹窗 Shift+Tab 从第一个控件循环到最后一个',
     firstFocusState.count > 0 && firstFocusState.firstIsActive && await detailModal.evaluate(root => {
       const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
-      const visible = [...root.querySelectorAll(selector)].filter(el => !el.hidden && el.getClientRects().length > 0);
+      const visible = [...root.querySelectorAll(selector)].filter(el => {
+      const closedDetails = el.closest('details:not([open])');
+      return !el.hidden && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && (!closedDetails || el.matches('details:not([open]) > summary'));
+    });
       return visible.length > 0 && document.activeElement === visible[visible.length - 1];
     }));
   await page.keyboard.press('Escape');
