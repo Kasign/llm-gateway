@@ -43,14 +43,18 @@
     }
     target.innerHTML = state.rows.map((row) => {
       const deployment = row.source === 'deployment' || row.editable === false;
-      const source = deployment ? '部署配置 · 只读' : 'Web · 可编辑';
+      const override = row.source === 'web-override';
+      const source = deployment ? '部署配置 · 可接管' : override ? 'Web 管理 · 覆盖部署配置' : 'Web · 可编辑';
       const status = row.source_conflict ? 'ID 冲突' : row.secret_unavailable ? 'Key 不可解密' : (row.enabled ? '已启用' : '已停用');
       const statusClass = row.source_conflict || row.secret_unavailable ? 'provider-state-bad' : (row.enabled ? 'provider-state-on' : 'provider-state-off');
       let actions = row.source_conflict
         ? '<span class="muted">来源冲突，拒绝操作</span>'
         : '<button class="btn sm ghost" data-action="test" data-id="' + esc(row.id) + '">测试</button>';
-      if (!deployment && !row.source_conflict) {
-        actions += ' <button class="btn sm ghost" data-action="edit" data-id="' + esc(row.id) + '">编辑</button>';
+      if (deployment && !row.source_conflict) {
+        actions += ' <button class="btn sm ghost" data-action="takeover" data-id="' + esc(row.id) + '">配置</button>';
+        actions += ' <button class="btn sm danger" data-action="delete" data-id="' + esc(row.id) + '">删除</button>';
+      } else if (!deployment && !row.source_conflict) {
+        actions += ' <button class="btn sm ghost" data-action="edit" data-id="' + esc(row.id) + '">配置</button>';
         actions += row.enabled
           ? ' <button class="btn sm ghost" data-action="disable" data-id="' + esc(row.id) + '">停用</button>'
           : ' <button class="btn sm ghost" data-action="enable" data-id="' + esc(row.id) + '">启用</button>';
@@ -176,11 +180,29 @@
   async function runAction(action, id) {
     const row = rowByID(id);
     if (!row) return;
-    if (action === 'delete' && !window.confirm('确定删除 Web Provider “' + id + '”吗？该操作会立即从新请求路由中移除。')) return;
+    if (action === 'delete') {
+      const message = row.source === 'deployment'
+        ? '确定删除部署配置中的 Provider “' + id + '”吗？Gateway 会立即屏蔽它，但不会修改部署 YAML/.env 文件。若当前正在使用，请先切换上游。'
+        : '确定删除 Web Provider “' + id + '”吗？该操作会立即从新请求路由中移除。';
+      if (!window.confirm(message)) return;
+    }
     if (action === 'clear-key' && !window.confirm('确定清除 Provider “' + id + '”已保存的 API Key？此操作不可自动恢复。')) return;
     try {
       await api('/api/admin/providers/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
-      setStatus('Provider 操作已生效。', 'ok');
+      if (action === 'takeover') {
+        await loadProviders();
+        const managed = rowByID(id);
+        if (managed && !managed.source_conflict) {
+          showEditor(managed);
+          setStatus('Provider 已接管为 Web 配置；保存后会立即生效。', 'ok', true);
+        } else {
+          setStatus('Provider 已接管，但暂时无法打开配置表单，请刷新后重试。', 'warn');
+        }
+        return;
+      }
+      setStatus(action === 'delete' && row.source === 'deployment'
+        ? 'Provider 已从 Gateway 生效列表中移除；部署 YAML/.env 未修改。'
+        : 'Provider 操作已生效。', 'ok');
       await loadProviders();
     } catch (error) {
       setStatus(error.message || 'Provider 操作失败。当前活动 Provider 不能直接停用或删除，请先切换上游。', 'err');

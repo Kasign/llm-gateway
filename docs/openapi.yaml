@@ -278,7 +278,7 @@ paths:
         - AdminSessionBearer: []
         - AdminKey: []
       summary: 列出部署托管与 Web 管理的 Provider
-      description: 返回 Key 是否已配置和掩码，不返回明文或密文；部署配置 Provider 为只读。
+      description: 返回 Key 是否已配置和掩码，不返回明文或密文；部署配置 Provider 支持接管为 Web 覆盖配置，或从 Gateway 运行时屏蔽。
       x-authentication-requirements:
         - valid admin web session
         - configured administrator credential
@@ -328,7 +328,7 @@ paths:
       - name: id
         in: path
         required: true
-        description: Web 管理的 Provider ID；部署托管项不可修改或删除
+        description: Provider ID；部署托管项可先通过 takeover 生成 Web 覆盖配置，也可删除并在 Gateway 运行时屏蔽；部署 YAML/.env 本身不会被修改
         schema:
           type: string
           minLength: 1
@@ -393,6 +393,52 @@ paths:
     $ref: "#/components/pathItems/ProviderDisable"
   /api/admin/providers/{id}/clear-key:
     $ref: "#/components/pathItems/ProviderClearKey"
+  /api/admin/providers/{id}/delete:
+    post:
+      operationId: postApiAdminProvidersIdDelete
+      tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      summary: 从 Gateway 运行时删除远程 Provider
+      description: 部署托管项通过持久化屏蔽标记删除，不会修改 YAML/.env；当前活动 Provider 不可删除，需先切换上游。
+      responses:
+        "200":
+          description: 操作完成并返回当前 Provider 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "409":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/providers/{id}/takeover:
+    post:
+      operationId: postApiAdminProvidersIdTakeover
+      tags: [Admin]
+      security:
+        - AdminSessionBearer: []
+        - AdminKey: []
+      summary: 将部署 Provider 接管为 Web 可编辑配置
+      description: 当前部署配置会被复制为 Web 覆盖项并持久化；已有 API Key 先加密保存，部署 YAML/.env 不会被修改。
+      responses:
+        "200":
+          description: 操作完成并返回当前 Provider 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
   /api/admin/providers/{id}/test:
     $ref: "#/components/pathItems/ProviderTest"
 

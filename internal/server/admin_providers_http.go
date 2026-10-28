@@ -46,6 +46,8 @@ type managedProvider struct {
 	APIKey string `json:"-"`
 	SourceConflict bool `json:"-"`
 	SecretUnavailable bool `json:"-"`
+	SourceOverride bool `json:"source_override,omitempty"`
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 type providerMutationRequest struct {
@@ -120,30 +122,124 @@ func (s *Server) initializeProviderEncryption() {
 	if err!=nil { applog.Printf("Provider key encryption unavailable: invalid key configuration") }
 }
 func (s *Server) encryptionAvailable() bool { return s!=nil && s.providerEncryptionKeyErr==nil && len(s.providerEncryptionKey)==32 }
+func (s *Server) deploymentProviderConfig(id string) (config.OpenAICompatibleProviderConfig, bool) {
+	if s == nil || s.cfg == nil {
+		return config.OpenAICompatibleProviderConfig{}, false
+	}
+	for _, item := range s.cfg.Providers.OpenAICompatible {
+		if strings.EqualFold(strings.TrimSpace(item.ID), strings.TrimSpace(id)) {
+			return item, true
+		}
+	}
+	return config.OpenAICompatibleProviderConfig{}, false
+}
+
 func (s *Server) deploymentProviderID(id string) bool {
-	if s==nil||s.cfg==nil{return false}
-	for _,item:=range s.cfg.Providers.OpenAICompatible {if strings.EqualFold(item.ID,id){return true}}
-	return false
+	_, ok := s.deploymentProviderConfig(id)
+	return ok
+}
+
+func managedProviderFromDeployment(item config.OpenAICompatibleProviderConfig) managedProvider {
+	return managedProvider{
+		ID: strings.ToLower(strings.TrimSpace(item.ID)), Enabled: item.Enabled,
+		BaseURL: item.BaseURL, APIKey: item.APIKey, APIKeyHeader: item.APIKeyHeader,
+		DefaultModel: item.DefaultModel, ModelMappings: cloneStringMap(item.ModelMappings),
+		AllowInsecureHTTP: item.AllowInsecureHTTP, AllowPrivateNetwork: item.AllowPrivateNetwork,
+		MaxResponseBytes: item.MaxResponseBytes, MaxConcurrentRequests: item.MaxConcurrentRequests,
+		MaxQueueSize: item.MaxQueueSize, QueueWaitTimeoutSeconds: item.QueueWaitTimeoutSeconds,
+		RequestsPerMinute: item.RequestsPerMinute, TokenBudgetPerDay: item.TokenBudgetPerDay,
+		RequestTimeoutSeconds: item.RequestTimeoutSeconds,
+	}
+}
+
+func providerNotRegistered(err error) bool {
+	return errors.Is(err, provider.ErrProviderNotFound)
 }
 
 func (s *Server) loadWebProviders(ctx context.Context) {
 	s.initializeProviderEncryption()
-	if s.webProviders==nil {s.webProviders=make(map[string]managedProvider)}
+	if s.webProviders == nil {
+		s.webProviders = make(map[string]managedProvider)
+	}
 	var rows []managedProvider
-	found,err:=s.settings.GetJSON(ctx,managedProviderSettingsKey,&rows)
-	if err!=nil {applog.Printf("load Web Provider settings failed: %v",err);return}
-	if !found{return}
-	seen:=make(map[string]bool)
-	for _,row:=range rows {
-		row.ID=strings.ToLower(strings.TrimSpace(row.ID))
-		if !managedProviderIDPattern.MatchString(row.ID)||seen[row.ID] {applog.Printf("ignore invalid or duplicate Web Provider record");continue}
-		seen[row.ID]=true; row.ModelMappings=cloneStringMap(row.ModelMappings)
-		if row.APIKeyCiphertext!="" {
-			plain,e:=decryptProviderAPIKey(s.providerEncryptionKey,row.APIKeyCiphertext)
-			if e!=nil {row.SecretUnavailable=true} else {row.APIKey=plain}
+	found, err := s.settings.GetJSON(ctx, managedProviderSettingsKey, &rows)
+	if err != nil {
+		applog.Printf("load Web Provider settings failed: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	seen := make(map[string]bool)
+	for _, row := range rows {
+		row.ID = strings.ToLower(strings.TrimSpace(row.ID))
+		if !managedProviderIDPattern.MatchString(row.ID) || seen[row.ID] {
+			applog.Printf("ignore invalid or duplicate Web Provider record")
+			continue
 		}
-		row.SourceConflict=s.deploymentProviderID(row.ID)
-		if row.SourceConflict {applog.Printf("Web Provider ID conflicts with deployment config; refusing override: id=%s",row.ID);s.webProviders[row.ID]=row;continue}
+		seen[row.ID] = true
+		row.ModelMappings = cloneStringMap(row.ModelMappings)
+		if row.APIKeyCiphertext != "" {
+			plain, decryptErr := decryptProviderAPIKey(s.providerEncryptionKey, row.APIKeyCiphertext)
+			if decryptErr != nil {
+				row.SecretUnavailable = true
+			} else {
+				row.APIKey = plain
+			}
+		}
+
+		deployment, isDeployment := s.deploymentProviderConfig(row.ID)
+		if row.Deleted {
+			if isDeployment && deployment.Enabled && s.providers != nil {
+				if err := s.providers.Unregister(row.ID); err != nil && !providerNotRegistered(err) {
+					applog.Printf("deleted deployment Provider could not be hidden at startup: id=%s", row.ID)
+				}
+			}
+			s.webProviders[row.ID] = row
+			continue
+		}
+		if isDeployment && row.SourceOverride {
+			row.SourceConflict = false
+			if row.Enabled && !row.SecretUnavailable {
+				remote, buildErr := s.buildRemoteProvider(row)
+				if buildErr != nil {
+					applog.Printf("stored Provider override failed validation: id=%s", row.ID)
+					row.SecretUnavailable = true
+				} else {
+					row.ConcurrencyLimiter = remote.ConcurrencyLimiter()
+					if s.providers == nil {
+						row.SourceConflict = true
+					} else {
+						var registerErr error
+						if deployment.Enabled {
+							registerErr = s.providers.Replace(row.ID, func() provider.Provider { return remote })
+							if registerErr != nil {
+								registerErr = s.providers.Register(row.ID, func() provider.Provider { return remote })
+							}
+						} else {
+							registerErr = s.providers.Register(row.ID, func() provider.Provider { return remote })
+						}
+						if registerErr != nil {
+							applog.Printf("stored Provider override registration failed: id=%s", row.ID)
+							row.SourceConflict = true
+						}
+					}
+				}
+			} else if deployment.Enabled && s.providers != nil {
+				if err := s.providers.Unregister(row.ID); err != nil && !providerNotRegistered(err) {
+					applog.Printf("disabled Provider override could not hide deployment Provider: id=%s", row.ID)
+				}
+			}
+			s.webProviders[row.ID] = row
+			continue
+		}
+
+		row.SourceConflict = isDeployment
+		if row.SourceConflict {
+			applog.Printf("Web Provider ID conflicts with deployment config; refusing override: id=%s", row.ID)
+			s.webProviders[row.ID] = row
+			continue
+		}
 		if row.Enabled && !row.SecretUnavailable {
 			remote, buildErr := s.buildRemoteProvider(row)
 			if buildErr != nil {
@@ -159,7 +255,7 @@ func (s *Server) loadWebProviders(ctx context.Context) {
 				}
 			}
 		}
-		s.webProviders[row.ID]=row
+		s.webProviders[row.ID] = row
 	}
 }
 
@@ -227,16 +323,39 @@ func (s *Server) safeProviderView(row managedProvider,source string,editable boo
 	return v
 }
 func (s *Server) listManagedProviderViews() []map[string]interface{} {
-	out:=make([]map[string]interface{},0)
-	if s!=nil&&s.cfg!=nil {
-		for _,r:=range s.cfg.Providers.OpenAICompatible {
-			row:=managedProvider{ID:r.ID,Enabled:r.Enabled,BaseURL:r.BaseURL,APIKey:r.APIKey,APIKeyHeader:r.APIKeyHeader,DefaultModel:r.DefaultModel,ModelMappings:cloneStringMap(r.ModelMappings),AllowInsecureHTTP:r.AllowInsecureHTTP,AllowPrivateNetwork:r.AllowPrivateNetwork,MaxResponseBytes:r.MaxResponseBytes,MaxConcurrentRequests:r.MaxConcurrentRequests,MaxQueueSize:r.MaxQueueSize,QueueWaitTimeoutSeconds:r.QueueWaitTimeoutSeconds,RequestsPerMinute:r.RequestsPerMinute,TokenBudgetPerDay:r.TokenBudgetPerDay,RequestTimeoutSeconds:r.RequestTimeoutSeconds}
-			out=append(out,s.safeProviderView(row,"deployment",false))
+	out := make([]map[string]interface{}, 0)
+	webRows := make(map[string]managedProvider)
+	if s != nil {
+		s.providerConfigMu.RLock()
+		for id, row := range s.webProviders {
+			webRows[id] = row
+		}
+		s.providerConfigMu.RUnlock()
+	}
+	if s != nil && s.cfg != nil {
+		for _, item := range s.cfg.Providers.OpenAICompatible {
+			id := strings.ToLower(strings.TrimSpace(item.ID))
+			if managed, ok := webRows[id]; ok && (managed.SourceOverride || managed.Deleted) {
+				continue
+			}
+			out = append(out, s.safeProviderView(managedProviderFromDeployment(item), "deployment", true))
 		}
 	}
-	s.providerConfigMu.RLock();rows:=make([]managedProvider,0,len(s.webProviders));for _,r:=range s.webProviders{rows=append(rows,r)};s.providerConfigMu.RUnlock()
-	sort.Slice(rows,func(i,j int)bool{return rows[i].ID<rows[j].ID})
-	for _,r:=range rows{out=append(out,s.safeProviderView(r,"web",!r.SourceConflict))}
+	rows := make([]managedProvider, 0, len(webRows))
+	for _, row := range webRows {
+		if row.Deleted {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	for _, row := range rows {
+		source := "web"
+		if row.SourceOverride && s.deploymentProviderID(row.ID) {
+			source = "web-override"
+		}
+		out = append(out, s.safeProviderView(row, source, !row.SourceConflict))
+	}
 	return out
 }
 
@@ -278,12 +397,25 @@ func (s *Server) adminProviderActionAPI(w http.ResponseWriter,r *http.Request) {
 		if err:=s.changeWebProvider(r.Context(),id,nil,"delete");err!=nil{writeProviderManagementError(w,err);return}
 		w.WriteHeader(http.StatusNoContent);return
 	}
-	if r.Method==http.MethodPost {
+	if r.Method == http.MethodPost {
 		switch action {
-		case "enable","disable","clear-key":
-			if err:=s.changeWebProvider(r.Context(),id,nil,action);err!=nil{writeProviderManagementError(w,err);return}
-			_=json.NewEncoder(w).Encode(map[string]interface{}{"data":s.listManagedProviderViewsWithRPMUsage(r.Context())});return
-		default:jsonError(w,404,"not_found","接口不存在");return
+		case "takeover":
+			if err := s.takeOverDeploymentProvider(r.Context(), id); err != nil {
+				writeProviderManagementError(w, err)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": s.listManagedProviderViewsWithRPMUsage(r.Context())})
+			return
+		case "enable", "disable", "clear-key", "delete":
+			if err := s.changeWebProvider(r.Context(), id, nil, action); err != nil {
+				writeProviderManagementError(w, err)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": s.listManagedProviderViewsWithRPMUsage(r.Context())})
+			return
+		default:
+			jsonError(w, 404, "not_found", "接口不存在")
+			return
 		}
 	}
 	jsonError(w,405,"method_not_allowed","请求方法不受支持")
@@ -362,14 +494,110 @@ func prepareProviderQueueLimit(action string, exists, enabled bool, limiter *pro
 	return current, false, false, nil
 }
 
-func (s *Server) changeWebProvider(ctx context.Context,id string,input *providerMutationRequest,action string)error {
-	id=strings.ToLower(strings.TrimSpace(id))
+func (s *Server) takeOverDeploymentProvider(ctx context.Context, id string) error {
+	id = strings.ToLower(strings.TrimSpace(id))
+	s.upstreamChangeMu.Lock()
+	defer s.upstreamChangeMu.Unlock()
+	s.providerConfigMu.Lock()
+	defer s.providerConfigMu.Unlock()
+
+	deployment, ok := s.deploymentProviderConfig(id)
+	if !ok {
+		return providerErr(404, "provider_not_found", "部署配置中的 Provider 不存在")
+	}
+	if current, exists := s.webProviders[id]; exists && current.SourceOverride && !current.Deleted {
+		return nil
+	}
+	row := managedProviderFromDeployment(deployment)
+	row.SourceOverride = true
+	row.SourceConflict = false
+	if row.APIKey != "" {
+		ciphertext, err := encryptProviderAPIKey(s.providerEncryptionKey, strings.TrimSpace(row.APIKey))
+		if err != nil {
+			return providerErr(503, "provider_encryption_unavailable", "无法安全接管该 Provider：请先配置有效的 Provider 密钥加密密钥")
+		}
+		row.APIKeyCiphertext = ciphertext
+	}
+	var runtimeProvider *provider.OpenAICompatibleProvider
+	if row.Enabled {
+		remote, err := s.buildRemoteProvider(row)
+		if err != nil {
+			return providerErr(400, "invalid_provider_config", "部署中的 Provider 配置当前无效，无法接管")
+		}
+		runtimeProvider = remote
+		row.ConcurrencyLimiter = remote.ConcurrencyLimiter()
+	}
+
+	previous := cloneManagedProviderMap(s.webProviders)
+	next := cloneManagedProviderMap(s.webProviders)
+	next[id] = row
+	if err := s.persistWebProviderMap(ctx, next); err != nil {
+		return providerErr(503, "provider_persistence_failed", "保存 Provider 接管配置失败，运行时配置未更新")
+	}
+	if s.providers == nil {
+		_ = s.persistWebProviderMap(ctx, previous)
+		return providerErr(503, "provider_registry_unavailable", "Provider 运行时注册表不可用")
+	}
+	var registryErr error
+	if row.Enabled {
+		if deployment.Enabled {
+			registryErr = s.providers.Replace(id, func() provider.Provider { return runtimeProvider })
+			if registryErr != nil {
+				registryErr = s.providers.Register(id, func() provider.Provider { return runtimeProvider })
+			}
+		} else {
+			registryErr = s.providers.Register(id, func() provider.Provider { return runtimeProvider })
+		}
+	} else if deployment.Enabled {
+		registryErr = s.providers.Unregister(id)
+		if providerNotRegistered(registryErr) {
+			registryErr = nil
+		}
+	}
+	if registryErr != nil {
+		_ = s.persistWebProviderMap(ctx, previous)
+		return providerErr(503, "provider_registry_update_failed", "接管 Provider 后更新运行时注册表失败，配置已回滚")
+	}
+	s.webProviders = next
+	return nil
+}
+
+func (s *Server) changeWebProvider(ctx context.Context, id string, input *providerMutationRequest, action string) error {
+	id = strings.ToLower(strings.TrimSpace(id))
 	// 与上游切换共用锁，避免检查非活动后又被并发切换为活动 Provider。
-	s.upstreamChangeMu.Lock();defer s.upstreamChangeMu.Unlock()
-	s.providerConfigMu.Lock();defer s.providerConfigMu.Unlock()
-	if s.deploymentProviderID(id){return providerErr(409,"provider_source_conflict","该 ID 由部署配置托管，Web 端只读且禁止覆盖")}
-	old,exists:=s.webProviders[id]
-	if !exists&&action!="save"{return providerErr(404,"provider_not_found","Web Provider 不存在")}
+	s.upstreamChangeMu.Lock()
+	defer s.upstreamChangeMu.Unlock()
+	s.providerConfigMu.Lock()
+	defer s.providerConfigMu.Unlock()
+
+	deployment, deploymentExists := s.deploymentProviderConfig(id)
+	old, exists := s.webProviders[id]
+	if deploymentExists && (!exists || !old.SourceOverride) {
+		if action != "delete" {
+			return providerErr(409, "provider_source_conflict", "该 Provider 由部署配置托管；请先点击“配置”接管后再修改")
+		}
+		active := strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
+		if active == id {
+			return providerErr(409, "active_provider", "请先切换到其他活动 Provider，再删除当前 Provider")
+		}
+		previous := cloneManagedProviderMap(s.webProviders)
+		next := cloneManagedProviderMap(s.webProviders)
+		next[id] = managedProvider{ID: id, Enabled: false, SourceOverride: true, Deleted: true}
+		if err := s.persistWebProviderMap(ctx, next); err != nil {
+			return providerErr(503, "provider_persistence_failed", "保存 Provider 删除状态失败，运行时配置未更新")
+		}
+		if deployment.Enabled && s.providers != nil {
+			if err := s.providers.Unregister(id); err != nil && !providerNotRegistered(err) {
+				_ = s.persistWebProviderMap(ctx, previous)
+				return providerErr(503, "provider_registry_update_failed", "移除 Provider 运行时注册失败，已尝试回滚配置")
+			}
+		}
+		s.webProviders = next
+		return nil
+	}
+	if !exists && action != "save" {
+		return providerErr(404, "provider_not_found", "Web Provider 不存在")
+	}
 	active:=strings.ToLower(strings.TrimSpace(s.effectiveUpstream().Backend))
 	if action=="save" && !exists && active==id { return providerErr(409,"provider_would_activate","当前上游配置仍指向该 ID；请先切换到其他后端，再创建同 ID Provider，避免新建即激活") }
 	requestedEnabled := input != nil && input.Enabled
@@ -378,7 +606,15 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 	}
 	previous:=cloneManagedProviderMap(s.webProviders);next:=cloneManagedProviderMap(s.webProviders);var row managedProvider
 	switch action {
-	case "delete":delete(next,id)
+	case "delete":
+		if deploymentExists && old.SourceOverride {
+			row = old
+			row.Enabled = false
+			row.Deleted = true
+			next[id] = row
+		} else {
+			delete(next, id)
+		}
 	case "disable":row=old;row.Enabled=false;next[id]=row
 	case "enable":row=old;row.Enabled=true;next[id]=row
 	case "clear-key":row=old;row.APIKey="";row.APIKeyCiphertext="";row.SecretUnavailable=false;next[id]=row
@@ -432,7 +668,7 @@ if blocksActiveProviderMutation(action, active, id, exists, requestedEnabled) {
 	var registryErr error
 	if s.providers==nil{registryErr=errors.New("Provider Registry unavailable")}else{
 		switch {
-		case action=="delete":if old.Enabled&&!old.SecretUnavailable{registryErr=s.providers.Unregister(id)}
+		case action=="delete":if old.Enabled&&!old.SecretUnavailable{registryErr=s.providers.Unregister(id);if providerNotRegistered(registryErr){registryErr=nil}}
 		case !row.Enabled:if exists&&old.Enabled&&!old.SecretUnavailable{registryErr=s.providers.Unregister(id)}
 		case exists&&old.Enabled&&!old.SecretUnavailable:registryErr=s.providers.Replace(id,func()provider.Provider{return runtimeProvider})
 		case row.Enabled:registryErr=s.providers.Register(id,func()provider.Provider{return runtimeProvider})
