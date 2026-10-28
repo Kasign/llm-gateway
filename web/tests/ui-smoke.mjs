@@ -449,6 +449,22 @@ try {
   const keyPickerBundle = fs.readFileSync(path.resolve('web/static/dist/key-service-picker.js'), 'utf8');
   const indexHtml = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
+  const modelDownloadCss = fs.readFileSync(path.resolve('web/static/css/model-download.css'), 'utf8');
+  // 静态 CSS 的主题变量必须有定义；跨模块引用允许显式 fallback。
+  const cssSources = [appCss, modelDownloadCss, providersSource];
+  const declaredThemeVariables = new Set(
+    cssSources.flatMap(source => [...source.matchAll(/--([a-z][\w-]*)\s*:/gi)].map(match => match[1]))
+  );
+  const unresolvedThemeVariables = [];
+  for (const source of cssSources) {
+    for (const match of source.matchAll(/var\(\s*--([a-z][\w-]*)([^)]*)\)/gi)) {
+      if (declaredThemeVariables.has(match[1]) || match[2].trimStart().startsWith(',')) continue;
+      unresolvedThemeVariables.push(match[1]);
+    }
+  }
+  check('静态样式引用的主题变量均已定义或提供 fallback',
+    unresolvedThemeVariables.length === 0,
+    [...new Set(unresolvedThemeVariables)]);
   // 从浏览器实际加载的 CSS 变量计算核心文字与主要深色表面的 WCAG 对比度。
   const textContrastAudit = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);
