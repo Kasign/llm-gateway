@@ -31,6 +31,8 @@ ROUTE_FAMILIES = {
         "/api/admin/providers/{id}/enable",
         "/api/admin/providers/{id}/disable",
         "/api/admin/providers/{id}/clear-key",
+        "/api/admin/providers/{id}/delete",
+        "/api/admin/providers/{id}/takeover",
         "/api/admin/providers/{id}/test",
     ),
     "/api/benchmark/": (
