@@ -167,6 +167,12 @@ input:focus,select:focus,textarea:focus{
   outline:none;border-color:rgba(99,102,241,.65);
   box-shadow:0 0 0 3px rgba(99,102,241,.18);
 }
+button:focus-visible,a[href]:focus-visible,input:not([type="hidden"]):focus-visible,
+select:focus-visible,textarea:focus-visible,summary:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible{
+  outline:2px solid var(--accent-2);
+  outline-offset:2px;
+}
 textarea{min-height:88px;resize:vertical}
 
 /* 统一常规表单控件尺寸，避免浏览器对 input 与 select 的默认行高差异。 */
