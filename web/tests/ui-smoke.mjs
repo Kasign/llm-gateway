@@ -10,6 +10,7 @@ fs.mkdirSync(artifactDir, { recursive: true });
 
 const report = {
   baseURL,
+  commitSHA: process.env.GITHUB_SHA || 'unknown',
   startedAt: new Date().toISOString(),
   checks: [],
   pageErrors: [],
