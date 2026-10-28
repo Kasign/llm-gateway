@@ -1109,10 +1109,10 @@
       'data-infer-backend="' + esc(backend) + '"',
       'data-infer-action="' + esc(action) + '"'
     ];
-    if (modelId) parts.push("data-model-id=" + JSON.stringify(modelId));
-    if (modelKey) parts.push("data-model-key=" + JSON.stringify(modelKey));
-    if (title) parts.push("data-infer-title=" + JSON.stringify(title));
-    if (confirmMsg) parts.push("data-confirm=" + JSON.stringify(confirmMsg));
+    if (modelId) parts.push('data-model-id="' + esc(modelId) + '"');
+    if (modelKey) parts.push('data-model-key="' + esc(modelKey) + '"');
+    if (title) parts.push('data-infer-title="' + esc(title) + '"');
+    if (confirmMsg) parts.push('data-confirm="' + esc(confirmMsg) + '"');
     const text = label || (action === "load" ? "\u52A0\u8F7D" : action === "unload" ? "\u5378\u8F7D" : action);
     return "<button " + parts.join(" ") + ">" + esc(text) + "</button>";
   }
@@ -1374,7 +1374,7 @@
           <td><div class="td-actions">
             ${inferButtonHtml("ollama", "load", { modelId: x.id, title: tLoad, label: loadLabel })}
             ${inferButtonHtml("ollama", "unload", { modelId: x.id, title: tUnload, confirmMsg: "\u4ECE\u5185\u5B58\u5378\u8F7D " + x.id + "\uFF1F", label: "\u5378\u8F7D", extraClass: "" })}
-            <button type="button" class="btn sm danger" data-model-delete="ollama" data-model-id=${JSON.stringify(x.id)}>\u5220\u9664</button>
+            <button type="button" class="btn sm danger" data-model-delete="ollama" data-model-id="${esc(x.id)}">\u5220\u9664</button>
           </div></td></tr>`;
       }).join(""));
     } catch (e) {
@@ -2068,7 +2068,7 @@
       const j = await api("/api/hf/files?repo=" + encodeURIComponent(repo) + "&revision=" + encodeURIComponent(rev));
       const fs = j.data || [];
       $("filesMsg").textContent = `${fs.length} \u4E2A GGUF`;
-      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" onclick='chooseFile(${JSON.stringify(f.path)},${JSON.stringify(repo)})'>\u9009\u62E9</button></td></tr>`).join(""));
+      $("filesBox").innerHTML = !fs.length ? emptyState("\u65E0\u6587\u4EF6") : wrapTable("<tr><th>\u6587\u4EF6</th><th>\u5927\u5C0F</th><th>SHA256</th><th></th></tr>" + fs.map((f) => `<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256 || "\u2014")}</td><td><button type="button" class="btn sm" onclick="${esc('chooseFile('+JSON.stringify(f.path)+','+JSON.stringify(repo)+')')}">\u9009\u62E9</button></td></tr>`).join(""));
     } catch (e) {
       $("filesMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
     }
@@ -2135,7 +2135,7 @@
         const canOperate = Boolean(routerMode && !modelHub.runtimeError && (rt?.registered || rt?.loaded));
         const loadButton = canOperate && rt?.registered && !rt.loaded && st !== "loading" ? inferButtonHtml("llamacpp", "load", { modelId, modelKey, title: "Llama \u6A21\u578B \xB7 \u52A0\u8F7D \xB7 " + (modelId || modelKey), label: "\u52A0\u8F7D" }) : "";
         const unloadButton = canOperate && rt.loaded ? inferButtonHtml("llamacpp", "unload", { modelId, modelKey, title: "Llama \u6A21\u578B \xB7 \u5378\u8F7D \xB7 " + (modelId || modelKey), confirmMsg: "\u4ECE llama.cpp \u5378\u8F7D " + (modelId || modelKey) + "\uFF1F", label: "\u5378\u8F7D" }) : "";
-        const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key=' + JSON.stringify(modelKey) + ">\u5220\u9664</button>" : rt?.disk_present && rt?.path ? '<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path=' + JSON.stringify(String(rt.path)) + ">\u5220\u9664</button>" : "";
+        const deleteButton = managed && modelKey ? '<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key="' + esc(modelKey) + '">\u5220\u9664</button>' : rt?.disk_present && rt?.path ? '<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path="' + esc(String(rt.path)) + '">\u5220\u9664</button>' : "";
         const defaultPill = rt?.active ? ' <span class="pill pill-active">Gateway \u9ED8\u8BA4</span>' : "";
         return "<tr><td>" + esc(name) + (x.quantization ? '<div class="small muted">' + esc(x.quantization) + "</div>" : "") + defaultPill + "</td><td>" + esc(llamaCatalogSourceLabel(rt, managed)) + "</td><td><code>" + esc(modelKey || modelId || "\u2014") + '</code></td><td class="tabular-nums">' + fmtSize(sizeBytes) + "</td><td>" + ggufLoadPill(st) + '</td><td><div class="td-actions">' + loadButton + unloadButton + deleteButton + "</div></td></tr>";
       }).join("")

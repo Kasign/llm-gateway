@@ -68,10 +68,10 @@ function inferButtonHtml(backend,action,{modelId='',modelKey='',title='',confirm
     'type="button"','class="'+cls.filter(Boolean).join(' ')+'"','data-infer=""',
     'data-infer-backend="'+esc(backend)+'"','data-infer-action="'+esc(action)+'"'
   ];
-  if(modelId)parts.push('data-model-id='+JSON.stringify(modelId));
-  if(modelKey)parts.push('data-model-key='+JSON.stringify(modelKey));
-  if(title)parts.push('data-infer-title='+JSON.stringify(title));
-  if(confirmMsg)parts.push('data-confirm='+JSON.stringify(confirmMsg));
+  if(modelId)parts.push('data-model-id="'+esc(modelId)+'"');
+  if(modelKey)parts.push('data-model-key="'+esc(modelKey)+'"');
+  if(title)parts.push('data-infer-title="'+esc(title)+'"');
+  if(confirmMsg)parts.push('data-confirm="'+esc(confirmMsg)+'"');
   const text=label||(action==='load'?'加载':action==='unload'?'卸载':action);
   return '<button '+parts.join(' ')+'>'+esc(text)+'</button>';
 }
@@ -439,7 +439,7 @@ async function loadOllamaLibrary(){
           <td><div class="td-actions">
             ${inferButtonHtml('ollama','load',{modelId:x.id,title:tLoad,label:loadLabel})}
             ${inferButtonHtml('ollama','unload',{modelId:x.id,title:tUnload,confirmMsg:'从内存卸载 '+x.id+'？',label:'卸载',extraClass:''})}
-            <button type="button" class="btn sm danger" data-model-delete="ollama" data-model-id=${JSON.stringify(x.id)}>删除</button>
+            <button type="button" class="btn sm danger" data-model-delete="ollama" data-model-id="${esc(x.id)}">删除</button>
           </div></td></tr>`;
       }).join(''));
   }catch(e){
@@ -1171,7 +1171,7 @@ async function listFiles(){
   try{
     const j=await api('/api/hf/files?repo='+encodeURIComponent(repo)+'&revision='+encodeURIComponent(rev));
     const fs=j.data||[];$('filesMsg').textContent=`${fs.length} 个 GGUF`;
-    $('filesBox').innerHTML=!fs.length?emptyState('无文件'):wrapTable('<tr><th>文件</th><th>大小</th><th>SHA256</th><th></th></tr>'+fs.map(f=>`<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256||'—')}</td><td><button type="button" class="btn sm" onclick='chooseFile(${JSON.stringify(f.path)},${JSON.stringify(repo)})'>选择</button></td></tr>`).join(''));
+    $('filesBox').innerHTML=!fs.length?emptyState('无文件'):wrapTable('<tr><th>文件</th><th>大小</th><th>SHA256</th><th></th></tr>'+fs.map(f=>`<tr><td>${esc(f.path)}</td><td>${fmtSize(f.size)}</td><td class="small">${esc(f.sha256||'—')}</td><td><button type="button" class="btn sm" onclick="${esc('chooseFile('+JSON.stringify(f.path)+','+JSON.stringify(repo)+')')}">选择</button></td></tr>`).join(''));
   }catch(e){$('filesMsg').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
 }
 function chooseFile(file,repo){
@@ -1241,9 +1241,9 @@ function renderGatewayModelTable(){
         ?inferButtonHtml('llamacpp','unload',{modelId,modelKey,title:'Llama 模型 · 卸载 · '+(modelId||modelKey),confirmMsg:'从 llama.cpp 卸载 '+(modelId||modelKey)+'？',label:'卸载'})
         :'';
       const deleteButton=managed&&modelKey
-        ?'<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key='+JSON.stringify(modelKey)+'>删除</button>'
+        ?'<button type="button" class="btn sm danger" data-model-delete="gguf" data-model-key="'+esc(modelKey)+'">删除</button>'
         :rt?.disk_present&&rt?.path
-          ?'<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path='+JSON.stringify(String(rt.path))+'>删除</button>'
+          ?'<button type="button" class="btn sm danger" data-model-delete="gguf-disk" data-model-path="'+esc(String(rt.path))+'">删除</button>'
           :'';
       const defaultPill=rt?.active?' <span class="pill pill-active">Gateway 默认</span>':'';
       return '<tr><td>'+esc(name)+(x.quantization?'<div class="small muted">'+esc(x.quantization)+'</div>':'')+defaultPill+'</td>'+
