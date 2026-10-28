@@ -480,3 +480,10 @@
 - 浏览器验收使用 GitHub Actions 隔离环境。Provider 列表在 CI 中不保证有真实配置，状态徽标断言验证公共样式规则与探针，不视为真实 Provider UI/网络端到端验收。
 - 当前没有开放 PR 或 Issue。代码级工作暂不继续扩大；待办优先级为：P1 生产 1Panel/OpenResty/llama.cpp 实际部署验收；P1 真实 Provider opt-in E2E；P2 管理台轮询性能基准；P2 按风险分批补齐 OpenAPI 字段级契约。
 - 生产验收需要实际部署权限、有效供应商凭据和慢模型环境；本次 CI 不会自动证明这些项目通过。自动重试/Provider 故障转移、Agent 级权限/多别名、全量目录迁移继续暂缓。
+
+
+## 2026-10-28 验收工具材料
+
+- 新增 `docs/production-acceptance-checklist.md`：1Panel/OpenResty/llama.cpp 生产验收步骤与结果模板。未实际运行的项目默认标记“未测”。
+- 新增 `docs/admin-polling-performance-plan.md`：无轮询/默认轮询/高频轮询对照设计，区分 Go 微基准与管理台端到端测量。
+- 真实 Provider E2E 已有 opt-in 测试：OpenAI-compatible Chat、Responses 与 Anthropic Messages；默认不访问网络。运行前需确认端点、模型、预算与用户授权，不能将默认跳过视为通过。

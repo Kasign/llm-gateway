@@ -1130,3 +1130,11 @@ RequestAnalysis 契约门禁曾在 Actions #247/#248 因脚本语法和变量初
 - 代码级 Review 和自动化回归已到可暂停扩展的状态。剩余工作按独立任务并行推进：①整理生产部署验收步骤与结果记录模板；②准备真实 Provider E2E 的 opt-in 验收矩阵；③设计管理台轮询性能基准采样方案；④OpenAPI 继续按实际使用接口分批补齐契约。前 3 项不应把未执行的真实环境检查标记为通过。
 - 生产部署、真实供应商调用与公网 OpenResty 行为需要可访问的用户环境和凭据；没有这些条件时只准备检查清单与安全执行方案，不宣称完成实测。
 - 自动重试/Provider 故障转移、Agent 级权限/多别名与全量目录迁移继续暂缓，除非出现明确需求或已复现缺陷。
+
+
+## 42. 生产验收与轮询性能执行材料
+
+- 新增 `docs/production-acceptance-checklist.md`，覆盖容器/配置、密码保护与会话、Provider、llama.cpp 模型发现/加载、公网 SSE、慢模型时限、审计与回滚，并提供逐项结果表。
+- 新增 `docs/admin-polling-performance-plan.md`，定义无轮询、默认轮询、高频轮询三组对照与多次采样指标；明确现有 Go 微基准不代表管理台轮询或数据库性能。
+- 已存在 opt-in 真实 Provider 测试：OpenAI-compatible Chat/Responses 与 Anthropic Messages。默认跳过网络请求，需在有授权和预算的环境手动启用；CI Mock 不代替真实上游验收。
+- 这些文档是验收准备，不代表已执行生产部署、真实供应商请求或性能采样。
