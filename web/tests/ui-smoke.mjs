@@ -541,6 +541,7 @@ try {
     keyPickerSource.includes('const epoch=++editEpoch;') &&
     keyPickerSource.includes('if(epoch!==editEpoch||!editModal.classList.contains(\'show\'))return;') &&
     keyPickerSource.includes('editEpoch+=1;') &&
+    keyPickerSource.includes('if(epoch===editEpoch&&button)button.disabled=false;') &&
     keyPickerSource.includes('showEditModal(button)'));
   check('调用记录有明确的加载中、失败重试与无障碍忙碌状态',
     requestsSource.includes('正在加载调用记录…') &&
