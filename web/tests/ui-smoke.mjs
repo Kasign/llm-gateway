@@ -401,6 +401,7 @@ try {
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
   const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
   const keyPickerSource = fs.readFileSync(path.resolve('web/js/key-service-picker.js'), 'utf8');
+  const keyPickerBundle = fs.readFileSync(path.resolve('web/static/dist/key-service-picker.js'), 'utf8');
   const indexHtml = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
   const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
@@ -447,7 +448,7 @@ try {
     appBundle.includes('detailTrigger = document.activeElement') &&
     appBundle.includes('event.key === "Escape"'));
   check('服务密钥编辑 Bundle 与源码一致，且具备 Escape、焦点返回和 Tab 循环',
-    providerBundle === fs.readFileSync(path.resolve('web/js/key-service-picker.js'), 'utf8') &&
+    keyPickerBundle === keyPickerSource &&
     keyPickerSource.includes('function restoreEditFocus()') &&
     keyPickerSource.includes("if(event.key==='Escape')") &&
     keyPickerSource.includes("event.shiftKey&&(active===first||!editModal.contains(active))") &&
