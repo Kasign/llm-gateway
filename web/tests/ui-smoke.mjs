@@ -365,6 +365,31 @@ try {
   const requestsSource = fs.readFileSync(path.resolve('web/js/features/requests.js'), 'utf8');
   const providersSource = fs.readFileSync(path.resolve('web/js/providers-entry.js'), 'utf8');
   const appCss = fs.readFileSync(path.resolve('web/static/css/app.css'), 'utf8');
+  const providerIdPattern = await page.locator('#providerId').getAttribute('pattern');
+  const providerIdPatternValid = await page.evaluate(pattern => {
+    try { new RegExp(pattern, 'v'); return true; }
+    catch (error) { return String(error); }
+  }, providerIdPattern);
+  check('Provider ID 正则兼容新版浏览器 v 模式',
+    providerIdPatternValid === true, providerIdPatternValid);
+  const providerIdSamples = await page.evaluate(() => {
+    const input = document.getElementById('providerId');
+    const results = {};
+    for (const value of ['openai', 'my-provider_1.test', 'a']) {
+      input.value = value;
+      results[value] = input.checkValidity();
+    }
+    for (const value of ['OpenAI', 'has space', 'bad/slash']) {
+      input.value = value;
+      results[value] = input.checkValidity();
+    }
+    return results;
+  });
+  check('Provider ID 正则仍接受小写字母数字及 . _ -，拒绝其他字符',
+    providerIdSamples.openai && providerIdSamples['my-provider_1.test'] && providerIdSamples.a &&
+    !providerIdSamples.OpenAI && !providerIdSamples['has space'] && !providerIdSamples['bad/slash'],
+    providerIdSamples);
+
   check('Provider 保存具备表单级重复提交锁和初始化防重入',
     providersSource.includes("form.dataset.saving === 'true'") &&
     providersSource.includes('globalThis.__llmGatewayProviderAdminInitialized'));
