@@ -314,6 +314,13 @@ func (s *Server) loadLlamaCppUpstreamWithClient(ctx context.Context, client *lla
 		if snapshotErr != nil {
 			return "", fmt.Errorf("load model via %s: /models/load 返回 not found，且无法确认当前已加载模型：%w", baseURL, snapshotErr)
 		}
+		// /v1/models 回退说明当前服务没有可用的 Router 状态目录；即使目标不匹配，也应更新模式缓存。
+		if cacheRouter && len(snapshot.Catalog) > 0 && snapshot.Catalog[0].Source == "upstream" {
+			s.mu.Lock()
+			no := false
+			s.llamaRouter = &no
+			s.mu.Unlock()
+		}
 		for _, loaded := range snapshot.Loaded {
 			matches := upstreamHint != "" && llama.ModelIDMatch(loaded.ID, upstreamHint)
 			if !matches && gw != nil {
@@ -321,13 +328,6 @@ func (s *Server) loadLlamaCppUpstreamWithClient(ctx context.Context, client *lla
 			}
 			if !matches {
 				continue
-			}
-			// 只有 RuntimeSnapshot 确实回退到单模型 /v1/models 清单时，才缓存为非 Router。
-			if cacheRouter && loaded.Source == "upstream" {
-				s.mu.Lock()
-				no := false
-				s.llamaRouter = &no
-				s.mu.Unlock()
 			}
 			applog.Infof("loadLlamaCpp: /models/load not found; verified requested model is already loaded as %q", loaded.ID)
 			return loaded.ID, nil
