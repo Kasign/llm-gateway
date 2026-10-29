@@ -3,6 +3,7 @@ package llama
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,5 +81,36 @@ func TestStreamProxyFlushesChunkBeforeObserver(t *testing.T) {
 	}
 	if writer.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", writer.status)
+	}
+}
+
+
+// TestStreamProxyStopsObservingAfterClientWriteFailure 验证客户端写入失败后不再处理该数据块。
+func TestStreamProxyStopsObservingAfterClientWriteFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: \"chunk\"\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	client := New(upstream.URL, 2*time.Second, "llamacpp", "")
+	request, err := http.NewRequest(http.MethodPost, "http://gateway.test/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("client disconnected")
+	observed := false
+	err = client.StreamProxy(context.Background(), &streamFlushWriter{}, request, "/v1/chat/completions",
+		bytes.NewReader([]byte("{}")), func([]byte) { observed = true }, nil,
+		func([]byte) error { return writeErr }, nil)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("StreamProxy error = %v, want client write error", err)
+	}
+	if observed {
+		t.Fatal("onChunk must not run after the client write failed")
 	}
 }
