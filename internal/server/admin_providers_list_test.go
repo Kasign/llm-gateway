@@ -1,9 +1,18 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/whl/llm-gateway/internal/adminuser"
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/ratelimit"
 )
 
 func TestListManagedProviderViewsDoesNotDuplicateDeploymentAndWebRecords(t *testing.T) {
@@ -67,5 +76,80 @@ func TestListManagedProviderViewsDoesNotDuplicateDeploymentAndWebRecords(t *test
 				t.Fatalf("Provider default_model = %#v, want %q", got, tc.wantModel)
 			}
 		})
+	}
+}
+
+
+func TestAdminProvidersAPIGetDeduplicatesConflictingDeploymentProvider(t *testing.T) {
+	addr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
+	if addr == "" {
+		t.Skip("REDIS_TEST_ADDR not set; HTTP handler test requires Redis")
+	}
+
+	limiter := ratelimit.New(addr, "", 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := limiter.Ping(ctx); err != nil {
+		_ = limiter.Close()
+		t.Fatalf("ping test Redis: %v", err)
+	}
+	defer limiter.Close()
+
+	token, err := adminuser.NewSessionToken()
+	if err != nil {
+		t.Fatalf("create admin session token: %v", err)
+	}
+	if err := limiter.SetSession(ctx, token, webAdminIdentity, 1, time.Minute); err != nil {
+		t.Fatalf("save admin test session: %v", err)
+	}
+	t.Cleanup(func() { _ = limiter.DeleteSession(context.Background(), token) })
+
+	cfg := &config.Config{}
+	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1",
+		APIKeyHeader: "authorization", APIKey: "deployment-secret", DefaultModel: "deepseek-chat",
+	}}
+	s := &Server{
+		cfg:     cfg,
+		limiter: limiter,
+		webLogin: webLoginSnapshot{
+			Username: webAdminIdentity,
+			Revision: 1,
+		},
+		webProviders: map[string]managedProvider{
+			"deepseek": {
+				ID: "deepseek", Enabled: true, BaseURL: "https://legacy.example/v1",
+				APIKey: "legacy-secret", DefaultModel: "legacy-model", SourceConflict: true,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	s.adminProvidersAPI(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /api/admin/providers status = %d, want %d; body=%s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var payload struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode provider response: %v; body=%s", err, response.Body.String())
+	}
+	if len(payload.Data) != 1 {
+		t.Fatalf("GET /api/admin/providers returned %d rows, want exactly 1: %#v", len(payload.Data), payload.Data)
+	}
+	row := payload.Data[0]
+	if row["id"] != "deepseek" || row["source"] != "deployment" || row["default_model"] != "deepseek-chat" {
+		t.Fatalf("GET /api/admin/providers returned unexpected surviving row: %#v", row)
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "deployment-secret") || strings.Contains(body, "legacy-secret") {
+		t.Fatalf("Provider API response leaked an API key: %s", body)
+	}
+	if row["api_key_configured"] != true || row["api_key_masked"] != "••••••••" {
+		t.Fatalf("Provider API response should show only masked key status: %#v", row)
 	}
 }
