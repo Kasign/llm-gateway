@@ -215,7 +215,7 @@ func TestAuthCredentialsPutRejectsInvalidPasswordChanges(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if !strings.Contains(rec.Body.String(), `"code":"`+tt.wantCode+`"`) {
+			if !strings.Contains(rec.Body.String(), `"type":"`+tt.wantCode+`"`) {
 				t.Fatalf("error code missing; want %q, body=%s", tt.wantCode, rec.Body.String())
 			}
 		})
