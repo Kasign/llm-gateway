@@ -111,7 +111,7 @@ def admin_api_key_scope_errors(source: str, auth_handler: str) -> list[str]:
                         item_body[method_match.end():method_end],
                     )
     key_scope_function = go_function(auth_handler, "func adminAPIKeyAllowedForPath(")
-    key_scope_function = re.sub(r"(?m)^\\s*//.*$", "", key_scope_function)
+    key_scope_function = re.sub(r"(?m)^\s*//.*$", "", key_scope_function)
     compact_scope = " ".join(key_scope_function.split())
     expected_scope = 'func adminAPIKeyAllowedForPath(path string) bool { return path == "/api/admin/keys" || strings.HasPrefix(path, "/api/admin/keys/") }'
     if compact_scope != expected_scope:
