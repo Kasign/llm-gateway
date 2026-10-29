@@ -14,6 +14,7 @@ import (
 
 const minPasswordRunes = 8
 const pbkdf2Iterations = 120_000
+const maxPBKDF2Iterations = 1_000_000
 
 var ErrWeakPassword = errors.New("password must be at least 8 characters")
 
@@ -51,15 +52,15 @@ func CheckPassword(stored, plain string) bool {
 		return false
 	}
 	iter, err := strconv.Atoi(parts[1])
-	if err != nil || iter <= 0 {
+	if err != nil || iter <= 0 || iter > maxPBKDF2Iterations {
 		return false
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil {
+	if err != nil || len(salt) != 16 {
 		return false
 	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[3])
-	if err != nil {
+	if err != nil || len(want) != 32 {
 		return false
 	}
 	got := pbkdf2Key([]byte(plain), salt, iter, len(want))

@@ -61,3 +61,21 @@ func TestWebLoginConfiguredRejectsMalformedHash(t *testing.T) {
 		t.Fatal("empty username must not be considered configured")
 	}
 }
+
+func TestCheckPasswordRejectsMalformedOrExpensiveHashes(t *testing.T) {
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{name: "空摘要不得匹配任意密码", hash: "pbkdf2:120000:NPQtPMgg+xqbAp04ObNRnA:"},
+		{name: "超大迭代次数必须拒绝", hash: "pbkdf2:999999999:NPQtPMgg+xqbAp04ObNRnA:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ"},
+		{name: "盐值长度错误必须拒绝", hash: "pbkdf2:120000:YQ:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if CheckPassword(tt.hash, "any-password") {
+				t.Fatal("malformed hash must never match")
+			}
+		})
+	}
+}

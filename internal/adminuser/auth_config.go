@@ -56,11 +56,11 @@ func WebLoginConfigured(username, passwordHash string) bool {
 		return false
 	}
 	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations <= 0 {
+	if err != nil || iterations <= 0 || iterations > maxPBKDF2Iterations {
 		return false
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil || len(salt) == 0 {
+	if err != nil || len(salt) != 16 {
 		return false
 	}
 	digest, err := base64.RawStdEncoding.DecodeString(parts[3])
