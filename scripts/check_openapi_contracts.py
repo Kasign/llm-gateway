@@ -68,6 +68,11 @@ def admin_api_key_scope_errors(source: str, auth_handler: str) -> list[str]:
 
     def check_operation(path: str, method: str, body: str) -> None:
         key_allowed = path == "/api/admin/keys" or path.startswith("/api/admin/keys/")
+        public_auth_paths = {"/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+        if path.startswith("/api/") and path not in public_auth_paths and "AdminSessionBearer: []" not in body:
+            errors.append(
+                f"{method.upper()} {path} must declare AdminSessionBearer; only auth status/login/logout are public"
+            )
         if not key_allowed and re.search(r"(?m)^\s*-\s*AdminKey:\s*\[\s*\]\s*$", body):
             errors.append(
                 f"{method.upper()} {path} must not advertise AdminKey; the deployment Admin API Key is scoped to /api/admin/keys*"
