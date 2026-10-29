@@ -132,8 +132,6 @@ func (s *Server) availableBackends() []map[string]interface{} {
 	}
 	out[0]["base_url"] = s.baseURLForBackend("llamacpp")
 	out[1]["base_url"] = s.baseURLForBackend("ollama")
-	out[0]["source"], out[0]["editable"] = "deployment", false
-	out[1]["source"], out[1]["editable"] = "deployment", false
 	s.providerConfigMu.RLock()
 	rows := make([]managedProvider, 0, len(s.webProviders))
 	for _, row := range s.webProviders {
@@ -150,7 +148,6 @@ func (s *Server) availableBackends() []map[string]interface{} {
 			"default_model": row.DefaultModel, "requests_per_minute": row.RequestsPerMinute,
 			"token_budget_per_day": row.TokenBudgetPerDay,
 			"api_key_configured": row.APIKey != "" || row.APIKeyCiphertext != "",
-			"source": "web", "editable": true,
 		})
 	}
 	return out

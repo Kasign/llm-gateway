@@ -159,6 +159,18 @@ def validate(
                     "all remote Providers are Web-managed"
                 )
 
+        backend_result = schema_block(source, "BackendSwitchResult")
+        try:
+            available_backend_fields = schema_field_block(backend_result, "available_backends")
+        except ValueError as exc:
+            errors.append(f"BackendSwitchResult: {exc}")
+        else:
+            for obsolete_field in ("source", "editable", "source_conflict", "source_override", "deleted"):
+                if re.search(rf"(?m)^\s+{re.escape(obsolete_field)}:", available_backend_fields):
+                    errors.append(
+                        f"BackendSwitchResult.available_backends still exposes obsolete field {obsolete_field!r}"
+                    )
+
         bounds = {
             "max_concurrent_requests": ("minimum: 0", "maximum: 64", "default: 64"),
             "max_queue_size": ("minimum: 0", "maximum: 1024", "default: 0"),

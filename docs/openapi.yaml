@@ -3068,14 +3068,12 @@ components:
           type: array
           items:
             type: object
-            required: [id, label, kind, base_url, source, editable]
+            required: [id, label, kind, base_url]
             properties:
               id: { type: string }
               label: { type: string }
               kind: { type: string, enum: [local, remote] }
               base_url: { type: string }
-              source: { type: string, enum: [deployment, web] }
-              editable: { type: boolean }
               default_model: { type: string }
               requests_per_minute: { type: integer, minimum: 0 }
               api_key_configured: { type: boolean }

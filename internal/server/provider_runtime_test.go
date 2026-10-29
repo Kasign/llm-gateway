@@ -46,6 +46,13 @@ func TestRemoteProviderRuntimeResolutionUsesConfiguredURLAndDefaultModel(t *test
 			}
 		}
 	}
+	for _, backend := range backends {
+		for _, obsolete := range []string{"source", "editable", "source_conflict", "source_override", "deleted"} {
+			if _, exists := backend[obsolete]; exists {
+				t.Fatalf("available backend %q still exposes obsolete field %q: %#v", backend["id"], obsolete, backend)
+			}
+		}
+	}
 	if !found {
 		t.Fatalf("remote provider absent from available backends: %#v", backends)
 	}
