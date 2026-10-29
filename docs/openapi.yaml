@@ -8,8 +8,8 @@ info:
     Web Provider、模型生命周期、下载任务、后端切换、推理参数与初始化快照等主要接口。
     仍标记为 partial：动态推理参数、运行时/上游透传对象按可扩展字段描述。CI 会核对
     Go 路由注册表与 paths 路径集合，但不会自动逐个比较 Handler 的 JSON 字段 Schema。
-    管理操作需要管理员网页登录态或部署管理员凭据；
-    推理请求使用调用方 Gateway API Key。
+    除公开登录/状态接口外，控制台管理操作需要有效 Web Session；部署管理员 API Key 仅授权 /api/admin/keys 及其子路径，不能代替网页登录。
+    推理请求使用调用方 Gateway API Key；Provider 上游密钥仅用于对应上游请求。
   x-contract-status: partial
 servers:
   - url: /
