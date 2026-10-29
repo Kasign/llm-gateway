@@ -41,7 +41,6 @@ jobs:
       - name: 验证根目录 Docker Compose 配置
         run: |
           cp .env.example .env
-          cp providers.env.example providers.env
           docker compose config -q
 
       - name: 配置 Node.js

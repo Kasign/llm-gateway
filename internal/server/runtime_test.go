@@ -23,10 +23,12 @@ func TestLocalRuntimeBackendRejectsRemoteProvider(t *testing.T) {
 
 func TestBuildAdminRuntimeOverviewRemoteDoesNotExposeLocalModelState(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat",
-	}}
-	s := &Server{cfg: cfg, upstream: settings.Upstream{
+	s := &Server{
+		cfg: cfg,
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+		},
+		upstream: settings.Upstream{
 		Backend: "deepseek", BaseURL: "https://api.deepseek.com/v1", ModelName: "deepseek-chat",
 	}}
 	got, err := s.buildAdminRuntimeOverview(context.Background())

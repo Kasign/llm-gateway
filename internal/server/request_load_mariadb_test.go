@@ -244,12 +244,14 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 	loggingDisabled := false
 	cfg.Logging.Enabled = &loggingDisabled
 	var injectedProviders *gatewayprovider.Registry
+	webProviderRows := make(map[string]managedProvider)
 	if dnsFailureTest {
 		for _, tc := range dnsFailureCases {
-			cfg.Providers.OpenAICompatible = append(cfg.Providers.OpenAICompatible, config.OpenAICompatibleProviderConfig{
+			webProviderRows[tc.providerID] = managedProvider{
 				ID: tc.providerID, Enabled: true, BaseURL: "https://provider.example/v1",
 				DefaultModel: "integration-model", APIKey: "private-provider-secret", APIKeyHeader: "api-key",
-			})
+				AllowPrivateNetwork: true,
+			}
 			cfg.Agents = append(cfg.Agents, config.AgentRouteConfig{
 				ID: tc.providerID + "-agent", Enabled: true, PathPrefix: tc.pathPrefix,
 				ProviderID: tc.providerID, DefaultModel: "integration-model",
@@ -272,11 +274,11 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 			}
 		}
 	} else {
-		cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
+		webProviderRows["loadtest"] = managedProvider{
 			ID: "loadtest", Enabled: true, BaseURL: upstream.URL + "/v1",
 			DefaultModel: "integration-model", APIKey: "test-upstream-key",
 			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
-		}}
+		}
 		cfg.Agents = []config.AgentRouteConfig{{
 			ID: "loadtest-agent", Enabled: true, PathPrefix: "/loadtest",
 			ProviderID: "loadtest", DefaultModel: "integration-model",
@@ -288,7 +290,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		cfg: cfg, db: db, keys: keyRepo, models: model.NewRepo(db),
 		logs: logRepo, audit: audit.NewWriter(logRepo, 16384), settings: settings.NewRepo(db),
 		limiter: limiter, live: live.NewRegistry(), runs: newRunCancels(),
-		providers: injectedProviders, localClients: make(map[string]localClientEntry),
+		providers: injectedProviders, webProviders: webProviderRows, localClients: make(map[string]localClientEntry),
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 		fileUpstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 	}
