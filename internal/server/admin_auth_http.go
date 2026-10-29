@@ -119,16 +119,12 @@ func (s *Server) authLoginAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if snap.PasswordEnabled {
-		if !adminuser.WebLoginConfigured(cfgUser, snap.PasswordHash) {
-			jsonError(w, 503, "login_not_configured", "密码保护已启用，但未配置有效密码")
-			return
-		}
-		if !adminuser.CheckPassword(snap.PasswordHash, in.Password) {
+	if status, code, message := validateWebLoginPassword(snap, in.Password); status != 0 {
+		if status == http.StatusUnauthorized {
 			applog.Printf("admin login failed: password mismatch from=%s", ip)
-			jsonError(w, 401, "invalid_credentials", "密码错误")
-			return
 		}
+		jsonError(w, status, code, message)
+		return
 	}
 
 	token, err := adminuser.NewSessionToken()
@@ -288,3 +284,18 @@ func (s *Server) authCredentialsPut(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+
+// validateWebLoginPassword 集中定义 Web 密码保护的失败关闭规则，供登录处理和回归测试共用。
+func validateWebLoginPassword(snap webLoginSnapshot, password string) (status int, code, message string) {
+	if !snap.PasswordEnabled {
+		return 0, "", ""
+	}
+	if !adminuser.WebLoginConfigured(snap.Username, snap.PasswordHash) {
+		return http.StatusServiceUnavailable, "login_not_configured", "密码保护已启用，但未配置有效密码"
+	}
+	if !adminuser.CheckPassword(snap.PasswordHash, password) {
+		return http.StatusUnauthorized, "invalid_credentials", "密码错误"
+	}
+	return 0, "", ""
+}
