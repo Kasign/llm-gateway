@@ -232,7 +232,6 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 查询请求、延迟和 Token 来源聚合统计
       description: |
         仅管理员可访问。range 仅接受 24h、7d、30d；窗口按 started_at 使用 [from,to) 计算。
@@ -240,7 +239,6 @@ paths:
         Tokens 区分上游 usage、llama.cpp timings 与来源未知；该来源分类不等同于费用核算。
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       parameters:
         - name: range
           in: query
@@ -276,12 +274,10 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 列出 Web 管理的远程 Provider
       description: 仅返回 Web 管理台保存的远程 Provider；API 只返回 Key 是否已配置和通用掩码，不返回明文或密文。
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       responses:
         "200":
           description: Provider 目录与密钥加密能力
@@ -296,12 +292,10 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 创建 Web 管理的 Provider
       description: API Key 仅接受写入；响应不会回显密钥。Provider ID 去除首尾空格并按小写规范化后全局唯一；若该 ID 已存在（大小写不敏感），返回 409 provider_id_exists，原配置不会被覆盖。
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       requestBody:
         required: true
         content:
@@ -338,12 +332,10 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 更新 Web 管理的 Provider
       description: 编辑时 api_key 留空表示保留既有 Key；清除 Key 必须使用单独的 clear-key 操作。
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       requestBody:
         required: true
         content:
@@ -370,12 +362,10 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 删除 Web 管理的 Provider
       description: 当前活动 Provider 不可删除；必须先切换活动上游。
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       responses:
         "204":
           description: Provider 已删除；响应正文为空。
@@ -399,7 +389,6 @@ paths:
       tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       summary: 删除 Web 管理的远程 Provider
       description: 直接删除该 Provider 的持久化配置并从运行时 Registry 移除；当前活动 Provider 不可删除，需先切换上游。
       responses:
@@ -657,7 +646,6 @@ paths:
       summary: 查询控制台登录配置概要
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 当前用户名及配置存储位置概要
@@ -706,7 +694,6 @@ paths:
       summary: 列出 Gateway 管理的模型元数据
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 模型元数据列表
@@ -732,7 +719,6 @@ paths:
       description: 此接口只读取进程内审计队列快照，不查询数据库，不返回请求正文或凭据。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 审计队列统计快照
@@ -757,7 +743,6 @@ paths:
       description: 返回静态保留配置、当前进程计数、最近一次清理结果和稳定失败代码；不查询数据库、不暴露原始数据库错误，进程重启后计数归零。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 保留策略运行状态
@@ -786,7 +771,6 @@ paths:
       description: 列表合并数据库历史记录与当前 Gateway 进程的实时请求；provider 按规范化 Provider ID 完整匹配。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       parameters:
         - name: limit
           in: query
@@ -833,7 +817,6 @@ paths:
       description: 危险操作，会清除请求历史记录与实时看板记录。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 已删除记录数量
@@ -863,7 +846,6 @@ paths:
       description: 详情可能包含已保存的 prompt、请求/响应正文、请求头和 SSE 事件；这些字段受 logging.store_payload 等配置影响，应仅对可信管理员开放。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 请求详情、时序和诊断信息
@@ -894,10 +876,8 @@ paths:
       description: 取消在途 Run；若进程内任务已不存在，会尝试将遗留的 running 审计记录收口。请求已开始收尾或已经结束时返回 409。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       x-authentication-requirements:
         - valid admin web session
-        - configured administrator credential
       responses:
         "200":
           description: 已发出取消信号，或成功收口遗留记录
@@ -931,7 +911,6 @@ paths:
       description: 本地后端返回已加载模型和目录；远程 Provider 不会伪装成本地运行时模型。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 运行时快照；字段依活动后端变化
@@ -953,7 +932,6 @@ paths:
         多分片 GGUF 会一并删除全部分片；当前 Gateway 默认路由目标不可直接删除。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       requestBody:
         required: true
         content:
@@ -1000,7 +978,6 @@ paths:
       description: Router 模式下重新扫描注册目录并清除运行时缓存；单模型模式只查询当前模型，不虚报动态加载能力。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 模型目录刷新完成
@@ -1030,7 +1007,6 @@ paths:
           schema: { type: string, enum: [llamacpp, ollama] }
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 本地运行时预览
@@ -1052,7 +1028,6 @@ paths:
       description: 只支持本地 llama.cpp/Ollama 后端；model_id 或 model_key 至少提供一个。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       requestBody:
         required: true
         content:
@@ -1079,7 +1054,6 @@ paths:
       summary: 卸载当前本地模型
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       requestBody:
         required: true
         content:
@@ -1108,7 +1082,6 @@ paths:
       description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       requestBody:
         required: true
         content:
@@ -1140,7 +1113,6 @@ paths:
       summary: 查询 Benchmark 任务状态和输出
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: Benchmark 任务与流式输出快照
@@ -1158,7 +1130,6 @@ paths:
       summary: 请求停止 Benchmark 任务
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
       responses:
         "200":
           description: 停止信号状态
@@ -1287,8 +1258,7 @@ paths:
       description: 只返回文件路径、大小和 SHA-256，不会开始下载；仓库名必填，revision 默认 main。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: repo
           in: query
@@ -1319,8 +1289,7 @@ paths:
       description: q 优先；未提供时兼容 search。此接口只发现模型，不会触发下载。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: q
           in: query
@@ -1362,8 +1331,7 @@ paths:
       description: 请求成功后立即返回 downloading；实际下载在后台执行，通过 GET /api/downloads 查询进度。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1402,8 +1370,7 @@ paths:
       description: 兼容管理接口；对于日常加载/卸载，优先使用 /api/admin/model-ops。响应透传上游 JSON。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 上游返回的刷新结果
@@ -1429,8 +1396,7 @@ paths:
       description: 会尝试卸载上游模型，并删除 Gateway 模型文件及数据库记录；这是破坏性操作。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "204":
           description: 删除成功；响应正文为空。
@@ -1460,8 +1426,7 @@ paths:
       description: load/unload 只影响上游内存；cancel/retry 用于下载任务。新管理调用优先使用 /api/admin/model-ops。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 操作执行成功。
@@ -1486,8 +1451,7 @@ paths:
       description: 合并 HF 下载与 Ollama Pull 状态；进度来源包含 Gateway 数据库和 Redis。完成任务按服务端保留策略显示。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 当前应展示的下载任务列表
@@ -1507,8 +1471,7 @@ paths:
       description: 不能清理仍处于 downloading 的任务。all_failed=true 忽略 model_key，并清理所有可清理的失败/取消项。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1536,8 +1499,7 @@ paths:
       description: 返回活动后端、依赖可达性、模型计数与主机资源；主机指标是最近缓存快照，不应视为实时性能采样。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 完整管理台初始化快照
@@ -1555,8 +1517,7 @@ paths:
       description: 只返回依赖可达性、推理概览与主机指标；不返回完整活动后端/URL 清单。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 轻量初始化快照
@@ -1574,8 +1535,7 @@ paths:
       description: refresh=1 或 probe=1 会刷新可达性探测缓存。远程 Provider 显示为已配置，不代表已经完成真实推理连通性验证。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: refresh
           in: query
@@ -1601,8 +1561,7 @@ paths:
       description: backend 接受 llamacpp、ollama 或已配置的远程 Provider ID。model_id 为空时兼容使用 model_name；切换可能触发上游模型加载。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1630,8 +1589,7 @@ paths:
       description: 只支持当前活动后端为 llama.cpp 或 Ollama 的情况；不删除磁盘模型，远程 Provider 返回 unsupported_operation。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 卸载完成
@@ -1656,8 +1614,7 @@ paths:
       description: 返回活动本地后端的上游模型列表；远程 Provider 返回当前配置模型的兼容列表，不会调用供应商模型目录 API。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 上游模型列表
@@ -1676,8 +1633,7 @@ paths:
       summary: 搜索模型目录（Hugging Face 或 Ollama Library）
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: q
           in: query
@@ -1718,8 +1674,7 @@ paths:
       summary: 查询 Ollama Library 中某模型的 tags
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: model
           in: query
@@ -1746,8 +1701,7 @@ paths:
       description: 字段随 Gateway 支持的后端和推理参数实现演进；客户端应按此接口动态渲染，不要硬编码全部字段。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 参数字段、分组标题和分组说明
@@ -1765,8 +1719,7 @@ paths:
       description: backend 支持 llamacpp 或 ollama，缺省为 llamacpp。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       parameters:
         - name: backend
           in: query
@@ -1789,8 +1742,7 @@ paths:
       summary: 保存指定后端的推理参数和可选参数策略
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1820,8 +1772,7 @@ paths:
       summary: 将指定后端推理参数恢复为部署默认值
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1852,8 +1803,7 @@ paths:
       summary: 查询 Gateway 本地 GGUF 与 Ollama 模型目录
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: 本地模型与 Ollama tag 清单
@@ -1873,8 +1823,7 @@ paths:
       description: 需要部署时配置 OLLAMA_BASE_URL；模型本地列表与加载状态来自 Ollama API。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       responses:
         "200":
           description: Ollama 模型目录与加载状态
@@ -1896,8 +1845,7 @@ paths:
       description: 返回 job_id 后通过 GET /api/downloads 查询进度；本接口不会等待整个模型下载完毕。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1924,8 +1872,7 @@ paths:
       summary: 取消 Ollama Pull 任务
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1954,8 +1901,7 @@ paths:
       description: 只改变运行时内存状态，不删除模型文件。新调用优先使用 /api/admin/model-ops。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -1983,8 +1929,7 @@ paths:
       description: 只释放运行时内存；要从磁盘移除模型请使用 delete。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -2012,8 +1957,7 @@ paths:
       description: 从 Ollama 存储中移除模型；与仅释放内存的 unload 不同。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -2039,8 +1983,7 @@ paths:
       description: action 支持 list/load/unload；load/unload 时需要 model_id 或 model_key。操作日志与业务成功标记放在 JSON 返回值中；上游操作失败可能返回 HTTP 200 且 success=false。
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
-      x-authentication-requirements: [valid admin web session, configured administrator credential]
+      x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
         content:
@@ -2078,7 +2021,7 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Key
-      description: 部署配置的管理员凭据，供管理 API 自动化调用；不是调用方推理 Key。
+      description: 部署配置的管理员凭据，仅用于 /api/admin/keys 及其子路径的服务密钥管理；其他控制台管理 API 必须使用 Web Session。
   parameters:
     AgentPrefix:
       name: agentPrefix
@@ -2143,11 +2086,9 @@ components:
         tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
         summary: 启用 Web Provider
         x-authentication-requirements:
           - valid admin web session
-          - configured administrator credential
         responses:
           "200":
             description: 返回最新 Provider 列表
@@ -2168,12 +2109,10 @@ components:
         tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
         summary: 停用 Web Provider
         description: 当前活动 Provider 不可停用。
         x-authentication-requirements:
           - valid admin web session
-          - configured administrator credential
         responses:
           "200":
             description: 返回最新 Provider 列表
@@ -2194,12 +2133,10 @@ components:
         tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
         summary: 显式清除 Web Provider 的 API Key
         description: 当前活动 Provider 不可清除 Key；调用前应先切换活动 Provider。
         x-authentication-requirements:
           - valid admin web session
-          - configured administrator credential
         responses:
           "200":
             description: 返回最新 Provider 列表
@@ -2220,12 +2157,10 @@ components:
         tags: [Admin]
       security:
         - AdminSessionBearer: []
-        - AdminKey: []
         summary: 测试 Provider 连接
         description: 使用模型列表端点进行轻量测试，不发起计费推理；结果应为脱敏诊断信息。
         x-authentication-requirements:
           - valid admin web session
-          - configured administrator credential
         responses:
           "200":
             description: 连接测试结果；业务失败也可能在结果字段中报告

@@ -61,6 +61,58 @@ def path_block(source: str, path: str) -> str:
     return tail[:next_path.start()] if next_path else tail
 
 
+def admin_api_key_scope_errors(source: str) -> list[str]:
+    """Ensure the deployment Admin API Key is advertised only for service-key management."""
+    errors: list[str] = []
+    paths_section = source.split("\ncomponents:", 1)[0]
+
+    def check_operation(path: str, method: str, body: str) -> None:
+        key_allowed = path == "/api/admin/keys" or path.startswith("/api/admin/keys/")
+        if not key_allowed and re.search(r"(?m)^\s*-\s*AdminKey:\s*\[\s*\]\s*$", body):
+            errors.append(
+                f"{method.upper()} {path} must not advertise AdminKey; the deployment Admin API Key is scoped to /api/admin/keys*"
+            )
+        if not key_allowed and "configured administrator credential" in body:
+            errors.append(
+                f"{method.upper()} {path} must require a valid admin web session, not the deployment Admin API Key"
+            )
+
+    path_matches = list(re.finditer(r"(?m)^  (/[^:\n]+):[ \t]*$", paths_section))
+    for path_index, path_match in enumerate(path_matches):
+        path = path_match.group(1)
+        path_end = path_matches[path_index + 1].start() if path_index + 1 < len(path_matches) else len(paths_section)
+        path_body = paths_section[path_match.end():path_end]
+        method_matches = list(re.finditer(r"(?m)^    (get|post|put|delete|patch|options|head):[ \t]*$", path_body))
+        for method_index, method_match in enumerate(method_matches):
+            method_end = method_matches[method_index + 1].start() if method_index + 1 < len(method_matches) else len(path_body)
+            body = path_body[method_match.end():method_end]
+            check_operation(path, method_match.group(1), body)
+
+    components_match = re.search(r"(?m)^components:[ \t]*$", source)
+    if components_match:
+        components = source[components_match.end():]
+        path_items_match = re.search(r"(?m)^  pathItems:[ \t]*$", components)
+        if path_items_match:
+            path_items = components[path_items_match.end():]
+            next_section = re.search(r"(?m)^  [A-Za-z][A-Za-z0-9_-]*:[ \t]*$", path_items)
+            if next_section:
+                path_items = path_items[:next_section.start()]
+            item_matches = list(re.finditer(r"(?m)^    ([A-Za-z][A-Za-z0-9_-]*):[ \t]*$", path_items))
+            for item_index, item_match in enumerate(item_matches):
+                item_name = item_match.group(1)
+                item_end = item_matches[item_index + 1].start() if item_index + 1 < len(item_matches) else len(path_items)
+                item_body = path_items[item_match.end():item_end]
+                method_matches = list(re.finditer(r"(?m)^      (get|post|put|delete|patch):[ \t]*$", item_body))
+                for method_index, method_match in enumerate(method_matches):
+                    method_end = method_matches[method_index + 1].start() if method_index + 1 < len(method_matches) else len(item_body)
+                    check_operation(
+                        f"components.pathItems.{item_name}",
+                        method_match.group(1),
+                        item_body[method_match.end():method_end],
+                    )
+    return errors
+
+
 def operation_block(source: str, path: str, method: str) -> str:
     body = path_block(source, path)
     match = re.search(rf"(?m)^    {re.escape(method.lower())}:[ \t]*$", body)
@@ -675,6 +727,7 @@ def main() -> int:
             request_retention_source,
             auth_handler,
         )
+        errors.extend(admin_api_key_scope_errors(source))
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
         return 2
@@ -688,7 +741,7 @@ def main() -> int:
     print(
         "OpenAPI high-risk contracts OK: Provider mutation/view fields and bounds, "
         "Provider create/delete status/body, request-stats DB error envelope, "
-        "request-list Provider filtering, request-cancel status contract, "
+        "request-list Provider filtering, request-cancel status contract, Admin API Key scope, "
         "/api/models GatewayModel fields, RequestLog fields, RequestDetail fields, RequestAnalysis/StreamEvent fields, AuditMetrics fields, and request retention status fields, public auth status and credential mutation response fields."
     )
     print(
