@@ -407,7 +407,7 @@
       '.provider-actions{display:flex;gap:8px;flex-wrap:wrap}',
       '.provider-row-actions{min-width:260px;white-space:normal}',
       '.provider-row-actions .btn{margin:2px}',
-      '.provider-state{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:12px}',
+      '.provider-state{display:inline-flex;flex-shrink:0;white-space:nowrap;border-radius:999px;padding:3px 8px;font-size:12px}',
       '.provider-state-on{background:#e3f5e9;color:#176d3a}',
       '.provider-state-off{background:#edf0f4;color:#596273}',
       '.provider-state-bad{background:#fff0df;color:#925300}',
