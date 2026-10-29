@@ -329,3 +329,56 @@ func TestDecodeProviderMutationRejectsMalformedAndOversizedBody(t *testing.T) {
 		}
 	})
 }
+
+
+// TestNormalizeStoredWebProvidersMigratesLegacyRows verifies deterministic normalization of old persisted records.
+func TestNormalizeStoredWebProvidersMigratesLegacyRows(t *testing.T) {
+	rows := []storedManagedProvider{
+		{managedProvider: managedProvider{ID: " DeepSeek ", BaseURL: "https://first.example/v1"}},
+		{managedProvider: managedProvider{ID: "deepseek", BaseURL: "https://duplicate.example/v1"}},
+		{managedProvider: managedProvider{ID: "openai", BaseURL: "https://deleted.example/v1"}, Deleted: true},
+		{managedProvider: managedProvider{ID: "openai", BaseURL: "https://openai.example/v1"}},
+		{managedProvider: managedProvider{ID: "../invalid", BaseURL: "https://invalid.example/v1"}},
+		{managedProvider: managedProvider{ID: "legacy", BaseURL: "https://legacy.example/v1"}, SourceOverride: true},
+	}
+
+	got, needsMigration := normalizeStoredWebProviders(rows)
+	if !needsMigration {
+		t.Fatal("legacy IDs, duplicate rows, tombstones, and legacy flags must trigger migration")
+	}
+	if len(got) != 3 {
+		t.Fatalf("normalized Provider count = %d, want 3: %#v", len(got), got)
+	}
+	if got["deepseek"].BaseURL != "https://first.example/v1" {
+		t.Fatalf("duplicate normalized ID should keep first valid row, got %#v", got["deepseek"])
+	}
+	if got["openai"].BaseURL != "https://openai.example/v1" {
+		t.Fatalf("deleted tombstone must not shadow a valid Provider row, got %#v", got["openai"])
+	}
+	if _, exists := got["../invalid"]; exists {
+		t.Fatal("invalid Provider ID must be dropped during migration")
+	}
+	if got["legacy"].ID != "legacy" {
+		t.Fatalf("legacy source flag should not discard valid Provider: %#v", got["legacy"])
+	}
+}
+
+// TestNormalizeStoredWebProvidersLeavesCurrentRowsUnchanged verifies current records do not trigger needless rewrites.
+func TestNormalizeStoredWebProvidersLeavesCurrentRowsUnchanged(t *testing.T) {
+	rows := []storedManagedProvider{
+		{managedProvider: managedProvider{ID: "deepseek", BaseURL: "https://api.deepseek.com"}},
+		{managedProvider: managedProvider{ID: "openai", BaseURL: "https://api.openai.com"}},
+	}
+	got, needsMigration := normalizeStoredWebProviders(rows)
+	if needsMigration {
+		t.Fatal("current normalized records must not require migration")
+	}
+	if len(got) != len(rows) {
+		t.Fatalf("normalized Provider count = %d, want %d", len(got), len(rows))
+	}
+	for _, id := range []string{"deepseek", "openai"} {
+		if _, exists := got[id]; !exists {
+			t.Fatalf("normalized Provider %q missing: %#v", id, got)
+		}
+	}
+}
