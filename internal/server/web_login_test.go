@@ -2,16 +2,21 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/whl/llm-gateway/internal/adminuser"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/ratelimit"
+	"github.com/whl/llm-gateway/internal/settings"
 )
 
 func TestValidateWebLoginPasswordFailsClosedWhenHashMissingOrInvalid(t *testing.T) {
@@ -219,5 +224,136 @@ func TestAuthCredentialsPutRejectsInvalidPasswordChanges(t *testing.T) {
 				t.Fatalf("error code missing; want %q, body=%s", tt.wantCode, rec.Body.String())
 			}
 		})
+	}
+}
+
+
+func TestAuthCredentialsPutPersistsPasswordAndInvalidatesOtherSessions(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
+	redisAddr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
+	if dsn == "" || redisAddr == "" {
+		t.Skip("MYSQL_TEST_DSN and REDIS_TEST_ADDR are required for password/session integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("open test MariaDB: %v", err)
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatalf("ping test MariaDB: %v", err)
+	}
+	var databaseName string
+	if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil {
+		t.Fatalf("read test database name: %v", err)
+	}
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing to modify non-test database %q", databaseName)
+	}
+
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test source path")
+	}
+	schemaPath := filepath.Join(filepath.Dir(sourceFile), "../../migrations/001_init.sql")
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read test schema: %v", err)
+	}
+	for _, statement := range strings.Split(string(schema), ";") {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("apply test schema statement: %v", err)
+		}
+	}
+
+	var previousSetting string
+	previousErr := db.QueryRowContext(ctx, "SELECT value_json FROM gateway_settings WHERE key_name = ?", settings.WebLoginKey).Scan(&previousSetting)
+	if previousErr != nil && previousErr != sql.ErrNoRows {
+		t.Fatalf("read previous login setting: %v", previousErr)
+	}
+	hadPreviousSetting := previousErr == nil
+	t.Cleanup(func() {
+		if hadPreviousSetting {
+			_, _ = db.ExecContext(context.Background(), `INSERT INTO gateway_settings (key_name, value_json, updated_at)
+VALUES (?, ?, UTC_TIMESTAMP())
+ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = VALUES(updated_at)`, settings.WebLoginKey, previousSetting)
+		} else {
+			_, _ = db.ExecContext(context.Background(), "DELETE FROM gateway_settings WHERE key_name = ?", settings.WebLoginKey)
+		}
+	})
+
+	oldHash, err := adminuser.HashPassword("current-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialEnabled := true
+	if err := settings.NewRepo(db).SaveWebLogin(ctx, settings.WebLoginStored{
+		Username: webAdminIdentity, PasswordHash: oldHash, Revision: 7, PasswordEnabled: &initialEnabled,
+	}); err != nil {
+		t.Fatalf("seed login setting: %v", err)
+	}
+
+	limiter := ratelimit.New(redisAddr, "", 0)
+	if err := limiter.Ping(ctx); err != nil {
+		_ = limiter.Close()
+		t.Fatalf("ping test Redis: %v", err)
+	}
+	defer limiter.Close()
+
+	currentToken, err := adminuser.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleToken, err := adminuser.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{currentToken, staleToken} {
+		if err := limiter.SetSession(ctx, token, webAdminIdentity, 7, time.Hour); err != nil {
+			t.Fatalf("seed session: %v", err)
+		}
+		t.Cleanup(func() { _ = limiter.DeleteSession(context.Background(), token) })
+	}
+
+	s := &Server{cfg: &config.Config{}, settings: settings.NewRepo(db), limiter: limiter}
+	s.loadWebLoginState(ctx)
+	req := httptest.NewRequest(http.MethodPut, "/api/auth/credentials", strings.NewReader(`{"current_password":"current-password","new_password":"next-password"}`))
+	req.Header.Set("Authorization", "Bearer "+currentToken)
+	response := httptest.NewRecorder()
+	s.authCredentialsPut(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("password update status = %d, want %d; body=%s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	snapshot := s.currentWebLoginSnapshot()
+	if snapshot.Revision != 8 || snapshot.PasswordSource != "database" || !adminuser.CheckPassword(snapshot.PasswordHash, "next-password") {
+		t.Fatalf("updated login snapshot is incorrect: revision=%d source=%q", snapshot.Revision, snapshot.PasswordSource)
+	}
+	if adminuser.CheckPassword(snapshot.PasswordHash, "current-password") {
+		t.Fatal("old password still validates after successful password change")
+	}
+	currentRequest := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	currentRequest.Header.Set("Authorization", "Bearer "+currentToken)
+	if got := s.adminUsernameFromRequest(ctx, currentRequest); got != webAdminIdentity {
+		t.Fatalf("current session username = %q, want %q", got, webAdminIdentity)
+	}
+	staleRequest := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	staleRequest.Header.Set("Authorization", "Bearer "+staleToken)
+	if got := s.adminUsernameFromRequest(ctx, staleRequest); got != "" {
+		t.Fatalf("old session remained valid after password change: username=%q", got)
+	}
+
+	stored, err := settings.NewRepo(db).GetWebLogin(ctx)
+	if err != nil {
+		t.Fatalf("reload persisted login setting: %v", err)
+	}
+	if stored == nil || stored.Revision != 8 || !adminuser.CheckPassword(stored.PasswordHash, "next-password") {
+		t.Fatalf("persisted login setting did not retain new password/revision: %#v", stored)
 	}
 }
