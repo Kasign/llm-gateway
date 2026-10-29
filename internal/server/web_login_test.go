@@ -278,7 +278,7 @@ func TestAuthCredentialsPutPersistsPasswordAndInvalidatesOtherSessions(t *testin
 		t.Fatalf("read previous login setting: %v", previousErr)
 	}
 	hadPreviousSetting := previousErr == nil
-	t.Cleanup(func() {
+	defer func() {
 		if hadPreviousSetting {
 			_, _ = db.ExecContext(context.Background(), `INSERT INTO gateway_settings (key_name, value_json, updated_at)
 VALUES (?, ?, UTC_TIMESTAMP())
@@ -286,7 +286,7 @@ ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = VALUES(upd
 		} else {
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM gateway_settings WHERE key_name = ?", settings.WebLoginKey)
 		}
-	})
+	}()
 
 	oldHash, err := adminuser.HashPassword("current-password")
 	if err != nil {
@@ -318,7 +318,7 @@ ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = VALUES(upd
 		if err := limiter.SetSession(ctx, token, webAdminIdentity, 7, time.Hour); err != nil {
 			t.Fatalf("seed session: %v", err)
 		}
-		t.Cleanup(func() { _ = limiter.DeleteSession(context.Background(), token) })
+		defer func(token string) { _ = limiter.DeleteSession(context.Background(), token) }(token)
 	}
 
 	s := &Server{cfg: &config.Config{}, settings: settings.NewRepo(db), limiter: limiter}
