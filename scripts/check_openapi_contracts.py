@@ -61,7 +61,7 @@ def path_block(source: str, path: str) -> str:
     return tail[:next_path.start()] if next_path else tail
 
 
-def admin_api_key_scope_errors(source: str) -> list[str]:
+def admin_api_key_scope_errors(source: str, auth_handler: str) -> list[str]:
     """Ensure the deployment Admin API Key is advertised only for service-key management."""
     errors: list[str] = []
     paths_section = source.split("\ncomponents:", 1)[0]
@@ -110,6 +110,18 @@ def admin_api_key_scope_errors(source: str) -> list[str]:
                         method_match.group(1),
                         item_body[method_match.end():method_end],
                     )
+    key_scope_function = go_function(auth_handler, "func adminAPIKeyAllowedForPath(")
+    key_scope_function = re.sub(r"(?m)^\\s*//.*$", "", key_scope_function)
+    compact_scope = " ".join(key_scope_function.split())
+    expected_scope = 'func adminAPIKeyAllowedForPath(path string) bool { return path == "/api/admin/keys" || strings.HasPrefix(path, "/api/admin/keys/") }'
+    if compact_scope != expected_scope:
+        errors.append("adminAPIKeyAllowedForPath must allow only /api/admin/keys and its descendants")
+
+    authorized_function = go_function(auth_handler, "func (s *Server) adminAuthorized(")
+    if "adminAPIKeyAllowedForPath(r.URL.Path)" not in authorized_function:
+        errors.append("adminAuthorized must enforce the narrow admin API Key path allowlist")
+    if "subtle.ConstantTimeCompare" not in authorized_function:
+        errors.append("adminAuthorized must compare the admin API Key in constant time")
     return errors
 
 
@@ -727,7 +739,7 @@ def main() -> int:
             request_retention_source,
             auth_handler,
         )
-        errors.extend(admin_api_key_scope_errors(source))
+        errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
         return 2

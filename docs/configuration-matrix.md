@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | server.host、server.port | config.yaml | 低 | 重启 | Compose 默认只将 8088 绑定到宿主机回环地址 |
 | server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写实际代理来源 IP/CIDR，不要信任所有转发头 |
-| 管理 API Key | .env 提供，YAML 引用 | 高 | 重启 | 与 Web 登录会话及调用方推理 API Key 分离 |
+| 管理 API Key | .env 提供，YAML 引用 | 高 | 重启 | 仅允许访问 `/api/admin/keys` 及其子路径；不用于控制台登录或其他管理 API |
 | Web 登录初始哈希/保护开关 | .env 经 Compose 显式注入 | 高 | 首次初始化；已有数据库设置优先 | 控制台保存后持久化在 gateway_settings.web_admin_login |
 | database.* | .env 注入地址和凭据，其他结构参数在 YAML | 高 | 重启 | root 凭据只用于初始化；日常使用 Gateway 专用数据库用户 |
 | redis.* | .env 注入连接地址和密码，DB 等选项在 YAML | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |

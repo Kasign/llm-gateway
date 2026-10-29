@@ -209,7 +209,7 @@ OpenAPI 当前包含 63 个字面路径模板和 72 个 HTTP operation。Agent �
 
 **这是分阶段建立的契约，不是完整 API 清单。** 模型下载、运行时管理、Benchmark、API Key 管理、推理参数、Ollama 管理及其他历史管理端点仍以本文件和各自部署文档为准；在逐项核实 Handler、认证和响应结构前，不应在 OpenAPI 文件中猜测字段。当前也尚未建立 OpenAPI 与 Handler 的自动差异检查。
 
-推理端点使用调用方 Gateway API Key（`Authorization: Bearer` 或 `X-API-Key`）；管理端点要求有效的管理员网页登录态或部署配置的管理员凭据。不要把调用方 API Key、远程 Provider Key 与管理员凭据混为一谈。Provider 管理 API 的返回对象只包含 Key 是否已配置及掩码，不返回明文或密文。
+推理端点使用调用方 Gateway API Key（`Authorization: Bearer` 或 `X-API-Key`）；除 `/api/admin/keys` 及其子路径外，其他控制台管理端点都要求有效的管理员 Web Session。部署配置的 `X-Admin-Key` 只用于服务密钥管理，不是通用管理员凭据。不要把调用方 API Key、远程 Provider Key 与管理员凭据混为一谈。Provider 管理 API 的返回对象只包含 Key 是否已配置及掩码，不返回明文或密文。
 
 本地慢模型还受多个独立超时层控制：`llama.request_timeout_seconds: 0` 关闭 Gateway 本地 HTTP Client 的整体请求期限；`warm_start` 在请求等待首 Token 时发送 SSE 保活；OpenResty 的 `proxy_read_timeout` / `proxy_send_timeout` 与 Codex、Cursor 等客户端期限需独立配置。关闭 Gateway 整体时限不会屏蔽客户端断连或管理端取消。
 
@@ -218,7 +218,7 @@ OpenAPI 当前包含 63 个字面路径模板和 72 个 HTTP operation。Agent �
 
 `docs/openapi.yaml` 已增加调用方 API Key CRUD、启用/禁用/轮换，以及控制台登录、会话查询、注销与凭据更新端点。
 
-- 调用方 Gateway Key 用于访问 `/v1/*`；它与管理员会话 Token、`X-Admin-Key` 和远程 Provider 的供应商 Key 不同。管理员请求支持 Bearer 管理会话或 `X-Admin-Key`；修改控制台密码与密码保护开关只允许使用 Web 登录会话。
+- 调用方 Gateway Key 用于访问 `/v1/*`；它与管理员会话 Token、`X-Admin-Key` 和远程 Provider 的供应商 Key 不同。仅 `/api/admin/keys` 及其子路径允许使用 `X-Admin-Key` 管理调用方服务密钥；其他管理 API 必须使用 Bearer 管理会话。修改控制台密码与密码保护开关也只允许使用 Web 登录会话。
 - `POST /api/admin/keys` 和 `POST /api/admin/keys/{id}/rotate` 会返回一次明文调用方 Key。数据库仅保存摘要，列表和元数据响应不含明文或哈希；轮换后旧 Key 立即失效。
 - 管理会话由 `POST /api/auth/login` 建立，Token 在后续请求通过 `Authorization: Bearer` 发送，不是浏览器 Cookie。登录按客户端 IP 进行限流；Web 会话的服务端有效性还依赖 Redis 会话记录及登录凭据版本。
 - `PUT /api/auth/credentials` 仅接受 Web 登录会话。保护已开启时，修改密码或关闭保护必须验证当前密码；从关闭状态开启保护时必须提交新密码。开关、密码哈希和版本号保存到现有 `gateway_settings.web_admin_login` JSON 记录；写入成功后更新当前会话版本，其他旧版本会话失效。旧记录没有 `password_enabled` 字段时，按有效旧密码哈希推断为开启，以兼容原有部署。
