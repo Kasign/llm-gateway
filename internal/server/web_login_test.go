@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/adminuser"
 	"github.com/whl/llm-gateway/internal/config"
+	"github.com/whl/llm-gateway/internal/ratelimit"
 )
 
 func TestValidateWebLoginPasswordFailsClosedWhenHashMissingOrInvalid(t *testing.T) {
@@ -147,5 +149,74 @@ func TestAuthStatusAPIExposesOnlyNonSecretLoginState(t *testing.T) {
 	}
 	if !strings.Contains(body, `"password_enabled":true`) || !strings.Contains(body, `"password_source":"database"`) {
 		t.Fatalf("auth status is missing public login state: %s", body)
+	}
+}
+
+
+func TestAuthCredentialsPutRejectsInvalidPasswordChanges(t *testing.T) {
+	addr := strings.TrimSpace(os.Getenv("REDIS_TEST_ADDR"))
+	if addr == "" {
+		t.Skip("REDIS_TEST_ADDR not set; password update handler test requires Redis")
+	}
+	limiter := ratelimit.New(addr, "", 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := limiter.Ping(ctx); err != nil {
+		_ = limiter.Close()
+		t.Fatalf("ping test Redis: %v", err)
+	}
+	defer limiter.Close()
+
+	hash, err := adminuser.HashPassword("current-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := adminuser.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name           string
+		snapshot       webLoginSnapshot
+		body           string
+		wantStatus     int
+		wantCode       string
+	}{
+		{
+			name: "当前密码错误",
+			snapshot: webLoginSnapshot{Username: webAdminIdentity, PasswordHash: hash, PasswordEnabled: true, Revision: 7},
+			body: `{"current_password":"wrong-password","new_password":"next-password"}`,
+			wantStatus: http.StatusUnauthorized,
+			wantCode: "invalid_credentials",
+		},
+		{
+			name: "关闭密码保护后重新开启但未设置新密码",
+			snapshot: webLoginSnapshot{Username: webAdminIdentity, PasswordEnabled: false, Revision: 7},
+			body: `{"password_enabled":true,"new_password":""}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode: "password_required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{cfg: &config.Config{}, limiter: limiter, webLogin: tt.snapshot}
+			if err := limiter.SetSession(ctx, token, webAdminIdentity, tt.snapshot.Revision, time.Hour); err != nil {
+				t.Fatalf("create test session: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/auth/credentials", strings.NewReader(tt.body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+
+			s.authCredentialsPut(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"code":"`+tt.wantCode+`"`) {
+				t.Fatalf("error code missing; want %q, body=%s", tt.wantCode, rec.Body.String())
+			}
+		})
 	}
 }
