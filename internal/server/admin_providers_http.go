@@ -302,7 +302,16 @@ func (s *Server) validateProviderInput(in providerMutationRequest,old *managedPr
 	}
 	row.ModelMappings=mappings
 	if row.MaxConcurrentRequests<0||row.MaxConcurrentRequests>provider.MaxOpenAICompatibleConcurrentRequests{return managedProvider{},providerErr(400,"invalid_concurrency_limit","并发上限必须在 0 到 64 之间")};if row.MaxQueueSize<0||row.MaxQueueSize>provider.MaxOpenAICompatibleQueueSize{return managedProvider{},providerErr(400,"invalid_queue_limit","排队队列大小必须在 0 到 1024 之间")};if row.QueueWaitTimeoutSeconds<0||row.QueueWaitTimeoutSeconds>provider.MaxOpenAICompatibleQueueWaitTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_queue_timeout","排队等待超时必须在 0 到 3600 秒之间")};if row.RequestsPerMinute<0||row.RequestsPerMinute>config.MaxProviderRequestsPerMinute{return managedProvider{},providerErr(400,"invalid_provider_rate_limit","Provider 每分钟请求数必须在 0 到 100000 之间")};if row.TokenBudgetPerDay<0||row.TokenBudgetPerDay>config.MaxProviderTokenBudgetPerDay{return managedProvider{},providerErr(400,"invalid_token_budget","每日 Token 预算必须在 0 到 1000000000000 之间")};if row.MaxResponseBytes<0{return managedProvider{},providerErr(400,"invalid_response_limit","最大响应大小不能为负数")};if row.RequestTimeoutSeconds<0||row.RequestTimeoutSeconds>provider.MaxOpenAICompatibleRequestTimeoutSeconds{return managedProvider{},providerErr(400,"invalid_request_timeout","整体请求超时必须在 0 到 86400 秒之间")}
-	if old!=nil {row.APIKeyCiphertext=old.APIKeyCiphertext;row.APIKey=old.APIKey;row.SecretUnavailable=old.SecretUnavailable;row.ConcurrencyLimiter=old.ConcurrencyLimiter}
+	if old!=nil {
+		row.APIKeyCiphertext = old.APIKeyCiphertext
+		row.APIKey = old.APIKey
+		row.SecretUnavailable = old.SecretUnavailable
+		row.ConcurrencyLimiter = old.ConcurrencyLimiter
+		// 部署 Provider 的删除标记可通过同 ID 的新增表单恢复。
+		// 保存时必须保留来源覆盖关系，并清除墓碑状态；否则重启后会被当成冲突 Web 记录。
+		row.SourceOverride = old.SourceOverride
+		row.Deleted = false
+	}
 	if strings.TrimSpace(in.APIKey)!="" {
 		ciphertext,err:=encryptProviderAPIKey(s.providerEncryptionKey,strings.TrimSpace(in.APIKey))
 		if err!=nil{return managedProvider{},providerErr(503,"provider_encryption_unavailable","尚未配置有效的 Provider 密钥加密密钥，无法保存 API Key")}
