@@ -328,22 +328,39 @@ func (s *Server) listManagedProviderViews() []map[string]interface{} {
 	if s != nil {
 		s.providerConfigMu.RLock()
 		for id, row := range s.webProviders {
-			webRows[id] = row
+			webRows[strings.ToLower(strings.TrimSpace(id))] = row
 		}
 		s.providerConfigMu.RUnlock()
 	}
+
+	// 先记录部署 Provider 的 ID。旧版本遗留的同 ID Web 记录可能被标记为
+	// SourceConflict；它不是第二个有效 Provider，不能与部署记录重复展示。
+	deploymentIDs := make(map[string]struct{})
 	if s != nil && s.cfg != nil {
 		for _, item := range s.cfg.Providers.OpenAICompatible {
 			id := strings.ToLower(strings.TrimSpace(item.ID))
+			if id == "" {
+				continue
+			}
+			if _, duplicate := deploymentIDs[id]; duplicate {
+				continue
+			}
+			deploymentIDs[id] = struct{}{}
 			if managed, ok := webRows[id]; ok && (managed.SourceOverride || managed.Deleted) {
 				continue
 			}
 			out = append(out, s.safeProviderView(managedProviderFromDeployment(item), "deployment", true))
 		}
 	}
+
 	rows := make([]managedProvider, 0, len(webRows))
-	for _, row := range webRows {
+	for id, row := range webRows {
 		if row.Deleted {
+			continue
+		}
+		// 部署托管 Provider 只有显式接管后才使用 Web 行覆盖展示。
+		// 同 ID 的旧冲突记录留在持久化数据中供接管流程覆盖，但不再生成第二行。
+		if _, isDeployment := deploymentIDs[id]; isDeployment && !row.SourceOverride {
 			continue
 		}
 		rows = append(rows, row)
