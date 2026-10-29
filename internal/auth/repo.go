@@ -123,6 +123,16 @@ func (r *Repo) SetStatus(ctx context.Context, id uint64, status string) error {
 	return nil
 }
 func (r *Repo) Delete(ctx context.Context, id uint64) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM api_keys WHERE id=?`, id)
-	return err
+	res, err := r.db.ExecContext(ctx, `DELETE FROM api_keys WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("api key not found")
+	}
+	return nil
 }
