@@ -64,3 +64,33 @@ func TestAdminAuthorizedRestrictsAdminAPIKeyToServiceKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestAdminAPIKeyCannotPassManagementHTTPHandlers 验证权限限制落实到实际 HTTP Handler，
+// 防止后续路由调整时只保留辅助函数测试、却意外放开管理端点。
+func TestAdminAPIKeyCannotPassManagementHTTPHandlers(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Auth.AdminAPIKey = "test-admin-api-key"
+	s := &Server{cfg: cfg}
+
+	tests := []struct {
+		name string
+		method string
+		path string
+		handler http.HandlerFunc
+	}{
+		{name: "Provider 列表", method: http.MethodGet, path: "/api/admin/providers", handler: s.adminProvidersAPI},
+		{name: "Provider 操作", method: http.MethodPost, path: "/api/admin/providers/remote/disable", handler: s.adminProviderActionAPI},
+		{name: "登录凭据修改", method: http.MethodPut, path: "/api/auth/credentials", handler: s.authCredentialsPut},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set("X-Admin-Key", "test-admin-api-key")
+			rec := httptest.NewRecorder()
+			tt.handler(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s with Admin API Key returned %d, want 401; body=%s", tt.method, tt.path, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
