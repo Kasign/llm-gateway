@@ -1,6 +1,6 @@
 # LLM Gateway 配置清单与来源矩阵
 
-新增配置时同步更新 Go 配置结构、示例模板、Compose 环境白名单（需要注入变量时）、中文说明与 CI 契约检查。远程 Provider 的唯一维护入口是 Web 管理台。
+新增配置时同步更新 Go 配置结构、示例模板、Compose 环境白名单（需要注入变量时）、中文说明与 CI 契约检查。远程 Provider 的唯一维护入口是 Web 管理台。认证口径固定为：管理员 API Key 只管理服务密钥；其他控制台管理 API 一律依赖 Web 登录 Session。
 
 ## 1. 服务静态配置
 
@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | server.host、server.port | config.yaml | 低 | 重启 | Compose 默认只将 8088 绑定到宿主机回环地址 |
 | server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写实际代理来源 IP/CIDR，不要信任所有转发头 |
-| 管理 API Key | .env 提供，YAML 引用 | 高 | 重启 | 仅允许访问 `/api/admin/keys` 及其子路径；不用于控制台登录或其他管理 API |
+| 管理员 API Key | .env 提供，YAML 引用 | 高 | 重启 | 只用于 `/api/admin/keys` 及其子路径，管理调用方服务密钥；其余管理 API 必须使用 Web Session |
 | Web 登录初始哈希/保护开关 | .env 经 Compose 显式注入 | 高 | 首次初始化；已有数据库设置优先 | 控制台保存后持久化在 gateway_settings.web_admin_login |
 | database.* | .env 注入地址和凭据，其他结构参数在 YAML | 高 | 重启 | root 凭据只用于初始化；日常使用 Gateway 专用数据库用户 |
 | redis.* | .env 注入连接地址和密码，DB 等选项在 YAML | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |

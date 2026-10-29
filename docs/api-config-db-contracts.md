@@ -39,7 +39,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 配置区 | 核心字段/用途 | 生效边界 |
 | --- | --- | --- |
 | `server` | `host`、`port`、`trusted_proxies` | 代理转发头只信任明确配置的代理来源。 |
-| `auth` | Admin API Key、控制台密码哈希、会话 TTL | 管理 API Key、控制台登录会话与调用方推理 API Key 是不同凭据域。Web 密码保护开关保存在 `gateway_settings.web_admin_login`。 |
+| `auth` | Admin API Key、控制台密码哈希、会话 TTL | **认证统一口径**：管理员 API Key 仅授权 `/api/admin/keys` 及其子路径，用于管理调用方服务密钥；除此之外的所有控制台管理 API（包括 Provider、模型/运行时、请求审计、账号与登录凭据）都必须使用有效 Web 登录 Session。管理员 API Key 不是登录凭据，不能替代登录态。调用方推理 API Key 仅用于 `/v1/*` 推理鉴权。Web 密码保护开关保存在 `gateway_settings.web_admin_login`。 |
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、请求时限、模型数、warm-start | `LLAMA_REQUEST_TIMEOUT_SECONDS` 控制本地推理客户端的整体请求时限；显式设为 `0` 时不设客户端整体时限，适合慢速本地模型，调用方取消仍然有效。旧配置未填写时继续默认 3600 秒；正整数上限 604800 秒。全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
@@ -51,6 +51,14 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 ### 环境变量解析
 
 配置加载先解析 YAML，再只对字符串值中的 `${ENV_NAME}` 做环境变量替换，最后重新序列化 YAML。这样可避免密钥包含引号、冒号或换行时破坏 YAML 结构。缺失的占位符不会被当成空白成功配置：其他必需字段仍需通过字段级校验。远程 Provider 不属于 YAML 配置结构，运行时以数据库中的 Web 管理记录为准。
+
+### 认证边界（必须保持一致）
+
+- `X-Admin-Key`：只允许访问 `/api/admin/keys` 与 `/api/admin/keys/*`，仅用于管理调用方服务密钥（创建、查看元数据、修改、禁用、启用、轮换和删除）。
+- Web Session：除公开的登录状态/登录/登出入口外，所有控制台管理功能均依赖有效登录态；不得将管理员 API Key 当作通用控制台凭据。
+- 调用方 API Key：只用于推理数据面鉴权，不授予控制台管理权限。
+- Provider 上游 API Key：仅用于 Gateway 向对应上游发请求，不授予任何管理 API 权限。
+- 新增或迁移管理路由时，必须同时更新 Handler 鉴权、OpenAPI `security`、契约检查与本节说明。若安全方案发生变化，先修改本节与测试再实现，不得仅靠路由前缀推断权限。
 
 建议约束：
 - 真实 Provider Key、数据库密码与 Admin API Key 只放在部署环境或受控 Secret 中；不要提交到 `config.yaml` 或示例文件。

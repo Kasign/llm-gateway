@@ -21,7 +21,8 @@ type webLoginSnapshot struct {
 
 func (s *Server) loadWebLoginState(ctx context.Context) {
     hash := strings.TrimSpace(s.cfg.Auth.AdminPasswordHash)
-    enabled := s.cfg.Auth.WebPasswordEnabled && adminuser.WebLoginConfigured(webAdminIdentity, hash)
+    // 密码保护开关表达管理员的明确选择；哈希缺失时不能把启用状态降级为关闭。
+    enabled := s.cfg.Auth.WebPasswordEnabled
     revision := uint64(0)
     source := "deployment"
     if s.cfg.Auth.WebLoginResetFromEnv {

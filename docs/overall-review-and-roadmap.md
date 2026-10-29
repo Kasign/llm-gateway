@@ -96,7 +96,7 @@
 - Provider 创建的重复 ID 由后端拒绝，不能回退成 upsert 覆盖；编辑、清 Key、停用和删除活动 Provider 必须继续受保护。
 - URL、HTTPS、私网访问例外、禁止重定向、响应体上限、超时和 Provider 预算规则继续通过单测和契约门禁锁定。
 
-当前 `.env.example` 的管理员 API Key 注释曾写成适用于所有 `/api/admin/*`，与实际权限范围不一致。本次会把注释更正为仅用于服务密钥管理端点。
+统一认证口径：管理员 API Key 仅管理调用方服务密钥（`/api/admin/keys` 及子路径）；其他控制台管理 API 一律使用 Web Session。调用方推理 API Key 和 Provider 上游 Key 也各自限定在独立用途。新增接口必须同步更新 Handler、OpenAPI、契约检查与文档。
 
 ### P1：OpenAPI 的剩余工作采用风险驱动
 
