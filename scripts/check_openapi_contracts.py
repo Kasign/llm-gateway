@@ -197,6 +197,16 @@ def validate(
             "#/components/schemas/ProviderList" in create_response,
             "POST /api/admin/providers 201 must describe ProviderList",
         )
+        create_operation = operation_block(source, "/api/admin/providers", "post")
+        duplicate_response = response_block(create_operation, "409")
+        require(
+            "#/components/responses/AdminError" in duplicate_response,
+            "POST /api/admin/providers 409 must describe the duplicate-ID conflict response",
+        )
+        require(
+            "provider_id_exists" in create_operation and "409" in create_operation,
+            "Provider creation must document the stable provider_id_exists conflict code",
+        )
         delete_response = response_block(
             operation_block(source, "/api/admin/providers/{id}", "delete"), "204"
         )
