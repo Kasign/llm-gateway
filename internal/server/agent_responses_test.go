@@ -13,6 +13,7 @@ import (
 
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
 )
 
@@ -100,13 +101,13 @@ func TestAgentRoutesForwardResponsesJSONAndSSEToConfiguredProviders(t *testing.T
 
 	cfg := &config.Config{}
 	cfg.Llama.AutoLoadOnProxy = false
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
-		{
+	webProviders := map[string]managedProvider{
+		"deepseek": {
 			ID: "deepseek", Enabled: true, BaseURL: deepseekUpstream.URL + "/v1",
 			DefaultModel: "deepseek-chat", APIKey: "deepseek-upstream-secret",
 			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
 		},
-		{
+		"openai": {
 			ID: "openai", Enabled: true, BaseURL: openaiUpstream.URL + "/v1",
 			DefaultModel: "gpt-4.1", APIKey: "openai-upstream-secret",
 			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
@@ -130,8 +131,18 @@ func TestAgentRoutesForwardResponsesJSONAndSSEToConfiguredProviders(t *testing.T
 		fileUpstream: settings.Upstream{
 			Backend: "llamacpp", BaseURL: "http://llama-unused.invalid:8080", ModelName: "local.gguf",
 		},
+		webProviders: webProviders,
 	}
 	s.pipe = s.newInferencePipeline()
+	for id, row := range webProviders {
+		remote, err := s.buildRemoteProvider(row)
+		if err != nil {
+			t.Fatalf("build Web-managed Provider %s: %v", id, err)
+		}
+		if err := s.providers.Register(id, func() provider.Provider { return remote }); err != nil {
+			t.Fatalf("register Web-managed Provider %s: %v", id, err)
+		}
+	}
 	// 本测试聚焦 Agent data-plane；鉴权、限流和数据库审计由独立集成测试覆盖。
 	s.pipe.Observe = nil
 

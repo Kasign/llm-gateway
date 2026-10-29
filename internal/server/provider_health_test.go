@@ -14,13 +14,12 @@ func remoteHealthTestServer(t *testing.T, registerProvider bool) *Server {
 	t.Helper()
 
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1",
-		APIKey: "test-only-key", DefaultModel: "deepseek-chat",
-	}}
 	s := &Server{
-		cfg:       cfg,
-		upstream:  settings.Upstream{Backend: "deepseek", BaseURL: "https://api.deepseek.com/v1"},
+		cfg: cfg,
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKey: "test-only-key", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+		},
+		upstream: settings.Upstream{Backend: "deepseek", BaseURL: "https://api.deepseek.com/v1"},
 		providers: provider.NewRegistry(),
 	}
 	if registerProvider {

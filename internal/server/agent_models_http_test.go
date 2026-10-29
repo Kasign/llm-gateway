@@ -137,10 +137,6 @@ func newAgentModelsHTTPTestServer(t *testing.T, records []agentModelsSQLKey, lim
 	db.SetMaxIdleConns(8)
 
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true,
-		BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat",
-	}}
 	cfg.Agents = []config.AgentRouteConfig{{
 		ID: "deepseek-agent", Enabled: true, PathPrefix: "/deepseek",
 		ProviderID: "deepseek", DefaultModel: "deepseek-chat",
@@ -149,6 +145,9 @@ func newAgentModelsHTTPTestServer(t *testing.T, records []agentModelsSQLKey, lim
 		cfg: cfg, db: db, keys: auth.NewRepo(db),
 		audit: audit.NewWriter(store.NewRepo(db), 64),
 		limiter: limiter,
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+		},
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "local.gguf"},
 		fileUpstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "local.gguf"},
 	}

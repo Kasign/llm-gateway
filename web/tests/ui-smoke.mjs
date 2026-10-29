@@ -1420,7 +1420,7 @@ try {
       };
       check('真实 Provider 列表中的同 ID 再次新增被拦截且没有发出第二个 POST',
         liveDuplicateState.postCount === 0 && liveDuplicateState.editorVisible &&
-        liveDuplicateState.message.includes('已存在') && liveDuplicateState.message.includes('编辑现有配置'),
+        liveDuplicateState.message.includes('已存在') && liveDuplicateState.message.includes('不能重复新增'),
         liveDuplicateState);
       await page.locator('#providerCancel').click();
     } finally {

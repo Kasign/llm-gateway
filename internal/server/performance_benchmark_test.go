@@ -19,11 +19,11 @@ var requestAnalysisBenchmarkSink RequestAnalysis
 // BenchmarkResolveInferenceAgentRoute 测量固定 Agent Provider/默认模型的解析路径，不包含上游网络请求。
 func BenchmarkResolveInferenceAgentRoute(b *testing.B) {
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat",
-	}}
 	s := &Server{
 		cfg: cfg,
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+		},
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://llama:8080", ModelName: "local.gguf"},
 	}
 	const requestID = "benchmark-agent-route"
