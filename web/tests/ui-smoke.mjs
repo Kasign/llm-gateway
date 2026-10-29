@@ -1208,7 +1208,7 @@ try {
         contentType:'application/json',
         body:JSON.stringify({
           data:[{
-            id:'deepseek', source:'web', editable:true, enabled:true,
+            id:'deepseek', enabled:true,
             base_url:'https://api.deepseek.com', default_model:'deepseek-chat',
             api_key_configured:true, requests_per_minute:0, token_budget_per_day:0
           }],
