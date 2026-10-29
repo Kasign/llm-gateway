@@ -4,8 +4,8 @@
 
 ## 当前基线
 
-- 最近一次完整通过的功能/契约验证基线为 `52d58f6c7c549902d69692a6f2741724b943acf2`，Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 的 5 个 Job 全部成功。后续提交 `0ed90d6ff97af81cc7a3d8f45782020e07db5638` 只更新台账与实施计划，另有独立 Go CI [运行 40822411713](https://github.com/Kasign/llm-gateway/actions/runs/40822411713)；以该运行的最终结果为准。
-- 配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 已全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
+- 当前最新 `dev` HEAD 为 `b4cc0cd1624b871432da6caa716aa28aed50015c`。本轮将 `X-Admin-Key` 的 OpenAPI 使用范围收敛到 `/api/admin/keys` 及其子路径，并增加 Go 白名单实现契约；Go CI [运行 40828500713](https://github.com/Kasign/llm-gateway/actions/runs/40828500713) 的 5 个 Job 全部成功。
+- 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
 - 先前显式设置 `llama.request_timeout_seconds: 0` 被代理层强制套用一小时的问题，已有代码级修复和零值/正值回归覆盖；当前完整 Go CI 已通过。慢模型在实际 OpenResty、客户端和本地模型组合下的端到端超时行为仍需生产环境验收。
