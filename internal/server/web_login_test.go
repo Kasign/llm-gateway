@@ -145,7 +145,7 @@ func TestAuthStatusAPIExposesOnlyNonSecretLoginState(t *testing.T) {
 			t.Fatalf("auth status leaked %q: %s", secret, body)
 		}
 	}
-	if !strings.Contains(body, ""password_enabled":true") || !strings.Contains(body, ""password_source":"database"") {
+	if !strings.Contains(body, `"password_enabled":true`) || !strings.Contains(body, `"password_source":"database"`) {
 		t.Fatalf("auth status is missing public login state: %s", body)
 	}
 }
