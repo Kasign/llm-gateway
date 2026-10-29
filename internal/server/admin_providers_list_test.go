@@ -137,6 +137,41 @@ func TestAdminProvidersAPIGetReturnsWebManagedProviderWithoutSecretsOrLegacyFlag
 		stored.APIKey != "legacy-secret" || stored.APIKeyCiphertext != "v1:ciphertext-secret" {
 		t.Fatalf("duplicate Provider creation mutated the existing connection or secret: %#v", stored)
 	}
+
+	// 真实 Handler 的方法和路径错误应返回稳定状态码，且不得触碰已保存的 Provider。
+	methodRequest := httptest.NewRequest(http.MethodPatch, "/api/admin/providers", nil)
+	methodRequest.Header.Set("Authorization", "Bearer "+token)
+	methodResponse := httptest.NewRecorder()
+	s.adminProvidersAPI(methodResponse, methodRequest)
+	if methodResponse.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PATCH /api/admin/providers status = %d, want 405", methodResponse.Code)
+	}
+
+	unknownRequest := httptest.NewRequest(http.MethodDelete, "/api/admin/providers/missing", nil)
+	unknownRequest.Header.Set("Authorization", "Bearer "+token)
+	unknownResponse := httptest.NewRecorder()
+	s.adminProviderActionAPI(unknownResponse, unknownRequest)
+	if unknownResponse.Code != http.StatusNotFound || !strings.Contains(unknownResponse.Body.String(), "provider_not_found") {
+		t.Fatalf("DELETE unknown Provider status/body = %d/%s, want 404/provider_not_found", unknownResponse.Code, unknownResponse.Body.String())
+	}
+
+	immutableRequest := httptest.NewRequest(http.MethodPut, "/api/admin/providers/deepseek", strings.NewReader(`{
+		"id": "openai",
+		"enabled": true,
+		"base_url": "https://replacement.example/v1",
+		"default_model": "replacement-model"
+	}`))
+	immutableRequest.Header.Set("Authorization", "Bearer "+token)
+	immutableRequest.Header.Set("Content-Type", "application/json")
+	immutableResponse := httptest.NewRecorder()
+	s.adminProviderActionAPI(immutableResponse, immutableRequest)
+	if immutableResponse.Code != http.StatusBadRequest || !strings.Contains(immutableResponse.Body.String(), "provider_id_immutable") {
+		t.Fatalf("PUT Provider with changed ID status/body = %d/%s, want 400/provider_id_immutable", immutableResponse.Code, immutableResponse.Body.String())
+	}
+	stored = s.webProviders["deepseek"]
+	if len(s.webProviders) != 1 || stored.BaseURL != "https://api.deepseek.com" || stored.APIKey != "legacy-secret" {
+		t.Fatalf("invalid Provider actions mutated persisted-in-memory state: %#v", s.webProviders)
+	}
 }
 
 
