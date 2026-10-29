@@ -20,8 +20,9 @@ cp config.example.yaml config.yaml
 - `OLLAMA_BASE_URL`：本机 Ollama 地址，例如 `http://ollama:11434`。必须和 llama.cpp 不同。
 - `MODEL_HOST_DIR`：宿主机上的 GGUF 目录。Gateway 下载的文件也写到这里，容器内是 `/data/models`。
 - `MARIADB_ROOT_PASSWORD`、`LLM_GATEWAY_DB_PASSWORD`、`REDIS_ROOT_PASSWORD`。
-- `LLM_GATEWAY_ADMIN_API_KEY`。
-- Web 登录仅使用密码，无需用户名。主 `.env` 包含初始密码哈希与默认密码保护开关，按 [控制台与密码说明.md](./控制台与密码说明.md) 进行迁移和修改；无需再创建 `admin-auth.env`。
+- `LLM_GATEWAY_ADMIN_API_KEY`：仅管理 `/api/admin/keys` 服务密钥，不是网页登录凭据。
+- `LLM_GATEWAY_ADMIN_PASSWORD_HASH`：必须设置为自行生成的有效密码哈希；仓库不提供默认密码。可在项目目录运行 `go run ./cmd/hash-admin-password '你的初始密码'` 生成哈希，将输出填入 `.env`，再启动 Compose。请勿把真实密码或哈希提交到 Git。
+- Web 登录仅使用密码，无需用户名。密码保护开关与密码哈希属于 Web Session 登录体系；数据库中已有设置时以数据库为准。忘记密码时，按 [控制台与密码说明.md](./控制台与密码说明.md) 使用 `LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV=true` 临时恢复，完成改密后务必恢复为 `false`；无需再创建 `admin-auth.env`。
 
 `LLM_BACKEND` 只决定数据库还没有上游记录时，第一次把 `/v1` 打到哪边。默认 `llamacpp`。
 

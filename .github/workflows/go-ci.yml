@@ -41,7 +41,8 @@ jobs:
       - name: 验证根目录 Docker Compose 配置
         run: |
           cp .env.example .env
-          docker compose config -q
+          # CI 使用占位哈希满足 Compose 的必填校验，不用于真实登录。
+          LLM_GATEWAY_ADMIN_PASSWORD_HASH='pbkdf2:ci-placeholder' docker compose config -q
 
       - name: 配置 Node.js
         uses: actions/setup-node@v4
