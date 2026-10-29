@@ -101,7 +101,7 @@ func (r *Repo) Rotate(ctx context.Context, id uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	res, err := r.db.ExecContext(ctx, `UPDATE api_keys SET prefix=?,key_hash=?,status='active',updated_at=? WHERE id=?`, prefix, h, time.Now(), id)
+	res, err := r.db.ExecContext(ctx, `UPDATE api_keys SET prefix=?,key_hash=?,status='active',last_used_at=NULL,updated_at=? WHERE id=?`, prefix, h, time.Now(), id)
 	if err != nil {
 		return "", err
 	}
