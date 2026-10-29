@@ -14,6 +14,7 @@ func TestValidateWebLoginPasswordFailsClosedWhenHashMissingOrInvalid(t *testing.
 	}{
 		{name: "缺少哈希", hash: ""},
 		{name: "哈希格式无效", hash: "not-a-password-hash"},
+		{name: "仅有哈希前缀但结构损坏", hash: "pbkdf2:broken"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -35,3 +35,29 @@ func TestCheckPasswordPlaceholderHash(t *testing.T) {
 		t.Fatal("generated hash should match its password")
 	}
 }
+
+func TestWebLoginConfiguredRejectsMalformedHash(t *testing.T) {
+	tests := []struct {
+		name string
+		hash string
+		want bool
+	}{
+		{name: "有效冒号格式", hash: "pbkdf2:120000:NPQtPMgg+xqbAp04ObNRnA:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ", want: true},
+		{name: "有效旧美元格式", hash: "pbkdf2$120000$Rq4omCdIiNZh1T7fMz/r1Q$Tiesjxer65K62mmSomM4uk+pRBouNU9oEnwe/Y0KeVk", want: true},
+		{name: "只有格式前缀", hash: "pbkdf2:broken"},
+		{name: "错误迭代次数", hash: "pbkdf2:0:NPQtPMgg+xqbAp04ObNRnA:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ"},
+		{name: "无效盐值", hash: "pbkdf2:120000:%%%:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ"},
+		{name: "摘要长度错误", hash: "pbkdf2:120000:NPQtPMgg+xqbAp04ObNRnA:YWJj"},
+		{name: "字段不完整", hash: "pbkdf2:120000:NPQtPMgg+xqbAp04ObNRnA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WebLoginConfigured("admin", tt.hash); got != tt.want {
+				t.Fatalf("WebLoginConfigured() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if WebLoginConfigured("", "pbkdf2:120000:NPQtPMgg+xqbAp04ObNRnA:J9q8Ggs9XtRIZ1E6Fb6Q9anZ0wcYPz/5zFX26GfrZjQ") {
+		t.Fatal("empty username must not be considered configured")
+	}
+}

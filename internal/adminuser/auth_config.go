@@ -1,7 +1,9 @@
 package adminuser
 
 import (
+	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -35,11 +37,34 @@ func NormalizeWebLogin(username, plain, hash *string) error {
 	return nil
 }
 
-// WebLoginConfigured 是否已配置 Web 控制台登录。
+// WebLoginConfigured 检查 Web 控制台用户名与密码哈希是否具备可校验的结构。
 func WebLoginConfigured(username, passwordHash string) bool {
+	if strings.TrimSpace(username) == "" {
+		return false
+	}
 	passwordHash = strings.TrimSpace(passwordHash)
-	return strings.TrimSpace(username) != "" && passwordHash != "" &&
-		(strings.HasPrefix(passwordHash, "pbkdf2$") || strings.HasPrefix(passwordHash, "pbkdf2:"))
+	var parts []string
+	switch {
+	case strings.HasPrefix(passwordHash, "pbkdf2$"):
+		parts = strings.Split(passwordHash, "$")
+	case strings.HasPrefix(passwordHash, "pbkdf2:"):
+		parts = strings.Split(passwordHash, ":")
+	default:
+		return false
+	}
+	if len(parts) != 4 || parts[0] != "pbkdf2" {
+		return false
+	}
+	iterations, err := strconv.Atoi(parts[1])
+	if err != nil || iterations <= 0 {
+		return false
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
+	if err != nil || len(salt) == 0 {
+		return false
+	}
+	digest, err := base64.RawStdEncoding.DecodeString(parts[3])
+	return err == nil && len(digest) == 32
 }
 
 // ValidUsername 校验控制台用户名（3–64，字母数字与下划线）。
