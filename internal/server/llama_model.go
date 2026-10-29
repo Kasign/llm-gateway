@@ -308,20 +308,38 @@ func (s *Server) loadLlamaCppUpstreamWithClient(ctx context.Context, client *lla
 	}
 
 	if lastErr != nil && isLlamaNotFound(lastErr) {
-		if cacheRouter {
-			s.mu.Lock()
-			no := false
-			s.llamaRouter = &no
-			s.mu.Unlock()
+		// /models/load 返回 404 不能证明单模型模式，也不能直接把目标记成已加载。
+		// 重新读取运行态，只在上游明确报告目标模型已加载时才返回成功。
+		snapshot, snapshotErr := client.RuntimeSnapshot(ctx, "")
+		if snapshotErr != nil {
+			return "", fmt.Errorf("load model via %s: /models/load 返回 not found，且无法确认当前已加载模型：%w", baseURL, snapshotErr)
 		}
-		applog.Infof("loadLlamaCpp: /models/load not found, treating as single-model")
-		if upstreamHint != "" {
-			return upstreamHint, nil
+		for _, loaded := range snapshot.Loaded {
+			matches := upstreamHint != "" && llama.ModelIDMatch(loaded.ID, upstreamHint)
+			if !matches && gw != nil {
+				matches = s.modelMatchesUpstreamID(gw, loaded.ID)
+			}
+			if !matches {
+				continue
+			}
+			// 只有 RuntimeSnapshot 确实回退到单模型 /v1/models 清单时，才缓存为非 Router。
+			if cacheRouter && loaded.Source == "upstream" {
+				s.mu.Lock()
+				no := false
+				s.llamaRouter = &no
+				s.mu.Unlock()
+			}
+			applog.Infof("loadLlamaCpp: /models/load not found; verified requested model is already loaded as %q", loaded.ID)
+			return loaded.ID, nil
 		}
+		name := strings.TrimSpace(upstreamHint)
 		if gw != nil {
-			return s.resolveLlamaModel(ctx, gw), nil
+			name = gw.LlamaModelName
+			if name == "" {
+				name = gw.Filename
+			}
 		}
-		return "", nil
+		return "", fmt.Errorf("load model %q via %s: /models/load 返回 not found，运行态未确认目标模型已加载", name, baseURL)
 	}
 
 	name := upstreamHint
