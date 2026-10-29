@@ -1,19 +1,22 @@
 # LLM Gateway 重构实施计划与进度
 
 > 目标分支：`dev`
-> 更新日期：2026-10-28。PR #5/#7 已合入；当前以 `dev` 为唯一日常集成分支。真实供应商 E2E、公网反向代理和生产部署验证仍依赖用户环境。
-> 最新通过的代码基线：`d89b94247e8b60164f28758a5da1142c5bafa054`（Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过；上一轮 Web UI 浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过，后续提交未改 Web 运行时代码）。
+> 更新日期：2026-10-29。以 `dev` 为唯一日常集成分支；不强推、不改写历史、不擅自合并 PR。
+> 当前最新 HEAD：`52d58f6c7c549902d69692a6f2741724b943acf2`；Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 全部 5 个 Job 通过。
+> 当前配置边界：远程 Provider 唯一维护入口为 Web 管理台，权威配置存于 MariaDB。旧 YAML/环境变量 Provider 预置方式已废弃；下文按日期记录的旧实现与方案仅作历史，不得当成当前功能或待恢复任务。现行配置与 API 契约以 `docs/configuration-matrix.md`、`docs/api-config-db-contracts.md` 为准。
 
-## 当前状态快照（2026-10-28）
+## 当前状态快照（2026-10-29）
 
-- 当前通过基线：`d89b94247e8b60164f28758a5da1142c5bafa054`；Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 成功。上一轮 Web UI 浏览器验收 [40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过；之后仅改 OpenAPI/门禁与文档，未改前端运行时代码。
-- 当前没有开放 PR 或 Issue。保持 `dev` 为唯一集成分支，不强推、不改写历史。
-- 多 Provider 管理、密钥加密与脱敏、模型映射、并发/FIFO 队列、RPM/Token 预算、审计、流式错误处理和高风险配置/API 契约门禁均已实现。
-- Provider 热更新最后一轮审查没有发现正常有效配置能触发的 setter 失败；保持现有最小补偿顺序，不增加额外回滚框架。
-- 整体 Review 发现并修复一个配置语义缺陷：显式 `llama.request_timeout_seconds: 0` 原先被代理层强制转换为一小时 Deadline。本批让其真正表示“不增加整体时限”，同时保留未配置时的一小时默认和父 Context 取消语义，并增加定向回归覆盖。
-- 密钥脱敏、慢模型 Context 传递、取消线性化与提交响应头后的 SSE 错误边界已按代码路径复审；前端源码与部署 Bundle 的同步由 CI 构建后 diff 门禁验证。
-- 真实供应商、公网 OpenResty 和 1Panel 验收依赖用户的凭据与部署环境；CI Mock 通过不代表生产验收完成。
-- 暂缓全面目录迁移、全量 OpenAPI 字段对账、自动重试/故障转移及 Agent 权限/热更新扩展；除非出现明确需求或已证实问题，否则不进入当前工作范围。
+- 远程 Provider 的管理入口已统一为 Web 管理台 + MariaDB；不再从 YAML、主 .env 或额外环境文件注册远程 Provider。Provider Key 以 AES-256-GCM 加密持久化，API 不回显明文或密文。
+- Provider ID 去首尾空白并转小写后唯一；新增时前端对已加载列表中的重复 ID 禁用提交，后端锁内再次检查并返回 `409/provider_id_exists`，不会覆盖已有配置。编辑时不能修改 ID。
+- 旧 Provider 生命周期/来源状态字段已从列表 API 和可用后端响应中移除；旧数据库记录只通过兼容解码与规范化做迁移，新持久化记录不会继续写入这些状态字段。
+- 最新完整 Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 对应当前 Head，Go/race/vet、配置/API 契约、负载与审计、故障注入、Go/Docker 构建全部通过。上一提交的配置和文档防回归验收 [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 也已全部通过。
+- 最近一次 Web UI Browser Smoke [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 通过；之后的提交只改文档与契约检查脚本，没有改动前端运行时源码。
+- Provider 模型映射、AES-GCM 密钥存储、并发/FIFO 队列、RPM/Token 预算、审计持久化和流式错误处理已有代码与 CI 覆盖。后续按可复现缺陷推进，不重复扩展已解决的抽象。
+- 真实供应商 E2E、公网 OpenResty 链路和生产 1Panel 部署仍需要用户环境与有效凭据；Mock/CI 通过不代表这些生产验收已完成。
+- 继续暂缓自动重试/故障转移、Agent 权限/热更新扩展和全量 OpenAPI Go 字段等价对账；没有明确需求或可复现问题时不扩大范围。
+
+> 下方各阶段及按日期列出的实施条目保留原始过程记录，其中的旧配置方案、提交状态和“待运行”说明可能已经过期。涉及当前行为时必须以上方快照及现行契约文档为准。
 
 ## 1. 重构目标
 
@@ -95,9 +98,9 @@
 验收：本地后端通过同一套契约测试；添加新 Provider 不需要修改核心 Pipeline；没有为远程 Provider 强加本地管理空操作。
 
 ### 阶段 4：外部 Provider 与凭据管理
-状态：进行中（YAML/环境变量/数据库 Web Provider 配置与管理台已经在 PR #7 实现；当前继续治理 Provider 热更新期间的并发许可生命周期、配置回滚与并发预算生效顺序）。
+状态：核心管理能力已完成。2026-10-29 已收敛为 Web 管理台 + MariaDB 唯一管理入口，旧 YAML/环境变量预置路线已废弃；真实供应商、公网反向代理和生产部署验收仍依赖用户环境。
 
-已完成：远程 Provider 静态配置、独立 API Key、模型 ID 覆盖、默认阻止私网及特殊用途 IP、禁止重定向、响应体上限、安全错误响应、Web 多 Provider 管理、`.env` 多 Provider 预置与每 Provider 整体请求时限均已实现。真实供应商端到端与公网故障注入仍待执行；本轮按用户要求不等待 CI，后续统一测试。
+当前实现：远程 Provider 通过 Web 管理台维护并保存到 MariaDB；Key 以 AES-256-GCM 加密，支持模型映射、HTTPS/SSRF 安全策略、响应体限制、并发/FIFO 队列、RPM、每日 Token 预算和请求时限。重复 ID 由前后端双重阻止，旧的来源/生命周期状态字段已从 API 契约移除。旧的多来源预置仅作为下方日期化历史记录保留，不再是当前支持能力。
 
 任务：
 - 增加 Provider、远程模型映射和凭据引用的安全配置/存储。
