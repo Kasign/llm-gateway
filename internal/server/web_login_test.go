@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"net/http"
-	"os"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -178,11 +178,11 @@ func TestAuthCredentialsPutRejectsInvalidPasswordChanges(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		snapshot       webLoginSnapshot
-		body           string
-		wantStatus     int
-		wantCode       string
+		name       string
+		snapshot   webLoginSnapshot
+		body       string
+		wantStatus int
+		wantCode   string
 	}{
 		{
 			name: "当前密码错误",
