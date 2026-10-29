@@ -2084,8 +2084,8 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
-      security:
-        - AdminSessionBearer: []
+        security:
+          - AdminSessionBearer: []
         summary: 启用 Web Provider
         x-authentication-requirements:
           - valid admin web session
@@ -2107,8 +2107,8 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
-      security:
-        - AdminSessionBearer: []
+        security:
+          - AdminSessionBearer: []
         summary: 停用 Web Provider
         description: 当前活动 Provider 不可停用。
         x-authentication-requirements:
@@ -2131,8 +2131,8 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
-      security:
-        - AdminSessionBearer: []
+        security:
+          - AdminSessionBearer: []
         summary: 显式清除 Web Provider 的 API Key
         description: 当前活动 Provider 不可清除 Key；调用前应先切换活动 Provider。
         x-authentication-requirements:
@@ -2155,8 +2155,8 @@ components:
         - $ref: "#/components/parameters/ProviderID"
       post:
         tags: [Admin]
-      security:
-        - AdminSessionBearer: []
+        security:
+          - AdminSessionBearer: []
         summary: 测试 Provider 连接
         description: 使用模型列表端点进行轻量测试，不发起计费推理；结果应为脱敏诊断信息。
         x-authentication-requirements:

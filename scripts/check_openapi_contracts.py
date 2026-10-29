@@ -105,11 +105,16 @@ def admin_api_key_scope_errors(source: str, auth_handler: str) -> list[str]:
                 method_matches = list(re.finditer(r"(?m)^      (get|post|put|delete|patch):[ \t]*$", item_body))
                 for method_index, method_match in enumerate(method_matches):
                     method_end = method_matches[method_index + 1].start() if method_index + 1 < len(method_matches) else len(item_body)
+                    operation_body = item_body[method_match.end():method_end]
                     check_operation(
                         f"components.pathItems.{item_name}",
                         method_match.group(1),
-                        item_body[method_match.end():method_end],
+                        operation_body,
                     )
+                    if "AdminSessionBearer: []" not in operation_body:
+                        errors.append(
+                            f"components.pathItems.{item_name} {method_match.group(1).upper()} must require AdminSessionBearer at operation level"
+                        )
     key_scope_function = go_function(auth_handler, "func adminAPIKeyAllowedForPath(")
     key_scope_function = re.sub(r"(?m)^\s*//.*$", "", key_scope_function)
     compact_scope = " ".join(key_scope_function.split())
