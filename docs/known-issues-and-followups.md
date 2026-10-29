@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前最新 `dev` HEAD 为 `b4cc0cd1624b871432da6caa716aa28aed50015c`。本轮将 `X-Admin-Key` 的 OpenAPI 使用范围收敛到 `/api/admin/keys` 及其子路径，并增加 Go 白名单实现契约；Go CI [运行 40828500713](https://github.com/Kasign/llm-gateway/actions/runs/40828500713) 的 5 个 Job 全部成功。
+- 最近一次已通过完整 Go CI 的代码/契约基线为 `b4cc0cd1624b871432da6caa716aa28aed50015c`；Go CI [运行 40828500713](https://github.com/Kasign/llm-gateway/actions/runs/40828500713) 的 5 个 Job 全部成功。仅修改问题台账或实施计划的文档提交不会改变该实现/契约基线。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
