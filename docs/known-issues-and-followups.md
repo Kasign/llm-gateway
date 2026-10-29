@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前最新 `dev` HEAD 为 `52d58f6c7c549902d69692a6f2741724b943acf2`；该提交补充 Provider 新增重复 ID 时的 OpenAPI `409` / `provider_id_exists` 契约门禁。最新 Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 已全部 5 个 Job 成功。
+- 最近一次完整通过的功能/契约验证基线为 `52d58f6c7c549902d69692a6f2741724b943acf2`，Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 的 5 个 Job 全部成功。后续提交 `0ed90d6ff97af81cc7a3d8f45782020e07db5638` 只更新台账与实施计划，另有独立 Go CI [运行 40822411713](https://github.com/Kasign/llm-gateway/actions/runs/40822411713)；以该运行的最终结果为准。
 - 配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 已全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
@@ -40,7 +40,7 @@
 |---|---|---|---|---|
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
-| GW-PROV-UI-001 | Web 多 Provider 管理与配置来源统一。 | 远程 Provider 已统一由 Web/MariaDB 管理；前端阻止已知重复 ID，后端再次归一化校验并返回 409，不覆盖旧配置；旧状态字段已从列表和 API 契约移除。当前 HEAD 的 Go CI 全部通过。 | 后续仅在复现新问题时修复运行时逻辑；旧 YAML/环境变量预置路线不再恢复。 | 用户部署前备份数据库与 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`；真实供应商、公网反代与 1Panel 行为仍需环境验收。 |
+| GW-PROV-UI-001 | Web 多 Provider 管理与配置来源统一。 | 远程 Provider 已统一由 Web/MariaDB 管理；前端阻止已知重复 ID，后端再次归一化校验并返回 409，不覆盖旧配置；旧状态字段已从列表和 API 契约移除。提交 `52d58f6` 对应的完整 Go CI 全部通过。 | 后续仅在复现新问题时修复运行时逻辑；旧 YAML/环境变量预置路线不再恢复。 | 用户部署前备份数据库与 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`；真实供应商、公网反代与 1Panel 行为仍需环境验收。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
 | GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 新增高风险字段/状态契约门禁，覆盖 Provider mutation/view 预算字段、创建/删除响应及统计数据库错误封套；整体 OpenAPI 仍为 partial。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 已覆盖高风险子集；一般性请求/响应 Schema 的全量 Go 等价性仍需分阶段补齐。 |
 

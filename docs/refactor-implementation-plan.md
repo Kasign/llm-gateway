@@ -2,7 +2,7 @@
 
 > 目标分支：`dev`
 > 更新日期：2026-10-29。以 `dev` 为唯一日常集成分支；不强推、不改写历史、不擅自合并 PR。
-> 当前最新 HEAD：`52d58f6c7c549902d69692a6f2741724b943acf2`；Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 全部 5 个 Job 通过。
+> 最近一次完整通过的功能/契约验证基线：`52d58f6c7c549902d69692a6f2741724b943acf2`；Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 全部 5 个 Job 通过。后续提交 `0ed90d6ff97af81cc7a3d8f45782020e07db5638` 只更新台账和实施计划，其独立 CI 为 [运行 40822411713](https://github.com/Kasign/llm-gateway/actions/runs/40822411713)。
 > 当前配置边界：远程 Provider 唯一维护入口为 Web 管理台，权威配置存于 MariaDB。旧 YAML/环境变量 Provider 预置方式已废弃；下文按日期记录的旧实现与方案仅作历史，不得当成当前功能或待恢复任务。现行配置与 API 契约以 `docs/configuration-matrix.md`、`docs/api-config-db-contracts.md` 为准。
 
 ## 当前状态快照（2026-10-29）
@@ -10,7 +10,7 @@
 - 远程 Provider 的管理入口已统一为 Web 管理台 + MariaDB；不再从 YAML、主 .env 或额外环境文件注册远程 Provider。Provider Key 以 AES-256-GCM 加密持久化，API 不回显明文或密文。
 - Provider ID 去首尾空白并转小写后唯一；新增时前端对已加载列表中的重复 ID 禁用提交，后端锁内再次检查并返回 `409/provider_id_exists`，不会覆盖已有配置。编辑时不能修改 ID。
 - 旧 Provider 生命周期/来源状态字段已从列表 API 和可用后端响应中移除；旧数据库记录只通过兼容解码与规范化做迁移，新持久化记录不会继续写入这些状态字段。
-- 最新完整 Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 对应当前 Head，Go/race/vet、配置/API 契约、负载与审计、故障注入、Go/Docker 构建全部通过。上一提交的配置和文档防回归验收 [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 也已全部通过。
+- 功能/契约提交 `52d58f6` 的 Go CI [运行 40821989516](https://github.com/Kasign/llm-gateway/actions/runs/40821989516) 已通过 Go/race/vet、配置/API 契约、负载与审计、故障注入、Go/Docker 构建全部 5 个 Job。随后仅修改台账与实施计划的提交 `0ed90d6` 对应独立 CI [运行 40822411713](https://github.com/Kasign/llm-gateway/actions/runs/40822411713)。
 - 最近一次 Web UI Browser Smoke [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 通过；之后的提交只改文档与契约检查脚本，没有改动前端运行时源码。
 - Provider 模型映射、AES-GCM 密钥存储、并发/FIFO 队列、RPM/Token 预算、审计持久化和流式错误处理已有代码与 CI 覆盖。后续按可复现缺陷推进，不重复扩展已解决的抽象。
 - 真实供应商 E2E、公网 OpenResty 链路和生产 1Panel 部署仍需要用户环境与有效凭据；Mock/CI 通过不代表这些生产验收已完成。
