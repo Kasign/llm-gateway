@@ -148,6 +148,17 @@ def validate(
             except ValueError as exc:
                 errors.append(f"ProviderView: {exc}")
 
+        for obsolete_field in ("source", "editable", "source_conflict", "source_override", "deleted"):
+            try:
+                schema_field_block(view, obsolete_field)
+            except ValueError:
+                pass
+            else:
+                errors.append(
+                    f"ProviderView still exposes obsolete lifecycle field {obsolete_field!r}; "
+                    "all remote Providers are Web-managed"
+                )
+
         bounds = {
             "max_concurrent_requests": ("minimum: 0", "maximum: 64", "default: 64"),
             "max_queue_size": ("minimum: 0", "maximum: 1024", "default: 0"),
@@ -195,6 +206,16 @@ def validate(
         require(
             "http.MethodPost" in create_handler and "http.StatusCreated" in create_handler,
             "adminProvidersAPI must return HTTP 201 for Provider creation",
+        )
+        require(
+            '"create"' in create_handler and '"provider_id_exists"' in provider_handler,
+            "Provider creation must use a duplicate-checked create action and return provider_id_exists",
+        )
+        require(
+            "takeOverDeploymentProvider" not in provider_handler
+            and '"source_override"' not in view
+            and '"deleted"' not in view,
+            "Provider management must not expose deployment takeover or persisted lifecycle flags",
         )
         delete_handler = go_function(
             provider_handler, "func (s *Server) adminProviderActionAPI("

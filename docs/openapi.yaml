@@ -277,8 +277,8 @@ paths:
       security:
         - AdminSessionBearer: []
         - AdminKey: []
-      summary: 列出部署托管与 Web 管理的 Provider
-      description: 返回 Key 是否已配置和掩码，不返回明文或密文；部署配置 Provider 支持接管为 Web 覆盖配置，或从 Gateway 运行时屏蔽。
+      summary: 列出 Web 管理的远程 Provider
+      description: 仅返回 Web 管理台保存的远程 Provider；API 只返回 Key 是否已配置和通用掩码，不返回明文或密文。
       x-authentication-requirements:
         - valid admin web session
         - configured administrator credential
@@ -298,7 +298,7 @@ paths:
         - AdminSessionBearer: []
         - AdminKey: []
       summary: 创建 Web 管理的 Provider
-      description: API Key 仅接受写入；响应不会回显密钥。ID 与部署配置冲突时拒绝覆盖。
+      description: API Key 仅接受写入；响应不会回显密钥。Provider ID 去除首尾空格并按小写规范化后全局唯一；若该 ID 已存在（大小写不敏感），返回 409 provider_id_exists，原配置不会被覆盖。
       x-authentication-requirements:
         - valid admin web session
         - configured administrator credential
@@ -328,7 +328,7 @@ paths:
       - name: id
         in: path
         required: true
-        description: Provider ID；部署托管项可先通过 takeover 生成 Web 覆盖配置，也可删除并在 Gateway 运行时屏蔽；部署 YAML/.env 本身不会被修改
+        description: Web 管理台中已存在的远程 Provider ID；去除首尾空格并按小写比较。
         schema:
           type: string
           minLength: 1
@@ -400,8 +400,8 @@ paths:
       security:
         - AdminSessionBearer: []
         - AdminKey: []
-      summary: 从 Gateway 运行时删除远程 Provider
-      description: 部署托管项通过持久化屏蔽标记删除，不会修改 YAML/.env；当前活动 Provider 不可删除，需先切换上游。
+      summary: 删除 Web 管理的远程 Provider
+      description: 直接删除该 Provider 的持久化配置并从运行时 Registry 移除；当前活动 Provider 不可删除，需先切换上游。
       responses:
         "200":
           description: 操作完成并返回当前 Provider 列表
@@ -414,28 +414,6 @@ paths:
         "404":
           $ref: "#/components/responses/AdminError"
         "409":
-          $ref: "#/components/responses/AdminError"
-        "503":
-          $ref: "#/components/responses/AdminError"
-  /api/admin/providers/{id}/takeover:
-    post:
-      operationId: postApiAdminProvidersIdTakeover
-      tags: [Admin]
-      security:
-        - AdminSessionBearer: []
-        - AdminKey: []
-      summary: 将部署 Provider 接管为 Web 可编辑配置
-      description: 当前部署配置会被复制为 Web 覆盖项并持久化；已有 API Key 先加密保存，部署 YAML/.env 不会被修改。
-      responses:
-        "200":
-          description: 操作完成并返回当前 Provider 列表
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProviderList"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
           $ref: "#/components/responses/AdminError"
         "503":
           $ref: "#/components/responses/AdminError"
@@ -2427,7 +2405,7 @@ components:
       additionalProperties: false
     ProviderView:
       type: object
-      required: [id, enabled, base_url, api_key_configured, api_key_masked, default_model, source, editable]
+      required: [id, enabled, base_url, api_key_configured, api_key_masked, default_model]
       properties:
         id: { type: string }
         enabled: { type: boolean }
@@ -2460,11 +2438,6 @@ components:
         token_budget_per_day_reset_seconds: { type: integer }
         token_budget_per_day_usage_available: { type: boolean }
         request_timeout_seconds: { type: integer }
-        source:
-          type: string
-          enum: [deployment, web]
-        editable: { type: boolean }
-        source_conflict: { type: boolean }
         secret_unavailable: { type: boolean }
       additionalProperties: true
     ProviderList:
@@ -3111,7 +3084,6 @@ components:
           type: array
           items: { type: string }
         health: { type: string }
-        url_from_env_only: { type: boolean }
         upstream_probes:
           type: object
           additionalProperties: true

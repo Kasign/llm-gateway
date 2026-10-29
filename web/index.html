@@ -83,7 +83,7 @@
         </div>
 
         <div class="card backend-card">
-          <div class="card-head"><div><h2>上游推理服务</h2><p>选择 API 流量使用的本地后端或已配置的远程 Provider；远程模型由 deploy/config.yaml 的 default_model 指定</p></div></div>
+          <div class="card-head"><div><h2>上游推理服务</h2><p>选择 API 流量使用的本地后端或已在 Web 管理台配置的远程 Provider</p></div></div>
           <div class="backend-toolbar">
             <div class="field sm backend-field"><label for="beBackend">推理后端</label>
               <select id="beBackend"><option value="llamacpp">llama.cpp</option><option value="ollama">Ollama</option></select>
@@ -108,11 +108,11 @@
       <section id="providers" class="panel">
         <div class="card">
           <div class="card-head">
-            <div><h2>远程 Provider</h2><p>部署 YAML / .env 托管项可接管为 Web 配置或从 Gateway 运行时移除；Web 项可动态新增、配置和管理。部署文件本身不会被修改。新增 Provider 不会自动切换当前上游。</p></div>
+            <div><h2>远程 Provider</h2><p>所有远程连接统一由 Web 管理台创建和维护。Provider ID 在系统内唯一，大小写不敏感；重复 ID 不允许新增。新增 Provider 不会自动切换当前上游。</p></div>
             <div class="mm-toolbar"><button type="button" class="btn sm ghost" id="providerRefresh">刷新</button><button type="button" class="btn sm" id="providerCreate">新增 Provider</button></div>
           </div>
           <div id="providerStatus" class="msg muted" role="status" aria-live="polite" aria-busy="false">尚未加载 Provider 列表。</div>
-          <div class="table-wrap"><table><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>默认模型</th><th>Provider RPM</th><th>每日 Token 预算（UTC）</th><th>并发占用（本进程）</th><th>拒绝 / 队列超时（累计）</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="10" class="muted">加载中…</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Provider ID</th><th>状态</th><th>默认模型</th><th>Provider RPM</th><th>每日 Token 预算（UTC）</th><th>并发占用（本进程）</th><th>拒绝 / 队列超时（累计）</th><th>API Key</th><th>操作</th></tr></thead><tbody id="providerRows"><tr><td colspan="9" class="muted">加载中…</td></tr></tbody></table></div>
         </div>
         <div class="card" id="providerEditorCard" hidden>
           <div class="card-head"><div><h2 id="providerEditorTitle">新增 Provider</h2><p>Key 留空表示保留原值；要删除已保存的 Key，请使用单独的“清除 Key”操作。</p></div><button type="button" class="btn sm ghost" id="providerCancel">取消</button></div>
@@ -144,7 +144,7 @@
               </div>
             </div>
             <div class="provider-grid">
-              <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._\x2d]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；保存后不可修改。</small></div>
+              <div class="field"><label for="providerId">Provider ID</label><input id="providerId" name="id" required pattern="[a-z0-9][a-z0-9._\x2d]{0,63}" maxlength="64" autocomplete="off"><small>仅小写字母、数字、点、下划线、连字符；系统唯一且大小写不敏感，保存后不可修改。</small></div>
               <div class="field"><label for="providerBaseURL">Base URL</label><input id="providerBaseURL" name="base_url" type="url" placeholder="https://api.example.com/v1" required></div>
               <div class="field"><label for="providerDefaultModel">默认模型 ID</label><input id="providerDefaultModel" name="default_model" required maxlength="255"></div>
               <div class="field"><label for="providerApiKey">API Key</label><input id="providerApiKey" name="api_key" type="password" autocomplete="new-password" placeholder="新增时填写；编辑留空保留旧 Key"><small id="providerKeyHelp">Key 仅发送到服务端一次加密保存，API 不回传密钥内容。</small></div>

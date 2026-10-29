@@ -75,45 +75,7 @@ logging:
   retention_interval_seconds: 3600
 
 
-# 远程 OpenAI-compatible Provider（可选）。需要启用时，将 openai_compatible: [] 替换为下面的列表。
-# API Key 从容器环境变量读取，绝不存入 gateway_settings 或 API 响应。
-providers:
-  openai_compatible: []
-  # 配置示例（复制时先删除上面的 openai_compatible: [] 行，再取消注释）。也可由 .env 的 LLM_GATEWAY_PROVIDER_<ID>_* 环境变量预置多个只读 Provider；同一 ID 不能同时出现在 YAML 与环境变量中：
-  # openai_compatible:
-  #   - id: deepseek
-  #     enabled: true
-  #     base_url: "https://api.deepseek.com/v1"
-  #     api_key: "${DEEPSEEK_API_KEY}"
-  #     api_key_header: "Authorization"
-  #     default_model: "deepseek-chat"
-  #     # 可选：公开模型 ID -> 上游真实模型 ID 映射。
-  #     # model_mappings:
-  #     #   public-chat: deepseek-chat
-  #     #   public-reasoner: deepseek-reasoner
-  #     max_concurrent_requests: 64 # 默认上限；达到后 fail-fast 返回 503
-  #     max_queue_size: 0 # 0 关闭排队并沿用立即返回 503 的行为；最大 1024
-  #     queue_wait_timeout_seconds: 30 # 队列开启后等待时限；0 使用默认 30 秒，最大 3600
-  #     requests_per_minute: 0 # 0 不限速；正数限制该 Provider 每分钟新请求数
-  #     token_budget_per_day: 0 # 0 关闭；正数设置 UTC 每日 Token 预算
-  #     request_timeout_seconds: 0 # 0 不设 Provider 总时限；1–86400 秒限制完整 JSON/SSE 请求
-  #     allow_insecure_http: false
-  #     allow_private_network: false
-  #   - id: openai
-  #     enabled: true
-  #     base_url: "https://api.openai.com/v1"
-  #     api_key: "${OPENAI_API_KEY}"
-  #     api_key_header: "Authorization"
-  #     default_model: "gpt-4.1"
-  #     max_concurrent_requests: 64
-  #     max_queue_size: 0
-  #     queue_wait_timeout_seconds: 30
-  #     requests_per_minute: 0
-  #     token_budget_per_day: 0
-  #     request_timeout_seconds: 0
-  #     allow_insecure_http: false
-  #     allow_private_network: false
-
+# 远程 Provider 统一由 Web 管理台创建并持久化；这里不预置厂商密钥或连接配置。
 
 # 多 Agent 独立入口（可选）。每个入口固定一个 Provider 和默认模型。
 # 配置好 deepseek/openai 等 OpenAI-compatible Provider 后即可同时暴露：

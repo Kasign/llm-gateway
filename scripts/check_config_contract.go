@@ -16,8 +16,6 @@ var (
  envRef=regexp.MustCompile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}")
  assignment=regexp.MustCompile("^([A-Za-z_][A-Za-z0-9_]*)=")
  requiredComposeVar=regexp.MustCompile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}")
- providerFields=regexp.MustCompile("fields := \\[\\]string\\{([^}]*)\\}")
- quotedField=regexp.MustCompile("\"([A-Z][A-Z0-9_]*)\"")
  composeKey=regexp.MustCompile("^([A-Z][A-Z0-9_]*):")
 )
 type tree struct { root *yaml.Node; paths map[string]bool; values map[string]string }
@@ -26,12 +24,12 @@ func run()error{
  actual,e:=readTree("config.yaml");if e!=nil{return e};example,e:=readTree("config.example.yaml");if e!=nil{return e}
  typ:=reflect.TypeOf(cfg.Config{});if e=knownFields(actual.root,typ,"");e!=nil{return fmt.Errorf("config.yaml: %w",e)};if e=knownFields(example.root,typ,"");e!=nil{return fmt.Errorf("config.example.yaml: %w",e)}
  if e=compareTrees(actual,example);e!=nil{return e}
- envData,e:=os.ReadFile(".env.example");if e!=nil{return e};providerData,e:=os.ReadFile("providers.env.example");if e!=nil{return e};composeData,e:=os.ReadFile("docker-compose.yml");if e!=nil{return e};parserData,e:=os.ReadFile("internal/config/provider_env.go");if e!=nil{return e}
+ envData,e:=os.ReadFile(".env.example");if e!=nil{return e};composeData,e:=os.ReadFile("docker-compose.yml");if e!=nil{return e}
  envs:=parseAssignments(string(envData));passed:=composeEnvironment(string(composeData))
  for _,t:=range []*tree{actual,example}{refs:=map[string]bool{};collectRefs(t.root,refs);for n:=range refs{if !envs[n]{return fmt.Errorf("YAML 引用的变量 %s 未写入 .env.example",n)};if !passed[n]{return fmt.Errorf("YAML 变量 %s 未由 Compose 显式注入容器",n)}}}
  for _,line:=range strings.Split(string(composeData),"\n"){line=strings.TrimSpace(line);if line==""||strings.HasPrefix(line,"#"){continue};for _,m:=range requiredComposeVar.FindAllStringSubmatch(line,-1){if len(m)==2&&!envs[m[1]]{return fmt.Errorf("Compose 必需变量 %s 未写入 .env.example",m[1])}}}
- if e=checkProviderFields(string(parserData),string(envData),string(providerData),string(composeData),passed);e!=nil{return e}
- fmt.Printf("配置契约检查通过：两份 YAML %d 个路径；环境变量注入和 Provider 字段映射完整。\n",len(actual.paths));return nil
+ if e=checkNoProviderPresets(actual,example,string(envData),string(composeData));e!=nil{return e}
+ fmt.Printf("配置契约检查通过：两份 YAML %d 个路径；远程 Provider 仅由 Web 管理台维护。\n",len(actual.paths));return nil
 }
 func readTree(path string)(*tree,error){data,e:=os.ReadFile(path);if e!=nil{return nil,e};var root yaml.Node;if e=yaml.Unmarshal(data,&root);e!=nil{return nil,fmt.Errorf("解析 %s: %w",path,e)};t:=&tree{root:&root,paths:map[string]bool{},values:map[string]string{}};shape(&root,"",t.paths,t.values);return t,nil}
 func deref(t reflect.Type)reflect.Type{for t!=nil&&t.Kind()==reflect.Pointer{t=t.Elem()};return t}
@@ -58,7 +56,22 @@ func compareTrees(a,b *tree)error{onlyA,onlyB:=[]string{},[]string{};for p:=rang
 func parseAssignments(s string)map[string]bool{out:=map[string]bool{};for _,l:=range strings.Split(s,"\n"){l=strings.TrimSpace(l);if l==""||strings.HasPrefix(l,"#"){continue};m:=assignment.FindStringSubmatch(l);if len(m)==2{out[m[1]]=true}};return out}
 func composeEnvironment(s string)map[string]bool{out:=map[string]bool{};in,base:=false,-1;for _,line:=range strings.Split(s,"\n"){tr:=strings.TrimSpace(line);if tr==""||strings.HasPrefix(tr,"#"){continue};indent:=len(line)-len(strings.TrimLeft(line," \t"));if tr=="environment:"{in=true;base=indent;continue};if in&&indent<=base{in=false};if !in||indent<=base{continue};m:=composeKey.FindStringSubmatch(tr);if len(m)==2{out[m[1]]=true}};return out}
 func collectRefs(n *yaml.Node,out map[string]bool){if n.Kind==yaml.DocumentNode||n.Kind==yaml.SequenceNode{for _,c:=range n.Content{collectRefs(c,out)};return};if n.Kind==yaml.MappingNode{for i:=0;i<len(n.Content);i+=2{collectRefs(n.Content[i+1],out)};return};if n.Kind!=yaml.ScalarNode{return};for _,m:=range envRef.FindAllStringSubmatch(n.Value,-1){if len(m)==2{out[m[1]]=true}}}
-func checkProviderFields(parser,env,extra,compose string,passed map[string]bool)error{m:=providerFields.FindStringSubmatch(parser);if len(m)!=2{return fmt.Errorf("无法读取 Provider 环境字段清单")};fields:=map[string]bool{};for _,q:=range quotedField.FindAllStringSubmatch(m[1],-1){if len(q)==2{fields[q[1]]=true}};missing:=[]string{}
- for field:=range fields{for _,x:=range []struct{content,id string}{{env,"DEEPSEEK"},{env,"OPENAI"},{extra,"EXAMPLE"}}{key:="LLM_GATEWAY_PROVIDER_"+x.id+"_"+field;if !strings.Contains(x.content,key){missing=append(missing,key)}};for _,id:=range []string{"DEEPSEEK","OPENAI"}{key:="LLM_GATEWAY_PROVIDER_"+id+"_"+field;if !passed[key]||!strings.Contains(compose,key+":"){missing=append(missing,key+" (Compose)")}}}
- sort.Strings(missing);if len(missing)>0{return fmt.Errorf("Provider 解析器、示例与 Compose 字段不一致：%v",missing)};if strings.Contains(compose,"env_file:\n      - .env"){return fmt.Errorf("禁止将主 .env 整份注入 Gateway 容器")};return nil
+func checkNoProviderPresets(actual, example *tree, env, compose string) error {
+	if actual.paths["providers"] || example.paths["providers"] {
+		return fmt.Errorf("远程 Provider 不允许出现在 YAML 预置配置中；请统一通过 Web 管理台维护")
+	}
+	for _, item := range []struct{name, content string}{
+		{name: ".env.example", content: env},
+		{name: "docker-compose.yml", content: compose},
+	} {
+		if strings.Contains(item.content, "DEEPSEEK_API_KEY") || strings.Contains(item.content, "OPENAI_API_KEY") ||
+			strings.Contains(item.content, "LLM_GATEWAY_PROVIDER_DEEPSEEK_") ||
+			strings.Contains(item.content, "LLM_GATEWAY_PROVIDER_OPENAI_") {
+			return fmt.Errorf("%s 仍包含 DeepSeek/OpenAI Provider 预置字段；远程连接必须通过 Web 管理台创建", item.name)
+		}
+	}
+	if strings.Contains(compose, "providers.env") || strings.Contains(compose, "env_file:") {
+		return fmt.Errorf("docker-compose.yml 不应通过 env_file 预置远程 Provider；API Key 仅从 Web 管理台加密保存")
+	}
+	return nil
 }

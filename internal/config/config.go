@@ -74,9 +74,6 @@ type Config struct {
 	Storage struct {
 		ModelsDir string `yaml:"models_dir"`
 	} `yaml:"storage"`
-	Providers struct {
-		OpenAICompatible []OpenAICompatibleProviderConfig `yaml:"openai_compatible"`
-	} `yaml:"providers"`
 	Agents []AgentRouteConfig `yaml:"agents"`
 	Download struct {
 		HFBaseURL        string `yaml:"hf_base_url"`
@@ -342,20 +339,6 @@ func validateResolvedConfigEnv(c *Config) error {
 			return err
 		}
 	}
-	for i, item := range c.Providers.OpenAICompatible {
-		if !item.Enabled {
-			continue
-		}
-		prefix := fmt.Sprintf("providers.openai_compatible[%d].", i)
-		for _, field := range []struct{ name, value string }{
-			{"id", item.ID}, {"base_url", item.BaseURL}, {"api_key", item.APIKey},
-			{"api_key_header", item.APIKeyHeader}, {"default_model", item.DefaultModel},
-		} {
-			if err := check(prefix+field.name, field.value); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -431,11 +414,8 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	// Web 登录与多 Provider 预置项由环境变量覆盖或补充。
+	// Web 登录初始配置可由环境变量覆盖；远程 Provider 统一从 Web 管理台持久化数据加载。
 	if err := applyAuthEnv(&c); err != nil {
-		return nil, err
-	}
-	if err := applyProviderEnvironment(&c); err != nil {
 		return nil, err
 	}
 	clearUnresolvedPlaceholder(&c.Auth.AdminUsername)
@@ -564,7 +544,7 @@ func Load(path string) (*Config, error) {
 	if c.Auth.AdminAPIKey == "" || c.Auth.AdminAPIKey == "CHANGE_ME_TO_A_LONG_RANDOM_ADMIN_KEY" {
 		return nil, errors.New("auth.admin_api_key must be changed from the example value")
 	}
-	if err := c.validateProviderConfigs(); err != nil {
+	if err := c.validateAgentRouteConfigs(); err != nil {
 		return nil, err
 	}
 	if err := adminuser.NormalizeWebLogin(&c.Auth.AdminUsername, &c.Auth.AdminPassword, &c.Auth.AdminPasswordHash); err != nil {

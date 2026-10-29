@@ -69,11 +69,14 @@ func TestInferenceForwarderUsesProviderPinnedBeforeRuntimeSwitch(t *testing.T) {
 
 func TestResolveProxyModelTargetUsesSuppliedUpstreamSnapshot(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
-		{ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat"},
-		{ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4.1"},
+	s := &Server{
+		cfg: cfg,
+		upstream: settings.Upstream{Backend: "openai", ModelName: "gpt-4.1"},
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+			"openai": {ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1", APIKeyHeader: "authorization", DefaultModel: "gpt-4.1"},
+		},
 	}
-	s := &Server{cfg: cfg, upstream: settings.Upstream{Backend: "openai", ModelName: "gpt-4.1"}}
 	target, err := s.resolveProxyModelTargetForUpstream(context.Background(), settings.Upstream{
 		Backend: "deepseek", BaseURL: "https://api.deepseek.com/v1", ModelName: "deepseek-chat",
 	})

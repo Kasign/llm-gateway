@@ -19,11 +19,16 @@ func TestRemoteProviderRuntimeResolutionUsesConfiguredURLAndDefaultModel(t *test
 	cfg := &config.Config{}
 	cfg.Llama.LlamaCppBaseURL = "http://llama:8080"
 	cfg.Llama.OllamaBaseURL = "http://ollama:11434"
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1",
-		APIKey: "sk-never-return-this", DefaultModel: "deepseek-chat",
-	}}
-	s := &Server{cfg: cfg, fileUpstream: settings.Upstream{ModelsDir: "/models"}}
+	s := &Server{
+		cfg: cfg,
+		fileUpstream: settings.Upstream{ModelsDir: "/models"},
+		webProviders: map[string]managedProvider{
+			"deepseek": {
+				ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1",
+				APIKey: "sk-never-return-this", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat",
+			},
+		},
+	}
 	got := s.resolveUpstream(settings.Upstream{Backend: "DEEPSEEK"})
 	if got.Backend != "deepseek" || got.BaseURL != "https://api.deepseek.com/v1" || got.ModelName != "deepseek-chat" || got.ModelsDir != "" {
 		t.Fatalf("resolved remote upstream = %+v", got)

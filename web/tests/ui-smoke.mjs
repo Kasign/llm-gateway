@@ -1208,7 +1208,7 @@ try {
         contentType:'application/json',
         body:JSON.stringify({
           data:[{
-            id:'deepseek', source:'deployment', editable:false, enabled:true,
+            id:'deepseek', source:'web', editable:true, enabled:true,
             base_url:'https://api.deepseek.com', default_model:'deepseek-chat',
             api_key_configured:true, requests_per_minute:0, token_budget_per_day:0
           }],
@@ -1259,7 +1259,7 @@ try {
       await page.locator('#providerBaseURL').inputValue() === 'https://api.deepseek.com' &&
       await page.locator('#providerDefaultModel').inputValue() === 'deepseek-chat' &&
       await page.locator('#providerApiKeyHeader').inputValue() === 'authorization');
-    check('固定模板 ID 与已有部署 Provider 冲突时明确提示复用现有配置',
+    check('固定模板 ID 与已有 Provider 冲突时显示唯一 ID 提示',
       (await page.locator('#providerTemplateHelp').textContent()).includes('Provider ID「deepseek」已存在'));
     await page.locator('#providerId').fill('deepseek-browser-test');
     check('修改为唯一 Provider ID 后自动清除重名提示',
@@ -1316,11 +1316,12 @@ try {
       editorHidden: await page.locator('#providerEditorCard').isHidden(),
       message: await page.locator('#providerEditorStatus').textContent()
     };
-    check('新增同名部署 Provider 被阻止且不会发送 POST',
+    check('新增同名 Provider 被阻止且不会发送 POST',
       duplicateCreateState.postCount === 0 &&
       !duplicateCreateState.editorHidden &&
       duplicateCreateState.message.includes('已存在') &&
-      duplicateCreateState.message.includes('点击“配置”'),
+      duplicateCreateState.message.includes('不能重复新增') &&
+      await page.locator('#providerSave').isDisabled(),
       duplicateCreateState);
     await page.locator('#providerTemplate').selectOption('openai');
     await page.locator('#providerTemplateKeepKey').click();

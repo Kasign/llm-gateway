@@ -15,6 +15,7 @@ import (
 	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
 )
@@ -55,12 +56,12 @@ func TestAgentRouteHandlerStripsPrefixAndPreservesPublicURL(t *testing.T) {
 
 func TestResolveInferenceUsesAgentRouteWithoutChangingActiveProvider(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{
-		ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat",
-	}}
 	s := &Server{
 		cfg: cfg,
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://llama:8080", ModelName: "local.gguf"},
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+		},
 	}
 	choice, err := s.resolveInference(context.Background(), core.State{
 		Request: core.Request{
@@ -141,18 +142,6 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Llama.AutoLoadOnProxy = false
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
-		{
-			ID: "deepseek", Enabled: true, BaseURL: deepseekUpstream.URL + "/v1",
-			DefaultModel: "deepseek-chat", APIKey: "deepseek-upstream-secret",
-			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
-		},
-		{
-			ID: "openai", Enabled: true, BaseURL: openaiUpstream.URL + "/v1",
-			DefaultModel: "gpt-4.1", APIKey: "openai-upstream-secret",
-			APIKeyHeader: "api-key", AllowInsecureHTTP: true, AllowPrivateNetwork: true,
-		},
-	}
 	deepseekRoute := config.AgentRouteConfig{
 		ID: "deepseek-agent", Enabled: true, PathPrefix: "/deepseek",
 		ProviderID: "deepseek", DefaultModel: "deepseek-chat",
@@ -171,8 +160,21 @@ func TestAgentRoutesForwardToDistinctConfiguredProviders(t *testing.T) {
 		fileUpstream: settings.Upstream{
 			Backend: "llamacpp", BaseURL: "http://llama-unused.invalid:8080", ModelName: "local.gguf",
 		},
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: deepseekUpstream.URL + "/v1", APIKey: "deepseek-upstream-secret", APIKeyHeader: "api-key", DefaultModel: "deepseek-chat", AllowInsecureHTTP: true, AllowPrivateNetwork: true},
+			"openai": {ID: "openai", Enabled: true, BaseURL: openaiUpstream.URL + "/v1", APIKey: "openai-upstream-secret", APIKeyHeader: "api-key", DefaultModel: "gpt-4.1", AllowInsecureHTTP: true, AllowPrivateNetwork: true},
+		},
 	}
 	s.pipe = s.newInferencePipeline()
+	for id, row := range s.webProviders {
+		remote, err := s.buildRemoteProvider(row)
+		if err != nil {
+			t.Fatalf("build %s Provider: %v", id, err)
+		}
+		if err := s.providers.Register(id, func() provider.Provider { return remote }); err != nil {
+			t.Fatalf("register %s Provider: %v", id, err)
+		}
+	}
 	// 本测试聚焦 data-plane 路由与 Provider 选择，不需要数据库审计观察器；其行为由独立测试覆盖。
 	s.pipe.Observe = nil
 
@@ -381,13 +383,13 @@ func TestRejectedInferenceLogPreservesAgentURLAndRedactsQuerySecrets(t *testing.
 
 func TestConcurrentAgentRoutesKeepProviderAndModelIsolation(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{
-		{ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-chat"},
-		{ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4.1"},
-	}
 	s := &Server{
 		cfg: cfg,
 		upstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://llama:8080", ModelName: "local.gguf"},
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com/v1", APIKeyHeader: "authorization", DefaultModel: "deepseek-chat"},
+			"openai": {ID: "openai", Enabled: true, BaseURL: "https://api.openai.com/v1", APIKeyHeader: "authorization", DefaultModel: "gpt-4.1"},
+		},
 	}
 
 	const iterations = 200

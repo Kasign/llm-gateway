@@ -34,10 +34,9 @@ Web 登录仅使用密码，可在账号设置里启用/关闭密码保护及修
 ```bash
 cp .env.example .env
 cp config.example.yaml config.yaml
-cp providers.env.example providers.env
 ```
 
-填写现有 Docker network、模型目录、MariaDB root 密码、Gateway 数据库密码和 Admin API Key，再：
+填写现有 Docker network、模型目录、MariaDB root 密码、Gateway 数据库密码和 Admin API Key。远程 Provider 在控制台「远程 Provider」页面新增和维护；首次添加 Key 前，请在 .env 中配置并备份 LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY。再：
 
 ```bash
 sudo docker compose up -d --build

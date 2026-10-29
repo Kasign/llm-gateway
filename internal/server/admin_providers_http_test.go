@@ -180,32 +180,12 @@ func TestProviderAPIKeyEncryptionRoundTripAndRejectsWrongKey(t *testing.T) {
 
 func TestSafeProviderViewNeverExposesPlaintextOrCiphertext(t *testing.T) {
 	s := &Server{}
-	view := s.safeProviderView(managedProvider{ID:"remote", Enabled:true, APIKey:"plaintext-secret", APIKeyCiphertext:"v1:ciphertext-secret", TokenBudgetPerDay:250000}, "web", true)
+	view := s.safeProviderView(managedProvider{ID:"remote", Enabled:true, APIKey:"plaintext-secret", APIKeyCiphertext:"v1:ciphertext-secret", TokenBudgetPerDay:250000})
 	raw, err := json.Marshal(view); if err != nil { t.Fatal(err) }
 	text := string(raw)
 	for _, forbidden := range []string{"plaintext-secret","ciphertext-secret","api_key_ciphertext",`"api_key"`} { if strings.Contains(text,forbidden) { t.Fatalf("Provider view leaked %q: %s",forbidden,text) } }
 	if view["token_budget_per_day"] != int64(250000) { t.Fatalf("safe view token budget = %#v, want 250000", view["token_budget_per_day"]) }
 	if view["api_key_configured"] != true { t.Fatal("safe view should disclose whether a key exists") }
-}
-
-func TestDeploymentProviderIDIncludesDisabledEntries(t *testing.T) {
-	s := &Server{cfg:&config.Config{}}
-	s.cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{ID:"reserved-remote",Enabled:false}}
-	if !s.deploymentProviderID("RESERVED-REMOTE") { t.Fatal("disabled deployment Provider ID must remain reserved") }
-	if s.deploymentProviderID("other") { t.Fatal("unconfigured Provider ID must not be reserved") }
-}
-
- 
-func TestChangeWebProviderRejectsDeploymentManagedIDIncludingDisabled(t *testing.T) {
-	s := &Server{cfg: &config.Config{}}
-	s.cfg.Providers.OpenAICompatible = []config.OpenAICompatibleProviderConfig{{ID:"reserved", Enabled:false}}
-	err := s.changeWebProvider(context.Background(), "reserved", &providerMutationRequest{
-		ID:"reserved", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model",
-	}, "save")
-	var managedErr *providerManagementError
-	if !errors.As(err, &managedErr) || managedErr.status != 409 {
-		t.Fatalf("deployment-owned ID should return 409, got %v", err)
-	}
 }
 
 func TestChangeWebProviderProtectsActiveProviderFromBecomingUnavailable(t *testing.T) {
@@ -240,10 +220,29 @@ func TestChangeWebProviderRejectsCreateWhenStaleUpstreamPointsAtNewID(t *testing
 	s := &Server{cfg:&config.Config{}, upstream:settings.Upstream{Backend:"orphan"}}
 	err := s.changeWebProvider(context.Background(), "orphan", &providerMutationRequest{
 		ID:"orphan", Enabled:true, BaseURL:"https://example.invalid/v1", DefaultModel:"model",
-	}, "save")
+	}, "create")
 	var managedErr *providerManagementError
 	if !errors.As(err, &managedErr) || managedErr.status != 409 {
 		t.Fatalf("creating the currently selected but unconfigured ID should return 409, got %v", err)
+	}
+}
+
+func TestChangeWebProviderRejectsDuplicateNormalizedID(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{},
+		webProviders: map[string]managedProvider{
+			"deepseek": {ID: "deepseek", Enabled: true, BaseURL: "https://api.deepseek.com", DefaultModel: "deepseek-chat"},
+		},
+	}
+	err := s.changeWebProvider(context.Background(), " DEEPSEEK ", &providerMutationRequest{
+		ID: " DEEPSEEK ", Enabled: true, BaseURL: "https://api.example.com/v1", DefaultModel: "model",
+	}, "create")
+	var managedErr *providerManagementError
+	if !errors.As(err, &managedErr) || managedErr.status != 409 || managedErr.code != "provider_id_exists" {
+		t.Fatalf("duplicate normalized Provider ID must return 409/provider_id_exists, got %v", err)
+	}
+	if len(s.webProviders) != 1 || s.webProviders["deepseek"].BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("duplicate create mutated existing Provider: %#v", s.webProviders)
 	}
 }
 
@@ -262,5 +261,38 @@ func TestValidateProviderInputKeepsExistingKeyWhenInputIsBlank(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if next.APIKey != old.APIKey || next.APIKeyCiphertext != old.APIKeyCiphertext {
 		t.Fatalf("blank API Key should retain existing credential; got plaintext=%q ciphertext=%q", next.APIKey, next.APIKeyCiphertext)
+	}
+}
+
+
+func TestValidateProviderInputRejectsInvalidConfiguredLimits(t *testing.T) {
+	base := func() providerMutationRequest {
+		return providerMutationRequest{
+			ID: "remote", Enabled: false, BaseURL: "https://provider.example/v1",
+			APIKeyHeader: "authorization", DefaultModel: "chat-model",
+		}
+	}
+	cases := []struct {
+		name string
+		mutate func(*providerMutationRequest)
+		wantCode string
+	}{
+		{name: "concurrency above maximum", mutate: func(in *providerMutationRequest) { in.MaxConcurrentRequests = 65 }, wantCode: "invalid_concurrency_limit"},
+		{name: "negative queue size", mutate: func(in *providerMutationRequest) { in.MaxQueueSize = -1 }, wantCode: "invalid_queue_limit"},
+		{name: "queue above maximum", mutate: func(in *providerMutationRequest) { in.MaxQueueSize = 1025 }, wantCode: "invalid_queue_limit"},
+		{name: "queue timeout above maximum", mutate: func(in *providerMutationRequest) { in.QueueWaitTimeoutSeconds = 3601 }, wantCode: "invalid_queue_timeout"},
+		{name: "RPM above maximum", mutate: func(in *providerMutationRequest) { in.RequestsPerMinute = config.MaxProviderRequestsPerMinute + 1 }, wantCode: "invalid_provider_rate_limit"},
+		{name: "token budget above maximum", mutate: func(in *providerMutationRequest) { in.TokenBudgetPerDay = config.MaxProviderTokenBudgetPerDay + 1 }, wantCode: "invalid_token_budget"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base()
+			tc.mutate(&in)
+			_, err := (&Server{}).validateProviderInput(in, nil, "remote")
+			var managedErr *providerManagementError
+			if !errors.As(err, &managedErr) || managedErr.status != 400 || managedErr.code != tc.wantCode {
+				t.Fatalf("invalid limit must return 400/%s, got %v", tc.wantCode, err)
+			}
+		})
 	}
 }

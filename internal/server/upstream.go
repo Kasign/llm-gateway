@@ -64,7 +64,7 @@ func (s *Server) validateUpstreamBackend(ctx context.Context, wantBackend, baseU
 	wantBackend = strings.ToLower(strings.TrimSpace(wantBackend))
 	if remote, ok := s.remoteProviderConfig(wantBackend); ok {
 		if strings.TrimRight(strings.TrimSpace(baseURL), "/") != strings.TrimRight(remote.BaseURL, "/") {
-			return fmt.Errorf("remote Provider %q URL must come from deploy/config.yaml", wantBackend)
+			return fmt.Errorf("remote Provider %q URL must match its Web-managed configuration", wantBackend)
 		}
 		if s.providers == nil {
 			return fmt.Errorf("remote Provider registry is not initialized")
@@ -122,16 +122,19 @@ func (s *Server) upstreamURLWarnings() []string {
 }
 
 func (s *Server) configuredBackendURLs() map[string]string {
-	out := map[string]string{
-		"llamacpp": s.baseURLForBackend("llamacpp"),
-		"ollama":   s.baseURLForBackend("ollama"),
+	out := map[string]string{}
+	if s == nil {
+		return out
 	}
-	if s != nil && s.cfg != nil {
-		for _, item := range s.cfg.Providers.OpenAICompatible { if item.Enabled { out[item.ID] = item.BaseURL } }
-		s.providerConfigMu.RLock()
-		for id, item := range s.webProviders { if item.Enabled && !item.SourceConflict && !item.SecretUnavailable { out[id] = item.BaseURL } }
-		s.providerConfigMu.RUnlock()
+	out["llamacpp"] = s.baseURLForBackend("llamacpp")
+	out["ollama"] = s.baseURLForBackend("ollama")
+	s.providerConfigMu.RLock()
+	for id, item := range s.webProviders {
+		if item.Enabled && !item.SecretUnavailable {
+			out[id] = item.BaseURL
+		}
 	}
+	s.providerConfigMu.RUnlock()
 	return out
 }
 
@@ -242,13 +245,15 @@ func (s *Server) getBackendAPI(w http.ResponseWriter, r *http.Request) {
 	if probes == nil {
 		probes = map[string]interface{}{}
 	}
-	for _, item := range s.cfg.Providers.OpenAICompatible {
-		if item.Enabled {
-			probes[item.ID] = map[string]interface{}{
+	s.providerConfigMu.RLock()
+	for id, item := range s.webProviders {
+		if item.Enabled && !item.SecretUnavailable {
+			probes[id] = map[string]interface{}{
 				"base_url": item.BaseURL, "configured_remote": true, "default_model": item.DefaultModel,
 			}
 		}
 	}
+	s.providerConfigMu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"active":                      u,
@@ -257,7 +262,6 @@ func (s *Server) getBackendAPI(w http.ResponseWriter, r *http.Request) {
 		"available_backends":          s.availableBackends(),
 		"url_warnings":                s.upstreamURLWarnings(),
 		"health":                      health,
-		"url_from_env_only":           true,
 		"upstream_probes":             probes,
 		"inference_active_model_id":   proxyActive,
 		"inference_active_by_backend": overview.activeByBackend,

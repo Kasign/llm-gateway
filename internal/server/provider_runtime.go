@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/applog"
@@ -63,30 +64,17 @@ func managedProviderConfig(item managedProvider) config.OpenAICompatibleProvider
 
 func (s *Server) remoteProviderConfig(id string) (config.OpenAICompatibleProviderConfig, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if s == nil || s.cfg == nil {
+	if s == nil || id == "" {
 		return config.OpenAICompatibleProviderConfig{}, false
 	}
 	s.providerConfigMu.RLock()
-	web, hasWeb := s.webProviders[id]
+	row, ok := s.webProviders[id]
 	s.providerConfigMu.RUnlock()
-	if hasWeb && web.Deleted {
+	if !ok || !row.Enabled || row.SecretUnavailable {
 		return config.OpenAICompatibleProviderConfig{}, false
 	}
-	if hasWeb && web.SourceOverride && s.deploymentProviderID(id) {
-		if !web.Enabled || web.SourceConflict || web.SecretUnavailable {
-			return config.OpenAICompatibleProviderConfig{}, false
-		}
-		return managedProviderConfig(web), true
-	}
-	if deployment, ok := s.deploymentProviderConfig(id); ok {
-		return deployment, deployment.Enabled
-	}
-	if !hasWeb || !web.Enabled || web.SourceConflict || web.SecretUnavailable {
-		return config.OpenAICompatibleProviderConfig{}, false
-	}
-	return managedProviderConfig(web), true
+	return managedProviderConfig(row), true
 }
-
 func (s *Server) isConfiguredProvider(id string) bool {
 	if isLocalInferenceBackend(id) {
 		return true
@@ -133,65 +121,51 @@ func (s *Server) activeProviderStatus(ctx context.Context) (backend, status stri
 	return backend, "configured; remote connectivity is checked on inference", nil
 }
 
-// availableBackends 仅暴露安全配置的元数据，不返回 API Key。
+// availableBackends 仅返回固定本地后端和 Web 管理台已保存的远程 Provider 元数据。
 func (s *Server) availableBackends() []map[string]interface{} {
 	out := []map[string]interface{}{
-		{"id":"llamacpp","label":"llama.cpp","kind":"local","base_url":s.baseURLForBackend("llamacpp"),"source":"deployment","editable":false},
-		{"id":"ollama","label":"Ollama","kind":"local","base_url":s.baseURLForBackend("ollama"),"source":"deployment","editable":false},
+		{"id": "llamacpp", "label": "llama.cpp", "kind": "local", "base_url": ""},
+		{"id": "ollama", "label": "Ollama", "kind": "local", "base_url": ""},
 	}
-	if s == nil || s.cfg == nil { return out }
+	if s == nil {
+		return out
+	}
+	out[0]["base_url"] = s.baseURLForBackend("llamacpp")
+	out[1]["base_url"] = s.baseURLForBackend("ollama")
+	out[0]["source"], out[0]["editable"] = "deployment", false
+	out[1]["source"], out[1]["editable"] = "deployment", false
 	s.providerConfigMu.RLock()
-	rows := make(map[string]managedProvider, len(s.webProviders))
-	for id, row := range s.webProviders {
-		rows[id] = row
+	rows := make([]managedProvider, 0, len(s.webProviders))
+	for _, row := range s.webProviders {
+		rows = append(rows, row)
 	}
 	s.providerConfigMu.RUnlock()
-	for _, item := range s.cfg.Providers.OpenAICompatible {
-		id := strings.ToLower(strings.TrimSpace(item.ID))
-		if managed, ok := rows[id]; ok && (managed.SourceOverride || managed.Deleted) {
-			continue
-		}
-		if !item.Enabled {
-			continue
-		}
-		out = append(out, map[string]interface{}{"id": item.ID, "label": item.ID, "kind": "remote", "base_url": item.BaseURL, "default_model": item.DefaultModel, "requests_per_minute": item.RequestsPerMinute, "token_budget_per_day": item.TokenBudgetPerDay, "api_key_configured": item.APIKey != "", "source": "deployment", "editable": true})
-	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	for _, row := range rows {
-		if row.Deleted || !row.Enabled || row.SourceConflict || row.SecretUnavailable {
+		if !row.Enabled || row.SecretUnavailable {
 			continue
 		}
-		source := "web"
-		if row.SourceOverride && s.deploymentProviderID(row.ID) {
-			source = "web-override"
-		}
-		out = append(out, map[string]interface{}{"id": row.ID, "label": row.ID, "kind": "remote", "base_url": row.BaseURL, "default_model": row.DefaultModel, "requests_per_minute": row.RequestsPerMinute, "token_budget_per_day": row.TokenBudgetPerDay, "api_key_configured": row.APIKeyCiphertext != "" || row.APIKey != "", "source": source, "editable": true})
+		out = append(out, map[string]interface{}{
+			"id": row.ID, "label": row.ID, "kind": "remote", "base_url": row.BaseURL,
+			"default_model": row.DefaultModel, "requests_per_minute": row.RequestsPerMinute,
+			"token_budget_per_day": row.TokenBudgetPerDay,
+			"api_key_configured": row.APIKey != "" || row.APIKeyCiphertext != "",
+			"source": "web", "editable": true,
+		})
 	}
 	return out
 }
 
- 
-// providerRequestsPerMinute 返回指定远程 Provider 的独立 RPM。0 表示不额外限制。
+// providerRequestsPerMinute 返回 Web 管理台配置的 Provider RPM。0 表示不额外限制。
 func (s *Server) providerRequestsPerMinute(id string) int {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if id == "" || isLocalInferenceBackend(id) || s == nil {
+	if s == nil || id == "" || isLocalInferenceBackend(id) {
 		return 0
 	}
 	s.providerConfigMu.RLock()
 	row, ok := s.webProviders[id]
 	s.providerConfigMu.RUnlock()
-	if ok && row.Deleted {
-		return 0
-	}
-	if ok && row.SourceOverride && s.deploymentProviderID(id) {
-		if !row.Enabled || row.SourceConflict || row.SecretUnavailable {
-			return 0
-		}
-		return row.RequestsPerMinute
-	}
-	if deployment, exists := s.deploymentProviderConfig(id); exists {
-		return deployment.RequestsPerMinute
-	}
-	if !ok || !row.Enabled || row.SourceConflict || row.SecretUnavailable {
+	if !ok || !row.Enabled || row.SecretUnavailable {
 		return 0
 	}
 	return row.RequestsPerMinute

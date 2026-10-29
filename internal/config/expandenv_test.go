@@ -104,8 +104,6 @@ llama:
   ollama_base_url: "${LLM_GATEWAY_MISSING_OPTIONAL_OLLAMA_URL}"
 storage:
   models_dir: "/tmp/llm-gateway-models"
-providers:
-  openai_compatible: []
 `, tc.adminKey, tc.dbPass)
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			if err := os.WriteFile(path, []byte(configText), 0o600); err != nil {
@@ -181,8 +179,6 @@ llama:
   ollama_base_url: %q
 storage:
   models_dir: "/tmp/llm-gateway-models"
-providers:
-  openai_compatible: []
 `, tc.llamaURL, tc.ollamaURL)
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			if err := os.WriteFile(path, []byte(configText), 0o600); err != nil {
@@ -208,51 +204,6 @@ providers:
 				t.Fatalf("configuration error leaked URL credential/query detail %q: %v", tc.wantSecret, err)
 			}
 		})
-	}
-}
-
-func TestExpandConfigEnvLoadsRemoteProviderKeyBeforeValidation(t *testing.T) {
-	const envName = "LLM_GATEWAY_TEST_PROVIDER_API_KEY"
-	t.Setenv(envName, "sk-test-remote-key")
-	raw := `providers:
-  openai_compatible:
-    - id: deepseek
-      enabled: true
-      base_url: "https://api.deepseek.com/v1"
-      api_key: "${LLM_GATEWAY_TEST_PROVIDER_API_KEY}"
-      api_key_header: "Authorization"
-      default_model: "deepseek-chat"
-`
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(expandConfigEnv(raw)), &cfg); err != nil {
-		t.Fatalf("unmarshal config: %v", err)
-	}
-	if len(cfg.Providers.OpenAICompatible) != 1 {
-		t.Fatalf("provider count = %d, want 1", len(cfg.Providers.OpenAICompatible))
-	}
-	if got := cfg.Providers.OpenAICompatible[0].APIKey; got != "sk-test-remote-key" {
-		t.Fatalf("API key env expansion = %q, want configured test value", got)
-	}
-	if err := cfg.validateProviderConfigs(); err != nil {
-		t.Fatalf("validate provider config after env expansion: %v", err)
-	}
-}
-
-func TestRemoteProviderRejectsUnresolvedEnvironmentPlaceholder(t *testing.T) {
-	raw := `providers:
-  openai_compatible:
-    - id: deepseek
-      enabled: true
-      base_url: "https://api.deepseek.com/v1"
-      api_key: "${LLM_GATEWAY_TEST_UNSET_PROVIDER_KEY}"
-      default_model: "deepseek-chat"
-`
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(expandConfigEnv(raw)), &cfg); err != nil {
-		t.Fatalf("unmarshal config: %v", err)
-	}
-	if err := cfg.validateProviderConfigs(); err == nil {
-		t.Fatal("enabled Provider with unresolved API Key placeholder must fail configuration validation")
 	}
 }
 
@@ -288,23 +239,6 @@ api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
 // TestRootConfigLoadsWithZeroLocalRequestTimeout protects the real deployment
 // config from YAML/environment type regressions that Compose parsing cannot catch.
 func TestRootConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
-	// Do not let a developer's local Provider environment leak into this fixture.
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !strings.HasPrefix(key, "LLM_GATEWAY_PROVIDER_") {
-			continue
-		}
-		if err := os.Unsetenv(key); err != nil {
-			t.Fatalf("unset %s: %v", key, err)
-		}
-		restoreKey, restoreValue := key, value
-		t.Cleanup(func() {
-			if err := os.Setenv(restoreKey, restoreValue); err != nil {
-				t.Errorf("restore %s: %v", restoreKey, err)
-			}
-		})
-	}
-
 	// Use non-production values; Load validates config but does not connect to services.
 	for key, value := range map[string]string{
 		"LLM_GATEWAY_ADMIN_API_KEY":       "ci-admin-api-key-for-config-test",
