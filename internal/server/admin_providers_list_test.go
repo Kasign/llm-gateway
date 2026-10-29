@@ -112,6 +112,20 @@ func TestAdminProvidersAPIGetReturnsWebManagedProviderWithoutSecretsOrLegacyFlag
 }
 
 
+
+func TestNormalizeStoredWebProvidersMigratesNormalizedIDs(t *testing.T) {
+	rows := []storedManagedProvider{
+		{managedProvider: managedProvider{ID: " OpenAI ", Enabled: true, DefaultModel: "gpt-4.1"}},
+	}
+	got, needsMigration := normalizeStoredWebProviders(rows)
+	if !needsMigration {
+		t.Fatal("ID normalization should trigger a persistent migration")
+	}
+	if len(got) != 1 || got["openai"].ID != "openai" {
+		t.Fatalf("normalized Provider rows = %#v", got)
+	}
+}
+
 func TestNormalizeStoredWebProvidersMigratesLegacyLifecycleFlags(t *testing.T) {
 	rows := []storedManagedProvider{
 		{

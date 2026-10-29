@@ -295,6 +295,21 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		fileUpstream: settings.Upstream{Backend: "llamacpp", BaseURL: "http://127.0.0.1:8080", ModelName: "unused.gguf"},
 	}
 	srv.pipe = srv.newInferencePipeline()
+	if injectedProviders == nil {
+		// 测试夹具与生产启动保持一致：所有远程 Provider 都来自 Web 数据，并注册到运行时 Registry。
+		for id, row := range srv.webProviders {
+			remote, buildErr := srv.buildRemoteProvider(row)
+			if buildErr != nil {
+				t.Fatalf("build Web-managed Provider %s: %v", id, buildErr)
+			}
+			row.ConcurrencyLimiter = remote.ConcurrencyLimiter()
+			srv.webProviders[id] = row
+			providerInstance := remote
+			if registerErr := srv.providers.Register(id, func() gatewayprovider.Provider { return providerInstance }); registerErr != nil {
+				t.Fatalf("register Web-managed Provider %s: %v", id, registerErr)
+			}
+		}
+	}
 	handler := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

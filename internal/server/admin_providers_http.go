@@ -137,7 +137,11 @@ func normalizeStoredWebProviders(rows []storedManagedProvider) (map[string]manag
 	needsMigration := false
 	for _, stored := range rows {
 		row := stored.managedProvider
-		row.ID = strings.ToLower(strings.TrimSpace(row.ID))
+		normalizedID := strings.ToLower(strings.TrimSpace(row.ID))
+		if normalizedID != row.ID {
+			needsMigration = true
+		}
+		row.ID = normalizedID
 		if stored.SourceOverride || stored.Deleted {
 			needsMigration = true
 		}
