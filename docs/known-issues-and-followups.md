@@ -1,15 +1,16 @@
 # LLM Gateway 未关闭问题与后续验收台账
 
-> 更新日期：2026-10-28。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
+> 更新日期：2026-10-29。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
 
 ## 当前基线
 
-- 最新代码基线：`d89b94247e8b60164f28758a5da1142c5bafa054`（2026-10-28）。Go CI [运行 40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过；上一轮 Web UI 浏览器验收 [运行 40631304282](https://github.com/Kasign/llm-gateway/actions/runs/40631304282) 52/52 项通过。此后提交集中在文档与 OpenAPI/契约门禁，未改 Web 运行时代码。早期 Actions #257 的 Runner 启动失败属于历史状态，不再代表当前基线。
-- 当前没有开放 PR。最新 CI 包含 Go 测试/race/vet、配置与 API 契约、前端 Bundle、MariaDB 审计负载、Gateway 稳态负载和故障注入、Go/Docker 构建。
-- Actions #247/#248 的失败来自 RequestAnalysis 契约脚本语法与初始化顺序，修复后的后续 Head 已通过；不再将旧 Head 的状态作为当前阻塞。
-- Provider 热更新已进行静态复审：容量有范围校验、同一 Provider 实例共享许可器、预算降低与提高采用不同生效顺序。当前没有确认的生产代码缺陷；若无新复现证据，不继续为这段逻辑增加抽象或重复测试。
-- CI 基于 Mock 与测试数据库；真实供应商、生产代理和 1Panel 部署需单独验收，不能标记为 CI 已覆盖。
-- Redis 限流器、模型 ID 解析和本地模型就绪失败的对外错误文案已收敛；Actions #256 已验证该基线。新发现的真实缺陷是显式设置 `llama.request_timeout_seconds: 0` 仍被代理层强制改成一小时，已纳入本批最小修复与回归覆盖。
+- 最新远端 `dev` HEAD：`411858d23f83652c2d465705fba62727a3d1d0f3`（2026-10-28 13:34 UTC；2026-10-29 复核）。该提交仅更新本文件之外的 Web UI 验收文档，没有修改运行时代码。
+- 当前 HEAD 的 Go CI [运行 40697691662](https://github.com/Kasign/llm-gateway/actions/runs/40697691662) 已完成，5 个 Job 全部成功：Go 测试/race/vet、配置/API 契约与前端 Bundle、Gateway 稳态负载与审计持久化、故障注入与恢复验证、Go/Docker 构建。
+- 最新代码级 Browser Smoke 对应父提交 `38f41a8516e3d3d1e5cde8aa1c48e9d86315953b`，运行 [40696945378](https://github.com/Kasign/llm-gateway/actions/runs/40696945378) 成功，报告为 164/164、`failures=[]`。其后 `411858d` 只改文档，故该浏览器结果仍对应当前 Web 运行时代码；下一次 Web 运行时代码变更仍须以新 Smoke 结果为准。
+- 当前没有开放 PR 或 Issue。上述 CI 与 Browser Smoke 不能代替真实供应商、生产 OpenResty/公网链路和 1Panel 部署验收；这些项目仍需单独记录实测证据。
+- 先前显式设置 `llama.request_timeout_seconds: 0` 被代理层强制套用一小时的问题，已有代码级修复和零值/正值回归覆盖；当前完整 Go CI 已通过。慢模型在实际 OpenResty、客户端和本地模型组合下的端到端超时行为仍需生产环境验收。
+- Provider 热更新已有共享并发许可器、限额变更顺序和回滚测试；后续只针对新的可复现失败补充实现，不再重复扩充同一段抽象。
+- 历史记录中在旧提交上标记为“待运行”的测试，需以本基线之后对应工作流的最终结果为准；不把旧失败继续算作当前阻塞，也不因为 CI 成功而关闭真实环境验收项。
 
 ## P1：可靠性与可观测性
 
