@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
 	"net/http/httptest"
 	"strings"
 	"testing"
