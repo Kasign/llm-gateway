@@ -109,6 +109,34 @@ func TestAdminProvidersAPIGetReturnsWebManagedProviderWithoutSecretsOrLegacyFlag
 	if row["api_key_configured"] != true || row["api_key_masked"] != "••••••••" {
 		t.Fatalf("Provider API response should show only masked key status: %#v", row)
 	}
+
+	// 通过真实 HTTP Handler 检查规范化后的重复 ID：必须返回稳定 409，不能覆盖既有 URL 或凭据。
+	duplicateRequest := httptest.NewRequest(http.MethodPost, "/api/admin/providers", strings.NewReader(`{
+		"id": " DEEPSEEK ",
+		"enabled": true,
+		"base_url": "https://replacement.example/v1",
+		"api_key": "replacement-secret",
+		"api_key_header": "authorization",
+		"default_model": "replacement-model"
+	}`))
+	duplicateRequest.Header.Set("Authorization", "Bearer "+token)
+	duplicateRequest.Header.Set("Content-Type", "application/json")
+	duplicateResponse := httptest.NewRecorder()
+	s.adminProvidersAPI(duplicateResponse, duplicateRequest)
+	if duplicateResponse.Code != http.StatusConflict || !strings.Contains(duplicateResponse.Body.String(), "provider_id_exists") {
+		t.Fatalf("POST duplicate Provider ID status/body = %d/%s, want 409/provider_id_exists", duplicateResponse.Code, duplicateResponse.Body.String())
+	}
+	if strings.Contains(duplicateResponse.Body.String(), "replacement-secret") {
+		t.Fatal("duplicate Provider response must not echo the submitted API Key")
+	}
+	if len(s.webProviders) != 1 {
+		t.Fatalf("duplicate Provider creation changed the number of records: %#v", s.webProviders)
+	}
+	stored := s.webProviders["deepseek"]
+	if stored.BaseURL != "https://api.deepseek.com" || stored.DefaultModel != "deepseek-chat" ||
+		stored.APIKey != "legacy-secret" || stored.APIKeyCiphertext != "v1:ciphertext-secret" {
+		t.Fatalf("duplicate Provider creation mutated the existing connection or secret: %#v", stored)
+	}
 }
 
 
