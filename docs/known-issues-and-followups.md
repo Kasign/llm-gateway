@@ -4,10 +4,10 @@
 
 ## 当前基线
 
-- 最新远端 `dev` HEAD：`411858d23f83652c2d465705fba62727a3d1d0f3`（2026-10-28 13:34 UTC；2026-10-29 复核）。该提交仅更新本文件之外的 Web UI 验收文档，没有修改运行时代码。
-- 当前 HEAD 的 Go CI [运行 40697691662](https://github.com/Kasign/llm-gateway/actions/runs/40697691662) 已完成，5 个 Job 全部成功：Go 测试/race/vet、配置/API 契约与前端 Bundle、Gateway 稳态负载与审计持久化、故障注入与恢复验证、Go/Docker 构建。
-- 最新代码级 Browser Smoke 对应父提交 `38f41a8516e3d3d1e5cde8aa1c48e9d86315953b`，运行 [40696945378](https://github.com/Kasign/llm-gateway/actions/runs/40696945378) 成功，报告为 164/164、`failures=[]`。其后 `411858d` 只改文档，故该浏览器结果仍对应当前 Web 运行时代码；下一次 Web 运行时代码变更仍须以新 Smoke 结果为准。
-- 当前没有开放 PR 或 Issue。上述 CI 与 Browser Smoke 不能代替真实供应商、生产 OpenResty/公网链路和 1Panel 部署验收；这些项目仍需单独记录实测证据。
+- 最新运行时代码修复：`a00b6f780bbe5b7e0f988420b8e50d104b0d70c1`（Provider 列表冲突记录去重）；随后 `8b1668349f58f27c24cb023700e930e37d1843b9` 增加函数级回归测试。当前最新代码提交 `502e964114d094cbd0adede6b1d3da5ec5260ec5` 只增加真实 HTTP Handler 回归测试，不改变生产代码。
+- 修复提交 `8b1668349f58f27c24cb023700e930e37d1843b9` 的 Go CI [运行 40808523419](https://github.com/Kasign/llm-gateway/actions/runs/40808523419) 已完成，5 个 Job 全部成功：Go 测试/race/vet、配置/API 契约与前端 Bundle、Gateway 稳态负载与审计持久化、故障注入与恢复验证、Go/Docker 构建。该提交的浏览器验收 [运行 40808523412](https://github.com/Kasign/llm-gateway/actions/runs/40808523412) 成功，桌面、窄屏与核心交互步骤均通过。
+- 最新追加的 HTTP Handler 测试使用 Go CI 提供的 `REDIS_TEST_ADDR` 创建有效网页登录会话，调用真实 `GET /api/admin/providers`，断言冲突记录只返回部署 Provider 一行，并且不泄漏部署 Key 或遗留 Web Key。该新提交的 CI 结果必须以对应最新 HEAD 的 Actions 最终结论为准；不能用父提交成功代替。
+- 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
 - 先前显式设置 `llama.request_timeout_seconds: 0` 被代理层强制套用一小时的问题，已有代码级修复和零值/正值回归覆盖；当前完整 Go CI 已通过。慢模型在实际 OpenResty、客户端和本地模型组合下的端到端超时行为仍需生产环境验收。
 - Provider 热更新已有共享并发许可器、限额变更顺序和回滚测试；后续只针对新的可复现失败补充实现，不再重复扩充同一段抽象。
 - 历史记录中在旧提交上标记为“待运行”的测试，需以本基线之后对应工作流的最终结果为准；不把旧失败继续算作当前阻塞，也不因为 CI 成功而关闭真实环境验收项。
@@ -496,3 +496,11 @@
 - 将公开 `GET /api/auth/status` 的 `password_enabled`、`password_source` 及 `Cache-Control: no-store` 纳入高风险 Schema/Handler 门禁，防止密码来源状态与公开契约漂移。
 - 当前基线 `d89b94247e8b60164f28758a5da1142c5bafa054` 的 Go CI [40639385262](https://github.com/Kasign/llm-gateway/actions/runs/40639385262) 全部 5 个 Job 通过，包含该门禁、前端 Bundle、race、稳态负载、故障注入与 Docker 构建。
 - 新增 `docs/real-provider-e2e-matrix.md`，说明已有 opt-in 真实端点测试的环境变量、单测试执行命令与凭据安全要求。该矩阵用于下一阶段在具备授权的用户环境执行；没有实际凭据时继续标记未测。
+
+
+## 2026-10-29：Provider 列表重复项修复与接口级回归
+
+- 根因位于服务端列表合并：部署配置 Provider 与旧版本遗留的同 ID Web 记录被分别加入响应，造成同配置双行；不属于常规前端提交后重复追加，因为新增成功后 UI 会重新拉取并替换列表状态。
+- 修复 `internal/server/admin_providers_http.go`：以规范化 Provider ID 去重，优先显示部署记录；仅显式接管后的 `SourceOverride` 记录覆盖部署行。遗留冲突记录不从持久化存储删除，避免未经用户确认的数据丢失。
+- 函数回归测试覆盖遗留冲突、显式接管及已删除覆盖三种状态。提交 `502e964114d094cbd0adede6b1d3da5ec5260ec5` 进一步增加 `GET /api/admin/providers` Handler 测试，验证会话鉴权、唯一列表和 API Key 掩码。
+- 代码可证明列表合并缺陷存在，但目前没有读取用户生产实例的持久化数据，因此不能断言生产环境中的重复行必然来自某一条具体数据库记录；该部分仍需在部署环境核对。
