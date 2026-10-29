@@ -153,3 +153,63 @@ func TestAdminProvidersAPIGetDeduplicatesConflictingDeploymentProvider(t *testin
 		t.Fatalf("Provider API response should show only masked key status: %#v", row)
 	}
 }
+
+
+func TestValidateProviderInputRestoresDeletedDeploymentOverride(t *testing.T) {
+	s := &Server{}
+	deleted := managedProvider{
+		ID: "deepseek",
+		Enabled: false,
+		BaseURL: "",
+		DefaultModel: "",
+		SourceOverride: true,
+		Deleted: true,
+	}
+	input := providerMutationRequest{
+		ID: "deepseek",
+		Enabled: true,
+		BaseURL: "https://api.deepseek.com",
+		APIKeyHeader: "authorization",
+		DefaultModel: "deepseek-chat",
+	}
+
+	got, err := s.validateProviderInput(input, &deleted, "deepseek")
+	if err != nil {
+		t.Fatalf("validateProviderInput restoring deleted deployment override: %v", err)
+	}
+	if !got.SourceOverride {
+		t.Fatal("restoring a deployment-managed Provider must preserve source_override=true")
+	}
+	if got.Deleted {
+		t.Fatal("saving a Provider over a deletion tombstone must clear deleted=true")
+	}
+	if got.ID != "deepseek" || !got.Enabled || got.DefaultModel != "deepseek-chat" {
+		t.Fatalf("restored Provider has unexpected config: %#v", got)
+	}
+}
+
+func TestValidateProviderInputPreservesExistingDeploymentOverride(t *testing.T) {
+	s := &Server{}
+	old := managedProvider{
+		ID: "openai",
+		Enabled: true,
+		BaseURL: "https://api.openai.com/v1",
+		DefaultModel: "gpt-4.1-mini",
+		SourceOverride: true,
+	}
+	input := providerMutationRequest{
+		ID: "openai",
+		Enabled: true,
+		BaseURL: "https://api.openai.com/v1",
+		APIKeyHeader: "authorization",
+		DefaultModel: "gpt-4.1-mini",
+	}
+
+	got, err := s.validateProviderInput(input, &old, "openai")
+	if err != nil {
+		t.Fatalf("validateProviderInput editing deployment override: %v", err)
+	}
+	if !got.SourceOverride || got.Deleted {
+		t.Fatalf("editing override must preserve ownership and remain active, got source_override=%v deleted=%v", got.SourceOverride, got.Deleted)
+	}
+}
