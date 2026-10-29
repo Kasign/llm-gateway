@@ -296,3 +296,35 @@ func TestValidateProviderInputRejectsInvalidConfiguredLimits(t *testing.T) {
 		})
 	}
 }
+
+
+// TestDecodeProviderMutationRejectsMalformedAndOversizedBody 验证管理接口请求体边界。
+func TestDecodeProviderMutationRejectsMalformedAndOversizedBody(t *testing.T) {
+	t.Run("empty body remains compatible", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/admin/providers", nil)
+		var input providerMutationRequest
+		if err := decodeProviderMutation(req, &input); err != nil {
+			t.Fatalf("empty body should be accepted for compatibility: %v", err)
+		}
+	})
+
+	t.Run("malformed JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/admin/providers", strings.NewReader(`{"id":`))
+		var input providerMutationRequest
+		var managedErr *providerManagementError
+		err := decodeProviderMutation(req, &input)
+		if !errors.As(err, &managedErr) || managedErr.status != 400 || managedErr.code != "invalid_request" {
+			t.Fatalf("malformed JSON error = %v, want 400/invalid_request", err)
+		}
+	})
+
+	t.Run("body over limit", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/admin/providers", strings.NewReader(strings.Repeat(" ", 128*1024+1)))
+		var input providerMutationRequest
+		var managedErr *providerManagementError
+		err := decodeProviderMutation(req, &input)
+		if !errors.As(err, &managedErr) || managedErr.status != 400 || managedErr.code != "invalid_request" {
+			t.Fatalf("oversized body error = %v, want 400/invalid_request", err)
+		}
+	})
+}
