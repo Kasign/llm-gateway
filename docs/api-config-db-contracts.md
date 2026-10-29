@@ -1,6 +1,6 @@
 # API、配置、数据库与响应契约盘点
 
-> 审查基线：`dev` 提交 `c18c20f2f47885522cec40cf045d72966d3a1f78`。内容按当前路由注册、配置校验、Provider 转发、响应结束处理和 SQL 迁移代码整理；这是现状清单，不表示所有功能均已完成端到端验收。真实上游验证边界见文末。
+> 本文件按当前路由注册、配置校验、Provider 转发、响应结束处理和 SQL 迁移代码整理；这是现状清单，不表示所有功能均已完成端到端验收。真实上游验证边界见文末。
 
 ## 1. 对外 HTTP API
 
@@ -14,7 +14,7 @@
 | `POST /v1/completions`、`/v1/responses` | 通过统一 `/v1/*` 入口处理。 | Responses 流错误事件有独立的字段/序号语义；流式响应提交后不能再改变 HTTP 状态。 |
 | `POST /v1/messages` | Anthropic Messages 兼容透传。 | 有协议专用错误 envelope、32,000,000 字节请求体上限及 Anthropic 头透传；上游非 2xx 且尚未提交响应时按兼容约定保留上游状态/错误正文，详见第 4 节。 |
 | `POST /v1/messages/count_tokens` | 经 `/v1/*` 和对应 Agent 前缀透传。 | 是否有效由配置的上游是否支持该路径决定；Gateway 不自行计算 Anthropic token 数。 |
-| `/<agent-prefix>/v1/models`、`/<agent-prefix>/v1/*` | 为每个启用的 Agent 固定 Provider 与默认模型，移除前缀后复用同一处理器。 | Agent 与 Provider 由 YAML 在启动时校验并注册；当前没有 Agent 级独立 Key ACL、模型别名映射或热更新。 |
+| `/<agent-prefix>/v1/models`、`/<agent-prefix>/v1/*` | 为每个启用的 Agent 固定 Provider 与默认模型，移除前缀后复用同一处理器。 | Agent 路由配置在启动时校验；内置 Provider 由服务配置建立，远程 Provider 从数据库载入，并在请求解析时检查是否存在且启用。当前没有 Agent 级独立 Key ACL、模型别名映射或热更新。 |
 
 Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `/api`、`/v1`、`/static`、`/health` 冲突，Agent ID 和路径前缀分别不能重复。Agent 复用全局推理鉴权、限流、Pipeline 与审计；现阶段不应假定 Agent 前缀自身就是独立的授权边界。
 
@@ -29,7 +29,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | 下载与基准测试 | `/api/downloads*`、`/api/benchmark*` | 下载任务、Benchmark 状态和结果。 |
 | 请求审计 | `/api/requests*` | 请求记录筛选与详情。`GET /api/requests` 支持 `provider` 查询参数，对 Provider ID 做不区分大小写的完整 ID 精确匹配；`GET /api/requests/stats` 返回受限时间窗口内的聚合调用、延迟及 Token 来源汇总。 |
 | API Key 管理 | `/api/admin/keys*` | 创建、修改、禁用、轮换、删除、过期时间、RPM、模型 ACL。 |
-| 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | 部署来源只读；Web 项保存到 `gateway_settings.remote_providers:web:v1`。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。列表同时返回 RPM 用量、当前 Gateway 进程的并发占用快照，以及该进程自启动以来因并发上限拒绝的新请求累计数；计数通过原有刷新请求更新，不使用额外后台轮询，多副本环境下不代表全局并发总数，进程重启后拒绝累计数归零。
+| 远程 Provider 管理 | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/{id}`、`POST /api/admin/providers/{id}/{enable,disable,clear-key,test}` | Web Provider 保存到 `gateway_settings.remote_providers:web:v1`，不存在部署来源可编辑项。Key 使用 AES-256-GCM 密文，API 不返回明文或密文；编辑时 Key 留空保留，清除必须调用 `clear-key`。列表返回 RPM 用量、当前 Gateway 进程的并发占用快照，以及当前进程的并发拒绝累计数；这些指标不代表多副本全局合计，拒绝累计数在进程重启后归零。 |
 | Web 登录 | `/api/auth/*` | 管理员网页登录、登出、会话和凭据更新。 |
 
 路由注册层只统一包裹 Request ID、调用记录和 Panic Recovery；管理 API 的具体鉴权由各 Handler/认证辅助逻辑执行，审查新的管理路由时需要单独确认认证与 CSRF 边界，不要把“已注册在 `/api/admin` 下”误当成自动获得统一授权。
@@ -43,19 +43,19 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `database` | MariaDB 地址、库/用户、密码、初始化权限、迁移文件 | 启动时连接并执行迁移/结构检查。 |
 | `redis` | 地址、密码、DB | 用于 RPM 限流等瞬态状态。 |
 | `llama` | 本地后端类型、llama.cpp/Ollama Base URL、上游 Key、请求时限、模型数、warm-start | `LLAMA_REQUEST_TIMEOUT_SECONDS` 控制本地推理客户端的整体请求时限；显式设为 `0` 时不设客户端整体时限，适合慢速本地模型，调用方取消仍然有效。旧配置未填写时继续默认 3600 秒；正整数上限 604800 秒。全局 `/v1/*` 初始活动后端配置；管理台切换后活动选择以持久化设置为准。 |
-| `providers.openai_compatible[]` / `LLM_GATEWAY_PROVIDER_<ID>_*` | Provider ID、启用状态、Base URL、API Key、Key Header、默认模型、公开模型 ID 映射、HTTP/私网策略、响应体上限、并发上限、Provider 级 RPM 与整体请求时限 | YAML / 环境变量项为部署托管配置，管理台只读显示；环境变量可一次预置多个 Provider，跨来源相同 ID 会在启动校验阶段拒绝。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID；`requests_per_minute=0` 时不启用 Provider 级 RPM，正数时按 UTC 固定分钟窗口对该 Provider 的所有调用方/Agent 共享计数，超限返回 429，配置 RPM 后 Redis 不可用则 fail-closed 返回 503；该预算只拒绝新请求，不中断在途流式生成。`request_timeout_seconds` 为 0 时保留既有 Context 与响应头超时行为，非 0 时限制完整 JSON/SSE 请求时长。 |
+| 远程 Provider（Web / MariaDB） | ID、启用状态、Base URL、API Key、Key Header、默认模型、模型映射、HTTP/私网策略、响应体上限、并发/队列、RPM、每日 Token 预算与请求时限 | 由 Web 管理台创建和维护，保存后更新运行时 Registry。Provider ID 去首尾空白并转小写后全局唯一；重复新增返回 409 `provider_id_exists`，不会覆盖已有记录。可选 `model_mappings` 将公开 model ID 映射到供应商真实 model ID；`requests_per_minute=0` 时关闭 Provider 级 RPM，正数时按 UTC 固定分钟窗口对该 Provider 的所有调用方/Agent 共享计数，超限返回 429，配置 RPM 后 Redis 不可用则 fail-closed 返回 503；该预算只拒绝新请求，不中断在途流式生成。`request_timeout_seconds` 为 0 时保留既有 Context 与响应头超时行为，非 0 时限制完整 JSON/SSE 请求时长。 |
 | `agents[]` | Agent ID、Path Prefix、Provider ID、默认模型 | 注册路由时校验引用；修改后需重启 Gateway，尚无配置热更新。 |
 | `storage`、`download` | 模型目录、下载服务地址、超时、User-Agent | 模型文件应放在挂载的持久化目录。 |
 | `logging` | 调试日志、请求 payload、SSE 原始事件/预览存储、请求历史保留策略 | `store_payload` 与原始流事件可能保存提示词、代码和模型回答；`retention_days=0` 时永不自动删除历史数据，正数则按保留天数分批清理已结束请求。批次默认 500、每轮最多 10 批，默认每小时运行一次；仍在运行的请求不清理。 |
 
 ### 环境变量解析
 
-配置加载先解析 YAML，再只对字符串值中的 `${ENV_NAME}` 做环境变量替换，最后重新序列化 YAML。这样可避免密钥包含引号、冒号或换行时破坏 YAML 结构。缺失的占位符不会被当成空白成功配置：启用的远程 Provider 和其他必需字段仍需通过字段级校验。
+配置加载先解析 YAML，再只对字符串值中的 `${ENV_NAME}` 做环境变量替换，最后重新序列化 YAML。这样可避免密钥包含引号、冒号或换行时破坏 YAML 结构。缺失的占位符不会被当成空白成功配置：其他必需字段仍需通过字段级校验。远程 Provider 不属于 YAML 配置结构，运行时以数据库中的 Web 管理记录为准。
 
 建议约束：
 - 真实 Provider Key、数据库密码与 Admin API Key 只放在部署环境或受控 Secret 中；不要提交到 `config.yaml` 或示例文件。
 - `allow_insecure_http` 和 `allow_private_network` 是显式的安全例外，只能在确认目标来源可信后启用。
-- `providers.openai_compatible` 与 `LLM_GATEWAY_PROVIDER_<ID>_*` 是只读部署配置；Web 只修改 `source=web` 项。Web 项持久化后动态更新 Registry；同 ID 跨来源冲突拒绝覆盖。Compose 从主 `.env` 显式传递 DeepSeek/OpenAI 示例变量；其他 Provider ID 可通过可选 `providers.env` 注入。该专用文件只应包含 `LLM_GATEWAY_PROVIDER_<ID>_*`，避免向 Gateway 容器注入主 `.env` 中的数据库管理员密码等无关凭据。旧部署缺少此文件时 Compose 不会因此失败。
+- 远程 Provider 由 Web 管理台创建并保存到数据库，保存后动态更新 Registry；API Key 在持久化前使用 AES-256-GCM 加密，接口不返回明文或密文。Provider ID 去首尾空白并转小写后唯一，新增重复 ID 会被前端和后端拒绝。
 - `/v1` 全局入口的活动 Provider 可由管理台选择；Agent 入口不读取这个活动指针，使用自己的固定 Provider/默认模型。
 
 ## 3. 数据库与迁移契约
@@ -158,14 +158,14 @@ Actions #108（提交 `82bd2f5712167707cbfa528e2d9d31a10172cdd0`）通过 `TestA
 
 ### Web 多 Provider 存储与运行时契约（2026-10-26）
 
-- Provider 可配置 `request_timeout_seconds`（0–86400）；非 0 时设置独立 HTTP Client 的整体期限，覆盖请求发送、等待响应和读取完整响应体，因此也会限制 SSE 生成的最长时长。0 表示不增加 Provider 级整体期限，仍受请求 Context、拨号/TLS 和响应头超时约束。Web 编辑、YAML、`.env` 与 Compose 透传同一字段。
+- Provider 可配置 `request_timeout_seconds`；非 0 时设置独立 HTTP Client 的整体期限，覆盖请求发送、等待响应和读取完整响应体，因此也会限制 SSE 生成的最长时长。0 表示不增加 Provider 级整体期限，仍受请求 Context、拨号/TLS 和响应头超时约束。该字段通过 Web 管理台保存。
 
 - 新增/编辑/启用/停用/删除前校验 Provider 配置与安全策略；先保存到 `gateway_settings.remote_providers:web:v1`，再更新 Registry。Registry 替换只改变新请求解析到的 Provider 工厂；已解析的请求与 SSE 保留旧实例，不被主动取消。
 - Web Provider API Key 使用 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`（base64 编码的 32 字节随机值）进行 AES-256-GCM 加密；数据库只保存版本化密文。列表/详情 API 只返回 `api_key_configured` 和通用掩码，不返回 `api_key` 或 `api_key_ciphertext`。编辑时空 Key 保留旧值，显式清除走独立 `clear-key` 动作。
-- YAML 与 `.env` 预置项只读。部署 ID（含禁用项）仍占用该 ID；Web 创建/编辑遇到冲突拒绝覆盖。停用/删除当前活动 Provider 返回 409；新增 Provider 不改变活动上游。
-- `model_mappings` 为公开 ID -> 上游真实 ID。`/v1/models` 仅返回活动 Provider 的可用别名并执行现有模型 ACL；推理转发使用映射后的上游 ID。未配置映射时，旧 YAML 的默认模型行为不变。
+- Provider 仅由 Web 管理台维护。保存后持久化到 `gateway_settings.remote_providers:web:v1` 并更新 Registry；新增 Provider 不会自动切换当前活动上游。停用或删除当前活动 Provider 会被拒绝，需先切换到其他上游。
+- `model_mappings` 为公开 ID -> 上游真实 ID。`/v1/models` 仅返回活动 Provider 的可用别名并执行现有模型 ACL；推理转发使用映射后的上游 ID。
 - 连接测试复用生产 Provider 构造器和现有 SSRF/HTTPS/禁止重定向策略，4 秒超时、最多读取 1 MiB，只返回模型 ID 与脱敏错误。
-- 连接测试允许检查已停用的 Web Provider，但 ID 来源冲突或密文不可解密的记录不会被测试路由接管；部署项仍通过 `?source=deployment` 显式指定。
+- 连接测试复用生产 Provider 构造器和现有 SSRF/HTTPS/禁止重定向策略，4 秒超时、最多读取 1 MiB，只返回模型 ID 与脱敏错误。已停用的 Web Provider 也可测试，但密文无法解密或凭据不可用的记录不能执行有效探测。
 
 ### 请求历史保留配置
 

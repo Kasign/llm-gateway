@@ -29,6 +29,7 @@ func run()error{
  for _,t:=range []*tree{actual,example}{refs:=map[string]bool{};collectRefs(t.root,refs);for n:=range refs{if !envs[n]{return fmt.Errorf("YAML 引用的变量 %s 未写入 .env.example",n)};if !passed[n]{return fmt.Errorf("YAML 变量 %s 未由 Compose 显式注入容器",n)}}}
  for _,line:=range strings.Split(string(composeData),"\n"){line=strings.TrimSpace(line);if line==""||strings.HasPrefix(line,"#"){continue};for _,m:=range requiredComposeVar.FindAllStringSubmatch(line,-1){if len(m)==2&&!envs[m[1]]{return fmt.Errorf("Compose 必需变量 %s 未写入 .env.example",m[1])}}}
  if e=checkNoProviderPresets(actual,example,string(envData),string(composeData));e!=nil{return e}
+ if e=checkProviderDocumentation();e!=nil{return e}
  fmt.Printf("配置契约检查通过：两份 YAML %d 个路径；远程 Provider 仅由 Web 管理台维护。\n",len(actual.paths));return nil
 }
 func readTree(path string)(*tree,error){data,e:=os.ReadFile(path);if e!=nil{return nil,e};var root yaml.Node;if e=yaml.Unmarshal(data,&root);e!=nil{return nil,fmt.Errorf("解析 %s: %w",path,e)};t:=&tree{root:&root,paths:map[string]bool{},values:map[string]string{}};shape(&root,"",t.paths,t.values);return t,nil}
@@ -72,6 +73,25 @@ func checkNoProviderPresets(actual, example *tree, env, compose string) error {
 	}
 	if strings.Contains(compose, "providers.env") || strings.Contains(compose, "env_file:") {
 		return fmt.Errorf("docker-compose.yml 不应通过 env_file 预置远程 Provider；API Key 仅从 Web 管理台加密保存")
+	}
+	return nil
+}
+
+
+// checkProviderDocumentation 防止旧版远程 Provider 预置配置说明重新进入文档。
+func checkProviderDocumentation() error {
+	paths := []string{"配置说明.md", "docs/configuration-matrix.md", "docs/api-config-db-contracts.md"}
+	obsolete := []string{"providers.openai_compatible", "providers.env", "LLM_GATEWAY_PROVIDER_<ID>_*"}
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("读取 Provider 配置文档 %s: %w", path, err)
+		}
+		for _, marker := range obsolete {
+			if strings.Contains(string(content), marker) {
+				return fmt.Errorf("%s 仍包含旧的 Provider 预置配置标记 %q；远程 Provider 统一通过 Web 管理台维护", path, marker)
+			}
+		}
 	}
 	return nil
 }

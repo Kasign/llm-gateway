@@ -1,71 +1,60 @@
 # LLM Gateway 配置清单与来源矩阵
 
-> 新增配置时同步更新 Go 配置结构、规范模板、Compose 环境白名单（需要注入变量时）、中文部署说明和 CI 契约检查。本表记录稳定配置的主维护入口。
+新增配置时同步更新 Go 配置结构、示例模板、Compose 环境白名单（需要注入变量时）、中文说明与 CI 契约检查。远程 Provider 的唯一维护入口是 Web 管理台。
 
 ## 1. 服务静态配置
 
 | 配置组 | 主维护入口 | 敏感性 | 生效时机 | 备注 |
 | --- | --- | --- | --- | --- |
-| server.host、server.port | config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
-| server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
-| 管理 API Key | `.env` 提供值，YAML 负责引用 | 高 | 重启 | 与 Web 管理会话和调用方 `sk-llm-*` Key 分离 |
-| Web 控制台初始密码哈希与保护默认值 | 主 `.env` 的 `LLM_GATEWAY_ADMIN_PASSWORD_HASH`、`LLM_GATEWAY_WEB_PASSWORD_ENABLED` 由 Compose 显式注入 | 高 | 重启；控制台保存后以数据库为准 | 新哈希格式为 `pbkdf2:`，兼容旧 `pbkdf2$`；`gateway_settings.web_admin_login` 保存后优先。忘记密码时用 `LLM_GATEWAY_WEB_LOGIN_RESET_FROM_ENV=true` 临时恢复，改密后撤销 |
+| server.host、server.port | config.yaml | 低 | 重启 | Compose 默认只将 8088 绑定到宿主机回环地址 |
+| server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写实际代理来源 IP/CIDR，不要信任所有转发头 |
+| 管理 API Key | .env 提供，YAML 引用 | 高 | 重启 | 与 Web 登录会话及调用方推理 API Key 分离 |
+| Web 登录初始哈希/保护开关 | .env 经 Compose 显式注入 | 高 | 首次初始化；已有数据库设置优先 | 控制台保存后持久化在 gateway_settings.web_admin_login |
+| database.* | .env 注入地址和凭据，其他结构参数在 YAML | 高 | 重启 | root 凭据只用于初始化；日常使用 Gateway 专用数据库用户 |
+| redis.* | .env 注入连接地址和密码，DB 等选项在 YAML | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |
+| 本地上游地址与可选 Key | .env 提供，YAML 引用 | 高（Key） | 重启 | 管理台切换的活动上游会覆盖初始选择 |
+| llama.request_timeout_seconds | LLAMA_REQUEST_TIMEOUT_SECONDS | 低 | 重启 | 0 不设 Gateway 整体时限；请求 Context 取消仍有效 |
+| 模型加载与输出上限 | config.yaml | 低 | 重启 | 不替代 OpenResty 或调用方超时 |
+| 模型目录与下载策略 | MODEL_HOST_DIR 在 .env；下载策略在 YAML | 低 | 重启 | 容器内模型目录固定为 /data/models |
+| 日志与保留策略 | config.yaml | 高 | 重启 | 正文可能包含提示词/代码；retention_days=0 不自动清理 |
 
-> 新增配置时同步更新 Go 配置结构、规范模板、Compose 环境白名单（需要注入变量时）、中文部署说明和 CI 契约检查。本表记录稳定配置的主维护入口。
+## 2. 远程 Provider（Web 管理台）
 
-## 1. 服务静态配置
-
-| 配置组 | 主维护入口 | 敏感性 | 生效时机 | 备注 |
+| 配置项 | 权威存储 | 编辑入口 | 生效时机 | 约束 |
 | --- | --- | --- | --- | --- |
-| server.host、server.port | config.yaml | 低 | 重启 | Compose 默认将 8088 绑定到宿主机回环地址 |
-| server.trusted_proxies | config.yaml | 中 | 重启 | 仅填写真实代理来源 IP/CIDR |
-| 管理 API Key | `.env` 提供值，YAML 负责引用 | 高 | 重启 | 与 Web 管理会话和调用方 `sk-llm-*` Key 分离 |
-；`gateway_settings.web_admin_login` 保存后优先 |
-| database.* | 容器地址由 LLM_GATEWAY_DB_HOST 注入；其余非敏感设置在 YAML，密码由 .env 注入 | 高 | 重启 | root 凭据用于自动初始化，日常使用 Gateway 专用数据库账号 |
-| redis.* | 地址由 LLM_GATEWAY_REDIS_ADDR 注入；DB 与密码在 YAML/.env 分层配置 | 高 | 重启 | 使用既有 Redis，不由 Gateway Compose 重建 |
-| 本地后端类型、Base URL、上游 Key | .env 提供值，YAML 负责引用 | 高（Key） | 重启；活动选择可被数据库覆盖 | LLM_BACKEND 仅作为数据库无活动选择时的初始默认 |
-| llama.request_timeout_seconds | LLAMA_REQUEST_TIMEOUT_SECONDS 经 Compose 注入 | 低 | 重启 | 0 不设 Gateway 整体时限；调用方取消仍然有效 |
-| 模型加载与输出上限 | config.yaml | 低 | 重启 | 不代替 OpenResty/客户端超时 |
-| 模型目录与下载 | MODEL_HOST_DIR 在 .env；下载策略在 YAML | 低 | 重启 | 容器内模型目录固定为 /data/models |
-| 日志与保留策略 | config.yaml | 高（可能含提示词/代码） | 重启 | retention_days=0 默认不主动清理；payload 留存需评估隐私与磁盘 |
+| ID、Base URL、默认模型、Key Header | MariaDB 中的远程 Provider 设置 | 远程 Provider 页面 | 保存后更新运行时 Registry | ID trim 后转小写，大小写不敏感唯一；内置 llamacpp/ollama ID 保留 |
+| API Key | 加密后的数据库字段 | 新增/编辑/清除 Key 操作 | 保存后用于新请求 | AES-256-GCM；使用 LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY；接口不返回明文或密文 |
+| 模型映射、安全选项、响应体限制、请求时限 | MariaDB 中的远程 Provider 设置 | 远程 Provider 页面 | 保存后对新请求生效 | 默认执行 HTTPS 和私网目标保护；安全例外需显式开启 |
+| 并发、队列及等待超时 | MariaDB 设置 + 当前进程的运行态 | 远程 Provider 页面 | 保存后动态更新共享许可器 | 队列为进程内控制；多副本时状态不是全局汇总 |
+| Provider RPM、每日 Token 预算 | MariaDB 设置；计数使用 Redis | 远程 Provider 页面 | 保存后用于后续请求准入 | RPM=0、每日 Token 预算=0 表示关闭；每日预算按 UTC 日界重置 |
 
-## 2. 远程 Provider
+Provider ID 不是独立显示名，编辑时不可修改。前端在已加载列表中发现重复 ID 时会提示并禁用新增提交；后端会在锁内再次核验，返回 HTTP 409 和 provider_id_exists，且不会覆盖已有记录。ID 经过去首尾空白和小写规范化，所以大小写不同不构成不同 ID。
 
-| 来源 | 管理内容 | Web 是否可编辑 | 生效时机 | 冲突规则 |
-| --- | --- | --- | --- | --- |
-| YAML: providers.openai_compatible[] | ID、URL、Key 引用、默认模型、模型映射、安全选项、并发、等待队列、RPM、每日 Token 预算和超时 | 否，部署托管项只读 | 重启 | 不得与环境预置或 Web Provider 重复 ID |
-| 环境变量: LLM_GATEWAY_PROVIDER_<ID>_* | Key、模型映射、并发/队列/RPM、每日 Token 预算、响应体限制、请求时限和网络安全选项 | 否，部署托管项只读 | 重启 | DeepSeek/OpenAI 通过显式环境白名单；自定义 ID 使用 providers.env |
-| Web / 数据库 | 新建、更新、启用/停用、删除、模型映射、并发/队列策略和凭据轮换 | 是 | 按后端持久化和 Registry 热更新契约生效 | Key 加密保存且不回显；活动 Provider 受保护 |
-
-Provider 环境字段以 internal/config/provider_env.go 中的解析器清单为准。CI 检查它与 .env.example、providers.env.example 及 Compose 中的 DeepSeek/OpenAI 字段一致。
-
-部署托管 Provider 在启动注册时会同时应用 `max_concurrent_requests`、`max_queue_size`、`queue_wait_timeout_seconds` 与 `request_timeout_seconds`；Web/数据库 Provider 则在保存时通过共享许可器热更新并发和排队容量。配置文件中写入这些字段不等于供应商连通性已验证。
-
-`token_budget_per_day=0` 默认关闭；正数按 Provider ID 使用 Redis UTC 自然日预算，在所有 API Key 和 Agent 间共享。准入时原子预占请求体字节估算与强制输出上限，余额不足时尽量收紧单次输出上限；收到可信供应商 usage 后结算为真实用量。没有可信 usage 时保守保留预占至日桶过期，因此这是预算保护，不是各家计费规则的精确复刻。
-
-
-Provider 等待队列是**进程内**准入控制，不依赖 Redis：`max_queue_size=0` 默认关闭并保持旧的立即拒绝行为；启用后采用有界 FIFO（1–1024），请求取消会从队列移除。等待超时默认 30 秒，最大 3600 秒；队列满或等待超时返回 503（`provider_queue_full` / `provider_queue_timeout`）。已经提交 HTTP 状态行的流式响应以安全 SSE error 结束。管理台显示当前排队数与队列超时累计数；多副本部署时，这些指标不是全局合计。
+旧版文件预置的远程 Provider 不再受支持。config.yaml、config.example.yaml、主 .env 和 Compose 都不应再次加入 Provider 列表或 Provider Key 预置字段。历史数据库里曾存在的 source_override/deleted 标记只用于兼容读取，成功迁移后不再写入新的 Provider 记录。
 
 ## 3. 数据库运行配置
 
-- 当前活动 Provider/模型选择在数据库中；首次初始化时才使用 LLM_BACKEND。
-- 每个上游的采样、思考和参数合并策略通过管理台保存，不能在 .env 与 YAML 中维护第二份。
-- Web Provider 与部署预置 Provider 有不同的生命周期；状态更新必须遵守 Provider ID 冲突、Registry 原子切换和并发预算回滚约束。
+- 当前活动上游/模型选择保存在数据库；只有数据库中尚无活动上游时才使用 LLM_BACKEND。
+- 每个上游的采样、思考与参数合并设置由管理台保存，不能在 .env 和 YAML 中维护第二份。
+- 远程 Provider 存在 gateway_settings 的 remote_providers:web:v1 项中；Key 在写入数据库前加密。
+- RPM 和每日 Token 预算使用 Redis 计数；并发和队列属于 Gateway 进程内状态。若部署多个副本，需要按这些边界理解限流和监控数据。
 
 ## 4. CI 契约检查
 
-go run ./scripts/check_config_contract.go 会检查：
-1. 两份 YAML 是否包含 Go 配置结构认可的字段。
-2. 两份 YAML 的有效字段路径和静态值是否完全一致；部署差异统一走环境变量，不允许维护例外值。
-3. YAML 变量是否同时在 .env.example 声明并由 Compose 显式注入。
-4. Compose 中没有默认值的插值变量是否在 .env.example 声明。
-5. Provider 解析器字段是否出现在两个环境示例和 DeepSeek/OpenAI Compose 白名单。
+go run ./scripts/check_config_contract.go 检查：
+1. 两份 YAML 是否只包含 Go 配置结构认可的字段。
+2. 两份 YAML 的有效字段路径和静态值是否一致。
+3. YAML 引用的变量是否在 .env.example 中声明且由 Compose 显式注入。
+4. Compose 中没有默认值的插值变量是否在 .env.example 中声明。
+5. YAML、环境示例和 Compose 是否重新引入远程 Provider 预置，以及配置说明文档是否仍包含旧的预置方式。
 
-这是静态契约门禁，不会访问生产数据库、验证真实 API Key 或证明供应商可用。慢模型超时、Provider 冲突、Web 更新/回滚和部署兼容性仍需统一回归。
+scripts/check_openapi_contracts.py 和 scripts/check_openapi_routes.py 检查关键 API Schema、Handler 状态和路由注册契约；Go CI 还包含单元/集成测试、竞态检查、静态检查、故障注入和 Docker 构建，Browser Smoke 验证管理台主要浏览器交互。
+
+静态契约检查不访问生产数据库，不验证真实 API Key，也不证明供应商端点可用。真实上游端到端验收应在有授权且明确计费风险的环境中单独执行。
 
 ## 5. 变更流程
 
-1. 先确认字段属于部署环境、YAML、Provider 预置还是 Web/数据库。
-2. 新环境变量必须说明只用于 Compose 主机插值，还是需要进入 Gateway 容器；后者必须加入显式白名单或 providers.env。
-3. 同步模板、文档和代码默认值；不以放宽 CI 检查替代修复差异。
-4. 可能改变旧部署行为时，先提供兼容期和迁移说明，不能无提示切换超时或日志留存。
+1. 先确定配置属于部署环境、静态 YAML 还是 Web/数据库运行时。
+2. 新增环境变量时说明它只用于 Compose 插值，还是需要进入 Gateway 容器。
+3. 同步模板、中文说明、契约检查和相关测试；不要通过放宽检查绕过配置差异。
+4. 影响旧版本数据时说明兼容读取和迁移规则，并在生产升级前备份数据库。
