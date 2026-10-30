@@ -1492,7 +1492,27 @@ async function createKey(){
   const models=$('keyModels').value.split(',').map(x=>x.trim()).filter(Boolean);
   try{
     const j=await apiServiceKeys('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,expires_at:$('keyExpires').value.trim()||null})});
-    $('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<div class="keybox">'+esc(j.key)+'</div><div class="msg muted">请立即复制</div>';loadKeys().catch(()=>{});
+    const resultBox=$('newKeyBox');
+    if(!j.key)throw new Error('密钥已创建，但服务端未返回明文密钥；请检查接口响应，必要时轮换该密钥。');
+    resultBox.style.display='block';
+    resultBox.innerHTML='<div class="msg ok" role="status">服务密钥创建成功。该明文仅显示这一次，请立即复制并妥善保存；离开此页面后无法再次查看。</div>'+
+      '<label for="createdServiceKey" class="small">新生成的服务密钥</label>'+
+      '<textarea id="createdServiceKey" readonly rows="3" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin:8px 0;resize:vertical;overflow-wrap:anywhere;word-break:break-all"></textarea>'+
+      '<div class="row" style="align-items:center"><button type="button" id="copyCreatedServiceKey" class="btn primary">复制密钥</button><span id="copyCreatedServiceKeyStatus" class="small muted" role="status" aria-live="polite">请复制后保存到安全位置。</span></div>';
+    $('createdServiceKey').value=j.key;
+    $('copyCreatedServiceKey').addEventListener('click',async()=>{
+      const copied=await writeClipboard(j.key);
+      const copyButton=$('copyCreatedServiceKey');
+      const status=$('copyCreatedServiceKeyStatus');
+      if(copied){
+        copyButton.textContent='已复制';
+        if(status)status.textContent='复制成功，请妥善保存。';
+      }else{
+        if(status)status.textContent='自动复制失败，请选中上方密钥并手动复制。';
+      }
+    });
+    resultBox.scrollIntoView({block:'nearest',behavior:'smooth'});
+    loadKeys().catch(()=>{});
   }catch(e){$('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
   finally{creatingKey=false;if(button)button.disabled=wasDisabled}
 }
