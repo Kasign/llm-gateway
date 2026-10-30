@@ -2187,8 +2187,26 @@
     const models = $("keyModels").value.split(",").map((x) => x.trim()).filter(Boolean);
     try {
       const j = await apiServiceKeys("/api/admin/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("keyName").value.trim(), rpm: Number($("keyRPM").value) || 60, allowed_models: models, expires_at: $("keyExpires").value.trim() || null }) });
-      $("newKeyBox").style.display = "block";
-      $("newKeyBox").innerHTML = '<div class="keybox">' + esc(j.key) + '</div><div class="msg muted">请立即复制</div>';
+      const resultBox = $("newKeyBox");
+      if (!j.key) throw new Error("\u5BC6\u94A5\u5DF2\u521B\u5EFA\uFF0C\u4F46\u670D\u52A1\u7AEF\u672A\u8FD4\u56DE\u660E\u6587\u5BC6\u94A5\uFF1B\u8BF7\u68C0\u67E5\u63A5\u53E3\u54CD\u5E94\uFF0C\u5FC5\u8981\u65F6\u8F6E\u6362\u8BE5\u5BC6\u94A5\u3002");
+      resultBox.style.display = "block";
+      resultBox.innerHTML = '<div class="msg ok" role="status">\u670D\u52A1\u5BC6\u94A5\u521B\u5EFA\u6210\u529F\u3002\u8BE5\u660E\u6587\u4EC5\u663E\u793A\u8FD9\u4E00\u6B21\uFF0C\u8BF7\u7ACB\u5373\u590D\u5236\u5E76\u59A5\u5584\u4FDD\u5B58\uFF1B\u79BB\u5F00\u6B64\u9875\u9762\u540E\u65E0\u6CD5\u518D\u6B21\u67E5\u770B\u3002</div>' +
+        '<label for="createdServiceKey" class="small">\u65B0\u751F\u6210\u7684\u670D\u52A1\u5BC6\u94A5</label>' +
+        '<textarea id="createdServiceKey" readonly rows="3" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin:8px 0;resize:vertical;overflow-wrap:anywhere;word-break:break-all"></textarea>' +
+        '<div class="row" style="align-items:center"><button type="button" id="copyCreatedServiceKey" class="btn primary">\u590D\u5236\u5BC6\u94A5</button><span id="copyCreatedServiceKeyStatus" class="small muted" role="status" aria-live="polite">\u8BF7\u590D\u5236\u540E\u4FDD\u5B58\u5230\u5B89\u5168\u4F4D\u7F6E\u3002</span></div>';
+      $("createdServiceKey").value = j.key;
+      $("copyCreatedServiceKey").addEventListener("click", async () => {
+        const copied = await writeClipboard(j.key);
+        const copyButton = $("copyCreatedServiceKey");
+        const status = $("copyCreatedServiceKeyStatus");
+        if (copied) {
+          copyButton.textContent = "\u5DF2\u590D\u5236";
+          if (status) status.textContent = "\u590D\u5236\u6210\u529F\uFF0C\u8BF7\u59A5\u5584\u4FDD\u5B58\u3002";
+        } else if (status) {
+          status.textContent = "\u81EA\u52A8\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u9009\u4E2D\u4E0A\u65B9\u5BC6\u94A5\u5E76\u624B\u52A8\u590D\u5236\u3002";
+        }
+      });
+      resultBox.scrollIntoView({ block: "nearest", behavior: "smooth" });
       loadKeys().catch(() => {});
     } catch (e) {
       $("newKeyBox").style.display = "block";
