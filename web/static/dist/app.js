@@ -2177,17 +2177,25 @@
       throw e;
     }
   }
+  let creatingKey = false;
   async function createKey() {
+    if (creatingKey) return;
+    creatingKey = true;
+    const button = $("keyCreateButton");
+    const wasDisabled = button?.disabled ?? false;
+    if (button) button.disabled = true;
     const models = $("keyModels").value.split(",").map((x) => x.trim()).filter(Boolean);
     try {
       const j = await apiServiceKeys("/api/admin/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("keyName").value.trim(), rpm: Number($("keyRPM").value) || 60, allowed_models: models, expires_at: $("keyExpires").value.trim() || null }) });
       $("newKeyBox").style.display = "block";
-      $("newKeyBox").innerHTML = '<div class="keybox">' + esc(j.key) + '</div><div class="msg muted">\u8BF7\u7ACB\u5373\u590D\u5236</div>';
-      loadKeys().catch(() => {
-      });
+      $("newKeyBox").innerHTML = '<div class="keybox">' + esc(j.key) + '</div><div class="msg muted">请立即复制</div>';
+      loadKeys().catch(() => {});
     } catch (e) {
       $("newKeyBox").style.display = "block";
       $("newKeyBox").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+    } finally {
+      creatingKey = false;
+      if (button) button.disabled = wasDisabled;
     }
   }
   async function toggleKey(id, a) {
