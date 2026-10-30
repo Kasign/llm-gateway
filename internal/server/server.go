@@ -638,6 +638,10 @@ func (s *Server) keysAPI(w http.ResponseWriter, r *http.Request) {
 		k, raw, e := s.keys.Create(r.Context(), strings.TrimSpace(in.Name), in.RPM, in.AllowedModels, in.ExpiresAt)
 		if e != nil {
 			applog.Printf("create api key failed: %v", e)
+			if strings.Contains(e.Error(), "Duplicate entry") && strings.Contains(e.Error(), "uk_key_name") {
+				jsonError(w, http.StatusConflict, "key_name_conflict", "服务密钥名称已存在，请更换名称")
+				return
+			}
 			jsonError(w, 400, "create_failed", e.Error())
 			return
 		}
