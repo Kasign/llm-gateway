@@ -1482,12 +1482,19 @@ async function loadKeys(){
     throw e;
   }
 }
+let creatingKey = false;
 async function createKey(){
+  if(creatingKey)return;
+  creatingKey=true;
+  const button=$('keyCreateButton');
+  const wasDisabled=button?.disabled??false;
+  if(button)button.disabled=true;
   const models=$('keyModels').value.split(',').map(x=>x.trim()).filter(Boolean);
   try{
     const j=await apiServiceKeys('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,expires_at:$('keyExpires').value.trim()||null})});
     $('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<div class="keybox">'+esc(j.key)+'</div><div class="msg muted">请立即复制</div>';loadKeys().catch(()=>{});
   }catch(e){$('newKeyBox').style.display='block';$('newKeyBox').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+  finally{creatingKey=false;if(button)button.disabled=wasDisabled}
 }
 async function toggleKey(id,a){try{await apiServiceKeys('/api/admin/keys/'+id+'/'+a,{method:'POST'});loadKeys().catch(()=>{})}catch(e){alert(e.message)}}
 async function rotateKey(id){if(!confirm('轮换后旧密钥立即失效，继续？'))return;try{const j=await apiServiceKeys('/api/admin/keys/'+id+'/rotate',{method:'POST'});alert('新密钥：\\n\\n'+j.key);loadKeys().catch(()=>{})}catch(e){alert(e.message)}}
