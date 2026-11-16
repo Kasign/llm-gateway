@@ -20,7 +20,7 @@ type Tag struct {
 }
 
 var (
-	reLibraryTagLink = regexp.MustCompile(`href="/([^"]+):([a-zA-Z0-9._-]+)"`)
+	reLibraryTagLink = regexp.MustCompile(`(?i)href\s*=\s*["']/([^"']+):([a-zA-Z0-9._-]+)["']`)
 	reTagGridRow     = regexp.MustCompile(`(?s)href="/([^"]+):([a-zA-Z0-9._-]+)"[^>]*>.*?<(?:p|div)\s+class="col-span-2 text-neutral-500[^"]*">\s*([^<]*?)\s*</(?:p|div)>\s*<(?:p|div)\s+class="col-span-2 text-neutral-500[^"]*">\s*([^<]*?)\s*</(?:p|div)>\s*<(?:p|div)\s+class="col-span-2 text-neutral-500[^"]*">\s*([^<]*?)\s*</(?:p|div)>`)
 	reTagMobileMeta  = regexp.MustCompile(`(?s)href="/([^"]+):([a-zA-Z0-9._-]+)" class="sm:hidden[^"]*"[^>]*>.*?<p class="flex text-neutral-500">([^<]+)</p>`)
 )
@@ -156,7 +156,7 @@ func (c *Client) ListTags(ctx context.Context, model string) ([]Tag, error) {
 	html := string(body)
 	out := parseLibraryTagsFromHTML(html, model)
 	if len(out) == 0 {
-		out = []Tag{{Tag: "latest", FullName: model + ":latest"}}
+		return nil, fmt.Errorf("ollama library tags: page structure is unsupported or no tags were found for %q", model)
 	}
 	return out, nil
 }

@@ -83,3 +83,20 @@ func TestParseCurrentSearchCard(t *testing.T) {
 		t.Fatalf("raw desc = %q", desc[1])
 	}
 }
+
+func TestSearchCardParserAllowsAttributeOrderAndMarkupChanges(t *testing.T) {
+	page := `<a data-testid="model-card" class="new-card" href="/library/example">
+		<div><h2><span>Example <b>Model</b></span></h2><p class="description">A &amp; B model</p></div>
+		<span title="1,234 downloads">1.2K</span>
+	</a>`
+	matches := reLibraryLink.FindAllStringSubmatch(page, -1)
+	if len(matches) != 1 || canonicalModelID(matches[0][1]) != "example" {
+		t.Fatalf("model links: %#v", matches)
+	}
+	if got := htmlText(reTitle.FindStringSubmatch(matches[0][2])[1]); got != "Example Model" {
+		t.Fatalf("title = %q", got)
+	}
+	if got := htmlText(reDesc.FindStringSubmatch(matches[0][2])[1]); got != "A & B model" {
+		t.Fatalf("description = %q", got)
+	}
+}

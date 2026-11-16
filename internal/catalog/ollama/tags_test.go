@@ -1,6 +1,16 @@
 package ollama
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 const fixtureLlama32Tags = `
         <a href="/library/llama3.2:latest" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
@@ -83,5 +93,16 @@ func TestParseOllamaMobileMeta(t *testing.T) {
 	size, ctx, input := parseOllamaMobileMeta("2.0GB · 128K context window · Text · 2 years ago")
 	if size != "2.0GB" || ctx != "128K" || input != "Text" {
 		t.Fatalf("got %q %q %q", size, ctx, input)
+	}
+}
+
+func TestListTagsDoesNotInventLatestOnUnrecognizedPage(t *testing.T) {
+	client := &Client{BaseURL: "https://example.test", HTTPClient: &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("<html><body>challenge page</body></html>")), Header: make(http.Header)}, nil
+		}),
+	}}
+	if got, err := client.ListTags(context.Background(), "llama3.2"); err == nil || got != nil {
+		t.Fatalf("expected parse error and no fabricated tags, got %#v, %v", got, err)
 	}
 }
