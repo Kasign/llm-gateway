@@ -65,6 +65,15 @@
 - Pull 仍为异步操作：创建接口返回 `job_id`，进度统一通过 `GET /api/downloads` 查看；取消仅作用于当前进程仍在运行的任务。Ollama Delete 的业务失败仍通过 HTTP 200 + `ModelOpsResult.success=false` 表达，本批只如实记录现状。
 - 待本提交完整 Go CI 通过后再关闭本批。
 
+## 2026-11-16：统一运行时 API 契约收口（进行中）
+
+- 对照 `runtime.go`、`inference_ops.go` 确认统一运行时接口此前存在真实契约缺口：`RuntimeSnapshot` 只有宽泛的任意对象定义，卸载成功响应也没有 DTO Schema；运行时 select/unload 请求没有用结构约束表达至少提供 `model_id` 或 `model_key`。
+- 已为 `RuntimeSnapshot` 明确本地 llama.cpp、Ollama 与远程 Provider 共用的字段集合，目录项复用 `OllamaCatalogItem`；远程 Provider 的本地模型管理标记、告警、资源占用、目录来源等字段均为可选项。空的 loaded/catalog/remaining_loaded 允许 null，以匹配 Go nil slice 的 JSON 表现。
+- `RuntimeModelRequest` 增加 anyOf，要求 `model_id` 或 `model_key` 至少出现一个；`RuntimeActionResult` 收紧成功响应字段，并明确 runtime 快照可能为 null。
+- 新增 `RuntimeUnloadResult`，逐项对应 `InferenceUnloadResult.toJSON()` 的 success、remaining_loaded、loaded_ram_bytes、loaded_vram_bytes 和可选 warning；不改变卸载逻辑。
+- 为 runtime、preview、select、unload 补齐 Handler 已支持的 405 响应；refresh 原本已完整声明。
+- 契约门禁增加运行时路由注册、管理员 Session、405、请求互斥条件和卸载 DTO JSON 字段对账。待本提交完整 Go CI 通过后再关闭本批。
+
 ## 当前执行范围
 
 1. Provider 热更新已完成最后一轮静态审查：没有确认正常配置路径可触发的 setter 失败，不增加额外回滚框架或重复测试。
