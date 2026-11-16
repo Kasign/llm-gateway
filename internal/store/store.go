@@ -33,6 +33,7 @@ type RequestLog struct {
 	InputTokens    *int64     `json:"input_tokens,omitempty"`
 	OutputTokens   *int64     `json:"output_tokens,omitempty"`
 	TotalTokens    *int64     `json:"total_tokens,omitempty"`
+	TokenSource    string     `json:"token_source,omitempty"`
 	RequestBytes   int64      `json:"request_bytes"`
 	ResponseBytes  int64      `json:"response_bytes"`
 	ErrorCode      string     `json:"error_code,omitempty"`
@@ -167,14 +168,14 @@ func (r *Repo) FinishRequest(ctx context.Context, l RequestLog) error {
 		upstream_http_status=COALESCE(NULLIF(?,0),upstream_http_status),
 		finished_at=CASE WHEN status='cancelled' THEN finished_at ELSE ? END,
 		latency_ms=CASE WHEN status='cancelled' THEN latency_ms ELSE ? END,
-		ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,response_bytes=?,
+		ttft_ms=?,input_tokens=?,output_tokens=?,total_tokens=?,token_source=?,response_bytes=?,
 		error_code=CASE WHEN status='cancelled' THEN error_code ELSE ? END,
 		error_message=CASE WHEN status='cancelled' THEN error_message ELSE ? END,
 		status=CASE WHEN status='cancelled' THEN status ELSE ? END
 		WHERE request_id=?`,
 		l.APIKeyID, l.APIKeyName, l.ModelRequested, l.ModelActual, l.RequestURL, l.ProviderID, l.Stream,
 		l.HTTPStatus, l.UpstreamHTTPStatus, l.FinishedAt, l.LatencyMS, l.TTFTMS,
-		l.InputTokens, l.OutputTokens, l.TotalTokens, l.ResponseBytes,
+		l.InputTokens, l.OutputTokens, l.TotalTokens, nullIfEmpty(l.TokenSource), l.ResponseBytes,
 		l.ErrorCode, l.ErrorMessage, l.Status, l.RequestID)
 	return err
 }

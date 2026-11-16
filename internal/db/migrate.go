@@ -153,6 +153,7 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE request_logs ADD COLUMN client_name VARCHAR(128) NULL`,
 		`ALTER TABLE request_logs ADD COLUMN ttft_ms BIGINT UNSIGNED NULL`,
 		`ALTER TABLE request_logs ADD COLUMN analysis_json LONGTEXT NULL`,
+		`ALTER TABLE request_logs ADD COLUMN token_source VARCHAR(32) NULL`,
 		`ALTER TABLE request_logs ADD COLUMN request_url VARCHAR(2048) NULL`,
 		`ALTER TABLE request_logs ADD COLUMN provider_id VARCHAR(64) NULL`,
 		`ALTER TABLE request_logs ADD INDEX idx_provider_started (provider_id, started_at)`,
