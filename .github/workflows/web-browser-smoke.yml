@@ -82,12 +82,17 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: 构建前端 Bundle 并验证同步
+      - name: 构建前端 Bundle 并校验可加载产物
         working-directory: web
         run: |
           npm ci
           npm run build
-          git diff --exit-code -- static/dist/app.js static/dist/providers-admin.js static/dist/key-service-picker.js
+          test -s static/dist/app.js
+          test -s static/dist/providers-admin.js
+          test -s static/dist/key-service-picker.js
+          node --check static/dist/app.js
+          node --check static/dist/providers-admin.js
+          node --check static/dist/key-service-picker.js
 
       - name: 准备隔离的 Gateway 测试配置
         run: |

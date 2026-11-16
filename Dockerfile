@@ -1,5 +1,5 @@
-# 默认最终阶段 release：使用仓库内已提交的 web/static/dist，不再跑 npm（改 Go 时重建最快）。
-# 前端有改动且未本地 make web 时：docker build --target release-with-web .
+# 默认 release 阶段始终使用 webbuilder 生成的前端资源，避免把过期的静态 Bundle 打进生产镜像。
+# release-with-web 保留为兼容目标；docker compose 默认构建 release 即可。
 #
 # syntax=docker/dockerfile:1
 
@@ -39,5 +39,5 @@ ENTRYPOINT ["/app/llm-gateway"]
 FROM release-base AS release-with-web
 COPY --from=webbuilder /src/web/static/dist /app/web/static/dist
 
-FROM release-base AS release
-COPY web/static/dist /app/web/static/dist
+# 默认部署目标继承已构建的前端资源，不再复制仓库内可能过期的 static/dist。
+FROM release-with-web AS release

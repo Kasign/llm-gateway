@@ -2,8 +2,8 @@
 
 > Review 日期：2026-11-16
 > 检查分支：`dev`
-> 检查基线：`ab9b8b16a179b2d5dcaeaf01eedfaaa536d0e203`（本轮代码 Review 基线；前端部署 Bundle 同步待完成）
-> 最新 Go CI：`43849798940`，5 个 Job 全部成功；最新代码验收 Browser Smoke：`43849359250` 成功
+> 检查基线：`d989c81e5d7e719a98ca5520730ea33ac3f7e749`（部署链路修复前）
+> 最近 Go CI：`43864137226`；后端测试、镜像、负载与故障注入 Job 成功，前端 Job 仅因旧的 Bundle 同步门禁失败。部署链路修复后的 CI / Browser Smoke 待本提交验证
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。
 
@@ -167,12 +167,11 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 
 ## 6. 本次检查基线
 
-- 分支 HEAD：`7bf2f6c990641f25b879d42f2ecc20168f635b74`
-- Go CI：[43849798940](https://github.com/Kasign/llm-gateway/actions/runs/43849798940)，5/5 Job 成功
-- 最新代码 Browser Smoke：[43849359250](https://github.com/Kasign/llm-gateway/actions/runs/43849359250)，成功
-- 当前开放 PR：无
-- 真实 1Panel/OpenResty/Provider 验收仍未执行；本轮代码工作未接触生产环境或真实密钥。
-- 本文之后的代码、部署和真实供应商状态，均需以最新提交与实际验收记录为准。
+- 本次修复前分支 HEAD：`d989c81e5d7e719a98ca5520730ea33ac3f7e749`
+- Go CI：[43864137226](https://github.com/Kasign/llm-gateway/actions/runs/43864137226)：Go 测试/竞态/静态检查、Docker 镜像、稳态负载和故障注入成功；前端 Job 因静态 Bundle 同步门禁失败。
+- 修复前 Browser Smoke：[43863892854](https://github.com/Kasign/llm-gateway/actions/runs/43863892854)：停在 Bundle 同步检查，未执行浏览器步骤。
+- 当前修复提交的 CI 与 Browser Smoke 结果待 Actions 完成后补记。
+- 真实 1Panel/OpenResty/Provider 验收仍未执行；代码级 CI 不代替生产环境验收。
 
 
 ## 2026-11-16：管理台轮询与 Ollama 目录解析 Review（进行中）
@@ -185,3 +184,12 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 - 后续：补充 catalog 来源级部分失败提示（先确认现有 API/前端契约是否有合适扩展点）；完成 Bundle 同步；统一问题台账与真实部署验收状态。
 
 - 后续提交 `87916045fd50b11d275f590ceb83e32cbd8e0d17` 移除前端 Ollama Tag 空结果时自动生成 `latest` 的兜底；`ab9b8b16a179b2d5dcaeaf01eedfaaa536d0e203` 增加 catalog 来源级状态，部分来源失败时保留成功来源结果并在管理台显示错误，且同步 OpenAPI 与部分失败测试。
+
+
+## 2026-11-16：默认 Docker 部署目标前端资源修复
+
+- 根因已定位到镜像打包链路：`docker-compose.yml` 未指定 target，默认构建 Dockerfile 的 `release`；旧 `release` 从仓库复制 `web/static/dist`，而不是使用前面已经构建的 `webbuilder` 产物。这样源码即使修复，默认生产镜像仍可能带旧 JS。
+- Dockerfile 已调整为默认 `release` 继承 `release-with-web`，保证 Compose 默认构建也使用本次源码生成的静态资源；不再要求部署前手工替换 `app.js`。
+- `index.html` 的 app.js 查询版本同步更新，降低浏览器继续命中旧缓存的概率。
+- Go CI 与 Browser Smoke 改为校验本次构建产物本身的语法、关键字段和浏览器行为，不再要求仓库内跟踪的静态 Bundle 必须与当前源码逐字一致；生产镜像必须从 webbuilder 取资源。
+- 本修复仍需等待新 HEAD 对应的 Go CI、Docker 构建和 Browser Smoke 完成；真实公网反代与生产浏览器验收仍待用户部署后确认。

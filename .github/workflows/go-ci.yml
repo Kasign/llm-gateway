@@ -69,8 +69,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: 校验前端语法、关键字段与 Bundle 一致性
+      - name: 校验前端构建产物语法与关键字段
         run: |
+          test -s web/static/dist/app.js
+          test -s web/static/dist/providers-admin.js
+          test -s web/static/dist/key-service-picker.js
           node --check web/js/providers-entry.js
           node --check web/static/dist/providers-admin.js
           node --check web/static/dist/app.js
@@ -85,11 +88,8 @@ jobs:
           grep -q 'configured_remote' web/js/app/main.js
           grep -q 'available_backends' web/static/dist/app.js
           grep -q 'configured_remote' web/static/dist/app.js
-          if ! git diff --quiet -- web/static/dist/app.js web/static/dist/providers-admin.js web/static/dist/key-service-picker.js; then
-            echo "::error::提交的前端部署 Bundle 与当前源码构建结果不一致，请重新生成并提交"
-            git diff -- web/static/dist/app.js web/static/dist/providers-admin.js | head -120 || true
-            exit 1
-          fi
+          # 生产 release 镜像必须继承 webbuilder 构建结果，不能复制仓库内的旧 Bundle。
+          grep -Fq 'FROM release-with-web AS release' Dockerfile
 
   go-quality:
     name: Go 测试、竞态与静态检查
