@@ -2,7 +2,7 @@
 
 > Review 日期：2026-11-16
 > 检查分支：`dev`
-> 检查基线：`d422456006dca934f17cc206a73196ec0a472ce6`（本轮代码 Review 基线；前端部署 Bundle 同步待完成）
+> 检查基线：`ab9b8b16a179b2d5dcaeaf01eedfaaa536d0e203`（本轮代码 Review 基线；前端部署 Bundle 同步待完成）
 > 最新 Go CI：`43849798940`，5 个 Job 全部成功；最新代码验收 Browser Smoke：`43849359250` 成功
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。
@@ -183,3 +183,5 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 - 对应 Go CI `43862999568`：Go 测试/竞态/静态检查、Docker 构建、稳态负载、故障注入均成功；“配置、API 契约与前端”因源码变更后静态部署 Bundle 尚未同步而失败。Browser Smoke `43862999564` 同样停在 Bundle 构建/同步检查，不能记为通过。
 - 前端 Bundle 已由 CI 构建，待将生成的 `web/static/dist/app.js` 同步到仓库后重跑完整 CI。
 - 后续：补充 catalog 来源级部分失败提示（先确认现有 API/前端契约是否有合适扩展点）；完成 Bundle 同步；统一问题台账与真实部署验收状态。
+
+- 后续提交 `87916045fd50b11d275f590ceb83e32cbd8e0d17` 移除前端 Ollama Tag 空结果时自动生成 `latest` 的兜底；`ab9b8b16a179b2d5dcaeaf01eedfaaa536d0e203` 增加 catalog 来源级状态，部分来源失败时保留成功来源结果并在管理台显示错误，且同步 OpenAPI 与部分失败测试。
