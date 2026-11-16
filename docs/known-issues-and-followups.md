@@ -1,15 +1,17 @@
 # LLM Gateway 未关闭问题与后续验收台账
 
-> 更新日期：2026-10-29。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
+> 更新日期：2026-11-16。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
 
 ## 当前基线
 
-- 最近一次已通过完整 Go CI 的代码/契约基线为 `b4cc0cd1624b871432da6caa716aa28aed50015c`；Go CI [运行 40828500713](https://github.com/Kasign/llm-gateway/actions/runs/40828500713) 的 5 个 Job 全部成功。仅修改问题台账或实施计划的文档提交不会改变该实现/契约基线。
+- 当前代码/契约基线：`a775a2a94a1ab57ad0b5d519e2c19749f9b8b97d`；Go CI [运行 43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 的 5 个 Job 全部成功，包含 API Key 名称冲突 409 契约门禁。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
 - 先前显式设置 `llama.request_timeout_seconds: 0` 被代理层强制套用一小时的问题，已有代码级修复和零值/正值回归覆盖；当前完整 Go CI 已通过。慢模型在实际 OpenResty、客户端和本地模型组合下的端到端超时行为仍需生产环境验收。
 - Provider 热更新已有共享并发许可器、限额变更顺序和回滚测试；后续只针对新的可复现失败补充实现，不再重复扩充同一段抽象。
+- Token 用量统计与中断请求口径已由提交 `c84601547f488d30988b36ebfaba0b425af49aae` 对应 Go CI [运行 43832112505](https://github.com/Kasign/llm-gateway/actions/runs/43832112505) 全部通过；浏览器验收 [运行 43832112496](https://github.com/Kasign/llm-gateway/actions/runs/43832112496) 为 164/164。流式中断后已采集 usage 的 MariaDB 记录保留 3/5/8 Token，来源为 `upstream_usage`；无 usage 时不估算 Token。详细口径见 `docs/token-usage-dashboard.md`。
+- 调用方 API Key 创建重复名称返回 `409 key_name_conflict` 的 OpenAPI 响应与 Handler 门禁已在提交 `a775a2a94a1ab57ad0b5d519e2c19749f9b8b97d` 对应 CI [运行 43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 全部通过。
 - 历史记录中在旧提交上标记为“待运行”的测试，需以本基线之后对应工作流的最终结果为准；不把旧失败继续算作当前阻塞，也不因为 CI 成功而关闭真实环境验收项。
 
 ## P1：可靠性与可观测性
@@ -17,7 +19,7 @@
 | 编号 | 问题 / 缺口 | 当前状态 | 统一解决方向 | 关闭条件 |
 |---|---|---|---|---|
 | GW-REL-001 | DNS NXDOMAIN/解析超时此前只覆盖 Provider 层错误映射；现已补齐 Gateway Handler + Redis + MariaDB 专项集成测试。 | Actions #163 全量验收通过 | 使用注入 Resolver 返回确定性 NXDOMAIN/timeout，验证 Gateway 安全响应与审计行的 Gateway 状态/NULL 上游状态；不依赖公网 DNS。 | NXDOMAIN=502、Resolver timeout=504；两条审计记录 `upstream_http_status IS NULL`（2/2）；不泄漏主机名、Resolver 诊断或凭据；Actions #163 全量 CI 通过。 |
-| GW-REL-002 | 上游已提交 HTTP 200 和部分 SSE 后发生 TCP RST 的行为，原先缺少完整 MariaDB 集成测试。 | Actions #164 全量验收通过 | 在 Gateway Handler + Redis + MariaDB 集成测试中，上游发送 200 与部分 SSE 后触发 TCP RST；验证已提交状态不可逆及审计一致性。 | 客户端 HTTP=200、保留部分 SSE 并追加安全 `event: error`；审计 `http_status=200`、`upstream_http_status=200`、`status=error`、`error_code=provider_upstream`；无凭据/底层网络诊断泄漏；Actions #164 全量 CI 通过。真实供应商 E2E 仍未覆盖。 |
+| GW-REL-002 | 上游已提交 HTTP 200 和部分 SSE 后发生 TCP RST 的行为，原先缺少完整 MariaDB 集成测试及已收到 usage 的 Token 持久化断言。 | Actions `43832112505` 全量验收通过 | 在 Gateway Handler + Redis + MariaDB 集成测试中，上游发送 200、部分 SSE 与 usage 后触发 TCP RST；验证已提交状态不可逆、审计一致性及已采集 Token 保留。 | 客户端 HTTP=200、保留部分 SSE 并追加安全 `event: error`；审计 `http_status=200`、`upstream_http_status=200`、`status=error`、`error_code=provider_upstream`，并保留输入/输出/总 Token 3/5/8、来源 `upstream_usage`；无凭据/底层网络诊断泄漏。真实供应商 E2E 仍未覆盖。 |
 | GW-REL-003 | TCP 拒绝后同端口恢复已由 PR #5 覆盖并合入 `dev`。 | 已合入，合并后整体回归仍需持续关注 | 不再从旧分支重复合入；后续回归检查请求与审计状态的一致性。 | 新 `dev` Head 对应完整 Actions 通过，并在统一回归中保持恢复语义。 |
 | GW-OBS-001 | 审计队列已有有界容量、关键任务预留及 dropped 计数。 | 实现完成；Actions #162（Head `dfbc2955`）全量通过 | 原子计数与低成本快照暴露队列深度、容量、成功/失败、按原因丢弃、累计排队时延/最大排队时延和累计 drop rate；管理员 GET API 不查询数据库，不返回正文、Key 或原始错误。 | Actions #162：单测、MariaDB 审计积压、Gateway 负载/故障注入/TCP 恢复、race、性能基线、go vet、Go 构建与前端 bundle 均通过。 |
 | GW-OBS-002 | 请求日志 / Payload 的数据库保留期限与自动清理。 | 清理逻辑、MariaDB 集成用例和只读运行状态 API 均随完整 Actions #225 通过 | `logging.retention_days` 默认 0（禁用）；正数保留天数后，按 500 条默认批次、每轮最多 10 批清理已结束请求，先删除流事件和 Payload 再删除请求日志；单批独立事务并支持取消。运行状态只保留进程内聚合计数，API 不暴露原始数据库异常。 | 完整 Actions 通过；状态 API 可区分 waiting/success/failed/cancelled，返回耗时、删除量和失败次数，且不泄露原始 DB 错误。 |
@@ -42,7 +44,7 @@
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与配置来源统一。 | 远程 Provider 已统一由 Web/MariaDB 管理；前端阻止已知重复 ID，后端再次归一化校验并返回 409，不覆盖旧配置；旧状态字段已从列表和 API 契约移除。提交 `52d58f6` 对应的完整 Go CI 全部通过。 | 后续仅在复现新问题时修复运行时逻辑；旧 YAML/环境变量预置路线不再恢复。 | 用户部署前备份数据库与 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`；真实供应商、公网反代与 1Panel 行为仍需环境验收。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 新增高风险字段/状态契约门禁，覆盖 Provider mutation/view 预算字段、创建/删除响应及统计数据库错误封套；整体 OpenAPI 仍为 partial。 | 继续在实际功能改动时对照 Handler 的请求体、成功状态码、错误响应和稳定 JSON 字段；不一次性声称全部契约完成。 | 已覆盖高风险子集；一般性请求/响应 Schema 的全量 Go 等价性仍需分阶段补齐。 |
+| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 高风险门禁已覆盖 Provider mutation/view、创建/删除、统计错误、请求取消、认证、审计/保留 DTO；并补齐调用方 API Key 创建重复名称 409 与 Handler 一致性检查。整体 OpenAPI 仍为 partial。 | 继续按风险顺序对照 Handler 的请求体、成功/错误状态码、错误封套和稳定 JSON 字段；不一次性猜测或声称全量完成。 | 已覆盖高风险子集；调用方 API Key 其余操作及模型下载/运行时、推理参数、Ollama、Benchmark 等字段级契约继续分批补齐。 |
 
 ## 当前执行范围
 
@@ -504,3 +506,12 @@
 - 修复 `internal/server/admin_providers_http.go`：以规范化 Provider ID 去重，优先显示部署记录；仅显式接管后的 `SourceOverride` 记录覆盖部署行。遗留冲突记录不从持久化存储删除，避免未经用户确认的数据丢失。
 - 函数回归测试覆盖遗留冲突、显式接管及已删除覆盖三种状态。提交 `502e964114d094cbd0adede6b1d3da5ec5260ec5` 进一步增加 `GET /api/admin/providers` Handler 测试，验证会话鉴权、唯一列表和 API Key 掩码。
 - 代码可证明列表合并缺陷存在，但目前没有读取用户生产实例的持久化数据，因此不能断言生产环境中的重复行必然来自某一条具体数据库记录；该部分仍需在部署环境核对。
+
+## 2026-11-16 执行记录：Token 用量验收与 API Key 冲突契约
+
+- Token 统计页面使用现有 `GET /api/requests/stats`，没有新增统计接口、模型/API Key 筛选或费用计算。区间、来源分类、未知 Token 处理和中断请求口径见 `docs/token-usage-dashboard.md`。
+- 流式中断测试扩展为上游在 TCP RST 前发送 usage；MariaDB 断言输入/输出/总 Token 为 3/5/8、来源 `upstream_usage`，请求仍记录为 `error/provider_upstream`。提交 `c846015` 的 Go CI 5/5 Job 通过。
+- 浏览器验收在提交 `c846015` 上 164/164 项通过；无页面异常、控制台错误、静态资源加载失败或非预期认证失败。
+- 稳态负载 CI 样本：12,000 请求，目标/实际 200 req/s，失败 0，p50 3.54 ms、p95 4.09 ms、p99 9.09 ms。该数据仅代表隔离 CI Mock 与数据库环境，不作为生产容量承诺。
+- 调用方 API Key 重复名称分支在 Handler 返回 HTTP 409 `key_name_conflict`，此前 OpenAPI 未声明。提交 `a775a2a` 增加 409 AdminError 响应，并在高风险契约门禁中对照 Handler 检查；Go CI [43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 5/5 Job 通过。
+- 下一项代码级工作按既定路线继续补齐 API Key 操作的请求/响应字段与状态契约；生产 1Panel/OpenResty/真实 Provider 验收仍依赖用户部署环境和授权凭据，不能用 CI 代替。
