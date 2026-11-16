@@ -6,7 +6,7 @@
 
 - [ ] 拉取目标提交后使用默认 Compose 构建：`docker compose build gateway`；当前 Dockerfile 的默认 release 会在镜像构建阶段执行前端 npm build，不需要手工下载或替换 `web/static/dist/app.js`。
 - [ ] 重建并启动 Gateway：`docker compose up -d --force-recreate gateway`；确认实际运行镜像对应本次提交。
-- [ ] 用 `curl -fsS -o /dev/null -w 'HTTP %{http_code}; Content-Type %{content_type}\\n' 'http://127.0.0.1:8088/static/dist/app.js?v=20261116-runtime-bundle-1'` 检查 app.js 返回 200 和 JavaScript Content-Type。
+- [ ] 用 `curl -fsS -o /dev/null -w 'HTTP %{http_code}; Content-Type %{content_type}\n' 'http://127.0.0.1:8088/static/dist/app.js?v=20261116-runtime-bundle-1'` 检查 app.js 返回 200 和 JavaScript Content-Type。
 - [ ] 记录当前镜像 tag/commit、Compose 配置版本和容器状态。
 - [ ] 确认数据库备份与恢复方式可用；本轮不删表、不清库、不重置无关设置。
 - [ ] 准备回滚到上一个已知可用镜像/提交的步骤。

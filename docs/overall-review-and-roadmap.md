@@ -167,7 +167,7 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 
 ## 6. 本次检查基线
 
-- 当前分支 HEAD：`6d02eb45684db188c2a5e1427cffe8a10fc6c3fc`
+- 部署代码基线：`6d02eb45684db188c2a5e1427cffe8a10fc6c3fc`（随后仅有验收文档更新）
 - Go CI：[43866482448](https://github.com/Kasign/llm-gateway/actions/runs/43866482448)，5/5 Job 成功，包含默认 release Docker 镜像构建。
 - Browser Smoke：[43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461)，164/164 检查通过；无页面异常、无 JS Console 错误、无静态资源加载失败。
 - Browser Smoke 的 502 仅来自刻意未启动的本地模型上游，属于预期不可用场景，不是页面资源错误。
