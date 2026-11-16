@@ -105,8 +105,8 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	if stats.Tokens.UnknownSource.Requests != 1 || stats.Tokens.UnknownSource.TotalTokens != 1 {
 		t.Fatalf("unexpected unknown source totals: %+v", stats.Tokens.UnknownSource)
 	}
-	if stats.Latency.SampleCount != 3 {
-		t.Fatalf("latency sample count = %d, want 3", stats.Latency.SampleCount)
+	if stats.Latency.SampleCount != 4 {
+		t.Fatalf("latency sample count = %d, want 4", stats.Latency.SampleCount)
 	}
 	if stats.ProviderID != "remote-a" {
 		t.Fatalf("provider filter normalization = %q, want remote-a", stats.ProviderID)
