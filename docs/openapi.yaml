@@ -985,6 +985,8 @@ paths:
                 $ref: "#/components/schemas/RuntimeSnapshot"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
         "502":
           $ref: "#/components/responses/AdminError"
   /api/admin/gguf/delete:
@@ -1083,6 +1085,8 @@ paths:
           $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
         "502":
           $ref: "#/components/responses/AdminError"
   /api/admin/runtime/select:
@@ -1110,6 +1114,8 @@ paths:
           $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
         "502":
           $ref: "#/components/responses/AdminError"
   /api/admin/runtime/unload:
@@ -1127,16 +1133,17 @@ paths:
               $ref: "#/components/schemas/RuntimeModelRequest"
       responses:
         "200":
-          description: 卸载操作结果
+          description: 卸载操作结果；只释放运行时内存，不删除磁盘模型
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/RuntimeUnloadResult"
         "400":
           $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
         "502":
           $ref: "#/components/responses/AdminError"
   /api/benchmark:
@@ -2877,23 +2884,67 @@ components:
           $ref: "#/components/schemas/AuditMetrics"
     RuntimeSnapshot:
       type: object
-      description: 字段依据本地 llama.cpp、Ollama 或远程 Provider 运行时而变化。
-      additionalProperties: true
+      description: 活动后端运行时快照。远程 Provider 不支持本地加载/卸载时，loaded/catalog 为空数组。
+      required: [backend, active_model, loaded, catalog]
+      properties:
+        backend: { type: string }
+        base_url: { type: string }
+        active_model: { type: string }
+        gateway_model: { type: string }
+        gateway_model_key: { type: string }
+        remote_provider: { type: boolean }
+        local_model_management: { type: boolean }
+        loaded:
+          type: array
+          items:
+            $ref: "#/components/schemas/OllamaCatalogItem"
+        catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/OllamaCatalogItem"
+        catalog_source: { type: string }
+        loaded_vram_bytes: { type: integer, format: int64, minimum: 0 }
+        loaded_ram_bytes: { type: integer, format: int64, minimum: 0 }
+        disk_bytes_est: { type: integer, format: int64, minimum: 0 }
+        hot_unload_supported: { type: boolean }
+        upstream_warning: { type: string }
+        catalog_warning: { type: string }
+        unload_note: { type: string }
+      additionalProperties: false
     RuntimeModelRequest:
       type: object
       properties:
-        model_id: { type: string }
-        model_key: { type: string }
+        model_id: { type: string, minLength: 1 }
+        model_key: { type: string, minLength: 1 }
+      anyOf:
+        - required: [model_id]
+        - required: [model_key]
       additionalProperties: false
     RuntimeActionResult:
       type: object
-      required: [success]
+      required: [success, active_model, runtime]
       properties:
         success: { type: boolean, const: true }
         active_model: { type: string }
         runtime:
-          $ref: "#/components/schemas/RuntimeSnapshot"
-      additionalProperties: true
+          allOf:
+            - $ref: "#/components/schemas/RuntimeSnapshot"
+          nullable: true
+      additionalProperties: false
+    RuntimeUnloadResult:
+      type: object
+      required: [success, remaining_loaded, loaded_ram_bytes, loaded_vram_bytes]
+      properties:
+        success: { type: boolean, const: true }
+        remaining_loaded:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        loaded_ram_bytes: { type: integer, format: int64, minimum: 0 }
+        loaded_vram_bytes: { type: integer, format: int64, minimum: 0 }
+        warning: { type: string }
+      additionalProperties: false
     BenchmarkCreateRequest:
       type: object
       properties:
