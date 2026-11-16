@@ -513,20 +513,39 @@ func (s *Server) OllamaPullModel(ctx context.Context, name string) error {
 	return client.OllamaPull(ctx, name, nil)
 }
 
+func shouldClearDeletedOllamaModelReference(reference, deletedModel string) bool {
+	return strings.TrimSpace(deletedModel) != "" &&
+		strings.EqualFold(strings.TrimSpace(reference), strings.TrimSpace(deletedModel))
+}
+
+func clearDeletedOllamaModelReferences(u settings.Upstream, deletedModel string) (settings.Upstream, bool) {
+	changed := false
+	if shouldClearDeletedOllamaActiveModel(u.Backend, u.ModelName, deletedModel) {
+		u.ModelName = ""
+		changed = true
+	}
+	if shouldClearDeletedOllamaModelReference(u.ModelsByBackend["ollama"], deletedModel) {
+		delete(u.ModelsByBackend, "ollama")
+		if len(u.ModelsByBackend) == 0 {
+			u.ModelsByBackend = nil
+		}
+		changed = true
+	}
+	return u, changed
+}
+
 func shouldClearDeletedOllamaActiveModel(backend, activeModel, deletedModel string) bool {
 	return strings.EqualFold(strings.TrimSpace(backend), "ollama") &&
-		strings.EqualFold(strings.TrimSpace(activeModel), strings.TrimSpace(deletedModel)) &&
-		strings.TrimSpace(deletedModel) != ""
+		shouldClearDeletedOllamaModelReference(activeModel, deletedModel)
 }
 
 func (s *Server) clearActiveOllamaModel(ctx context.Context, deletedModel string) error {
-	u := s.effectiveUpstream()
-	if !shouldClearDeletedOllamaActiveModel(u.Backend, u.ModelName, deletedModel) {
+	u, changed := clearDeletedOllamaModelReferences(s.effectiveUpstream(), deletedModel)
+	if !changed {
 		return nil
 	}
-	u.ModelName = ""
 	if err := s.settings.SaveUpstream(ctx, u); err != nil {
-		return fmt.Errorf("Ollama model deleted but active model setting clear failed: %w", err)
+		return fmt.Errorf("Ollama model deleted but active/model mapping clear failed: %w", err)
 	}
 	s.applyUpstream(u, false)
 	return nil
