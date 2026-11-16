@@ -1014,12 +1014,13 @@ def validate(
                 errors.append(f"RuntimeSnapshot: missing runtime field {field!r}")
 
         # 推理参数管理 API：动态表单字段、参数 DTO 与三个路由的状态码必须与实现一致。
-        inference_routes = {
-            "/api/admin/inference-params/schema": ("get", "inferenceParamsSchemaAPI"),
-            "/api/admin/inference-params": ("get", "inferenceParamsAPI"),
-            "/api/admin/inference-params/reset": ("post", "inferenceParamsResetAPI"),
-        }
-        for route, (method, handler_name) in inference_routes.items():
+        inference_routes = [
+            ("/api/admin/inference-params/schema", "get", "inferenceParamsSchemaAPI"),
+            ("/api/admin/inference-params", "get", "inferenceParamsAPI"),
+            ("/api/admin/inference-params", "put", "inferenceParamsAPI"),
+            ("/api/admin/inference-params/reset", "post", "inferenceParamsResetAPI"),
+        ]
+        for route, method, handler_name in inference_routes:
             operation = operation_block(source, route, method)
             require(
                 "AdminSessionBearer: []" in operation,
@@ -1035,9 +1036,9 @@ def validate(
                 f"{method.upper()} {route} 405 must use AdminError",
             )
 
-        params_decl = re.search(r"(?ms)^type Params struct \\{(.*?)^\\}", inference_params_schema)
-        policy_decl = re.search(r"(?ms)^type Policy struct \\{(.*?)^\\}", inference_params_schema)
-        field_decl = re.search(r"(?ms)^type Field struct \\{(.*?)^\\}", inference_params_schema)
+        params_decl = re.search(r"(?ms)^type Params struct \{(.*?)^\}", inference_params_schema)
+        policy_decl = re.search(r"(?ms)^type Policy struct \{(.*?)^\}", inference_params_schema)
+        field_decl = re.search(r"(?ms)^type Field struct \{(.*?)^\}", inference_params_schema)
         for decl, name, schema_name in (
             (params_decl, "Params", "InferenceParams"),
             (policy_decl, "Policy", "InferenceParamsPolicy"),
