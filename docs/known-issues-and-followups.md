@@ -545,12 +545,12 @@
 - 调用方 API Key 列表、创建、修改、删除、启用、禁用和轮换的响应 Schema、状态码与 Handler 分支门禁已由提交 `447a14d` 的完整 Go CI 通过。下一批按路线图转向模型下载/运行时、推理参数、Ollama 和 Benchmark 的稳定契约；生产 1Panel/OpenResty/真实 Provider 验收仍依赖用户部署环境和授权凭据，不能用 CI 代替。
 
 
-## 2026-11-16：推理参数 API 契约收口（进行中）
+## 2026-11-16：推理参数 API 契约收口（已完成）
 
 - 本批范围仅为管理员推理参数配置 API：GET schema、GET 当前配置、PUT 保存、POST reset；不改变参数合并、默认值、持久化或推理请求行为。
 - 现有接口按后端区分 `llamacpp` 与 `ollama`；schema 动态提供字段、分组和说明。参数结构以 `inferenceparams.Params` 为准，策略当前保存 `mode`，`gateway_only` 强制覆盖客户端同名采样字段，其余值按 `client_first` 处理。
 - 已将 OpenAPI 中原先泛化的动态表单字段、参数对象、策略、配置 Envelope 和 reset 响应改为可读的字段级 Schema；保留参数对象对未来字段的扩展能力，不虚构当前 Handler 不执行的数值范围校验。
 - 为 schema、配置 GET/PUT 和 reset 路由补齐 Handler 已支持的 405；保持现有管理员 Session、错误状态和 reset 默认 backend 语义。
 - 高风险门禁新增对照 `inferenceparams.Params`、`Policy`、`Field` 的 JSON tags 与 OpenAPI 字段，并检查路由注册、管理员鉴权、405 和主要成功响应引用。
-- 当前提交：OpenAPI `855b7d9`，契约门禁后续修正提交 `ec6dcc4`、`dc6e3ee`、`96016a9`。本批完整 CI 尚未完成；通过前不关闭任务。
+- 本批最终代码基线为提交 `7d680514d87bd644ee4ac193711a354fd1e7c8c5`；对应 Actions [运行 43842973775](https://github.com/Kasign/llm-gateway/actions/runs/43842973775) 的 5 个 Job 全部成功。契约门禁同时覆盖 Field.Select 的嵌套 value/label 字段，避免将其误判为 Field 顶层属性。
 - 复核发现当前 Handler 对 PUT 参数对象使用普通 JSON Decoder，未知字段会被忽略；reset 对请求 JSON 解码错误也不返回 400。本批按现有行为描述，不把 OpenAPI 写成 Handler 尚未实现的严格拒绝语义。数值范围和策略值校验也未由当前 Handler 执行，不在 Schema 中伪造约束。
