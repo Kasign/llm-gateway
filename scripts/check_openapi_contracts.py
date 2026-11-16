@@ -928,7 +928,7 @@ def validate(
             raise ValueError("internal/catalog/ollama/tags.go: Tag struct not found")
         tag_schema = schema_block(source, "OllamaTagsResult")
         tag_items = re.search(
-            r"(?ms)^        tags:\\n          type: array\\n          items:\\n            type: object\\n(.*?)(?=^      additionalProperties:)",
+            r"(?ms)^        tags:\n          type: array\n          items:\n            type: object\n(.*?)(?=^      additionalProperties:)",
             tag_schema,
         )
         if tag_items is None:
