@@ -593,16 +593,16 @@
 - 提交 `2cc510e48263cc2f27b3079f6782b4fd67f08db8`；Go CI [运行 43847843747](https://github.com/Kasign/llm-gateway/actions/runs/43847843747) 5/5 Job 全部成功，浏览器验收 [运行 43847843826](https://github.com/Kasign/llm-gateway/actions/runs/43847843826) 成功。
 
 
-## 2026-11-16：Ollama 模型删除生命周期（进行中）
+## 2026-11-16：Ollama 模型删除生命周期（已完成）
 
-- 复核 Ollama 删除流程发现同类风险：先调用 `InferenceUnload`，但忽略卸载错误，仍继续调用上游 Delete；删除当前活动 Ollama 模型后，也没有清除持久化的活动模型名。
-- 本批复用“卸载成功后才执行破坏性删除”的统一顺序；卸载失败时不调用 Ollama Delete。删除成功后，如果被删模型恰好是当前活动 Ollama 模型，则清除持久化和运行时的活动模型名，避免后续请求继续路由到已删除模型。
-- 增加活动模型匹配判定测试；完整 CI 通过后关闭本批。
+- 修复 Ollama 删除前忽略卸载错误的问题：复用统一删除顺序，只有卸载成功后才调用上游 Delete；卸载失败时不会执行破坏性删除。
+- 删除成功后，如果活动 Ollama 模型或 `ModelsByBackend["ollama"]` 历史映射指向被删模型，则清除对应引用，避免后续请求或切换后端再切回时继续路由到已删除模型。
+- 增加活动模型匹配及历史映射清理测试。提交 `3dfadac4d6f5f66752c038e217988c59f5662d3c`、`df49d803c2312fe9422dd8bc4dcd0ffa75be381e`、`a5c8a712d44830146f2cccfa4a7d0be926e980a8`；最终 Go CI [运行 43849359264](https://github.com/Kasign/llm-gateway/actions/runs/43849359264) 5/5 Job 全部成功，浏览器验收 [运行 43849359250](https://github.com/Kasign/llm-gateway/actions/runs/43849359250) 成功。中间提交 `3dfadac` 曾因漏引入 `settings` 包导致编译失败，已在最终提交修复并通过完整验收。
 
+## 2026-11-16：ModelsMax=1 加载前卸载失败保护（已完成）
 
-## 2026-11-16：ModelsMax=1 加载前卸载失败保护（进行中）
+- 修复 `ModelsMax<=1` 时忽略旧模型卸载错误仍继续加载目标模型的问题。
+- Gateway 模型路径先确认模型列表可读，再逐个使用运行态感知的 `UnloadFromMemory` 卸载旧模型；只有卸载成功后才更新对应数据库状态。无法列出、卸载失败或状态写入失败时中止目标加载。
+- 非 Gateway 模型路径的 `UnloadAll` 错误也会中止目标加载。
+- 新增真实 HTTP Handler 模拟测试，验证旧模型卸载失败时不会继续发送目标模型 Load。提交 `a5c8a712d44830146f2cccfa4a7d0be926e980a8`；Go CI [运行 43849359264](https://github.com/Kasign/llm-gateway/actions/runs/43849359264) 5/5 Job 全部成功，浏览器验收 [运行 43849359250](https://github.com/Kasign/llm-gateway/actions/runs/43849359250) 成功。
 
-- 生命周期审查发现 `loadLlamaCppUpstreamWithClient` 在 `ModelsMax<=1` 时忽略旧模型卸载错误，仍继续加载目标模型；Gateway 模型分支还会无条件把旧模型数据库状态写成 `unloaded`。上游卸载失败时可能导致多模型并存或数据库状态与真实运行态不一致。
-- 本批改为先确认旧模型卸载成功，再更新数据库状态并继续加载；无法列出模型、卸载失败或状态写入失败时中止目标加载。非 Gateway 模型的 `UnloadAll` 失败也不再被忽略。
-- 新增真实 HTTP Handler 模拟测试，验证旧模型卸载失败时不会继续发送目标模型 Load。
-- 完整 CI 通过后关闭本批。
