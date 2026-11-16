@@ -556,9 +556,11 @@
 - 复核发现当前 Handler 对 PUT 参数对象使用普通 JSON Decoder，未知字段会被忽略；reset 对请求 JSON 解码错误也不返回 400。本批按现有行为描述，不把 OpenAPI 写成 Handler 尚未实现的严格拒绝语义。数值范围和策略值校验也未由当前 Handler 执行，不在 Schema 中伪造约束。
 
 
-## 2026-11-16：Benchmark API 契约收口（进行中）
+## 2026-11-16：Benchmark API 契约收口（已完成）
 
-- 范围仅限已有的 `POST /api/benchmark`、`GET /api/benchmark/{job_id}`、`DELETE /api/benchmark/{job_id}`，不新增 Benchmark 业务功能。
-- 已核对 Handler：`max_tokens` 缺省、非正数或大于 8192 时归一化为 4000；`model_id` 优先于 `model_key`，`model` 是兼容别名；`use_active=true` 时忽略 `model_key`；未指定模型时使用当前活动模型。未知请求字段由 JSON Decoder 忽略，因此请求 Schema 保持允许额外字段。
-- 当前差距：Benchmark Job、停止结果和流事件/分析 DTO 的字段级契约不完整；GET/DELETE 缺少实际支持的 400/405 描述，POST 缺少 405 描述。
-- 本批目标：补齐请求行为说明、Job/停止结果/状态响应 Schema、错误状态码，并增加 Go DTO 与 OpenAPI 字段一致性门禁。CI 完整通过前不关闭任务。
+- 范围仅限已有的 `POST /api/benchmark`、`GET /api/benchmark/{job_id}`、`DELETE /api/benchmark/{job_id}`，没有新增 Benchmark 业务功能。
+- 已核对并记录 Handler 行为：`max_tokens` 缺省、非正数或大于 8192 时归一化为 4000；`model_id` 优先于 `model_key`，`model` 是兼容别名；`use_active=true` 时忽略 `model_key`；未指定模型时使用当前活动模型。未知请求字段由 JSON Decoder 忽略，因此请求 Schema 保持允许额外字段。
+- 补齐 Benchmark Job、停止结果、流事件和分析 DTO 的字段级 Schema，以及 POST/GET/DELETE 实际支持的 400/404/405 与认证错误响应。
+- 高风险契约门禁对照 Handler 请求字段、模型选择与 max_tokens 归一化逻辑、Job/StreamEvent/RequestAnalysis 相关 Go JSON tags 和 OpenAPI Schema，防止后续漂移。
+- 提交 `8bd3843e5ad25f4369e79ed88a6ddb1cfe970ab1`；GitHub Actions [运行 43844621649](https://github.com/Kasign/llm-gateway/actions/runs/43844621649) 的 5 个 Job 全部成功：编译与 Docker 镜像、Go 测试/竞态/静态检查、配置/API 契约/前端、故障注入与恢复、稳态负载与审计持久化。
+- 本批只修改 OpenAPI、契约检查和台账，没有改动 Benchmark 业务 Handler 或任务状态机。
