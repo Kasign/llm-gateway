@@ -195,6 +195,7 @@ def validate(
     inference_ops: str,
     runtime_handler: str,
     inference_params_schema: str,
+    inference_params_handler: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -1179,6 +1180,7 @@ def main() -> int:
             inference_ops,
             runtime_handler,
             inference_params_schema,
+            inference_params_handler,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
