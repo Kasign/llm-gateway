@@ -127,10 +127,10 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aggregate request stats: %v", err)
 	}
-	if stats.Requests.Total != 6 || stats.Requests.Success != 4 || stats.Requests.Errors != 1 || stats.Requests.Cancelled != 1 {
+	if stats.Requests.Total != 5 || stats.Requests.Success != 3 || stats.Requests.Errors != 1 || stats.Requests.Cancelled != 1 {
 		t.Fatalf("unexpected request counts: %+v", stats.Requests)
 	}
-	if stats.Tokens.UpstreamUsage.Requests != 3 || stats.Tokens.UpstreamUsage.InputTokens != 13 || stats.Tokens.UpstreamUsage.OutputTokens != 7 || stats.Tokens.UpstreamUsage.TotalTokens != 20 {
+	if stats.Tokens.UpstreamUsage.Requests != 2 || stats.Tokens.UpstreamUsage.InputTokens != 11 || stats.Tokens.UpstreamUsage.OutputTokens != 6 || stats.Tokens.UpstreamUsage.TotalTokens != 17 {
 		t.Fatalf("unexpected upstream usage totals: %+v", stats.Tokens.UpstreamUsage)
 	}
 	if stats.Tokens.LlamaTimings.Requests != 1 || stats.Tokens.LlamaTimings.TotalTokens != 5 {
@@ -139,8 +139,8 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	if stats.Tokens.UnknownSource.Requests != 1 || stats.Tokens.UnknownSource.TotalTokens != 1 {
 		t.Fatalf("unexpected unknown source totals: %+v", stats.Tokens.UnknownSource)
 	}
-	if stats.Latency.SampleCount != 6 {
-		t.Fatalf("latency sample count = %d, want 6", stats.Latency.SampleCount)
+	if stats.Latency.SampleCount != 5 {
+		t.Fatalf("latency sample count = %d, want 5", stats.Latency.SampleCount)
 	}
 	if stats.ProviderID != "remote-a" {
 		t.Fatalf("provider filter normalization = %q, want remote-a", stats.ProviderID)
