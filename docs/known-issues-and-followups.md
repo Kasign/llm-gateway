@@ -63,7 +63,7 @@
 - 为 7 个现有路由补充 Handler 实际返回的 405；没有改变 Handler 的状态码或业务逻辑。
 - 契约门禁现在对照 `server.go` 路由注册、Ollama Handler 请求/响应字段、`llama.CatalogItem` 和 `ollama.Tag` JSON tags，检查现有 OpenAPI Schema，防止文档和实现再次漂移。
 - Pull 仍为异步操作：创建接口返回 `job_id`，进度统一通过 `GET /api/downloads` 查看；取消仅作用于当前进程仍在运行的任务。Ollama Delete 的业务失败仍通过 HTTP 200 + `ModelOpsResult.success=false` 表达，本批只如实记录现状。
-- 待本提交完整 Go CI 通过后再关闭本批。
+- 已由提交 `090ded2` 对应 Actions `43841607514` 全部 5 个 Job 通过；Ollama 契约收口已验收。
 
 ## 2026-11-16：统一运行时 API 契约收口（进行中）
 
@@ -543,3 +543,14 @@
 - 稳态负载 CI 样本：12,000 请求，目标/实际 200 req/s，失败 0，p50 3.54 ms、p95 4.09 ms、p99 9.09 ms。该数据仅代表隔离 CI Mock 与数据库环境，不作为生产容量承诺。
 - 调用方 API Key 重复名称分支在 Handler 返回 HTTP 409 `key_name_conflict`，此前 OpenAPI 未声明。提交 `a775a2a` 增加 409 AdminError 响应，并在高风险契约门禁中对照 Handler 检查；Go CI [43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 5/5 Job 通过。
 - 调用方 API Key 列表、创建、修改、删除、启用、禁用和轮换的响应 Schema、状态码与 Handler 分支门禁已由提交 `447a14d` 的完整 Go CI 通过。下一批按路线图转向模型下载/运行时、推理参数、Ollama 和 Benchmark 的稳定契约；生产 1Panel/OpenResty/真实 Provider 验收仍依赖用户部署环境和授权凭据，不能用 CI 代替。
+
+
+## 2026-11-16：推理参数 API 契约收口（进行中）
+
+- 本批范围仅为管理员推理参数配置 API：GET schema、GET 当前配置、PUT 保存、POST reset；不改变参数合并、默认值、持久化或推理请求行为。
+- 现有接口按后端区分 `llamacpp` 与 `ollama`；schema 动态提供字段、分组和说明。参数结构以 `inferenceparams.Params` 为准，策略当前保存 `mode`，`gateway_only` 强制覆盖客户端同名采样字段，其余值按 `client_first` 处理。
+- 已将 OpenAPI 中原先泛化的动态表单字段、参数对象、策略、配置 Envelope 和 reset 响应改为可读的字段级 Schema；保留参数对象对未来字段的扩展能力，不虚构当前 Handler 不执行的数值范围校验。
+- 为 schema、配置 GET/PUT 和 reset 路由补齐 Handler 已支持的 405；保持现有管理员 Session、错误状态和 reset 默认 backend 语义。
+- 高风险门禁新增对照 `inferenceparams.Params`、`Policy`、`Field` 的 JSON tags 与 OpenAPI 字段，并检查路由注册、管理员鉴权、405 和主要成功响应引用。
+- 当前提交：OpenAPI `855b7d9`，契约门禁后续修正提交 `ec6dcc4`、`dc6e3ee`、`96016a9`。本批完整 CI 尚未完成；通过前不关闭任务。
+- 复核发现当前 Handler 对 PUT 参数对象使用普通 JSON Decoder，未知字段会被忽略；reset 对请求 JSON 解码错误也不返回 400。本批按现有行为描述，不把 OpenAPI 写成 Handler 尚未实现的严格拒绝语义。数值范围和策略值校验也未由当前 Handler 执行，不在 Schema 中伪造约束。
