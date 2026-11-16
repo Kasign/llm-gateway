@@ -497,14 +497,11 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		}
 		o.s.audit.InsertStreamEvents(st.ID, trace.drainEvents())
 	}
-	if tokenSrc == "usage" {
-		tokenSrc = "upstream_usage"
-	}
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
 		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, ModelActual: st.Model.UpstreamID,
 		Stream: st.Stream, Status: state, HTTPStatus: gatewayStatus, UpstreamHTTPStatus: upstreamStatus, FinishedAt: &end, LatencyMS: totalMS,
-		TTFTMS: ttft, InputTokens: inTok, OutputTokens: outTok, TotalTokens: totTok, TokenSource: tokenSrc,
+		TTFTMS: ttft, InputTokens: inTok, OutputTokens: outTok, TotalTokens: totTok,
 		ResponseBytes: respBytes, ErrorCode: code, ErrorMessage: msg,
 	}
 	if key != nil {
@@ -512,6 +509,9 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		logItem.APIKeyName = key.Name
 	}
 	o.s.audit.FinishRequest(logItem)
+	if tokenSrc == "usage" {
+		tokenSrc = "upstream_usage"
+	}
 	o.s.finishProviderTokenBudget(st.ID, tokenSrc, inTok, outTok, totTok)
 	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,

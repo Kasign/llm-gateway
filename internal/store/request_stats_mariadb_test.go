@@ -89,6 +89,29 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	}
 
 	repo := NewRepo(db)
+	finishStarted := start.Add(10 * time.Second)
+	if err := repo.CreateRequest(ctx, RequestLog{
+		RequestID: prefix + "-finish-path", Endpoint: "/v1/chat/completions", Method: "POST",
+		ProviderID: "remote-a", Status: "running", StartedAt: finishStarted,
+	}); err != nil {
+		t.Fatalf("create finish-path sample: %v", err)
+	}
+	finishedAt := finishStarted.Add(2 * time.Second)
+	one, two, three := int64(1), int64(2), int64(3)
+	if err := repo.FinishRequest(ctx, RequestLog{
+		RequestID: prefix + "-finish-path", Status: "success", HTTPStatus: 200,
+		FinishedAt: &finishedAt, LatencyMS: 2000, InputTokens: &one,
+		OutputTokens: &two, TotalTokens: &three, TokenSource: "upstream_usage",
+	}); err != nil {
+		t.Fatalf("finish request sample: %v", err)
+	}
+	var persistedSource string
+	if err := db.QueryRowContext(ctx, "SELECT token_source FROM request_logs WHERE request_id=?", prefix+"-finish-path").Scan(&persistedSource); err != nil {
+		t.Fatalf("read persisted token source: %v", err)
+	}
+	if persistedSource != "upstream_usage" {
+		t.Fatalf("persisted token source = %q, want upstream_usage", persistedSource)
+	}
 	stats, err := repo.AggregateRequestStats(ctx, from, to, " REMOTE-A ")
 	if err != nil {
 		t.Fatalf("aggregate request stats: %v", err)
@@ -106,7 +129,7 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 		t.Fatalf("unexpected unknown source totals: %+v", stats.Tokens.UnknownSource)
 	}
 	if stats.Latency.SampleCount != 4 {
-		t.Fatalf("latency sample count = %d, want 4", stats.Latency.SampleCount)
+		t.Fatalf("latency sample count = %d, want 6", stats.Latency.SampleCount)
 	}
 	if stats.ProviderID != "remote-a" {
 		t.Fatalf("provider filter normalization = %q, want remote-a", stats.ProviderID)
