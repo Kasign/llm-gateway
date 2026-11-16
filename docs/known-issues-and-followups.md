@@ -46,6 +46,15 @@
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
 | GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 高风险门禁已覆盖 Provider mutation/view、创建/删除、统计错误、请求取消、认证、审计/保留 DTO，以及调用方 API Key 列表/创建/修改/删除/启用/禁用/轮换的响应 Schema、状态码和 Handler 分支；整体 OpenAPI 仍为 partial。 | 继续按风险顺序对照 Handler 的请求体、成功/错误状态码、错误封套和稳定 JSON 字段；不一次性猜测或声称全量完成。 | 下一批按路线图覆盖模型下载/运行时、推理参数、Ollama、Benchmark 等字段级契约；全量 Go/OpenAPI 等价性仍分阶段补齐。 |
 
+## 2026-11-16：下载任务 API 契约收口（进行中）
+
+- 本批只处理 GW-API-001 的下载任务响应契约，不改变 HF/Ollama 下载实现与任务状态机。
+- `GET /api/downloads` 的 Handler DTO 始终输出 `model_key/kind/status/done/total`，但 OpenAPI 原先只要求其中部分字段，且允许任意额外字段；现已收紧为必需字段与明确状态枚举，任务项和顶层响应均拒绝未声明字段。
+- `POST /api/downloads/dismiss` 的实际语义是“提供非空 model_key 清理单条”或“`all_failed=true` 批量清理”；原 Schema 只用 description 说明，未用结构约束表达，现已补充 `anyOf`。
+- 同步扩展高风险契约门禁：从 `downloadsAPI` 的 Go JSON tag 对账任务字段，检查状态/来源枚举、必需字段、封闭响应对象，以及清理接口的两条 Handler 分支和成功响应 Schema。
+- 本批不把 HF 下载取消、Ollama Pull 取消或重启恢复当作新任务；这些已有实现和契约需在后续统一生命周期审查中按真实缺口处理。
+- 代码/契约门禁通过前保持进行中；以本提交对应的完整 Go CI 为验收依据。
+
 ## 当前执行范围
 
 1. Provider 热更新已完成最后一轮静态审查：没有确认正常配置路径可触发的 setter 失败，不增加额外回滚框架或重复测试。
