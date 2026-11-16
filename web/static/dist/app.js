@@ -1219,10 +1219,9 @@
       el.innerHTML = '<span class="err small">' + esc(e.message) + "</span>";
     }
   }
-
   function formatTokenCount(value) {
     const n = Number(value);
-    return Number.isFinite(n) && n >= 0 ? Math.trunc(n).toLocaleString("zh-CN") : "—";
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n).toLocaleString("zh-CN") : "\\u2014";
   }
   async function loadDashboardStats() {
     const root = $("dashTokenStats");
@@ -1233,9 +1232,9 @@
     try {
       const stats = await api("/api/requests/stats?range=" + encodeURIComponent(selected));
       const sources = [
-        { key: "upstream_usage", label: "远程上游 usage", hint: "上游返回的 Token 用量" },
-        { key: "llama_timings", label: "本地 llama.cpp", hint: "本地引擎 timings 统计" },
-        { key: "unknown_source", label: "来源未知", hint: "旧记录或缺少可识别来源" }
+        { key: "upstream_usage", label: "\\u8FDC\\u7A0B\\u4E0A\\u6E38 usage", hint: "\\u4E0A\\u6E38\\u8FD4\\u56DE\\u7684 Token \\u7528\\u91CF" },
+        { key: "llama_timings", label: "\\u672C\\u5730 llama.cpp", hint: "\\u672C\\u5730\\u5F15\\u64CE timings \\u7EDF\\u8BA1" },
+        { key: "unknown_source", label: "\\u6765\\u6E90\\u672A\\u77E5", hint: "\\u65E7\\u8BB0\\u5F55\\u6216\\u7F3A\\u5C11\\u53EF\\u8BC6\\u522B\\u6765\\u6E90" }
       ];
       const totals = sources.reduce((sum, item) => {
         const v = stats.tokens?.[item.key] || {};
@@ -1246,28 +1245,27 @@
       }, { input: 0, output: 0, total: 0 });
       const requests = stats.requests || {};
       root.innerHTML = `
-        <div class="token-stats-summary">
-          <div class="stat"><span>请求总数</span><b>${formatTokenCount(requests.total_requests)}</b><small>成功 ${formatTokenCount(requests.success_requests)} · 失败 ${formatTokenCount(requests.error_requests)} · 取消 ${formatTokenCount(requests.cancelled_requests)}</small></div>
-          <div class="stat"><span>Token 总量</span><b>${formatTokenCount(totals.total)}</b><small>输入 ${formatTokenCount(totals.input)} · 输出 ${formatTokenCount(totals.output)}</small></div>
-          <div class="stat"><span>成功率</span><b>${Number(requests.success_rate_percent || 0).toFixed(1)}%</b><small>按已结束请求计算</small></div>
-          <div class="stat"><span>平均延迟</span><b>${stats.latency?.average_ms == null ? "—" : Math.round(Number(stats.latency.average_ms)).toLocaleString("zh-CN") + " ms"}</b><small>${formatTokenCount(stats.latency?.sample_count)} 个有效样本</small></div>
-        </div>
-        <div class="table-wrap token-source-table">
-          <table><thead><tr><th>统计来源</th><th>有 Token 记录的请求</th><th>输入 Token</th><th>输出 Token</th><th>合计</th></tr></thead><tbody>
-            ${sources.map((item) => {
-              const v = stats.tokens?.[item.key] || {};
-              return `<tr><td><strong>${item.label}</strong><div class="small muted">${item.hint}</div></td><td>${formatTokenCount(v.requests)}</td><td>${formatTokenCount(v.input_tokens)}</td><td>${formatTokenCount(v.output_tokens)}</td><td><strong>${formatTokenCount(v.total_tokens)}</strong></td></tr>`;
-            }).join("")}
-          </tbody></table>
-        </div>
-        <p class="small muted token-stats-note">${esc(stats.tokens?.note || "Token 来源按请求审计记录分类；不同来源不可直接视为供应商账单用量。")}</p>`;
+      <div class="token-stats-summary">
+        <div class="stat"><span>\\u8BF7\\u6C42\\u603B\\u6570</span><b>${formatTokenCount(requests.total_requests)}</b><small>\\u6210\\u529F ${formatTokenCount(requests.success_requests)} \\xB7 \\u5931\\u8D25 ${formatTokenCount(requests.error_requests)} \\xB7 \\u53D6\\u6D88 ${formatTokenCount(requests.cancelled_requests)}</small></div>
+        <div class="stat"><span>Token \\u603B\\u91CF</span><b>${formatTokenCount(totals.total)}</b><small>\\u8F93\\u5165 ${formatTokenCount(totals.input)} \\xB7 \\u8F93\\u51FA ${formatTokenCount(totals.output)}</small></div>
+        <div class="stat"><span>\\u6210\\u529F\\u7387</span><b>${Number(requests.success_rate_percent || 0).toFixed(1)}%</b><small>\\u6309\\u5DF2\\u7ED3\\u675F\\u8BF7\\u6C42\\u8BA1\\u7B97</small></div>
+        <div class="stat"><span>\\u5E73\\u5747\\u5EF6\\u8FDF</span><b>${stats.latency?.average_ms == null ? "\\u2014" : Math.round(Number(stats.latency.average_ms)).toLocaleString("zh-CN") + " ms"}</b><small>${formatTokenCount(stats.latency?.sample_count)} \\u4E2A\\u6709\\u6548\\u6837\\u672C</small></div>
+      </div>
+      <div class="table-wrap token-source-table">
+        <table><thead><tr><th>\\u7EDF\\u8BA1\\u6765\\u6E90</th><th>\\u6709 Token \\u8BB0\\u5F55\\u7684\\u8BF7\\u6C42</th><th>\\u8F93\\u5165 Token</th><th>\\u8F93\\u51FA Token</th><th>\\u5408\\u8BA1</th></tr></thead><tbody>
+          ${sources.map((item) => {
+        const v = stats.tokens?.[item.key] || {};
+        return `<tr><td><strong>${item.label}</strong><div class="small muted">${item.hint}</div></td><td>${formatTokenCount(v.requests)}</td><td>${formatTokenCount(v.input_tokens)}</td><td>${formatTokenCount(v.output_tokens)}</td><td><strong>${formatTokenCount(v.total_tokens)}</strong></td></tr>`;
+      }).join("")}
+        </tbody></table>
+      </div>
+      <p class="small muted token-stats-note">${esc(stats.tokens?.note || "Token \\u6765\\u6E90\\u6309\\u8BF7\\u6C42\\u5BA1\\u8BA1\\u8BB0\\u5F55\\u5206\\u7C7B\\uFF1B\\u4E0D\\u540C\\u6765\\u6E90\\u4E0D\\u53EF\\u76F4\\u63A5\\u89C6\\u4E3A\\u4F9B\\u5E94\\u5546\\u8D26\\u5355\\u用\\u91CF\\u3002")}</p>`;
     } catch (e) {
-      root.innerHTML = '<span class="err small">Token 统计加载失败：' + esc(e.message) + "</span>";
+      root.innerHTML = '<span class="err small">Token \\u7EDF\\u8BA1\\u52A0\\u8F7D\\u5931\\u8D25\\uFF1A' + esc(e.message) + "</span>";
     } finally {
       root.setAttribute("aria-busy", "false");
     }
   }
-
   function adminKeyStatus() {
     const el = $("adminKeyStatus");
     if (!el) return;
