@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -38,6 +39,13 @@ func NewService(cfg Config) *Service {
 
 // Search queries one or both sources and merges results.
 func (s *Service) Search(ctx context.Context, q Query) ([]Listing, error) {
+	result, _, err := s.SearchDetailed(ctx, q)
+	return result, err
+}
+
+// SearchDetailed returns merged results and per-source status. A partial source
+// failure does not hide successful results, but is made visible to callers.
+func (s *Service) SearchDetailed(ctx context.Context, q Query) ([]Listing, map[string]SourceStatus, error) {
 	q.Text = strings.TrimSpace(q.Text)
 	if q.Limit <= 0 {
 		q.Limit = 30
@@ -55,6 +63,7 @@ func (s *Service) Search(ctx context.Context, q Query) ([]Listing, error) {
 
 	var hfRows, ollamaRows []Listing
 	var errHF, errOllama error
+	status := make(map[string]SourceStatus, 2)
 
 	newest := q.Sort == SortNewest
 	if src == "all" || src == "hf" || src == "huggingface" {
@@ -62,6 +71,7 @@ func (s *Service) Search(ctx context.Context, q Query) ([]Listing, error) {
 		ggufOnly := q.HFGGUFOnly
 		raw, err := hfc.Search(ctx, q.Text, newest, ggufOnly, q.Limit)
 		errHF = err
+		status[string(SourceHuggingFace)] = sourceStatus(errHF)
 		for _, r := range raw {
 			hfRows = append(hfRows, listingFromHF(r))
 		}
@@ -70,26 +80,28 @@ func (s *Service) Search(ctx context.Context, q Query) ([]Listing, error) {
 		oc := &ollama.Client{BaseURL: s.cfg.OllamaLibraryURL, UserAgent: s.cfg.HFUserAgent, HTTPClient: s.hc}
 		raw, err := oc.Search(ctx, q.Text, newest, q.Limit)
 		errOllama = err
+		status[string(SourceOllama)] = sourceStatus(errOllama)
 		for _, r := range raw {
 			ollamaRows = append(ollamaRows, listingFromOllama(r))
 		}
 	}
 
 	if errHF != nil && errOllama != nil {
-		return nil, errHF
+		return nil, status, fmt.Errorf("catalog search failed: huggingface: %v; ollama: %v", errHF, errOllama)
 	}
 	if src == "hf" || src == "huggingface" {
-		return hfRows, errHF
+		return hfRows, status, errHF
 	}
 	if src == "ollama" {
-		return ollamaRows, errOllama
+		return ollamaRows, status, errOllama
 	}
 	merged := MergeSorted(hfRows, ollamaRows, q.Sort, q.Limit)
-	if errHF != nil && len(hfRows) == 0 {
-		return merged, nil
+	return merged, status, nil
+}
+
+func sourceStatus(err error) SourceStatus {
+	if err != nil {
+		return SourceStatus{Status: "failed", Error: err.Error()}
 	}
-	if errOllama != nil && len(ollamaRows) == 0 {
-		return merged, nil
-	}
-	return merged, nil
+	return SourceStatus{Status: "success"}
 }

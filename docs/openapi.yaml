@@ -3125,6 +3125,16 @@ components:
             type: object
             description: 目录卡片字段以搜索来源和 catalog 服务返回内容为准。
             additionalProperties: true
+        sources:
+          type: object
+          description: 本次查询各目录来源的状态；部分来源失败时仍返回其他来源的成功结果。
+          additionalProperties:
+            type: object
+            required: [status]
+            properties:
+              status: { type: string, enum: [success, failed] }
+              error: { type: string }
+            additionalProperties: false
       additionalProperties: true
     DownloadsEnvelope:
       type: object

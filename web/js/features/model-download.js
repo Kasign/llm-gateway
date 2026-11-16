@@ -287,10 +287,18 @@ async function search() {
     const params = new URLSearchParams({ q: query, source, sort, limit: '40', hf_gguf: hfGguf ? '1' : '0' });
     const j = await api('/api/admin/catalog/search?' + params);
     renderRows(j.data || []);
-    if (msg)
-      msg.textContent = query
+    if (msg) {
+      const failed = Object.entries(j.sources || {}).filter(([, state]) => state?.status === 'failed');
+      const summary = query
         ? '共 ' + (j.data || []).length + ' 条'
         : '展示热门/最近模型（可输入关键词缩小范围）';
+      msg.textContent = summary;
+      if (failed.length) {
+        msg.innerHTML = esc(summary) + '；部分来源不可用：' + failed.map(([name, state]) =>
+          esc((name === 'huggingface' ? 'Hugging Face' : name) + '：' + (state.error || '请求失败'))
+        ).join('；');
+      }
+    }
   } catch (e) {
     if (msg) msg.innerHTML = '<span class="err">' + esc(e.message) + '</span>';
     if ($('catalogResults')) $('catalogResults').innerHTML = '';

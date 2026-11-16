@@ -45,3 +45,10 @@ type Listing struct {
 	SortDownloads int64      `json:"-"`
 	SortTime      time.Time  `json:"-"`
 }
+
+
+// SourceStatus reports the availability of one catalog source for a search.
+type SourceStatus struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}

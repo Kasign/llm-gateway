@@ -40,12 +40,12 @@ func (s *Server) catalogSearchAPI(w http.ResponseWriter, r *http.Request) {
 		q.Sort = catalog.SortHot
 	}
 	ctx := r.Context()
-	items, err := s.catalogService().Search(ctx, q)
+	items, sources, err := s.catalogService().SearchDetailed(ctx, q)
 	if err != nil {
 		jsonError(w, 502, "catalog_search_failed", err.Error())
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"data": items})
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": items, "sources": sources})
 }
 
 func (s *Server) hfSearch(w http.ResponseWriter, r *http.Request) {
