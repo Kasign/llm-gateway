@@ -1785,6 +1785,8 @@ paths:
                 $ref: "#/components/schemas/InferenceParamsSchema"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
   /api/admin/inference-params:
     get:
       operationId: getApiAdminInferenceParams
@@ -1809,6 +1811,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
     put:
       operationId: putApiAdminInferenceParams
@@ -1838,6 +1842,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
   /api/admin/inference-params/reset:
     post:
@@ -1869,6 +1875,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
   /api/admin/local-inventory:
     get:
@@ -3232,6 +3240,61 @@ components:
           type: object
           additionalProperties: true
       additionalProperties: true
+    InferenceParamField:
+      type: object
+      required: [key, label, hint, description, impact, range, recommend, type, section, backends]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        hint: { type: string }
+        description: { type: string }
+        impact: { type: string }
+        range: { type: string }
+        recommend: { type: string }
+        example: { type: string }
+        examples:
+          type: object
+          additionalProperties: { type: string }
+        placeholder: { type: string }
+        type: { type: string, enum: [number, select, stop_lines, text] }
+        section: { type: string }
+        backends:
+          type: array
+          items: { type: string, enum: [both, llamacpp, ollama] }
+        select:
+          type: array
+          items:
+            type: object
+            required: [value, label]
+            properties:
+              value: { type: string }
+              label: { type: string }
+            additionalProperties: false
+      additionalProperties: false
+    InferenceParams:
+      type: object
+      properties:
+        max_tokens: { type: integer, format: int64 }
+        temperature: { type: number, format: double }
+        top_p: { type: number, format: double }
+        top_k: { type: integer, format: int64 }
+        min_p: { type: number, format: double }
+        frequency_penalty: { type: number, format: double }
+        presence_penalty: { type: number, format: double }
+        repeat_penalty: { type: number, format: double }
+        seed: { type: integer, format: int64 }
+        enable_thinking: { type: string }
+        stop:
+          type: array
+          items: { type: string }
+        keep_alive: { type: string }
+        max_output_cap: { type: integer, format: int64 }
+      additionalProperties: true
+    InferenceParamsPolicy:
+      type: object
+      properties:
+        mode: { type: string, description: "当前实现将 gateway_only 识别为强制覆盖，其余值按 client_first 处理。" }
+      additionalProperties: true
     InferenceParamsSchema:
       type: object
       required: [fields, sections, section_descriptions]
@@ -3239,27 +3302,22 @@ components:
         fields:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: "#/components/schemas/InferenceParamField"
         sections:
           type: object
-          additionalProperties: true
+          additionalProperties: { type: string }
         section_descriptions:
           type: object
-          additionalProperties: true
-      additionalProperties: true
+          additionalProperties: { type: string }
+      additionalProperties: false
     InferenceParamsMutation:
       type: object
       properties:
         backend: { type: string, enum: [llamacpp, ollama], default: llamacpp }
         params:
-          type: object
-          description: 具体参数字段以 GET /api/admin/inference-params/schema 返回的 fields 为准。
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParams"
         policy:
-          type: object
-          description: 可选参数来源/优先级策略；字段按当前推理参数实现演进。
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParamsPolicy"
       additionalProperties: true
     InferenceParamsEnvelope:
       type: object
@@ -3267,28 +3325,33 @@ components:
       properties:
         backend: { type: string, enum: [llamacpp, ollama] }
         params:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParams"
         policy:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParamsPolicy"
         effective:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParams"
         defaults:
           type: object
-          additionalProperties: true
+          required: [llamacpp, ollama]
+          properties:
+            llamacpp: { $ref: "#/components/schemas/InferenceParams" }
+            ollama: { $ref: "#/components/schemas/InferenceParams" }
+          additionalProperties: false
         default_policy:
           type: object
-          additionalProperties: true
-      additionalProperties: true
+          required: [llamacpp, ollama]
+          properties:
+            llamacpp: { $ref: "#/components/schemas/InferenceParamsPolicy" }
+            ollama: { $ref: "#/components/schemas/InferenceParamsPolicy" }
+          additionalProperties: false
+      additionalProperties: false
     InferenceParamsResetResult:
       type: object
       required: [params]
       properties:
         params:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/InferenceParams"
+      additionalProperties: false
     LocalInventoryEnvelope:
       type: object
       required: [gguf, ollama_names]
