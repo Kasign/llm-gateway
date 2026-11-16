@@ -69,6 +69,7 @@ func TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites(t *testing.T) {
 		"input_tokens BIGINT UNSIGNED NULL," +
 		"output_tokens BIGINT UNSIGNED NULL," +
 		"total_tokens BIGINT UNSIGNED NULL," +
+		"token_source VARCHAR(32) NULL," +
 		"request_bytes BIGINT UNSIGNED NULL," +
 		"response_bytes BIGINT UNSIGNED NULL," +
 		"error_code VARCHAR(64) NULL," +
@@ -81,14 +82,21 @@ func TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites(t *testing.T) {
 	}
 
 	// CREATE TABLE IF NOT EXISTS 不会修补复用测试库中的旧表；确保字段存在，避免测试依赖执行顺序。
-	var providerIDColumnCount int
-	if err := db.QueryRowContext(connectCtx, `SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'request_logs' AND COLUMN_NAME = 'provider_id'`).Scan(&providerIDColumnCount); err != nil {
-		t.Fatalf("检查 request_logs.provider_id 字段失败: %v", err)
-	}
-	if providerIDColumnCount == 0 {
-		if _, err := db.ExecContext(connectCtx, "ALTER TABLE request_logs ADD COLUMN provider_id VARCHAR(64) NULL"); err != nil {
-			t.Fatalf("补齐 request_logs.provider_id 测试字段失败: %v", err)
+	for _, column := range []struct {
+		name string
+		ddl  string
+	}{
+		{name: "provider_id", ddl: "ALTER TABLE request_logs ADD COLUMN provider_id VARCHAR(64) NULL"},
+		{name: "token_source", ddl: "ALTER TABLE request_logs ADD COLUMN token_source VARCHAR(32) NULL"},
+	} {
+		var count int
+		if err := db.QueryRowContext(connectCtx, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'request_logs' AND COLUMN_NAME = ?", column.name).Scan(&count); err != nil {
+			t.Fatalf("检查 request_logs.%s 字段失败: %v", column.name, err)
+		}
+		if count == 0 {
+			if _, err := db.ExecContext(connectCtx, column.ddl); err != nil {
+				t.Fatalf("补齐 request_logs.%s 测试字段失败: %v", column.name, err)
+			}
 		}
 	}
 

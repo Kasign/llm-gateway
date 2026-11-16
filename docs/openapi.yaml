@@ -268,6 +268,65 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/AdminError"
+  /api/admin/model-prices:
+    get:
+      operationId: listAdminModelPrices
+      tags: [Admin]
+      summary: 查询远程 Provider 模型价格版本
+      description: 仅供管理员 Web Session 使用；价格配置保留为元数据，不代表网关会计算费用。
+      parameters:
+        - in: query
+          name: provider_id
+          schema: { type: string }
+        - in: query
+          name: model_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: 价格版本列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        "401": { description: 需要管理员登录 }
+        "500": { description: 读取价格配置失败 }
+    post:
+      operationId: createAdminModelPrice
+      tags: [Admin]
+      summary: 新增模型价格版本
+      description: 仅供管理员 Web Session 使用；价格按不可变版本保存，不触发费用计算。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider_id, model_id, input_price_per_million, output_price_per_million, effective_at]
+              properties:
+                provider_id: { type: string, maxLength: 64 }
+                model_id: { type: string, maxLength: 255 }
+                input_price_per_million: { type: string }
+                output_price_per_million: { type: string }
+                currency: { type: string, enum: [USD] }
+                effective_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: 已创建价格版本
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: object, additionalProperties: true }
+        "400": { description: 请求或价格字段无效 }
+        "401": { description: 需要管理员登录 }
   /api/admin/providers:
     get:
       operationId: getApiAdminProviders

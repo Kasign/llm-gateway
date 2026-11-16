@@ -55,6 +55,17 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 			t.Fatalf("apply test schema: %v", err)
 		}
 	}
+	// 测试可能与其他包共用同一个 MariaDB 测试库；CREATE TABLE IF NOT EXISTS 不会升级旧表。
+	var tokenSourceColumnCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'request_logs' AND COLUMN_NAME = 'token_source'`).Scan(&tokenSourceColumnCount); err != nil {
+		t.Fatalf("检查 request_logs.token_source: %v", err)
+	}
+	if tokenSourceColumnCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE request_logs ADD COLUMN token_source VARCHAR(32) NULL"); err != nil {
+			t.Fatalf("补齐 request_logs.token_source 测试字段: %v", err)
+		}
+	}
 
 	prefix := fmt.Sprintf("request-stats-%d", time.Now().UnixNano())
 	start := time.Now().UTC().Truncate(time.Second)
