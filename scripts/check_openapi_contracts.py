@@ -24,6 +24,7 @@ REQUEST_RETENTION_FILE = ROOT / "internal" / "server" / "request_retention.go"
 REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 AUTH_HANDLER_FILE = ROOT / "internal" / "server" / "admin_auth_http.go"
+DOWNLOAD_DISMISS_HANDLER_FILE = ROOT / "internal" / "server" / "download_dismiss.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -179,6 +180,7 @@ def validate(
     audit_metrics_source: str,
     request_retention_source: str,
     auth_handler: str,
+    download_dismiss_handler: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -836,7 +838,7 @@ def validate(
             "DownloadsEnvelope must reject undocumented top-level response fields",
         )
 
-        dismiss_handler = go_function(request_list_handler, "func (s *Server) downloadsDismissAPI(")
+        dismiss_handler = go_function(download_dismiss_handler, "func (s *Server) downloadsDismissAPI(")
         require(
             "ClearFailedDownloads(ctx)" in dismiss_handler and "DismissDownloadRecord(ctx, key)" in dismiss_handler,
             "downloadsDismissAPI must preserve single-item and all-failed cleanup paths",
@@ -915,6 +917,7 @@ def main() -> int:
         audit_metrics_source = AUDIT_METRICS_FILE.read_text(encoding="utf-8")
         request_retention_source = REQUEST_RETENTION_FILE.read_text(encoding="utf-8")
         auth_handler = AUTH_HANDLER_FILE.read_text(encoding="utf-8")
+        download_dismiss_handler = DOWNLOAD_DISMISS_HANDLER_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -929,6 +932,7 @@ def main() -> int:
             audit_metrics_source,
             request_retention_source,
             auth_handler,
+            download_dismiss_handler,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
