@@ -40,10 +40,9 @@ func (s *Server) DeleteGatewayModel(ctx context.Context, m *model.Model) error {
 	if m == nil {
 		return fmt.Errorf("model required")
 	}
-	if m.Status == "downloading" {
-		if err := s.stopAndWaitDownload(ctx, m.ModelKey); err != nil {
-			return err
-		}
+	// 不能只看数据库状态：重试启动与 worker 更新状态之间也存在短暂窗口。
+	if err := s.stopAndWaitDownload(ctx, m.ModelKey); err != nil {
+		return err
 	}
 	_ = s.unloadModelUpstream(ctx, m)
 	if lp := strings.TrimSpace(m.LocalPath); lp != "" {
