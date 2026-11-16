@@ -96,3 +96,16 @@ CREATE TABLE IF NOT EXISTS gateway_settings (
   value_json LONGTEXT NOT NULL,
   updated_at DATETIME(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Provider 模型价格采用追加版本，不覆盖历史价格；单价单位为 USD / 1,000,000 tokens。
+CREATE TABLE IF NOT EXISTS model_prices (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  provider_id VARCHAR(64) NOT NULL,
+  model_id VARCHAR(255) NOT NULL,
+  input_price_per_million DECIMAL(24,12) NOT NULL,
+  output_price_per_million DECIMAL(24,12) NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'USD',
+  effective_at DATETIME(6) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_model_price_lookup (provider_id, model_id, effective_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
