@@ -169,7 +169,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 				return
 			}
 			partial := "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: 4096\r\nConnection: keep-alive\r\n\r\n" +
-				"data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial-stream-fragment\"},\"finish_reason\":null}]}\n\n"
+				"data: {\"id\":\"chatcmpl-partial\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial-stream-fragment\"},\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8}}\n\n"
 			if _, writeErr := buffered.WriteString(partial); writeErr == nil {
 				writeErr = buffered.Flush()
 				if writeErr != nil {
@@ -593,7 +593,7 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		}
 
 		rows, queryErr := db.QueryContext(verifyCtx,
-			"SELECT http_status, upstream_http_status, status, error_code, COALESCE(error_message,'') FROM request_logs WHERE api_key_name=?",
+			"SELECT http_status, upstream_http_status, status, error_code, COALESCE(error_message,''), input_tokens, output_tokens, total_tokens, COALESCE(token_source,'') FROM request_logs WHERE api_key_name=?",
 			keyName)
 		if queryErr != nil {
 			t.Fatalf("query stream-reset audit details: %v", queryErr)
@@ -601,8 +601,9 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		seen := 0
 		for rows.Next() {
 			var gatewayStatus, upstreamStatus sql.NullInt64
-			var state, errorCode, errorMessage string
-			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &state, &errorCode, &errorMessage); scanErr != nil {
+			var state, errorCode, errorMessage, tokenSource string
+			var inputTokens, outputTokens, totalTokens sql.NullInt64
+			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &state, &errorCode, &errorMessage, &inputTokens, &outputTokens, &totalTokens, &tokenSource); scanErr != nil {
 				_ = rows.Close()
 				t.Fatalf("scan stream-reset audit detail: %v", scanErr)
 			}
@@ -630,7 +631,14 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 		if seen != 1 {
 			t.Fatalf("stream-reset audit detail rows=%d, want 1", seen)
 		}
-		t.Logf("Gateway stream reset integration: client HTTP=200 (committed), upstream HTTP=200, request state=error/provider_upstream, partial SSE retained and error event appended")
+		if !inputTokens.Valid || inputTokens.Int64 != 3 ||
+			!outputTokens.Valid || outputTokens.Int64 != 5 ||
+			!totalTokens.Valid || totalTokens.Int64 != 8 ||
+			tokenSource != "upstream_usage" {
+			t.Fatalf("stream-reset audit tokens = input:%v output:%v total:%v source:%q; want 3/5/8/upstream_usage",
+				inputTokens, outputTokens, totalTokens, tokenSource)
+		}
+		t.Logf("Gateway stream reset integration: client HTTP=200 (committed), upstream HTTP=200, request state=error/provider_upstream, partial SSE and usage tokens persisted, error event appended")
 		return
 	}
 
