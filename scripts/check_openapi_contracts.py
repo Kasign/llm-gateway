@@ -1054,10 +1054,23 @@ def validate(
                 if tag and tag != "-"
             }
             for field in sorted(json_fields):
+                # Field.Select 是匿名子结构，value/label 属于 select.items 而非 Field 顶层。
+                if name == "Field" and field in ("value", "label"):
+                    continue
                 try:
                     schema_field_block(contract_schema, field)
                 except ValueError:
                     errors.append(f"{schema_name}: missing {name} JSON field {field!r}")
+            if name == "Field":
+                try:
+                    select_schema = schema_field_block(contract_schema, "select")
+                    require(
+                        "value: { type: string }" in select_schema
+                        and "label: { type: string }" in select_schema,
+                        "InferenceParamField.select.items must describe value and label",
+                    )
+                except ValueError as exc:
+                    errors.append(f"InferenceParamField: {exc}")
 
         for route, method, handler_name in (
             ("/api/admin/inference-params/schema", "get", "inferenceParamsSchemaAPI"),
