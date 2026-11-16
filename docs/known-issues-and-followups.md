@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前代码/契约基线：`a775a2a94a1ab57ad0b5d519e2c19749f9b8b97d`；Go CI [运行 43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 的 5 个 Job 全部成功，包含 API Key 名称冲突 409 契约门禁。
+- 当前代码/契约基线：`447a14d8773f58987467e90dba58294b7e474e3f`；Go CI [运行 43833571803](https://github.com/Kasign/llm-gateway/actions/runs/43833571803) 的 5 个 Job 全部成功，包含调用方 API Key 列表、创建、修改、删除、启用、禁用和轮换操作契约门禁。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
@@ -44,7 +44,7 @@
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与配置来源统一。 | 远程 Provider 已统一由 Web/MariaDB 管理；前端阻止已知重复 ID，后端再次归一化校验并返回 409，不覆盖旧配置；旧状态字段已从列表和 API 契约移除。提交 `52d58f6` 对应的完整 Go CI 全部通过。 | 后续仅在复现新问题时修复运行时逻辑；旧 YAML/环境变量预置路线不再恢复。 | 用户部署前备份数据库与 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`；真实供应商、公网反代与 1Panel 行为仍需环境验收。 |
 | GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
-| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 高风险门禁已覆盖 Provider mutation/view、创建/删除、统计错误、请求取消、认证、审计/保留 DTO；并补齐调用方 API Key 创建重复名称 409 与 Handler 一致性检查。整体 OpenAPI 仍为 partial。 | 继续按风险顺序对照 Handler 的请求体、成功/错误状态码、错误封套和稳定 JSON 字段；不一次性猜测或声称全量完成。 | 已覆盖高风险子集；调用方 API Key 其余操作及模型下载/运行时、推理参数、Ollama、Benchmark 等字段级契约继续分批补齐。 |
+| GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 高风险门禁已覆盖 Provider mutation/view、创建/删除、统计错误、请求取消、认证、审计/保留 DTO，以及调用方 API Key 列表/创建/修改/删除/启用/禁用/轮换的响应 Schema、状态码和 Handler 分支；整体 OpenAPI 仍为 partial。 | 继续按风险顺序对照 Handler 的请求体、成功/错误状态码、错误封套和稳定 JSON 字段；不一次性猜测或声称全量完成。 | 下一批按路线图覆盖模型下载/运行时、推理参数、Ollama、Benchmark 等字段级契约；全量 Go/OpenAPI 等价性仍分阶段补齐。 |
 
 ## 当前执行范围
 
@@ -514,4 +514,4 @@
 - 浏览器验收在提交 `c846015` 上 164/164 项通过；无页面异常、控制台错误、静态资源加载失败或非预期认证失败。
 - 稳态负载 CI 样本：12,000 请求，目标/实际 200 req/s，失败 0，p50 3.54 ms、p95 4.09 ms、p99 9.09 ms。该数据仅代表隔离 CI Mock 与数据库环境，不作为生产容量承诺。
 - 调用方 API Key 重复名称分支在 Handler 返回 HTTP 409 `key_name_conflict`，此前 OpenAPI 未声明。提交 `a775a2a` 增加 409 AdminError 响应，并在高风险契约门禁中对照 Handler 检查；Go CI [43832948683](https://github.com/Kasign/llm-gateway/actions/runs/43832948683) 5/5 Job 通过。
-- 下一项代码级工作按既定路线继续补齐 API Key 操作的请求/响应字段与状态契约；生产 1Panel/OpenResty/真实 Provider 验收仍依赖用户部署环境和授权凭据，不能用 CI 代替。
+- 调用方 API Key 列表、创建、修改、删除、启用、禁用和轮换的响应 Schema、状态码与 Handler 分支门禁已由提交 `447a14d` 的完整 Go CI 通过。下一批按路线图转向模型下载/运行时、推理参数、Ollama 和 Benchmark 的稳定契约；生产 1Panel/OpenResty/真实 Provider 验收仍依赖用户部署环境和授权凭据，不能用 CI 代替。
