@@ -285,6 +285,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/backend", s.backendAPI)                        // 读取/修改上游后端配置
 	mux.HandleFunc("/api/admin/providers", s.adminProvidersAPI)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderActionAPI)
+	mux.HandleFunc("/api/admin/model-prices", s.modelPricesAPI)
 
 	// —— 管理 API：运行时管理（控制 llama.cpp 加载哪个模型）——
 	mux.HandleFunc("/api/admin/runtime/preview", s.runtimePreviewAPI) // 预览运行时状态
