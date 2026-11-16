@@ -564,3 +564,12 @@
 - 高风险契约门禁对照 Handler 请求字段、模型选择与 max_tokens 归一化逻辑、Job/StreamEvent/RequestAnalysis 相关 Go JSON tags 和 OpenAPI Schema，防止后续漂移。
 - 提交 `8bd3843e5ad25f4369e79ed88a6ddb1cfe970ab1`；GitHub Actions [运行 43844621649](https://github.com/Kasign/llm-gateway/actions/runs/43844621649) 的 5 个 Job 全部成功：编译与 Docker 镜像、Go 测试/竞态/静态检查、配置/API 契约/前端、故障注入与恢复、稳态负载与审计持久化。
 - 本批只修改 OpenAPI、契约检查和台账，没有改动 Benchmark 业务 Handler 或任务状态机。
+
+
+## 2026-11-16：HF 下载取消/删除生命周期修复（进行中）
+
+- 生命周期联调发现真实竞态：`CancelModelDownload` 在仅发出 Context cancel 后立即删除运行任务登记并把数据库状态改为 cancelled；下载 goroutine 可能仍在退出过程中。此时用户重试会与旧任务同时写入同一 `.part` 文件，删除模型也可能先于旧任务停止写文件。
+- 本批已将 HF 下载任务登记前移到启动 goroutine 之前，增加 worker 完成信号；取消只发出取消请求，由 worker 实际退出后写终态并清理登记。
+- 删除模型前等待下载 worker 退出，避免删除文件/数据库记录与下载写入并发；重试复用统一启动入口，活动任务仍登记时拒绝重复启动。
+- 新增取消任务仍保持登记、删除等待 worker 退出的回归测试。
+- 本批只处理 HF 下载任务的进程内并发/文件生命周期，不改变断点续传协议、下载状态枚举或 Ollama Pull 状态机；完整 CI 通过后再关闭。
