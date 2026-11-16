@@ -2,8 +2,8 @@
 
 > Review 日期：2026-11-16
 > 检查分支：`dev`
-> Review HEAD：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`
-> Go CI：[43869432688](https://github.com/Kasign/llm-gateway/actions/runs/43869432688)，5/5 Job 成功
+> 代码 Review 基线：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`（后续提交仅更新验收文档）
+> 最新 Go CI：[43870019761](https://github.com/Kasign/llm-gateway/actions/runs/43870019761)，5/5 Job 成功
 > Browser Smoke：[43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077)，165/165 检查通过
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。

@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前 Review HEAD：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`；Go CI [运行 43869432688](https://github.com/Kasign/llm-gateway/actions/runs/43869432688) 5/5 Job 成功；Browser Smoke [运行 43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077) 165/165 检查通过，静默轮询 HTTP 503 回归通过。
+- 当前代码 Review 基线：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`（后续提交仅更新验收文档）；最新 Go CI [运行 43870019761](https://github.com/Kasign/llm-gateway/actions/runs/43870019761) 5/5 Job 成功；Browser Smoke [运行 43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077) 165/165 检查通过，静默轮询 HTTP 503 回归通过。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR（2026-11-16 复核）；Issue 状态未作为本轮关闭依据。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
