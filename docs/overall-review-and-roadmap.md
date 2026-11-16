@@ -1,9 +1,9 @@
 # LLM Gateway 整体 Review 与功能路线图
 
-> Review 日期：2026-10-29
+> Review 日期：2026-11-16
 > 检查分支：`dev`
-> 检查基线：`713690659e580edf36ba79e49209e6d9cfd367f5`
-> 最新 Go CI：`40829066938`，5 个 Job 全部成功
+> 检查基线：`7bf2f6c990641f25b879d42f2ecc20168f635b74`
+> 最新 Go CI：`43849798940`，5 个 Job 全部成功；最新代码验收 Browser Smoke：`43849359250` 成功
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。
 
@@ -24,12 +24,12 @@
 | 功能域 | 当前判断 | 接下来真正需要做的事 |
 |---|---|---|
 | 推理协议入口 | 已有 Chat Completions、Completions、Responses、Anthropic Messages 等路径；不同协议仍有各自的兼容边界 | 用真实 Provider 按需验证协议、工具调用、结构化输出、Reasoning/视觉等能力，不宣称所有厂商完全等价 |
-| 本地模型 | 已有 llama.cpp / Ollama、模型发现与管理、GGUF 下载和运行时状态 | 在实际容器网络、Router/单模型模式和模型目录挂载下完成验收 |
+| 本地模型 | 已有 llama.cpp / Ollama、模型发现与管理、GGUF 下载和运行时状态；代码级已补齐 HF 取消/删除竞态、Ollama Pull 重启状态恢复、删除前卸载失败保护、ModelsMax=1 加载前卸载失败保护 | 在实际容器网络、Router/单模型模式和模型目录挂载下完成验收 |
 | 远程 Provider | 已统一由 Web 管理台和 MariaDB 管理；Key 使用 AES-GCM 密文存储，列表不回显明文；Provider ID 冲突有后端保护与测试 | 验证生产数据兼容、密钥备份与恢复；后续只修复可复现缺陷 |
 | 请求治理 | 已实现调用方 API Key、模型 ACL、RPM、Provider 并发、可选 FIFO 队列、每日 Token 预算 | 真实用量、慢上游、实际客户端取消和反代超时仍需端到端测试；队列目前是单进程协调 |
 | 请求审计 | 已有异步审计、有界队列、请求详情、流事件和保留策略 | 通过生产样本验证数据增长、保留策略与管理台轮询的实际影响 |
 | 管理员身份 | Web Session 与管理员 API Key 已分离；管理员 API Key 的服务端权限限定于 `/api/admin/keys` 路径树；固定默认密码已移除，密码保护对无效哈希失败关闭并有回归测试 | 后续评估 Web Session 在前端 localStorage 的存储风险；真实 1Panel 环境仍需验收 |
-| API/配置契约 | 高风险路由、状态码、字段和部分 Schema 已有自动检查 | OpenAPI 仍为 partial；新功能按实际风险增量补齐，不追求一轮覆盖所有历史接口 |
+| API/配置契约 | Token 用量、管理员 API Key、Ollama、Runtime、推理参数和 Benchmark 等高风险接口已完成 Handler/DTO/OpenAPI 对账与门禁 | OpenAPI 整体仍为 partial；后续按风险增量补齐，不追求一轮覆盖所有历史接口 |
 | 管理台体验 | 近期 Browser Smoke 已覆盖关键桌面/窄屏交互；主要视觉风格相对一致 | 移动导航、请求表格信息密度、Provider 模板与 Key 的交互说明、剩余可访问性细节按优先级渐进处理 |
 | 生产与容量验收 | CI 当前通过 | 真实 Provider、公网 HTTPS/SSE、1Panel/OpenResty、真实慢模型和轮询负载仍未完成环境验收 |
 
@@ -150,7 +150,7 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 | 阶段 | 优先级 | 工作范围 | 完成定义 |
 |---|---|---|---|
 | 阶段 0：认证安全收口 | P0 | **实现与文档已完成，CI 已通过**：移除固定默认密码、无效哈希失败关闭、部署模板与恢复指引、回归测试 | CI 已验证缺失/损坏哈希与登录模式的核心逻辑；真实 1Panel 反代验收仍列入阶段 1 |
-| 阶段 1：生产闭环 | P1 | 一次性完成 1Panel/OpenResty/慢模型/取消/恢复/真实 Provider 最小矩阵 | 验收清单按具体日期、镜像、环境和脱敏证据记录；失败项保留，不以 CI 代替 |
+| 阶段 1：生产闭环 | P1 | **当前下一阶段**：一次性完成 1Panel/OpenResty/慢模型/取消/恢复/真实 Provider 最小矩阵 | `docs/production-acceptance-checklist.md` 仍全部为未测；需要真实部署环境、真实 Provider 与公网 HTTPS/SSE 证据，不能由 Mock/CI 替代 |
 | 阶段 2：接口与配置收口 | P1 | 更正权限说明；按实际风险补 OpenAPI Schema/状态码/认证范围；保留 Provider 单一来源与冲突语义 | 高风险门禁通过；一般接口清单仍如实标注 partial |
 | 阶段 3：实测与运维能力 | P2 | 管理台轮询基准；补充容量/指标预算；为需要数据迁移的后续变更设计有序 schema 版本 | 有可复现数据与报告后再决定优化；迁移方案具有备份、失败恢复与兼容测试 |
 | 阶段 4：体验完善 | P2 | 移动导航、Provider 模板 Key 提示、调用表格、剩余无障碍/状态反馈 | Browser Smoke 增量覆盖主要视口、操作和状态 |
@@ -160,14 +160,16 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 
 1. 每个提交按一个可验证功能组组织，使用中文提交说明；文档修正不伪装成实现完成。
 2. 实现变更以新 HEAD 对应的 CI 为准；新提交覆盖旧运行时，必须记录最终成功的那一轮。
-3. 最新 `dev` 已有完整 Go CI 通过。后续不要反复重做 Provider ID、管理员 API Key scope 等已有完整回归；只有出现新的复现证据才扩大实现范围。
+3. 最新 `dev` 的 Go CI 5/5 Job 已通过（`43849798940`）；最新代码节点 `a5c8a712d44830146f2cccfa4a7d0be926e980a8` 的 Browser Smoke 也已通过（`43849359250`）。后续不要反复重做已验收的契约、下载和模型生命周期回归；只有出现新的复现证据才扩大实现范围。
 4. 真实 Provider、生产部署和负载测试分别记录，不把 Mock 测试、静态契约或截图验收替代真实环境结论。
 5. 不直接修改 `main`，不自动合并 PR；本路线图只规划后续任务，不授权重写或引入延后功能。
 6. 每轮优先解决一个 P0/P1 风险或一个真实、独立的产品问题；若只有生产环境才能验证，完善执行材料后等待环境证据，不重复空转审查。
 
 ## 6. 本次检查基线
 
-- 分支 HEAD：`713690659e580edf36ba79e49209e6d9cfd367f5`
-- Go CI：[40829066938](https://github.com/Kasign/llm-gateway/actions/runs/40829066938)，5/5 Job 成功
+- 分支 HEAD：`7bf2f6c990641f25b879d42f2ecc20168f635b74`
+- Go CI：[43849798940](https://github.com/Kasign/llm-gateway/actions/runs/43849798940)，5/5 Job 成功
+- 最新代码 Browser Smoke：[43849359250](https://github.com/Kasign/llm-gateway/actions/runs/43849359250)，成功
 - 当前开放 PR：无
+- 真实 1Panel/OpenResty/Provider 验收仍未执行；本轮代码工作未接触生产环境或真实密钥。
 - 本文之后的代码、部署和真实供应商状态，均需以最新提交与实际验收记录为准。
