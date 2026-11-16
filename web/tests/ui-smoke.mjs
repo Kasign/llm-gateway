@@ -1079,6 +1079,7 @@ try {
 
   // 请求详情弹窗使用只读 Mock 验证真实键盘路径，不写入 Gateway 审计记录。
   const smokeRequestID = 'browser-smoke-detail-1';
+  let failNextRequestList = false;
   await page.route('**/api/requests*', async route => {
     const request = route.request();
     if (request.method() !== 'GET') return route.continue();
@@ -1095,6 +1096,11 @@ try {
       return;
     }
     if (pathname === '/api/requests') {
+      if (failNextRequestList) {
+        failNextRequestList = false;
+        await route.abort('failed');
+        return;
+      }
       await route.fulfill({
         status: 200, contentType: 'application/json',
         body: JSON.stringify({ data: [{
@@ -1177,6 +1183,13 @@ try {
   check('请求详情弹窗 Escape 关闭并将焦点返回触发按钮',
     await detailTrigger.evaluate(el => document.activeElement === el) &&
     await page.locator('#detailModal').getAttribute('aria-hidden') === 'true');
+  const toastCountBeforeSilentPoll = await page.locator('#toastHost .toast').count();
+  failNextRequestList = true;
+  await page.evaluate(() => window.loadRequests({ silent: true }));
+  const toastCountAfterSilentPoll = await page.locator('#toastHost .toast').count();
+  check('调用记录静默轮询遇到网络失败时保留现有内容且不弹重复提示',
+    !failNextRequestList && toastCountAfterSilentPoll === toastCountBeforeSilentPoll,
+    { before: toastCountBeforeSilentPoll, after: toastCountAfterSilentPoll });
   await page.unroute('**/api/requests*');
 
   // Provider 新增防重复回归：创建请求被 Mock 拦截，不会写入真实 Provider 配置。
