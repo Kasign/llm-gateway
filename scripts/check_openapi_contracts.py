@@ -297,6 +297,103 @@ def validate(
             and '"key_name_conflict"' in key_create_handler,
             "keysAPI must return HTTP 409 with key_name_conflict for duplicate names",
         )
+
+        # 调用方 API Key 的各项操作逐一对照 Handler 与稳定响应 Schema。
+        key_list_operation = operation_block(source, "/api/admin/keys", "get")
+        key_list_response = response_block(key_list_operation, "200")
+        require(
+            "#/components/schemas/APIKeyList" in key_list_response,
+            "GET /api/admin/keys 200 must reference APIKeyList",
+        )
+        require(
+            "#/components/responses/AdminError" in response_block(key_list_operation, "500"),
+            "GET /api/admin/keys 500 must use AdminError",
+        )
+        require(
+            "http.MethodGet" in key_create_handler
+            and "http.StatusInternalServerError" in key_create_handler
+            and '"database_error"' in key_create_handler,
+            "keysAPI GET must list key metadata and map storage errors to HTTP 500",
+        )
+
+        key_created_response = response_block(key_create_operation, "200")
+        require(
+            "#/components/schemas/APIKeyCreated" in key_created_response,
+            "POST /api/admin/keys 200 must reference APIKeyCreated",
+        )
+        for status in ("400", "401", "409"):
+            response_block(key_create_operation, status)
+        require(
+            "http.MethodPost" in key_create_handler
+            and '"key": raw' in key_create_handler
+            and '"api_key": k' in key_create_handler,
+            "keysAPI POST must return the one-time plaintext key and metadata",
+        )
+
+        key_action_handler = go_function(
+            request_list_handler, "func (s *Server) keyAction("
+        )
+        key_update_operation = operation_block(source, "/api/admin/keys/{id}", "put")
+        key_update_response = response_block(key_update_operation, "200")
+        require(
+            "success: true" in key_update_response,
+            "PUT /api/admin/keys/{id} 200 must describe success=true",
+        )
+        for status in ("400", "401", "500"):
+            response_block(key_update_operation, status)
+        require(
+            "http.MethodPut" in key_action_handler
+            and '"success": true' in key_action_handler
+            and '"update_failed"' in key_action_handler,
+            "keyAction PUT must return success=true and use update_failed on storage errors",
+        )
+
+        key_delete_operation = operation_block(source, "/api/admin/keys/{id}", "delete")
+        key_delete_response = response_block(key_delete_operation, "204")
+        require(
+            "content:" not in key_delete_response,
+            "DELETE /api/admin/keys/{id} 204 must not declare a response body",
+        )
+        for status in ("401", "500"):
+            response_block(key_delete_operation, status)
+        require(
+            "http.MethodDelete" in key_action_handler
+            and "http.StatusNoContent" in key_action_handler
+            and '"delete_failed"' in key_action_handler,
+            "keyAction DELETE must return bodyless HTTP 204 and map storage errors",
+        )
+
+        for action in ("disable", "enable"):
+            operation = operation_block(source, f"/api/admin/keys/{{id}}/{action}", "post")
+            success = response_block(operation, "200")
+            require(
+                "#/components/schemas/APIKeyStatusResult" in success,
+                f"POST /api/admin/keys/{{id}}/{action} 200 must reference APIKeyStatusResult",
+            )
+            for status in ("401", "500"):
+                response_block(operation, status)
+        require(
+            'parts[4] == "disable"' in key_action_handler
+            and 'parts[4] == "enable"' in key_action_handler
+            and '"status": st' in key_action_handler
+            and '"update_failed"' in key_action_handler,
+            "keyAction disable/enable must return the active/disabled status and stable update error",
+        )
+
+        key_rotate_operation = operation_block(source, "/api/admin/keys/{id}/rotate", "post")
+        key_rotate_response = response_block(key_rotate_operation, "200")
+        require(
+            "#/components/schemas/APIKeyRotated" in key_rotate_response,
+            "POST /api/admin/keys/{id}/rotate 200 must reference APIKeyRotated",
+        )
+        for status in ("401", "500"):
+            response_block(key_rotate_operation, status)
+        require(
+            'case "rotate":' in key_action_handler
+            and '"key": raw' in key_action_handler
+            and '"rotate_failed"' in key_action_handler,
+            "keyAction rotate must return a one-time plaintext key and stable rotate error",
+        )
         delete_response = response_block(
             operation_block(source, "/api/admin/providers/{id}", "delete"), "204"
         )
