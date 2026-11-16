@@ -2638,6 +2638,7 @@ components:
         input_tokens: { type: integer, format: int64, minimum: 0 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
         total_tokens: { type: integer, format: int64, minimum: 0 }
+        token_source: { type: string, enum: [upstream_usage, llama_timings, unknown_source], description: Token 统计来源；无法确认时使用 unknown_source。 }
         request_bytes: { type: integer, format: int64, minimum: 0 }
         response_bytes: { type: integer, format: int64, minimum: 0 }
         error_code: { type: string }
