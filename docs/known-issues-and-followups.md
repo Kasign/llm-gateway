@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前 Review HEAD：`3b683b4f05cce88caf95a7911f2b3bcc349aa760`；最近完整 Go CI [运行 43867241418](https://github.com/Kasign/llm-gateway/actions/runs/43867241418) 5/5 Job 成功（对应前一基线 `37c3b7c`）。最近 Browser Smoke [运行 43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461) 164/164 检查通过（对应代码基线 `6d02eb4`）；最新静默轮询失败回归尚待新提交 Browser Smoke 验证。
+- 当前 Review HEAD：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`；Go CI [运行 43869432688](https://github.com/Kasign/llm-gateway/actions/runs/43869432688) 5/5 Job 成功；Browser Smoke [运行 43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077) 165/165 检查通过，静默轮询 HTTP 503 回归通过。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR（2026-11-16 复核）；Issue 状态未作为本轮关闭依据。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
@@ -624,5 +624,5 @@
 
 - 代码复核发现调用记录定时轮询使用 `loadRequests({silent:true})`，但失败分支未处理静默标记，可能在网络故障期间每 15 秒重复弹出错误 Toast。
 - 提交 `99e7567ce06f20b1d1d9d729441b8092105bc7f0` 使静默轮询失败不覆盖当前列表、不弹重复提示；提交 `3b683b4f05cce88caf95a7911f2b3bcc349aa760` 增加 Browser Smoke 网络失败回归。
-- 新增回归对应的 Go CI / Browser Smoke 尚未完成；完成前不关闭该项。
+- 修复与回归已通过：Go CI [43869432688](https://github.com/Kasign/llm-gateway/actions/runs/43869432688) 5/5，Browser Smoke [43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077) 165/165。
 - 认证失败关闭与固定默认密码移除已在当前代码和已有 CI 中完成；生产反代与真实 Provider 验收仍待用户环境。
