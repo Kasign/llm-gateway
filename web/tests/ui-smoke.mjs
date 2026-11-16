@@ -25,6 +25,7 @@ const report = {
   authHeaderUsage: [],
   serverErrors: [],
   expectedProviderFailures: [],
+  expectedSilentPollFailures: [],
   unexpectedDialogs: [],
   layouts: [],
   notes: [
@@ -42,6 +43,9 @@ let expectedExpiredSessionRejection = false;
 let expectedProviderListRefreshFailure = false;
 let expectedProviderListRefreshConsoleCount = 0;
 let expectedProviderListRefreshResponseCount = 0;
+let expectedSilentRequestPollFailure = false;
+let expectedSilentRequestPollConsoleCount = 0;
+let expectedSilentRequestPollResponseCount = 0;
 
 function check(name, condition, detail) {
   report.checks.push({ name, passed: Boolean(condition), detail: detail ?? null });
@@ -108,6 +112,12 @@ try {
       report.expectedProviderFailures.push({ source: 'browser-console', message: messageText });
       return;
     }
+    if (/Failed to load resource: the server responded with a status of 503 \(Service Unavailable\)/.test(messageText) &&
+        expectedSilentRequestPollFailure && expectedSilentRequestPollConsoleCount === 0) {
+      expectedSilentRequestPollConsoleCount += 1;
+      report.expectedSilentPollFailures.push({ source: 'browser-console', message: messageText });
+      return;
+    }
     if (/Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/.test(messageText)) {
       report.environmentConsoleWarnings.push(messageText);
       return;
@@ -141,7 +151,11 @@ try {
       report.authFailures.push({ status: response.status(), url });
     }
     if (url.includes('/api/') && response.status() >= 500) {
-      if (response.status() === 503 && pathname === '/api/admin/providers' &&
+      if (response.status() === 503 && pathname === '/api/requests' &&
+          expectedSilentRequestPollFailure && expectedSilentRequestPollResponseCount === 0) {
+        expectedSilentRequestPollResponseCount += 1;
+        report.expectedSilentPollFailures.push({ status: response.status(), url });
+      } else if (response.status() === 503 && pathname === '/api/admin/providers' &&
           expectedProviderListRefreshFailure && expectedProviderListRefreshResponseCount === 0) {
         expectedProviderListRefreshResponseCount += 1;
         report.expectedProviderFailures.push({ status: response.status(), url });
@@ -1098,7 +1112,10 @@ try {
     if (pathname === '/api/requests') {
       if (failNextRequestList) {
         failNextRequestList = false;
-        await route.abort('failed');
+        await route.fulfill({
+          status: 503, contentType: 'application/json',
+          body: JSON.stringify({ error: { type: 'temporarily_unavailable', message: 'simulated request-list outage' } })
+        });
         return;
       }
       await route.fulfill({
@@ -1185,11 +1202,15 @@ try {
     await page.locator('#detailModal').getAttribute('aria-hidden') === 'true');
   const toastCountBeforeSilentPoll = await page.locator('#toastHost .toast').count();
   failNextRequestList = true;
+  expectedSilentRequestPollFailure = true;
   await page.evaluate(() => window.loadRequests({ silent: true }));
+  await page.waitForTimeout(100);
+  expectedSilentRequestPollFailure = false;
   const toastCountAfterSilentPoll = await page.locator('#toastHost .toast').count();
-  check('调用记录静默轮询遇到网络失败时保留现有内容且不弹重复提示',
-    !failNextRequestList && toastCountAfterSilentPoll === toastCountBeforeSilentPoll,
-    { before: toastCountBeforeSilentPoll, after: toastCountAfterSilentPoll });
+  check('调用记录静默轮询遇到 HTTP 503 时保留现有内容且不弹重复提示',
+    !failNextRequestList && expectedSilentRequestPollResponseCount === 1 &&
+    toastCountAfterSilentPoll === toastCountBeforeSilentPoll,
+    { before: toastCountBeforeSilentPoll, after: toastCountAfterSilentPoll, expected503: expectedSilentRequestPollResponseCount });
   await page.unroute('**/api/requests*');
 
   // Provider 新增防重复回归：创建请求被 Mock 拦截，不会写入真实 Provider 配置。
