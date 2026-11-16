@@ -133,7 +133,7 @@ export async function loadRequests(options = {}) {
               .join(''),
         );
   } catch (e) {
-    if (epoch !== requestLoadEpoch) return;
+    if (epoch !== requestLoadEpoch || options.silent) return;
     if (!requestSnapshot) {
       tableEl.innerHTML = '<div class="msg err" role="alert"><span>加载调用记录失败：' + esc(e.message || '未知错误') +
         '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">重试</button></div>';
