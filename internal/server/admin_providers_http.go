@@ -20,6 +20,7 @@ import (
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/provider"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 const managedProviderSettingsKey = "remote_providers:web:v1"
@@ -687,4 +688,57 @@ func (s *Server) testProviderAPI(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "http_status": 200, "models": models})
+}
+
+
+// modelPricesAPI 管理远程 Provider 模型的价格版本；只接受管理员 Web Session。
+func (s *Server) modelPricesAPI(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r.Context(), r) {
+		jsonError(w, http.StatusUnauthorized, "unauthorized", "需要管理员登录")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		items, err := s.logs.ListModelPrices(r.Context(), r.URL.Query().Get("provider_id"), r.URL.Query().Get("model_id"), 200)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "database_error", "读取模型价格失败")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": items})
+	case http.MethodPost:
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			ModelID string `json:"model_id"`
+			InputPricePerMillion string `json:"input_price_per_million"`
+			OutputPricePerMillion string `json:"output_price_per_million"`
+			Currency string `json:"currency"`
+			EffectiveAt string `json:"effective_at"`
+		}
+		dec := json.NewDecoder(io.LimitReader(r.Body, 16*1024))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_request", "价格配置 JSON 无效")
+			return
+		}
+		effectiveAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(in.EffectiveAt))
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_effective_at", "effective_at 必须是 RFC3339 时间")
+			return
+		}
+		price, err := s.logs.CreateModelPrice(r.Context(), store.ModelPrice{
+			ProviderID: in.ProviderID, ModelID: in.ModelID,
+			InputPricePerMillion: in.InputPricePerMillion,
+			OutputPricePerMillion: in.OutputPricePerMillion,
+			Currency: in.Currency, EffectiveAt: effectiveAt,
+		})
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_model_price", err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": price})
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		jsonError(w, http.StatusMethodNotAllowed, "method_not_allowed", "仅支持 GET 或 POST")
+	}
 }
