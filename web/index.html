@@ -96,6 +96,22 @@
           <div id="backendProbe" class="backend-probe-compact msg muted"></div>
         </div>
 
+        <div class="card compact token-stats-card">
+          <div class="card-head">
+            <div><h2>Token 用量统计</h2><p>按请求审计来源汇总，不包含费用估算</p></div>
+            <div class="token-stats-toolbar">
+              <label for="dashTokenRange">统计范围</label>
+              <select id="dashTokenRange" aria-label="Token 统计范围">
+                <option value="24h">最近 24 小时</option>
+                <option value="7d">最近 7 天</option>
+                <option value="30d">最近 30 天</option>
+              </select>
+              <button type="button" class="btn sm ghost" onclick="loadDashboardStats()">刷新</button>
+            </div>
+          </div>
+          <div id="dashTokenStats" aria-live="polite" aria-busy="false"><span class="muted small">正在加载 Token 统计…</span></div>
+        </div>
+
         <div class="card compact">
           <div class="card-head"><div><h2>最近调用</h2><p>最近 5 条 API 请求</p></div>
             <button type="button" class="btn sm ghost" onclick="goTab('requests')">全部</button>
