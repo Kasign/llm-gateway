@@ -30,6 +30,7 @@ CATALOG_HANDLER_FILE = ROOT / "internal" / "server" / "admin_catalog_http.go"
 RUNTIME_TYPES_FILE = ROOT / "internal" / "llama" / "runtime.go"
 OLLAMA_TAG_TYPES_FILE = ROOT / "internal" / "catalog" / "ollama" / "tags.go"
 INFERENCE_OPS_FILE = ROOT / "internal" / "server" / "inference_ops.go"
+RUNTIME_HANDLER_FILE = ROOT / "internal" / "server" / "runtime.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -191,6 +192,7 @@ def validate(
     runtime_types: str,
     ollama_tag_types: str,
     inference_ops: str,
+    runtime_handler: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -978,7 +980,7 @@ def validate(
                 f"runtimeUnloadAPI request must decode {field}",
             )
         unload_schema = schema_block(source, "RuntimeUnloadResult")
-        unload_decl = re.search(r"(?ms)^type InferenceUnloadResult struct \\{(.*?)^\\}", inference_ops)
+        unload_decl = re.search(r"(?ms)^type InferenceUnloadResult struct \{(.*?)^\}", inference_ops)
         if unload_decl is None:
             raise ValueError("internal/server/inference_ops.go: InferenceUnloadResult struct not found")
         unload_fields = {tag for tag in re.findall(r'json:"([^",]+)', unload_decl.group(1)) if tag and tag != "-"}
@@ -1075,7 +1077,7 @@ def main() -> int:
         catalog_handler = CATALOG_HANDLER_FILE.read_text(encoding="utf-8")
         runtime_types = RUNTIME_TYPES_FILE.read_text(encoding="utf-8")
         ollama_tag_types = OLLAMA_TAG_TYPES_FILE.read_text(encoding="utf-8")
-        runtime_handler = REQUEST_LIST_HANDLER_FILE.read_text(encoding="utf-8")
+        runtime_handler = RUNTIME_HANDLER_FILE.read_text(encoding="utf-8")
         inference_ops = INFERENCE_OPS_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
@@ -1097,6 +1099,7 @@ def main() -> int:
             runtime_types,
             ollama_tag_types,
             inference_ops,
+            runtime_handler,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
