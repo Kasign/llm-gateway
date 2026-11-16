@@ -173,6 +173,92 @@ def go_function(source: str, signature: str) -> str:
     return source[start:] if end < 0 else source[start:end]
 
 
+
+def benchmark_contract_errors(source: str, handler_source: str, store_source: str, analysis_source: str) -> list[str]:
+    """核对 Benchmark 请求、任务快照、流事件和分析 DTO 的字段及路由响应。"""
+    errors: list[str] = []
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(message)
+
+    try:
+        create = operation_block(source, "/api/benchmark", "post")
+        status_path = operation_block(source, "/api/benchmark/{job_id}", "get")
+        stop = operation_block(source, "/api/benchmark/{job_id}", "delete")
+        for route, method, operation in (
+            ("/api/benchmark", "post", create),
+            ("/api/benchmark/{job_id}", "get", status_path),
+            ("/api/benchmark/{job_id}", "delete", stop),
+        ):
+            handler = go_function(
+                handler_source,
+                "func (s *Server) benchmarkAPI(" if method == "post" else "func (s *Server) benchmarkStatusAPI(",
+            )
+            require("requireAdmin" in handler, f"{method.upper()} {route} must require admin session")
+            body = response_block(operation, "405")
+            require("#/components/responses/AdminError" in body, f"{method.upper()} {route} 405 must use AdminError")
+        for operation, status in ((create, "400"), (create, "404"), (status_path, "400"), (status_path, "404"), (stop, "400"), (stop, "404")):
+            require("#/components/responses/AdminError" in response_block(operation, status), f"Benchmark response {status} must use AdminError")
+        require("#/components/responses/Unauthorized" in response_block(create, "401"), "POST /api/benchmark 401 must use Unauthorized")
+        require("#/components/responses/Unauthorized" in response_block(status_path, "401"), "GET /api/benchmark/{job_id} 401 must use Unauthorized")
+        require("#/components/responses/Unauthorized" in response_block(stop, "401"), "DELETE /api/benchmark/{job_id} 401 must use Unauthorized")
+
+        create_handler = go_function(handler_source, "func (s *Server) benchmarkAPI(")
+        request_match = re.search(r"(?ms)var in struct \{(.*?)^\s*\}", create_handler)
+        require(request_match is not None, "benchmarkAPI request DTO not found")
+        if request_match:
+            request_fields = {tag for tag in re.findall(r'json:"([^",]+)', request_match.group(1)) if tag and tag != "-"}
+            request_schema = schema_block(source, "BenchmarkCreateRequest")
+            for field in sorted(request_fields):
+                try:
+                    schema_field_block(request_schema, field)
+                except ValueError:
+                    errors.append(f"BenchmarkCreateRequest: missing Handler JSON field {field!r}")
+            require("additionalProperties: true" in request_schema, "BenchmarkCreateRequest must reflect decoder behavior: unknown fields are ignored")
+        require("in.ModelID" in create_handler and "in.Model" in create_handler and "in.UseActive" in create_handler, "Benchmark model selection compatibility logic changed; review contract description")
+        require("in.MaxTokens <= 0 || in.MaxTokens > 8192" in create_handler, "Benchmark max_tokens normalization changed; review contract bounds/default")
+
+        snapshot_match = re.search(r"(?ms)^type benchmarkJobSnapshot struct \{(.*?)^\}", handler_source)
+        require(snapshot_match is not None, "benchmarkJobSnapshot DTO not found")
+        if snapshot_match:
+            tags = {tag for tag in re.findall(r'json:"([^",]+)', snapshot_match.group(1)) if tag and tag != "-"}
+            schema = schema_block(source, "BenchmarkJob")
+            for field in sorted(tags):
+                try:
+                    schema_field_block(schema, field)
+                except ValueError:
+                    errors.append(f"BenchmarkJob: missing Go JSON field {field!r}")
+        stream_match = re.search(r"(?ms)^type StreamEvent struct \{(.*?)^\}", store_source)
+        require(stream_match is not None, "store.StreamEvent DTO not found")
+        if stream_match:
+            tags = {tag for tag in re.findall(r'json:"([^",]+)', stream_match.group(1)) if tag and tag != "-"}
+            schema = schema_block(source, "StreamEvent")
+            for field in sorted(tags):
+                try:
+                    schema_field_block(schema, field)
+                except ValueError:
+                    errors.append(f"StreamEvent: missing Go JSON field {field!r}")
+        for name in ("RequestAnalysis", "RequestPhaseMS", "RequestThroughput"):
+            match = re.search(rf"(?ms)^type {name} struct \{{(.*?)^\}}", analysis_source)
+            require(match is not None, f"request_analysis.go: {name} DTO not found")
+            if match:
+                schema = schema_block(source, name)
+                tags = {tag for tag in re.findall(r'json:"([^",]+)', match.group(1)) if tag and tag != "-"}
+                for field in sorted(tags):
+                    try:
+                        schema_field_block(schema, field)
+                    except ValueError:
+                        errors.append(f"{name}: missing Go JSON field {field!r}")
+
+        require("#/components/schemas/BenchmarkStopResult" in response_block(stop, "200"), "Benchmark DELETE 200 must reference BenchmarkStopResult")
+        require("#/components/schemas/BenchmarkStatus" in response_block(status_path, "200"), "Benchmark GET 200 must reference BenchmarkStatus")
+        require("#/components/schemas/BenchmarkStartResult" in response_block(create, "200"), "Benchmark POST 200 must reference BenchmarkStartResult")
+    except ValueError as exc:
+        errors.append(str(exc))
+    return errors
+
+
 def validate(
     source: str,
     provider_handler: str,
@@ -1196,6 +1282,7 @@ def main() -> int:
             inference_params_handler,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
+        errors.extend(benchmark_contract_errors(source, (ROOT / "internal" / "server" / "benchmark.go").read_text(encoding="utf-8"), store_request_log, request_analysis_source))
     except OSError as exc:
         print(f"OpenAPI high-risk contract check could not run: {exc}", file=sys.stderr)
         return 2

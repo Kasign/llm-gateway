@@ -554,3 +554,11 @@
 - 高风险门禁新增对照 `inferenceparams.Params`、`Policy`、`Field` 的 JSON tags 与 OpenAPI 字段，并检查路由注册、管理员鉴权、405 和主要成功响应引用。
 - 本批最终代码基线为提交 `7d680514d87bd644ee4ac193711a354fd1e7c8c5`；对应 Actions [运行 43842973775](https://github.com/Kasign/llm-gateway/actions/runs/43842973775) 的 5 个 Job 全部成功。契约门禁同时覆盖 Field.Select 的嵌套 value/label 字段，避免将其误判为 Field 顶层属性。
 - 复核发现当前 Handler 对 PUT 参数对象使用普通 JSON Decoder，未知字段会被忽略；reset 对请求 JSON 解码错误也不返回 400。本批按现有行为描述，不把 OpenAPI 写成 Handler 尚未实现的严格拒绝语义。数值范围和策略值校验也未由当前 Handler 执行，不在 Schema 中伪造约束。
+
+
+## 2026-11-16：Benchmark API 契约收口（进行中）
+
+- 范围仅限已有的 `POST /api/benchmark`、`GET /api/benchmark/{job_id}`、`DELETE /api/benchmark/{job_id}`，不新增 Benchmark 业务功能。
+- 已核对 Handler：`max_tokens` 缺省、非正数或大于 8192 时归一化为 4000；`model_id` 优先于 `model_key`，`model` 是兼容别名；`use_active=true` 时忽略 `model_key`；未指定模型时使用当前活动模型。未知请求字段由 JSON Decoder 忽略，因此请求 Schema 保持允许额外字段。
+- 当前差距：Benchmark Job、停止结果和流事件/分析 DTO 的字段级契约不完整；GET/DELETE 缺少实际支持的 400/405 描述，POST 缺少 405 描述。
+- 本批目标：补齐请求行为说明、Job/停止结果/状态响应 Schema、错误状态码，并增加 Go DTO 与 OpenAPI 字段一致性门禁。CI 完整通过前不关闭任务。

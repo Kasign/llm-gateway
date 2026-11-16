@@ -1151,7 +1151,7 @@ paths:
       operationId: postApiBenchmark
       tags: [Admin]
       summary: 启动异步模型 Benchmark
-      description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。
+      description: Benchmark 任务保存在进程内，Gateway 重启后历史任务不保证可恢复。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。model_id 优先于 model_key；model 是 model_id 的兼容别名，仅在 model_id 为空时使用。use_active=true 时忽略 model_key；未指定 model_id/model_key 时使用当前活动模型。max_tokens 缺省、非正数或大于 8192 时统一归一化为 4000。未知请求字段由当前 JSON 解码器忽略。
       security:
         - AdminSessionBearer: []
       requestBody:
@@ -1172,6 +1172,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
   /api/benchmark/{job_id}:
     parameters:
@@ -1194,7 +1196,11 @@ paths:
                 $ref: "#/components/schemas/BenchmarkStatus"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "400":
+          $ref: "#/components/responses/AdminError"
         "404":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
     delete:
       operationId: deleteApiBenchmarkJobId
@@ -1208,11 +1214,14 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/BenchmarkStopResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
+          $ref: "#/components/responses/AdminError"
+        "405":
           $ref: "#/components/responses/AdminError"
 
   /{agentPrefix}/v1/completions:
@@ -2965,9 +2974,8 @@ components:
         prompt: { type: string }
         max_tokens:
           type: integer
-          minimum: 1
-          maximum: 8192
           default: 4000
+          description: 缺省、非正数或大于 8192 时服务端归一化为 4000。
         use_active: { type: boolean }
         temperature: { type: number }
         top_p: { type: number }
@@ -2981,7 +2989,7 @@ components:
         stop:
           type: array
           items: { type: string }
-      additionalProperties: false
+      additionalProperties: true
     BenchmarkStartResult:
       type: object
       required: [job_id, request_id, status, poll, request_log, message]
@@ -2992,24 +3000,61 @@ components:
         poll: { type: string }
         request_log: { type: string }
         message: { type: string }
+    BenchmarkJob:
+      type: object
+      required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
+      properties:
+        job_id: { type: string }
+        status: { type: string, enum: [running, completed, failed, cancelled] }
+        model_key: { type: string }
+        llama_model: { type: string }
+        prompt_len: { type: integer, minimum: 0 }
+        max_tokens: { type: integer, minimum: 0 }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        latency_ms: { type: integer, format: int64, minimum: 0 }
+        http_status: { type: integer, minimum: 0 }
+        response_bytes: { type: integer, format: int64, minimum: 0 }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        total_tokens: { type: integer, format: int64, minimum: 0 }
+        response: { type: string }
+        answer: { type: string }
+        error: { type: string }
+        request_id: { type: string }
+        stream: { type: boolean }
+        ttft_ms: { type: integer, format: int64, minimum: 0 }
+        stream_event_count: { type: integer, minimum: 0 }
+        reasoning_chars: { type: integer, minimum: 0 }
+        content_text: { type: string }
+        reasoning_text: { type: string }
+        content_chars: { type: integer, minimum: 0 }
+      additionalProperties: false
+    BenchmarkStopResult:
+      type: object
+      required: [job_id, status, stopped]
+      properties:
+        job_id: { type: string }
+        status: { type: string, enum: [running, completed, failed, cancelled] }
+        stopped: { type: boolean }
+        message: { type: string }
+      additionalProperties: false
     BenchmarkStatus:
       type: object
       required: [job, stream_events, request_id, request_log]
       properties:
         job:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/BenchmarkJob"
         stream_events:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: "#/components/schemas/StreamEvent"
+          nullable: true
         request_id: { type: string }
         request_log: { type: string }
         analysis:
-          type: object
-          additionalProperties: true
-      additionalProperties: true
+          $ref: "#/components/schemas/RequestAnalysis"
+      additionalProperties: false
 
     FlexibleObject:
       type: object
