@@ -1,0 +1,114 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+)
+
+func TestAggregateRequestStatsMariaDB(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("MYSQL_TEST_DSN is required for MariaDB request statistics integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("open MariaDB: %v", err)
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatalf("ping MariaDB: %v", err)
+	}
+	var databaseName string
+	if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil {
+		t.Fatalf("read selected database: %v", err)
+	}
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing request statistics integration test against non-test database %q", databaseName)
+	}
+
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve source file for migration schema")
+	}
+	schema, err := os.ReadFile(filepath.Join(filepath.Dir(sourceFile), "../../migrations/001_init.sql"))
+	if err != nil {
+		t.Fatalf("read migration schema: %v", err)
+	}
+	for _, statement := range strings.Split(string(schema), ";") {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("apply test schema: %v", err)
+		}
+	}
+
+	prefix := fmt.Sprintf("request-stats-%d", time.Now().UnixNano())
+	start := time.Now().UTC().Truncate(time.Second)
+	from, to := start.Add(-time.Minute), start.Add(time.Minute)
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM request_logs WHERE request_id LIKE ?", prefix+"%")
+	}()
+
+	type sample struct {
+		suffix, provider, status, analysis string
+		input, output, total               any
+		started                            time.Time
+		latency                            int64
+	}
+	samples := []sample{
+		{suffix: "upstream", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(10), output: int64(4), total: int64(14), started: start, latency: 1200},
+		{suffix: "timings", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"llama_timings"}}`, input: int64(3), output: int64(2), total: int64(5), started: start, latency: 2500},
+		{suffix: "unknown", provider: "remote-a", status: "error", analysis: `{"throughput":{"source":"unrecognized"}}`, input: int64(1), output: int64(0), total: int64(1), started: start, latency: 4000},
+		{suffix: "legacy", provider: "remote-a", status: "cancelled", analysis: "", input: nil, output: nil, total: nil, started: start, latency: 0},
+		{suffix: "other-provider", provider: "remote-b", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(100), output: int64(50), total: int64(150), started: start, latency: 500},
+		{suffix: "outside-window", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(900), output: int64(900), total: int64(1800), started: to.Add(time.Second), latency: 500},
+	}
+	for _, item := range samples {
+		_, err := db.ExecContext(ctx, `INSERT INTO request_logs
+			(request_id, endpoint, method, provider_id, status, started_at, latency_ms, input_tokens, output_tokens, total_tokens, analysis_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			prefix+"-"+item.suffix, "/v1/chat/completions", "POST", item.provider, item.status,
+			item.started, item.latency, item.input, item.output, item.total, item.analysis)
+		if err != nil {
+			t.Fatalf("insert %s sample: %v", item.suffix, err)
+		}
+	}
+
+	repo := NewRepo(db)
+	stats, err := repo.AggregateRequestStats(ctx, from, to, " REMOTE-A ")
+	if err != nil {
+		t.Fatalf("aggregate request stats: %v", err)
+	}
+	if stats.Requests.Total != 4 || stats.Requests.Success != 2 || stats.Requests.Errors != 1 || stats.Requests.Cancelled != 1 {
+		t.Fatalf("unexpected request counts: %+v", stats.Requests)
+	}
+	if stats.Tokens.UpstreamUsage.Requests != 1 || stats.Tokens.UpstreamUsage.InputTokens != 10 || stats.Tokens.UpstreamUsage.OutputTokens != 4 || stats.Tokens.UpstreamUsage.TotalTokens != 14 {
+		t.Fatalf("unexpected upstream usage totals: %+v", stats.Tokens.UpstreamUsage)
+	}
+	if stats.Tokens.LlamaTimings.Requests != 1 || stats.Tokens.LlamaTimings.TotalTokens != 5 {
+		t.Fatalf("unexpected llama timings totals: %+v", stats.Tokens.LlamaTimings)
+	}
+	if stats.Tokens.UnknownSource.Requests != 1 || stats.Tokens.UnknownSource.TotalTokens != 1 {
+		t.Fatalf("unexpected unknown source totals: %+v", stats.Tokens.UnknownSource)
+	}
+	if stats.Latency.SampleCount != 3 {
+		t.Fatalf("latency sample count = %d, want 3", stats.Latency.SampleCount)
+	}
+	if stats.ProviderID != "remote-a" {
+		t.Fatalf("provider filter normalization = %q, want remote-a", stats.ProviderID)
+	}
+}
