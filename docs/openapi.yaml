@@ -968,6 +968,196 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /api/admin/ollama:
+    get:
+      operationId: getApiAdminOllama
+      tags: [ModelManagement]
+      summary: 查询 Ollama 模型目录与已加载模型
+      security:
+        - AdminSessionBearer: []
+      responses:
+        "200":
+          description: Ollama 运行时模型目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaRuntimeOverview"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/pull:
+    post:
+      operationId: postApiAdminOllamaPull
+      tags: [ModelManagement]
+      summary: 异步拉取 Ollama 模型
+      description: 立即返回 job_id；进度和最终状态统一通过 GET /api/downloads 查询，状态为 downloading/ready/download_failed/download_cancelled。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaPullRequest"
+      responses:
+        "200":
+          description: 拉取任务已加入后台队列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaPullStartResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/pull/cancel:
+    post:
+      operationId: postApiAdminOllamaPullCancel
+      tags: [ModelManagement]
+      summary: 取消正在执行的 Ollama Pull
+      description: 仅能取消当前进程中仍在运行的 Pull；取消结果会写入 GET /api/downloads 的 download_cancelled 状态。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaPullCancelRequest"
+      responses:
+        "200":
+          description: 取消信号已发送
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationSuccess"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/load:
+    post:
+      operationId: postApiAdminOllamaLoad
+      tags: [ModelManagement]
+      summary: 加载 Ollama 模型
+      description: 兼容管理接口；新管理调用优先使用 /api/admin/runtime/select。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 模型加载成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaModelActionResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/unload:
+    post:
+      operationId: postApiAdminOllamaUnload
+      tags: [ModelManagement]
+      summary: 卸载 Ollama 模型
+      description: 只释放模型运行时内存，不删除磁盘模型；兼容管理接口，新管理调用优先使用 /api/admin/runtime/unload。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 模型卸载成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaModelActionResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/ollama/delete:
+    post:
+      operationId: postApiAdminOllamaDelete
+      tags: [ModelManagement]
+      summary: 从 Ollama 磁盘删除模型
+      description: 删除操作结果通过 HTTP 200 的 ModelOpsResult.success 表示；业务失败时 success=false 并附 error。
+      security:
+        - AdminSessionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OllamaModelRequest"
+      responses:
+        "200":
+          description: 删除操作结果（success=false 表示业务失败）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelOpsResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+  /api/admin/catalog/ollama/tags:
+    get:
+      operationId: getApiAdminCatalogOllamaTags
+      tags: [ModelCatalog]
+      summary: 查询 Ollama Library 模型可用标签
+      parameters:
+        - name: model
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      security:
+        - AdminSessionBearer: []
+      responses:
+        "200":
+          description: 模型标签列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OllamaTagsResult"
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
+        "502":
+          $ref: "#/components/responses/AdminError"
   /api/admin/runtime:
     get:
       operationId: getApiAdminRuntime
@@ -2861,6 +3051,99 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/AuditMetrics"
+    OperationSuccess:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, const: true }
+      additionalProperties: false
+    RuntimeCatalogItem:
+      type: object
+      required: [id, loaded, active]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        path: { type: string }
+        loaded: { type: boolean }
+        running: { type: boolean }
+        active: { type: boolean }
+        status: { type: string }
+        disk_bytes: { type: integer, format: int64, minimum: 0 }
+        vram_bytes: { type: integer, format: int64, minimum: 0 }
+        ram_bytes: { type: integer, format: int64, minimum: 0 }
+        memory_note: { type: string }
+        quantization: { type: string }
+        parameter_size: { type: string }
+        registered: { type: boolean }
+        disk_present: { type: boolean }
+        source: { type: string }
+      additionalProperties: false
+    OllamaRuntimeOverview:
+      type: object
+      required: [base_url, catalog, loaded, active]
+      properties:
+        base_url: { type: string }
+        catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeCatalogItem"
+        loaded:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeCatalogItem"
+        active: { type: string }
+      additionalProperties: false
+    OllamaPullRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+      additionalProperties: false
+    OllamaPullStartResult:
+      type: object
+      required: [success, name, job_id]
+      properties:
+        success: { type: boolean, const: true }
+        name: { type: string }
+        job_id: { type: string, minLength: 1 }
+      additionalProperties: false
+    OllamaPullCancelRequest:
+      type: object
+      required: [job_id]
+      properties:
+        job_id: { type: string, minLength: 1 }
+      additionalProperties: false
+    OllamaModelRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+      additionalProperties: false
+    OllamaModelActionResult:
+      type: object
+      required: [success, name]
+      properties:
+        success: { type: boolean, const: true }
+        name: { type: string }
+      additionalProperties: false
+    OllamaTagsResult:
+      type: object
+      required: [model, tags]
+      properties:
+        model: { type: string }
+        tags:
+          type: array
+          items:
+            type: object
+            required: [tag, full_name]
+            properties:
+              tag: { type: string }
+              full_name: { type: string }
+              size: { type: string }
+              context: { type: string }
+              input: { type: string }
+            additionalProperties: false
+      additionalProperties: false
     RuntimeSnapshot:
       type: object
       description: 字段依据本地 llama.cpp、Ollama 或远程 Provider 运行时而变化。
