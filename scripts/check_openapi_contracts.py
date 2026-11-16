@@ -25,6 +25,10 @@ REQUEST_LIST_HANDLER_FILE = ROOT / "internal" / "server" / "server.go"
 REQUEST_CANCEL_HANDLER_FILE = ROOT / "internal" / "server" / "pipeline_http.go"
 AUTH_HANDLER_FILE = ROOT / "internal" / "server" / "admin_auth_http.go"
 DOWNLOAD_DISMISS_HANDLER_FILE = ROOT / "internal" / "server" / "download_dismiss.go"
+OLLAMA_HANDLER_FILE = ROOT / "internal" / "server" / "ollama_admin.go"
+CATALOG_HANDLER_FILE = ROOT / "internal" / "server" / "admin_catalog_http.go"
+RUNTIME_TYPES_FILE = ROOT / "internal" / "llama" / "runtime.go"
+OLLAMA_TAG_TYPES_FILE = ROOT / "internal" / "catalog" / "ollama" / "tags.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -181,6 +185,10 @@ def validate(
     request_retention_source: str,
     auth_handler: str,
     download_dismiss_handler: str,
+    ollama_handler: str,
+    catalog_handler: str,
+    runtime_types: str,
+    ollama_tag_types: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -855,6 +863,76 @@ def validate(
             "POST /api/downloads/dismiss 200 must reference DownloadDismissResult",
         )
 
+        # Ollama 专用管理 API 必须逐条登记，不能只依赖宽泛的 RuntimeSnapshot。
+        ollama_routes = {
+            "/api/admin/ollama": ("get", "ollamaAdminAPI"),
+            "/api/admin/ollama/pull": ("post", "ollamaPullAPI"),
+            "/api/admin/ollama/pull/cancel": ("post", "ollamaPullCancelAPI"),
+            "/api/admin/ollama/load": ("post", "ollamaLoadAPI"),
+            "/api/admin/ollama/unload": ("post", "ollamaUnloadAPI"),
+            "/api/admin/ollama/delete": ("post", "ollamaDeleteAPI"),
+            "/api/admin/catalog/ollama/tags": ("get", "ollamaCatalogTagsAPI"),
+        }
+        for route, (method, handler_name) in ollama_routes.items():
+            route_block = operation_block(source, route, method)
+            require(
+                "AdminSessionBearer: []" in route_block,
+                f"{method.upper()} {route} must require an admin web session",
+            )
+            require(
+                f'HandleFunc("{route}", s.{handler_name})' in request_list_handler,
+                f"{route} must remain registered to {handler_name}",
+            )
+        ollama_list_handler = go_function(ollama_handler, "func (s *Server) ollamaAdminAPI(")
+        for field in ("base_url", "catalog", "loaded", "active"):
+            require(
+                f'"{field}"' in ollama_list_handler,
+                f"ollamaAdminAPI response must include {field}",
+            )
+        catalog_decl = re.search(r"(?ms)^type CatalogItem struct \\{(.*?)^\\}", runtime_types)
+        if catalog_decl is None:
+            raise ValueError("internal/llama/runtime.go: CatalogItem struct not found")
+        catalog_schema = schema_block(source, "RuntimeCatalogItem")
+        for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', catalog_decl.group(1)) if tag and tag != "-" }):
+            try:
+                schema_field_block(catalog_schema, field)
+            except ValueError:
+                errors.append(f"RuntimeCatalogItem: missing CatalogItem JSON field {field!r}")
+        for handler_name, request_fields, response_fields in (
+            ("ollamaPullAPI", ("name",), ("success", "name", "job_id")),
+            ("ollamaPullCancelAPI", ("job_id",), ("success",)),
+            ("ollamaLoadAPI", ("name",), ("success", "name")),
+            ("ollamaUnloadAPI", ("name",), ("success", "name")),
+            ("ollamaDeleteAPI", ("name",), ("success", "logs")),
+        ):
+            handler = go_function(ollama_handler, f"func (s *Server) {handler_name}(")
+            for field in request_fields:
+                require(
+                    f'json:"{field}"' in handler,
+                    f"{handler_name} request must decode {field}",
+                )
+            for field in response_fields:
+                require(
+                    f'"{field}"' in handler or (field == "logs" and "writeModelOpsResult" in handler),
+                    f"{handler_name} response must expose {field}",
+                )
+        tags_handler = go_function(catalog_handler, "func (s *Server) ollamaCatalogTagsAPI(")
+        require(
+            'r.URL.Query().Get("model")' in tags_handler
+            and '"model"' in tags_handler
+            and '"tags"' in tags_handler,
+            "ollamaCatalogTagsAPI must accept model query and return model/tags",
+        )
+        tag_decl = re.search(r"(?ms)^type Tag struct \\{(.*?)^\\}", ollama_tag_types)
+        if tag_decl is None:
+            raise ValueError("internal/catalog/ollama/tags.go: Tag struct not found")
+        tag_schema = schema_block(source, "OllamaTagsResult")
+        for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', tag_decl.group(1)) if tag and tag != "-" }):
+            try:
+                schema_field_block(tag_schema, field)
+            except ValueError:
+                errors.append(f"OllamaTagsResult.tags: missing Tag JSON field {field!r}")
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -918,6 +996,10 @@ def main() -> int:
         request_retention_source = REQUEST_RETENTION_FILE.read_text(encoding="utf-8")
         auth_handler = AUTH_HANDLER_FILE.read_text(encoding="utf-8")
         download_dismiss_handler = DOWNLOAD_DISMISS_HANDLER_FILE.read_text(encoding="utf-8")
+        ollama_handler = OLLAMA_HANDLER_FILE.read_text(encoding="utf-8")
+        catalog_handler = CATALOG_HANDLER_FILE.read_text(encoding="utf-8")
+        runtime_types = RUNTIME_TYPES_FILE.read_text(encoding="utf-8")
+        ollama_tag_types = OLLAMA_TAG_TYPES_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -933,6 +1015,10 @@ def main() -> int:
             request_retention_source,
             auth_handler,
             download_dismiss_handler,
+            ollama_handler,
+            catalog_handler,
+            runtime_types,
+            ollama_tag_types,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
