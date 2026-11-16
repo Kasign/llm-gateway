@@ -513,6 +513,25 @@ func (s *Server) OllamaPullModel(ctx context.Context, name string) error {
 	return client.OllamaPull(ctx, name, nil)
 }
 
+func shouldClearDeletedOllamaActiveModel(backend, activeModel, deletedModel string) bool {
+	return strings.EqualFold(strings.TrimSpace(backend), "ollama") &&
+		strings.EqualFold(strings.TrimSpace(activeModel), strings.TrimSpace(deletedModel)) &&
+		strings.TrimSpace(deletedModel) != ""
+}
+
+func (s *Server) clearActiveOllamaModel(ctx context.Context, deletedModel string) error {
+	u := s.effectiveUpstream()
+	if !shouldClearDeletedOllamaActiveModel(u.Backend, u.ModelName, deletedModel) {
+		return nil
+	}
+	u.ModelName = ""
+	if err := s.settings.SaveUpstream(ctx, u); err != nil {
+		return fmt.Errorf("Ollama model deleted but active model setting clear failed: %w", err)
+	}
+	s.applyUpstream(u, false)
+	return nil
+}
+
 // OllamaDeleteModel removes a model from Ollama storage (not the same as unload).
 func (s *Server) OllamaDeleteModel(ctx context.Context, name string, log InferenceOpLogger) error {
 	name = strings.TrimSpace(name)
@@ -523,9 +542,22 @@ func (s *Server) OllamaDeleteModel(ctx context.Context, name string, log Inferen
 	if err != nil {
 		return err
 	}
-	_, _ = s.InferenceUnload(ctx, "ollama", name, "", log)
-	body, err := client.OllamaDeleteModel(ctx, name)
-	logUpstreamJSON(log, "Ollama delete", body, err)
+	var body []byte
+	err = deleteModelAfterUnload(
+		func() error {
+			_, err := s.InferenceUnload(ctx, "ollama", name, "", log)
+			return err
+		},
+		func() error {
+			var deleteErr error
+			body, deleteErr = client.OllamaDeleteModel(ctx, name)
+			logUpstreamJSON(log, "Ollama delete", body, deleteErr)
+			return deleteErr
+		},
+		func() error {
+			return s.clearActiveOllamaModel(ctx, name)
+		},
+	)
 	if err != nil {
 		return err
 	}
