@@ -4,10 +4,10 @@
 
 ## 当前基线
 
-- 当前部署代码基线：`6d02eb45684db188c2a5e1427cffe8a10fc6c3fc`；Go CI [运行 43866482448](https://github.com/Kasign/llm-gateway/actions/runs/43866482448) 5/5 Job 成功，Browser Smoke [运行 43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461) 164/164 检查通过。后续 `dfd2bb1891eb06a0697f8248b1507d0adf3970a8` 为文档修正。
+- 当前 Review HEAD：`3b683b4f05cce88caf95a7911f2b3bcc349aa760`；最近完整 Go CI [运行 43867241418](https://github.com/Kasign/llm-gateway/actions/runs/43867241418) 5/5 Job 成功（对应前一基线 `37c3b7c`）。最近 Browser Smoke [运行 43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461) 164/164 检查通过（对应代码基线 `6d02eb4`）；最新静默轮询失败回归尚待新提交 Browser Smoke 验证。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
-- 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
+- 目前没有开放 PR（2026-11-16 复核）；Issue 状态未作为本轮关闭依据。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
 - 先前显式设置 `llama.request_timeout_seconds: 0` 被代理层强制套用一小时的问题，已有代码级修复和零值/正值回归覆盖；当前完整 Go CI 已通过。慢模型在实际 OpenResty、客户端和本地模型组合下的端到端超时行为仍需生产环境验收。
 - Provider 热更新已有共享并发许可器、限额变更顺序和回滚测试；后续只针对新的可复现失败补充实现，不再重复扩充同一段抽象。
 - Token 用量统计与中断请求口径已由提交 `c84601547f488d30988b36ebfaba0b425af49aae` 对应 Go CI [运行 43832112505](https://github.com/Kasign/llm-gateway/actions/runs/43832112505) 全部通过；浏览器验收 [运行 43832112496](https://github.com/Kasign/llm-gateway/actions/runs/43832112496) 为 164/164。流式中断后已采集 usage 的 MariaDB 记录保留 3/5/8 Token，来源为 `upstream_usage`；无 usage 时不估算 Token。详细口径见 `docs/token-usage-dashboard.md`。
@@ -618,3 +618,11 @@
 - Browser Smoke [运行 43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461)：164/164 检查通过；无 pageerror、无 Console 错误、无静态资源加载失败。测试中的本地模型 502 是预期的不可用上游场景，不是静态资源故障。
 - 真实 1Panel/OpenResty、浏览器缓存、公网 HTTPS/SSE、真实 Ollama 页面结构和真实 Provider 请求仍需用户部署后验证；不将 CI 夹具或模拟上游结果当作生产验收。
 
+
+
+## 2026-11-16 Review 增量记录
+
+- 代码复核发现调用记录定时轮询使用 `loadRequests({silent:true})`，但失败分支未处理静默标记，可能在网络故障期间每 15 秒重复弹出错误 Toast。
+- 提交 `99e7567ce06f20b1d1d9d729441b8092105bc7f0` 使静默轮询失败不覆盖当前列表、不弹重复提示；提交 `3b683b4f05cce88caf95a7911f2b3bcc349aa760` 增加 Browser Smoke 网络失败回归。
+- 新增回归对应的 Go CI / Browser Smoke 尚未完成；完成前不关闭该项。
+- 认证失败关闭与固定默认密码移除已在当前代码和已有 CI 中完成；生产反代与真实 Provider 验收仍待用户环境。
