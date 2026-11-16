@@ -270,6 +270,8 @@ paths:
           $ref: "#/components/responses/AdminError"
   /api/admin/model-prices:
     get:
+      security:
+        - AdminSessionBearer: []
       operationId: listAdminModelPrices
       tags: [Admin]
       summary: 查询远程 Provider 模型价格版本
@@ -296,6 +298,8 @@ paths:
         "401": { description: 需要管理员登录 }
         "500": { description: 读取价格配置失败 }
     post:
+      security:
+        - AdminSessionBearer: []
       operationId: createAdminModelPrice
       tags: [Admin]
       summary: 新增模型价格版本
