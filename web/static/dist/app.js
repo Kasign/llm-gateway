@@ -1259,7 +1259,7 @@
       }).join("")}
         </tbody></table>
       </div>
-      <p class="small muted token-stats-note">${esc(stats.tokens?.note || "Token \u6765\u6E90\u6309\u8BF7\u6C42\u5BA1\u8BA1\u8BB0\u5F55\u5206\u7C7B\uFF1B\u4E0D\u540C\u6765\u6E90\u4E0D\u53EF\u76F4\u63A5\u89C6\u4E3A\u4F9B\u5E94\u5546\u8D26\u5355\u用\u91CF\u3002")}</p>`;
+      <p class="small muted token-stats-note">${esc(stats.tokens?.note || "Token \u6765\u6E90\u6309\u8BF7\u6C42\u5BA1\u8BA1\u8BB0\u5F55\u5206\u7C7B\uFF1B\u4E0D\u540C\u6765\u6E90\u4E0D\u53EF\u76F4\u63A5\u89C6\u4E3A\u4F9B\u5E94\u5546\u8D26\u5355\u7528\u91CF\u3002")}</p>`;
     } catch (e) {
       root.innerHTML = '<span class="err small">Token \u7EDF\u8BA1\u52A0\u8F7D\u5931\u8D25\uFF1A' + esc(e.message) + "</span>";
     } finally {
@@ -2225,7 +2225,6 @@
       throw e;
     }
   }
-  let creatingKey = false;
   async function createKey() {
     if (creatingKey) return;
     creatingKey = true;
@@ -2238,10 +2237,7 @@
       const resultBox = $("newKeyBox");
       if (!j.key) throw new Error("\u5BC6\u94A5\u5DF2\u521B\u5EFA\uFF0C\u4F46\u670D\u52A1\u7AEF\u672A\u8FD4\u56DE\u660E\u6587\u5BC6\u94A5\uFF1B\u8BF7\u68C0\u67E5\u63A5\u53E3\u54CD\u5E94\uFF0C\u5FC5\u8981\u65F6\u8F6E\u6362\u8BE5\u5BC6\u94A5\u3002");
       resultBox.style.display = "block";
-      resultBox.innerHTML = '<div class="msg ok" role="status">\u670D\u52A1\u5BC6\u94A5\u521B\u5EFA\u6210\u529F\u3002\u8BE5\u660E\u6587\u4EC5\u663E\u793A\u8FD9\u4E00\u6B21\uFF0C\u8BF7\u7ACB\u5373\u590D\u5236\u5E76\u59A5\u5584\u4FDD\u5B58\uFF1B\u79BB\u5F00\u6B64\u9875\u9762\u540E\u65E0\u6CD5\u518D\u6B21\u67E5\u770B\u3002</div>' +
-        '<label for="createdServiceKey" class="small">\u65B0\u751F\u6210\u7684\u670D\u52A1\u5BC6\u94A5</label>' +
-        '<textarea id="createdServiceKey" readonly rows="3" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin:8px 0;resize:vertical;overflow-wrap:anywhere;word-break:break-all"></textarea>' +
-        '<div class="row" style="align-items:center"><button type="button" id="copyCreatedServiceKey" class="btn primary">\u590D\u5236\u5BC6\u94A5</button><span id="copyCreatedServiceKeyStatus" class="small muted" role="status" aria-live="polite">\u8BF7\u590D\u5236\u540E\u4FDD\u5B58\u5230\u5B89\u5168\u4F4D\u7F6E\u3002</span></div>';
+      resultBox.innerHTML = '<div class="msg ok" role="status">\u670D\u52A1\u5BC6\u94A5\u521B\u5EFA\u6210\u529F\u3002\u8BE5\u660E\u6587\u4EC5\u663E\u793A\u8FD9\u4E00\u6B21\uFF0C\u8BF7\u7ACB\u5373\u590D\u5236\u5E76\u59A5\u5584\u4FDD\u5B58\uFF1B\u79BB\u5F00\u6B64\u9875\u9762\u540E\u65E0\u6CD5\u518D\u6B21\u67E5\u770B\u3002</div><label for="createdServiceKey" class="small">\u65B0\u751F\u6210\u7684\u670D\u52A1\u5BC6\u94A5</label><textarea id="createdServiceKey" readonly rows="3" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin:8px 0;resize:vertical;overflow-wrap:anywhere;word-break:break-all"></textarea><div class="row" style="align-items:center"><button type="button" id="copyCreatedServiceKey" class="btn primary">\u590D\u5236\u5BC6\u94A5</button><span id="copyCreatedServiceKeyStatus" class="small muted" role="status" aria-live="polite">\u8BF7\u590D\u5236\u540E\u4FDD\u5B58\u5230\u5B89\u5168\u4F4D\u7F6E\u3002</span></div>';
       $("createdServiceKey").value = j.key;
       $("copyCreatedServiceKey").addEventListener("click", async () => {
         const copied = await writeClipboard(j.key);
@@ -2250,12 +2246,13 @@
         if (copied) {
           copyButton.textContent = "\u5DF2\u590D\u5236";
           if (status) status.textContent = "\u590D\u5236\u6210\u529F\uFF0C\u8BF7\u59A5\u5584\u4FDD\u5B58\u3002";
-        } else if (status) {
-          status.textContent = "\u81EA\u52A8\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u9009\u4E2D\u4E0A\u65B9\u5BC6\u94A5\u5E76\u624B\u52A8\u590D\u5236\u3002";
+        } else {
+          if (status) status.textContent = "\u81EA\u52A8\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u9009\u4E2D\u4E0A\u65B9\u5BC6\u94A5\u5E76\u624B\u52A8\u590D\u5236\u3002";
         }
       });
       resultBox.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      loadKeys().catch(() => {});
+      loadKeys().catch(() => {
+      });
     } catch (e) {
       $("newKeyBox").style.display = "block";
       $("newKeyBox").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
@@ -2764,7 +2761,7 @@
       if (token === benchPollToken) setBenchRunning(false);
     }
   }
-  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, benchDrawerTrigger, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
+  var modelHub, backendProbeInFlight, GAUGE, GAUGE_THEMES, GAUGE_ANIM_MS, gaugeShown, gaugeAnimToken, gaugeDomReady, dashboardPoll, creatingKey, BENCH_STORE_KEY, BENCH_SHARED, BENCH_PRESETS, benchPollToken, benchCurrentBackend, benchDrawerTrigger, REQUESTS_POLL_MS, DOWNLOADS_POLL_MS;
   var init_main = __esm({
     "js/app/main.js"() {
       init_dom();
@@ -2815,7 +2812,8 @@
         syncTopbarRefresh();
       });
       syncTopbarRefresh();
-      $("dashTokenRange")?.addEventListener("change", () => loadDashboardStats().catch(() => {}));
+      $("dashTokenRange")?.addEventListener("change", () => loadDashboardStats().catch(() => {
+      }));
       $("models-local")?.addEventListener("click", handleInferClick);
       modelHub = {
         rows: [],
@@ -3035,7 +3033,8 @@
               });
             }
             const statsEvery = this.intervalMs <= 4e3 ? 30 : 10;
-            if (this.auxTick % statsEvery === 0) await loadDashboardStats().catch(() => {});
+            if (this.auxTick % statsEvery === 0) await loadDashboardStats().catch(() => {
+            });
           } finally {
             this.inFlight = false;
             if (this.active && $("dashboard")?.classList.contains("active")) this.schedule();
@@ -3047,6 +3046,7 @@
         if (!btn) return;
         chooseFile(btn.dataset.hfFile || "", btn.dataset.hfRepo || "");
       });
+      creatingKey = false;
       BENCH_STORE_KEY = "llm-gateway.bench.v1";
       BENCH_SHARED = {
         prompt: "Write a small, correct Objective-C function and explain why it is thread-safe.",
