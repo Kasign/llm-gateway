@@ -962,9 +962,10 @@ def validate(
                 f'HandleFunc("{route}", s.{handler_name})' in request_list_handler,
                 f"{route} must remain registered to {handler_name}",
             )
+            method_not_allowed = response_block(operation, "405")
             require(
-                '"405":' in response_block(operation, "405"),
-                f"{method.upper()} {route} must document Handler's 405 response",
+                "#/components/responses/AdminError" in method_not_allowed,
+                f"{method.upper()} {route} 405 must use the AdminError response envelope",
             )
         runtime_request = schema_block(source, "RuntimeModelRequest")
         require(
