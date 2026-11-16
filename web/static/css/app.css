@@ -965,3 +965,26 @@ body.auth-locked{overflow:hidden}
   #requests .table-wrap th:nth-child(8),#requests .table-wrap td:nth-child(8){width:100px}
   #requests .table-wrap th:nth-child(9),#requests .table-wrap td:nth-child(9){width:82px}
 }
+
+/* 首页 Token 用量统计：按来源区分上游 usage、本地 timings 与未知记录。 */
+.token-stats-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.token-stats-toolbar label{margin:0;white-space:nowrap}
+.token-stats-toolbar select{min-width:132px;height:34px;min-height:34px}
+.token-stats-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.token-stats-summary .stat{min-width:0}
+.token-stats-summary .stat b{font-size:20px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.token-stats-summary .stat small{display:block;margin-top:5px;color:var(--text-3);font-size:11px;line-height:1.45}
+.token-source-table{margin-top:10px}
+.token-source-table table{min-width:560px}
+.token-source-table td{font-variant-numeric:tabular-nums}
+.token-stats-note{margin:9px 0 0;line-height:1.5}
+#dashTokenStats[aria-busy="true"]{opacity:.72}
+@media(max-width:900px){.token-stats-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){
+  .token-stats-toolbar{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto}
+  .token-stats-toolbar select{min-width:0;width:100%}
+  .token-stats-summary{gap:8px}
+  .token-stats-summary .stat{padding:10px}
+  .token-stats-summary .stat b{font-size:17px}
+  .token-stats-card .card-head{flex-direction:column;align-items:stretch}
+}
