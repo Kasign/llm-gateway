@@ -784,6 +784,63 @@ def validate(
         except ValueError as exc:
             errors.append(f"CredentialsMutationResponse: {exc}")
 
+        # 下载任务列表字段必须与 downloadsAPI 的实际 JSON DTO 保持一致。
+        downloads_handler = go_function(request_list_handler, "func (s *Server) downloadsAPI(")
+        download_item = re.search(r"(?ms)^\s*type item struct \{(.*?)^\s*\}", downloads_handler)
+        if download_item is None:
+            raise ValueError("downloadsAPI item response struct not found")
+        download_json_fields = set(re.findall(r'json:"([^",]+)', download_item.group(1)))
+        downloads_schema = schema_block(source, "DownloadsEnvelope")
+        download_item_schema = re.search(
+            r"(?ms)^        data:\n          type: array\n          items:\n(.*?)(?=^      additionalProperties:)",
+            downloads_schema,
+        )
+        if download_item_schema is None:
+            raise ValueError("DownloadsEnvelope.data.items schema not found")
+        for field in sorted(download_json_fields):
+            try:
+                schema_field_block(download_item_schema.group(1), field)
+            except ValueError:
+                errors.append(f"DownloadsEnvelope item: missing Handler JSON field {field!r}")
+        for field in ("model_key", "kind", "status", "done", "total"):
+            require(
+                re.search(rf"(?m)^            required:.*\\b{re.escape(field)}\\b", downloads_schema) is not None,
+                f"DownloadsEnvelope item must require {field}",
+            )
+        require(
+            "enum: [hf, ollama]" in schema_field_block(download_item_schema.group(1), "kind"),
+            "DownloadsEnvelope.kind must enumerate the Handler's hf/ollama task kinds",
+        )
+        require(
+            "enum: [downloading, download_failed, download_cancelled, ready]" in schema_field_block(download_item_schema.group(1), "status"),
+            "DownloadsEnvelope.status must enumerate the supported download states",
+        )
+        require(
+            "additionalProperties: false" in download_item_schema.group(1),
+            "DownloadsEnvelope item must reject undocumented response fields",
+        )
+        require(
+            "additionalProperties: false" in downloads_schema,
+            "DownloadsEnvelope must reject undocumented top-level response fields",
+        )
+
+        dismiss_handler = go_function(request_list_handler, "func (s *Server) downloadsDismissAPI(")
+        require(
+            "ClearFailedDownloads(ctx)" in dismiss_handler and "DismissDownloadRecord(ctx, key)" in dismiss_handler,
+            "downloadsDismissAPI must preserve single-item and all-failed cleanup paths",
+        )
+        dismiss_request = schema_block(source, "DownloadDismissRequest")
+        require(
+            "anyOf:" in dismiss_request and "all_failed: { type: boolean, const: true }" in dismiss_request,
+            "DownloadDismissRequest must require model_key or all_failed=true",
+        )
+        dismiss_operation = operation_block(source, "/api/downloads/dismiss", "post")
+        dismiss_response = response_block(dismiss_operation, "200")
+        require(
+            '"#/components/schemas/DownloadDismissResult"' in dismiss_response,
+            "POST /api/downloads/dismiss 200 must reference DownloadDismissResult",
+        )
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
