@@ -583,3 +583,11 @@
 - 新增重启状态判定测试。提交 `4eb2fcda51ecce0ae4aed0cf6749a62aab33a419`；Go CI [运行 43846520123](https://github.com/Kasign/llm-gateway/actions/runs/43846520123) 5/5 Job 全部成功，浏览器验收 [运行 43846520253](https://github.com/Kasign/llm-gateway/actions/runs/43846520253) 成功。
 - 当前下载任务的重启恢复边界已明确：HF 通过已有 `.part` 断点续传重新启动；Ollama Pull 不自动恢复，明确标记中断后由用户重新发起。
 
+
+
+## 2026-11-16：模型删除的卸载失败保护（进行中）
+
+- 生命周期审查发现 `DeleteGatewayModel` 忽略 `unloadModelUpstream` 错误，可能在上游卸载失败或不可达时仍删除 GGUF 文件和数据库记录，造成磁盘/运行时状态不一致。
+- 修复要求：若 llama.cpp 已配置，必须先确认卸载成功；卸载失败则中止后续文件和数据库删除。若未配置 llama.cpp，则不尝试对不存在的受管上游执行卸载。
+- 将卸载、文件删除、数据库删除顺序抽为可测试的生命周期步骤，验证卸载失败时后续破坏性操作不会执行。
+- 完整 CI 通过后关闭本批。

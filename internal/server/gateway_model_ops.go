@@ -44,16 +44,44 @@ func (s *Server) DeleteGatewayModel(ctx context.Context, m *model.Model) error {
 	if err := s.stopAndWaitDownload(ctx, m.ModelKey); err != nil {
 		return err
 	}
-	_ = s.unloadModelUpstream(ctx, m)
-	if lp := strings.TrimSpace(m.LocalPath); lp != "" {
-		if e := os.Remove(lp); e != nil && !os.IsNotExist(e) {
-			return e
+	unload := func() error {
+		// 未配置 llama.cpp 时没有可卸载的受管上游；已配置但卸载失败则必须中止删除。
+		if s.baseURLForBackend("llamacpp") == "" {
+			return nil
 		}
+		return s.unloadModelUpstream(ctx, m)
 	}
-	if err := s.models.Delete(ctx, m.ModelKey); err != nil {
+	removeFile := func() error {
+		if lp := strings.TrimSpace(m.LocalPath); lp != "" {
+			return os.Remove(lp)
+		}
+		return nil
+	}
+	deleteRecord := func() error {
+		return s.models.Delete(ctx, m.ModelKey)
+	}
+	if err := deleteModelAfterUnload(unload, removeFile, deleteRecord); err != nil {
 		return err
 	}
 	_, _ = s.InferenceRefreshRegistry(ctx, "llamacpp")
+	return nil
+}
+
+// deleteModelAfterUnload preserves model data when the upstream cannot confirm unload.
+func deleteModelAfterUnload(unload, removeFile, deleteRecord func() error) error {
+	if unload != nil {
+		if err := unload(); err != nil {
+			return fmt.Errorf("unload model before delete: %w", err)
+		}
+	}
+	if removeFile != nil {
+		if err := removeFile(); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if deleteRecord != nil {
+		return deleteRecord()
+	}
 	return nil
 }
 
