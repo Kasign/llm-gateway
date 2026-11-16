@@ -2,9 +2,9 @@
 
 > Review 日期：2026-11-16
 > 检查分支：`dev`
-> Review HEAD：`3b683b4f05cce88caf95a7911f2b3bcc349aa760`
-> 最近完整 Go CI：`43867241418`，5/5 Job 成功（对应前一代码/文档基线 `37c3b7c`）
-> 最近 Browser Smoke：`43866482461`，164/164 检查通过（对应代码基线 `6d02eb4`）；调用记录静默轮询回归已新增，等待新提交的 Browser Smoke 验证
+> Review HEAD：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`
+> Go CI：[43869432688](https://github.com/Kasign/llm-gateway/actions/runs/43869432688)，5/5 Job 成功
+> Browser Smoke：[43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077)，165/165 检查通过
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。
 
@@ -199,6 +199,6 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 
 - 本轮复核确认：认证保护的 P0 实现已完成，当前路线不应再把“修复默认密码/无效哈希降级”列为下一项；阶段 0 已关闭，下一阶段是生产闭环。
 - Docker 默认 `release` 已继承 `release-with-web`，Compose 默认构建使用 webbuilder 生成的前端资源；该修复对应 Go CI 5/5、Browser Smoke 164/164。
-- 复核调用记录轮询时发现 `loadRequests({silent:true})` 的调用方已经存在，但失败分支忽略 `silent`，网络故障时仍会重复弹 Toast。已在提交 `99e7567ce06f20b1d1d9d729441b8092105bc7f0` 修正，并在 `3b683b4f05cce88caf95a7911f2b3bcc349aa760` 增加浏览器回归；新提交对应的 CI / Browser Smoke 尚待结果。
-- 当前未发现足以阻止部署的已证实后端逻辑缺陷；但真实 Provider、Ollama 实际页面结构、生产反代和轮询负载仍没有真实环境证据，不能记为全部完成。
+- 复核调用记录轮询时发现 `loadRequests({silent:true})` 的调用方已经存在，但失败分支忽略 `silent`，网络故障时仍会重复弹 Toast。提交 `99e7567ce06f20b1d1d9d729441b8092105bc7f0` 修复；提交 `3b683b4f05cce88caf95a7911f2b3bcc349aa760` 增加回归，随后将故障注入改为 HTTP 503，避免 Chromium 对 `abort()` 的 `net::ERR_FAILED` 产生误报。最终 Browser Smoke 165/165 通过，预期 503 已被记录为预期故障，无 Console 错误。
+- 当前代码 Review 未发现新的阻止部署的已证实后端逻辑缺陷；Go CI 5/5、Browser Smoke 165/165 已通过。但真实 Provider、Ollama 实际页面结构、生产反代和轮询负载仍没有真实环境证据，不能记为全部完成。
 - 持续遗留项：OpenAPI 整体仍为 partial；管理台 localStorage Session 的 XSS 风险属于设计评估项；多副本全局队列/并发协调、自动故障转移、Agent 级多别名/权限均为明确暂缓或待需求，不属于本次部署阻塞。
