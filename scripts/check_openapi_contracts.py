@@ -31,6 +31,7 @@ RUNTIME_TYPES_FILE = ROOT / "internal" / "llama" / "runtime.go"
 OLLAMA_TAG_TYPES_FILE = ROOT / "internal" / "catalog" / "ollama" / "tags.go"
 INFERENCE_OPS_FILE = ROOT / "internal" / "server" / "inference_ops.go"
 RUNTIME_HANDLER_FILE = ROOT / "internal" / "server" / "runtime.go"
+INFERENCE_PARAMS_SCHEMA_FILE = ROOT / "internal" / "inferenceparams" / "schema.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -193,6 +194,7 @@ def validate(
     ollama_tag_types: str,
     inference_ops: str,
     runtime_handler: str,
+    inference_params_schema: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -1011,6 +1013,78 @@ def validate(
             except ValueError:
                 errors.append(f"RuntimeSnapshot: missing runtime field {field!r}")
 
+        # 推理参数管理 API：动态表单字段、参数 DTO 与三个路由的状态码必须与实现一致。
+        inference_routes = {
+            "/api/admin/inference-params/schema": ("get", "inferenceParamsSchemaAPI"),
+            "/api/admin/inference-params": ("get", "inferenceParamsAPI"),
+            "/api/admin/inference-params/reset": ("post", "inferenceParamsResetAPI"),
+        }
+        for route, (method, handler_name) in inference_routes.items():
+            operation = operation_block(source, route, method)
+            require(
+                "AdminSessionBearer: []" in operation,
+                f"{method.upper()} {route} must require an admin web session",
+            )
+            require(
+                f'HandleFunc("{route}", s.{handler_name})' in request_list_handler,
+                f"{route} must remain registered to {handler_name}",
+            )
+            not_allowed = response_block(operation, "405")
+            require(
+                "#/components/responses/AdminError" in not_allowed,
+                f"{method.upper()} {route} 405 must use AdminError",
+            )
+
+        params_decl = re.search(r"(?ms)^type Params struct \\{(.*?)^\\}", inference_params_schema)
+        policy_decl = re.search(r"(?ms)^type Policy struct \\{(.*?)^\\}", inference_params_schema)
+        field_decl = re.search(r"(?ms)^type Field struct \\{(.*?)^\\}", inference_params_schema)
+        for decl, name, schema_name in (
+            (params_decl, "Params", "InferenceParams"),
+            (policy_decl, "Policy", "InferenceParamsPolicy"),
+            (field_decl, "Field", "InferenceParamField"),
+        ):
+            if decl is None:
+                errors.append(f"internal/inferenceparams/schema.go: {name} struct not found")
+                continue
+            contract_schema = schema_block(source, schema_name)
+            json_fields = {
+                tag for tag in re.findall(r'json:"([^",]+)', decl.group(1))
+                if tag and tag != "-"
+            }
+            for field in sorted(json_fields):
+                try:
+                    schema_field_block(contract_schema, field)
+                except ValueError:
+                    errors.append(f"{schema_name}: missing {name} JSON field {field!r}")
+
+        for route, method, handler_name in (
+            ("/api/admin/inference-params/schema", "get", "inferenceParamsSchemaAPI"),
+            ("/api/admin/inference-params", "get", "inferenceParamsAPI"),
+            ("/api/admin/inference-params", "put", "inferenceParamsAPI"),
+            ("/api/admin/inference-params/reset", "post", "inferenceParamsResetAPI"),
+        ):
+            operation = operation_block(source, route, method)
+            handler = go_function(inference_params_handler, f"func (s *Server) {handler_name}(")
+            require(
+                "requireAdmin" in handler,
+                f"{method.upper()} {route} must enforce admin session authorization",
+            )
+        params_put = operation_block(source, "/api/admin/inference-params", "put")
+        require(
+            "#/components/schemas/InferenceParamsMutation" in params_put,
+            "PUT /api/admin/inference-params must reference InferenceParamsMutation",
+        )
+        params_get = response_block(operation_block(source, "/api/admin/inference-params", "get"), "200")
+        require(
+            "#/components/schemas/InferenceParamsEnvelope" in params_get,
+            "GET /api/admin/inference-params must reference InferenceParamsEnvelope",
+        )
+        reset_response = response_block(operation_block(source, "/api/admin/inference-params/reset", "post"), "200")
+        require(
+            "#/components/schemas/InferenceParamsResetResult" in reset_response,
+            "POST /api/admin/inference-params/reset must reference InferenceParamsResetResult",
+        )
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -1080,6 +1154,8 @@ def main() -> int:
         ollama_tag_types = OLLAMA_TAG_TYPES_FILE.read_text(encoding="utf-8")
         runtime_handler = RUNTIME_HANDLER_FILE.read_text(encoding="utf-8")
         inference_ops = INFERENCE_OPS_FILE.read_text(encoding="utf-8")
+        inference_params_schema = INFERENCE_PARAMS_SCHEMA_FILE.read_text(encoding="utf-8")
+        inference_params_handler = (ROOT / "internal" / "server" / "admin_inference_params_http.go").read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -1101,6 +1177,7 @@ def main() -> int:
             ollama_tag_types,
             inference_ops,
             runtime_handler,
+            inference_params_schema,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
