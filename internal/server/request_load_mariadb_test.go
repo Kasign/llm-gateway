@@ -599,10 +599,11 @@ func TestGatewayConcurrentRequestLoadWithMariaDBAudit(t *testing.T) {
 			t.Fatalf("query stream-reset audit details: %v", queryErr)
 		}
 		seen := 0
+		var inputTokens, outputTokens, totalTokens sql.NullInt64
+		var tokenSource string
 		for rows.Next() {
 			var gatewayStatus, upstreamStatus sql.NullInt64
-			var state, errorCode, errorMessage, tokenSource string
-			var inputTokens, outputTokens, totalTokens sql.NullInt64
+			var state, errorCode, errorMessage string
 			if scanErr := rows.Scan(&gatewayStatus, &upstreamStatus, &state, &errorCode, &errorMessage, &inputTokens, &outputTokens, &totalTokens, &tokenSource); scanErr != nil {
 				_ = rows.Close()
 				t.Fatalf("scan stream-reset audit detail: %v", scanErr)
