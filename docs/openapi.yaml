@@ -2896,10 +2896,12 @@ components:
         local_model_management: { type: boolean }
         loaded:
           type: array
+          nullable: true
           items:
             $ref: "#/components/schemas/OllamaCatalogItem"
         catalog:
           type: array
+          nullable: true
           items:
             $ref: "#/components/schemas/OllamaCatalogItem"
         catalog_source: { type: string }
@@ -2938,6 +2940,7 @@ components:
         success: { type: boolean, const: true }
         remaining_loaded:
           type: array
+          nullable: true
           items:
             type: object
             additionalProperties: true
@@ -3334,10 +3337,12 @@ components:
         base_url: { type: string }
         catalog:
           type: array
+          nullable: true
           items:
             $ref: "#/components/schemas/OllamaCatalogItem"
         loaded:
           type: array
+          nullable: true
           items:
             $ref: "#/components/schemas/OllamaCatalogItem"
         active: { type: string }
