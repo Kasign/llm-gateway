@@ -70,8 +70,9 @@ type Server struct {
 	upstream     settings.Upstream // 当前生效的上游配置（管理员在后台改的，优先级高）
 	fileUpstream settings.Upstream // 配置文件里的默认上游配置（管理员没改时用这个）
 	// —— 下载任务管理 ——
-	downloadMu     sync.Mutex                    // 下载任务锁：保护下载取消函数的 map
+	downloadMu     sync.Mutex                    // 下载任务锁：保护下载任务表
 	downloadCancel map[string]context.CancelFunc // 下载取消函数表：key 是模型名，value 是取消该下载的函数
+	downloadDone   map[string]chan struct{}      // 下载完成信号：取消/删除操作等待工作协程退出
 	// —— 其他状态缓存 ——
 	benchmarks  *benchmarkStore // 基准测试结果缓存：跑模型性能测试时的临时数据
 	llamaRouter *bool           // 是否启用 llama 路由（缓存值，避免每次都查）
@@ -141,7 +142,9 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 		audit:    audit.NewWriter(logsRepo, 0),                                                                                                   // 审计写入器（异步批量写日志）
 		settings: settings.NewRepo(dbx),                                                                                                          // 设置仓库
 		llama:    llama.New(cfg.Llama.BaseURL, time.Duration(cfg.Llama.RequestTimeout)*time.Second, cfg.Llama.Backend, cfg.Llama.UpstreamAPIKey), // llama.cpp 客户端
-		limiter:  lim, live: live.NewRegistry(), downloader: dl, downloadCancel: make(map[string]context.CancelFunc), benchmarks: newBenchmarkStore(),
+		limiter: lim, live: live.NewRegistry(), downloader: dl,
+		downloadCancel: make(map[string]context.CancelFunc), downloadDone: make(map[string]chan struct{}),
+		benchmarks: newBenchmarkStore(),
 		trustedProxyRanges: parseTrustedProxyRanges(cfg.Server.TrustedProxies),
 		upstream: fileUpstream, fileUpstream: fileUpstream, // 初始时当前上游 = 配置文件默认上游
 	}
@@ -219,7 +222,9 @@ func (s *Server) RecoverDownloads() {
 		}
 		applog.Printf("resuming model download: %s", m.ModelKey)
 		// 开一个后台 goroutine 重新下载这个模型
-		go s.downloadModel(m.ModelKey, m.DisplayName, m.HFRepo, m.HFRevision, m.Filename, m.Quantization)
+		if err := s.startDownloadModel(m.ModelKey, m.DisplayName, m.HFRepo, m.HFRevision, m.Filename, m.Quantization); err != nil {
+			applog.Printf("recover downloads: key=%s start failed: %v", m.ModelKey, err)
+		}
 	}
 }
 
@@ -891,7 +896,10 @@ func (s *Server) installModel(w http.ResponseWriter, r *http.Request) {
 	}
 	applog.Printf("model install queued: key=%s repo=%s rev=%s file=%s", in.ModelKey, in.Repo, in.Revision, in.Filename)
 	// 开一个后台 goroutine 去下载（不阻塞 HTTP 响应，用户可以继续操作）
-	go s.downloadModel(in.ModelKey, in.DisplayName, in.Repo, in.Revision, in.Filename, in.Quantization)
+	if err := s.startDownloadModel(in.ModelKey, in.DisplayName, in.Repo, in.Revision, in.Filename, in.Quantization); err != nil {
+		jsonError(w, 409, "download_running", err.Error())
+		return
+	}
 	// 立即返回"已加入下载队列"
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "status": "downloading", "model_key": in.ModelKey})
 }
@@ -900,21 +908,33 @@ func (s *Server) installModel(w http.ResponseWriter, r *http.Request) {
 // 流程：加锁防重复下载 → 设置下载超时 → 更新状态为 downloading → 调用下载器下载 →
 //
 //	成功则更新状态为 installed 并刷新上游模型列表；失败则记录错误状态
-func (s *Server) downloadModel(key, display, repo, rev, filename, quant string) {
-	// 加下载锁，防止同一个模型被重复下载
+func (s *Server) startDownloadModel(key, display, repo, rev, filename, quant string) error {
+	// 在启动 goroutine 前登记任务，避免立即取消/删除时尚未看见运行任务。
 	s.downloadMu.Lock()
-	// 如果这个模型已经有一个正在进行的下载（downloadCancel 里有它的取消函数），就不重复下
 	if _, ok := s.downloadCancel[key]; ok {
 		s.downloadMu.Unlock()
-		return
+		return fmt.Errorf("download already running")
 	}
-	// 创建下载用的上下文（带超时，超时时间从配置里读）
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.cfg.Download.Timeout)*time.Second)
-	// 把取消函数存到 map 里（管理后台可以通过这个函数取消下载）
+	done := make(chan struct{})
 	s.downloadCancel[key] = cancel
+	s.downloadDone[key] = done
 	s.downloadMu.Unlock()
-	// 函数结束时：取消上下文 + 从 map 里删除这个下载的取消函数（清理资源）
-	defer func() { cancel(); s.downloadMu.Lock(); delete(s.downloadCancel, key); s.downloadMu.Unlock() }()
+
+	go s.runDownloadModel(ctx, cancel, done, key, display, repo, rev, filename, quant)
+	return nil
+}
+
+func (s *Server) runDownloadModel(ctx context.Context, cancel context.CancelFunc, done chan struct{}, key, display, repo, rev, filename, quant string) {
+	// 只有工作协程真正退出后才释放任务登记；删除/重试可据此等待或拒绝并发操作。
+	defer func() {
+		cancel()
+		s.downloadMu.Lock()
+		delete(s.downloadCancel, key)
+		delete(s.downloadDone, key)
+		close(done)
+		s.downloadMu.Unlock()
+	}()
 
 	// 更新数据库状态为 downloading
 	_ = s.models.SetStatus(ctx, key, "downloading")

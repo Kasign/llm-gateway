@@ -42,7 +42,9 @@ func (s *Server) DeleteGatewayModel(ctx context.Context, m *model.Model) error {
 		return fmt.Errorf("model required")
 	}
 	if m.Status == "downloading" {
-		_ = s.CancelModelDownload(m.ModelKey)
+		if err := s.stopAndWaitDownload(ctx, m.ModelKey); err != nil {
+			return err
+		}
 	}
 	_ = s.unloadModelUpstream(ctx, m)
 	if lp := strings.TrimSpace(m.LocalPath); lp != "" {
@@ -60,15 +62,35 @@ func (s *Server) DeleteGatewayModel(ctx context.Context, m *model.Model) error {
 // CancelModelDownload stops an in-flight HF download for modelKey.
 func (s *Server) CancelModelDownload(modelKey string) error {
 	s.downloadMu.Lock()
-	defer s.downloadMu.Unlock()
-	c, ok := s.downloadCancel[modelKey]
+	cancel, ok := s.downloadCancel[modelKey]
+	s.downloadMu.Unlock()
 	if !ok {
 		return fmt.Errorf("download not running")
 	}
-	c()
-	delete(s.downloadCancel, modelKey)
-	_ = s.models.SetStatus(context.Background(), modelKey, "download_cancelled")
+	// 不提前移除任务或修改终态；由工作协程在实际退出后写入取消状态并清理登记。
+	cancel()
 	return nil
+}
+
+// stopAndWaitDownload cancels an active download and waits until its worker has stopped
+// touching the partial/final file before the caller removes model data.
+func (s *Server) stopAndWaitDownload(ctx context.Context, modelKey string) error {
+	s.downloadMu.Lock()
+	cancel := s.downloadCancel[modelKey]
+	done := s.downloadDone[modelKey]
+	s.downloadMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // RetryModelDownload restarts HF download from model metadata.
@@ -79,12 +101,5 @@ func (s *Server) RetryModelDownload(ctx context.Context, m *model.Model) error {
 	if m.HFRepo == "" || m.Filename == "" {
 		return fmt.Errorf("download metadata missing")
 	}
-	_ = s.models.SetStatus(ctx, m.ModelKey, "downloading")
-	_ = s.limiter.SetDownload(ctx, m.ModelKey, map[string]interface{}{
-		"status":     "downloading",
-		"updated_at": time.Now().Unix(),
-	})
-	_ = s.limiter.DeleteDownloadFields(ctx, m.ModelKey, "error")
-	go s.downloadModel(m.ModelKey, m.DisplayName, m.HFRepo, m.HFRevision, m.Filename, m.Quantization)
-	return nil
+	return s.startDownloadModel(m.ModelKey, m.DisplayName, m.HFRepo, m.HFRevision, m.Filename, m.Quantization)
 }
