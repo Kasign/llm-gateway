@@ -336,9 +336,6 @@ func (o inferenceObserver) On(ctx context.Context, ev core.Event) {
 // onParsed 创建 running 状态的请求记录。门外拒绝的请求不会走到这里，由 rejectInference 单独记录。
 func (o inferenceObserver) onParsed(st core.State) {
 	cs := o.s.callGet(st.ID)
-	if tokenSrc == "usage" {
-		tokenSrc = "upstream_usage"
-	}
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,
 		Endpoint: st.Path, RequestURL: st.RequestURL, ProviderID: o.s.providerIDForState(st), Method: st.Method, ModelRequested: st.ClientModel, Stream: st.Stream,
@@ -499,6 +496,9 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 			ttft = timings.FirstAnyMS
 		}
 		o.s.audit.InsertStreamEvents(st.ID, trace.drainEvents())
+	}
+	if tokenSrc == "usage" {
+		tokenSrc = "upstream_usage"
 	}
 	logItem := store.RequestLog{
 		RequestID: st.ID, ClientIP: st.ClientIP, ClientName: st.ClientName, UserAgent: st.UserAgent,

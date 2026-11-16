@@ -61,7 +61,6 @@ CREATE TABLE IF NOT EXISTS request_logs (
   input_tokens BIGINT UNSIGNED NULL,
   output_tokens BIGINT UNSIGNED NULL,
   total_tokens BIGINT UNSIGNED NULL,
-  token_source VARCHAR(32) NULL,
   request_bytes BIGINT UNSIGNED NULL,
   response_bytes BIGINT UNSIGNED NULL,
   error_code VARCHAR(64) NULL,

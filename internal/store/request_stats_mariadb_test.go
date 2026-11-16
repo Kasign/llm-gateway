@@ -64,26 +64,25 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	}()
 
 	type sample struct {
-		suffix, provider, status, analysis, tokenSource string
+		suffix, provider, status, analysis string
 		input, output, total               any
 		started                            time.Time
 		latency                            int64
 	}
 	samples := []sample{
-		{suffix: "upstream", provider: "remote-a", status: "success", tokenSource: "upstream_usage", analysis: "", input: int64(10), output: int64(4), total: int64(14), started: start, latency: 1200},
-		{suffix: "timings", provider: "remote-a", status: "success", tokenSource: "llama_timings", analysis: "", input: int64(3), output: int64(2), total: int64(5), started: start, latency: 2500},
+		{suffix: "upstream", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(10), output: int64(4), total: int64(14), started: start, latency: 1200},
+		{suffix: "timings", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"llama_timings"}}`, input: int64(3), output: int64(2), total: int64(5), started: start, latency: 2500},
 		{suffix: "unknown", provider: "remote-a", status: "error", analysis: `{"throughput":{"source":"unrecognized"}}`, input: int64(1), output: int64(0), total: int64(1), started: start, latency: 4000},
-		{suffix: "legacy-json", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(2), output: int64(1), total: int64(3), started: start, latency: 900},
 		{suffix: "legacy", provider: "remote-a", status: "cancelled", analysis: "", input: nil, output: nil, total: nil, started: start, latency: 0},
 		{suffix: "other-provider", provider: "remote-b", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(100), output: int64(50), total: int64(150), started: start, latency: 500},
 		{suffix: "outside-window", provider: "remote-a", status: "success", analysis: `{"throughput":{"source":"usage"}}`, input: int64(900), output: int64(900), total: int64(1800), started: to.Add(time.Second), latency: 500},
 	}
 	for _, item := range samples {
 		_, err := db.ExecContext(ctx, `INSERT INTO request_logs
-			(request_id, endpoint, method, provider_id, status, started_at, latency_ms, input_tokens, output_tokens, total_tokens, token_source, analysis_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(request_id, endpoint, method, provider_id, status, started_at, latency_ms, input_tokens, output_tokens, total_tokens, analysis_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			prefix+"-"+item.suffix, "/v1/chat/completions", "POST", item.provider, item.status,
-			item.started, item.latency, item.input, item.output, item.total, nullIfEmpty(item.tokenSource), item.analysis)
+			item.started, item.latency, item.input, item.output, item.total, item.analysis)
 		if err != nil {
 			t.Fatalf("insert %s sample: %v", item.suffix, err)
 		}
@@ -94,10 +93,10 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aggregate request stats: %v", err)
 	}
-	if stats.Requests.Total != 5 || stats.Requests.Success != 3 || stats.Requests.Errors != 1 || stats.Requests.Cancelled != 1 {
+	if stats.Requests.Total != 4 || stats.Requests.Success != 2 || stats.Requests.Errors != 1 || stats.Requests.Cancelled != 1 {
 		t.Fatalf("unexpected request counts: %+v", stats.Requests)
 	}
-	if stats.Tokens.UpstreamUsage.Requests != 2 || stats.Tokens.UpstreamUsage.InputTokens != 12 || stats.Tokens.UpstreamUsage.OutputTokens != 5 || stats.Tokens.UpstreamUsage.TotalTokens != 17 {
+	if stats.Tokens.UpstreamUsage.Requests != 1 || stats.Tokens.UpstreamUsage.InputTokens != 10 || stats.Tokens.UpstreamUsage.OutputTokens != 4 || stats.Tokens.UpstreamUsage.TotalTokens != 14 {
 		t.Fatalf("unexpected upstream usage totals: %+v", stats.Tokens.UpstreamUsage)
 	}
 	if stats.Tokens.LlamaTimings.Requests != 1 || stats.Tokens.LlamaTimings.TotalTokens != 5 {
@@ -106,7 +105,7 @@ func TestAggregateRequestStatsMariaDB(t *testing.T) {
 	if stats.Tokens.UnknownSource.Requests != 1 || stats.Tokens.UnknownSource.TotalTokens != 1 {
 		t.Fatalf("unexpected unknown source totals: %+v", stats.Tokens.UnknownSource)
 	}
-	if stats.Latency.SampleCount != 5 {
+	if stats.Latency.SampleCount != 4 {
 		t.Fatalf("latency sample count = %d, want 4", stats.Latency.SampleCount)
 	}
 	if stats.ProviderID != "remote-a" {
