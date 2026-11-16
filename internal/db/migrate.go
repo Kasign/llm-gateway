@@ -19,6 +19,7 @@ var requiredTables = []string{
 	"request_payloads",
 	"request_stream_events",
 	"gateway_settings",
+	"model_prices",
 }
 
 // Migrate 按分号拆分执行迁移文件，再跑 ensureColumns 做增量结构升级，并校验必需表存在。
@@ -133,6 +134,19 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   updated_at DATETIME(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return fmt.Errorf("schema upgrade failed (gateway_settings): %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS model_prices (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  provider_id VARCHAR(64) NOT NULL,
+  model_id VARCHAR(255) NOT NULL,
+  input_price_per_million DECIMAL(24,12) NOT NULL,
+  output_price_per_million DECIMAL(24,12) NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'USD',
+  effective_at DATETIME(6) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_model_price_lookup (provider_id, model_id, effective_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return fmt.Errorf("schema upgrade failed (model_prices): %w", err)
 	}
 	alters := []string{
 		`ALTER TABLE models ADD COLUMN runtime_json LONGTEXT NULL`,
