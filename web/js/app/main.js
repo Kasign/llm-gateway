@@ -2116,6 +2116,7 @@ exposeGlobals({
   probeUpstream,
   loadBenchPanel,
   loadDashboardRecent,
+  loadDashboardStats,
   loadDownloads,
   loadKeys,
   loadKeysPanel,
