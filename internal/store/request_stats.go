@@ -85,8 +85,8 @@ func (r *Repo) AggregateRequestStats(ctx context.Context, from, to time.Time, pr
 	FROM (
 		SELECT status, latency_ms, input_tokens, output_tokens, total_tokens,
 			CASE
-				WHEN JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(analysis_json),analysis_json,'{}'), '$.throughput.source')) IN ('usage','upstream_usage') THEN 'upstream_usage'
-				WHEN JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(analysis_json),analysis_json,'{}'), '$.throughput.source'))='llama_timings' THEN 'llama_timings'
+				WHEN COALESCE(NULLIF(token_source,''), JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(analysis_json),analysis_json,'{}'), '$.throughput.source'))) IN ('usage','upstream_usage') THEN 'upstream_usage'
+				WHEN COALESCE(NULLIF(token_source,''), JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(analysis_json),analysis_json,'{}'), '$.throughput.source')))='llama_timings' THEN 'llama_timings'
 				ELSE 'unknown'
 			END AS token_source,
 			CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL OR total_tokens IS NOT NULL THEN 1 ELSE 0 END AS has_tokens
@@ -149,7 +149,7 @@ func (r *Repo) AggregateRequestStats(ctx context.Context, from, to time.Time, pr
 			UpstreamUsage: RequestStatsTokenSource{Requests: upstream[0], InputTokens: upstream[1], OutputTokens: upstream[2], TotalTokens: upstream[3]},
 			LlamaTimings: RequestStatsTokenSource{Requests: timings[0], InputTokens: timings[1], OutputTokens: timings[2], TotalTokens: timings[3]},
 			UnknownSource: RequestStatsTokenSource{Requests: unknown[0], InputTokens: unknown[1], OutputTokens: unknown[2], TotalTokens: unknown[3]},
-			Note: "仅按 analysis_json.throughput.source 分类；缺少可识别来源的旧记录列入 unknown_source，不推测为上游 usage。llama_timings 为本地引擎计数，不等同于供应商计费 usage。",
+			Note: "优先使用请求结束时同步保存的 token_source；旧记录回退读取 analysis_json.throughput.source。缺少可识别来源的记录列入 unknown_source。llama_timings 为本地引擎计数，不等同于供应商计费 usage。",
 		},
 	}
 	if avgLatency.Valid {
