@@ -29,6 +29,7 @@ OLLAMA_HANDLER_FILE = ROOT / "internal" / "server" / "ollama_admin.go"
 CATALOG_HANDLER_FILE = ROOT / "internal" / "server" / "admin_catalog_http.go"
 RUNTIME_TYPES_FILE = ROOT / "internal" / "llama" / "runtime.go"
 OLLAMA_TAG_TYPES_FILE = ROOT / "internal" / "catalog" / "ollama" / "tags.go"
+INFERENCE_OPS_FILE = ROOT / "internal" / "server" / "inference_ops.go"
 
 
 def schema_block(source: str, name: str) -> str:
@@ -189,6 +190,7 @@ def validate(
     catalog_handler: str,
     runtime_types: str,
     ollama_tag_types: str,
+    inference_ops: str,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -940,6 +942,72 @@ def validate(
                 f"OllamaTagList.tags: missing Tag JSON field {field!r}",
             )
 
+        # 统一运行时 API：请求至少指定 model_id/model_key，卸载结果与 Go DTO 对齐。
+        runtime_routes = {
+            "/api/admin/runtime": ("get", "runtimeAPI"),
+            "/api/admin/runtime/preview": ("get", "runtimePreviewAPI"),
+            "/api/admin/runtime/refresh": ("post", "runtimeRefreshAPI"),
+            "/api/admin/runtime/select": ("post", "runtimeSelectAPI"),
+            "/api/admin/runtime/unload": ("post", "runtimeUnloadAPI"),
+        }
+        for route, (method, handler_name) in runtime_routes.items():
+            operation = operation_block(source, route, method)
+            require(
+                "AdminSessionBearer: []" in operation,
+                f"{method.upper()} {route} must require an admin web session",
+            )
+            require(
+                f'HandleFunc("{route}", s.{handler_name})' in request_list_handler,
+                f"{route} must remain registered to {handler_name}",
+            )
+            require(
+                '"405":' in response_block(operation, "405"),
+                f"{method.upper()} {route} must document Handler's 405 response",
+            )
+        runtime_request = schema_block(source, "RuntimeModelRequest")
+        require(
+            "anyOf:" in runtime_request
+            and "required: [model_id]" in runtime_request
+            and "required: [model_key]" in runtime_request,
+            "RuntimeModelRequest must require model_id or model_key",
+        )
+        runtime_unload = go_function(runtime_handler, "func (s *Server) runtimeUnloadAPI(")
+        for field in ("model_id", "model_key"):
+            require(
+                f'json:"{field}"' in runtime_unload,
+                f"runtimeUnloadAPI request must decode {field}",
+            )
+        unload_schema = schema_block(source, "RuntimeUnloadResult")
+        unload_decl = re.search(r"(?ms)^type InferenceUnloadResult struct \\{(.*?)^\\}", inference_ops)
+        if unload_decl is None:
+            raise ValueError("internal/server/inference_ops.go: InferenceUnloadResult struct not found")
+        unload_fields = {tag for tag in re.findall(r'json:"([^",]+)', unload_decl.group(1)) if tag and tag != "-"}
+        for field in sorted(unload_fields):
+            try:
+                schema_field_block(unload_schema, field)
+            except ValueError:
+                errors.append(f"RuntimeUnloadResult: missing InferenceUnloadResult JSON field {field!r}")
+        require(
+            '"success"' in go_function(inference_ops, "func (r InferenceUnloadResult) toJSON()"),
+            "InferenceUnloadResult.toJSON must keep its synthetic success field",
+        )
+        unload_response = response_block(operation_block(source, "/api/admin/runtime/unload", "post"), "200")
+        require(
+            '"#/components/schemas/RuntimeUnloadResult"' in unload_response,
+            "POST /api/admin/runtime/unload 200 must reference RuntimeUnloadResult",
+        )
+        select_response = response_block(operation_block(source, "/api/admin/runtime/select", "post"), "200")
+        require(
+            '"#/components/schemas/RuntimeActionResult"' in select_response,
+            "POST /api/admin/runtime/select 200 must reference RuntimeActionResult",
+        )
+        runtime_schema = schema_block(source, "RuntimeSnapshot")
+        for field in ("backend", "active_model", "loaded", "catalog", "remote_provider", "hot_unload_supported"):
+            try:
+                schema_field_block(runtime_schema, field)
+            except ValueError:
+                errors.append(f"RuntimeSnapshot: missing runtime field {field!r}")
+
         # GET /api/models returns GatewayModel rows, including runtime-name
         # fields synthesized by ListGatewayModelRows rather than model.Model.
         model_schema = schema_block(source, "GatewayModel")
@@ -1007,6 +1075,8 @@ def main() -> int:
         catalog_handler = CATALOG_HANDLER_FILE.read_text(encoding="utf-8")
         runtime_types = RUNTIME_TYPES_FILE.read_text(encoding="utf-8")
         ollama_tag_types = OLLAMA_TAG_TYPES_FILE.read_text(encoding="utf-8")
+        runtime_handler = REQUEST_LIST_HANDLER_FILE.read_text(encoding="utf-8")
+        inference_ops = INFERENCE_OPS_FILE.read_text(encoding="utf-8")
         errors = validate(
             source,
             provider_handler,
@@ -1026,6 +1096,7 @@ def main() -> int:
             catalog_handler,
             runtime_types,
             ollama_tag_types,
+            inference_ops,
         )
         errors.extend(admin_api_key_scope_errors(source, auth_handler))
     except OSError as exc:
