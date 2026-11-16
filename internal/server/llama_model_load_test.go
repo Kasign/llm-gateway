@@ -104,3 +104,39 @@ func TestLlamaLoadNotFoundRequiresRuntimeConfirmation(t *testing.T) {
 		})
 	}
 }
+
+func TestLlamaLoadAbortsWhenExistingModelsCannotBeUnloaded(t *testing.T) {
+	var unloadCalls, loadCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/models" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"old.gguf","status":{"value":"loaded"}}]}`))
+		case r.URL.Path == "/models/unload" && r.Method == http.MethodPost:
+			unloadCalls++
+			http.Error(w, "model is still busy", http.StatusServiceUnavailable)
+		case r.URL.Path == "/models/load" && r.Method == http.MethodPost:
+			loadCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{}
+	cfg.Llama.ModelsMax = 1
+	s := &Server{cfg: cfg}
+	client := llama.New(upstream.URL, 2*time.Second, "llamacpp", "")
+	_, err := s.loadLlamaCppUpstreamWithClient(context.Background(), client, nil, "target.gguf", upstream.URL, false, nil)
+	if err == nil {
+		t.Fatal("load should fail when the currently loaded model cannot be unloaded")
+	}
+	if unloadCalls == 0 {
+		t.Fatal("expected an attempt to unload the existing model")
+	}
+	if loadCalls != 0 {
+		t.Fatalf("target load was attempted %d times after unload failed", loadCalls)
+	}
+}

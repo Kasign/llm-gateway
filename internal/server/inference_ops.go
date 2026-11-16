@@ -13,6 +13,7 @@ import (
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/model"
+	"github.com/whl/llm-gateway/internal/settings"
 )
 
 const inferenceUnloadStillLoadedWarning = "上游仍报告有模型在内存（含 sleeping）；Gateway 容器内存不会因此下降，请在推理主机/容器上查看占用"

@@ -269,19 +269,32 @@ func (s *Server) loadLlamaCppUpstreamWithClient(ctx context.Context, client *lla
 		return "", fmt.Errorf("no load candidates for upstream model %q", upstreamHint)
 	}
 
-	if gw != nil && s.cfg.Llama.ModelsMax <= 1 {
-		ms, _ := s.models.List(ctx)
-		for _, other := range ms {
-			if other.ModelKey == gw.ModelKey {
-				continue
+	if s.cfg.Llama.ModelsMax <= 1 {
+		if gw != nil {
+			ms, listErr := s.models.List(ctx)
+			if listErr != nil {
+				return "", fmt.Errorf("list Gateway models before load: %w", listErr)
 			}
-			for _, cand := range s.llamaLoadCandidatesWithClient(ctx, client, &other) {
-				_, _ = client.Unload(ctx, cand)
+			for _, other := range ms {
+				if other.ModelKey == gw.ModelKey {
+					continue
+				}
+				candidates := s.llamaLoadCandidatesWithClient(ctx, client, &other)
+				if len(candidates) == 0 {
+					continue
+				}
+				for _, cand := range candidates {
+					if _, unloadErr := client.UnloadFromMemory(ctx, cand); unloadErr != nil {
+						return "", fmt.Errorf("unload existing model %q before loading %q: %w", other.ModelKey, gw.ModelKey, unloadErr)
+					}
+				}
+				if statusErr := s.models.SetStatus(ctx, other.ModelKey, "unloaded"); statusErr != nil {
+					return "", fmt.Errorf("update unloaded state for model %q: %w", other.ModelKey, statusErr)
+				}
 			}
-			_ = s.models.SetStatus(ctx, other.ModelKey, "unloaded")
+		} else if unloadErr := client.UnloadAll(ctx); unloadErr != nil {
+			return "", fmt.Errorf("unload existing models before loading %q: %w", upstreamHint, unloadErr)
 		}
-	} else if s.cfg.Llama.ModelsMax <= 1 {
-		_ = client.UnloadAll(ctx)
 	}
 
 	applog.Infof("loadLlamaCpp: candidates=%v url=%s", candidates, baseURL)
