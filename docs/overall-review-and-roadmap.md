@@ -2,8 +2,8 @@
 
 > Review 日期：2026-11-16
 > 检查分支：`dev`
-> 检查基线：`d989c81e5d7e719a98ca5520730ea33ac3f7e749`（部署链路修复前）
-> 最近 Go CI：`43864137226`；后端测试、镜像、负载与故障注入 Job 成功，前端 Job 仅因旧的 Bundle 同步门禁失败。部署链路修复后的 CI / Browser Smoke 待本提交验证
+> 检查基线：`6d02eb45684db188c2a5e1427cffe8a10fc6c3fc`（默认部署链路修复后）
+> Go CI：`43866482448`，5/5 Job 成功；Browser Smoke：`43866482461`，164/164 检查通过
 >
 > 本文用于统一规划，不代表生产环境验收已经完成。代码级 CI、Mock/故障注入、真实 Provider E2E 和生产部署验收必须分别记录。
 
@@ -167,11 +167,11 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 
 ## 6. 本次检查基线
 
-- 本次修复前分支 HEAD：`d989c81e5d7e719a98ca5520730ea33ac3f7e749`
-- Go CI：[43864137226](https://github.com/Kasign/llm-gateway/actions/runs/43864137226)：Go 测试/竞态/静态检查、Docker 镜像、稳态负载和故障注入成功；前端 Job 因静态 Bundle 同步门禁失败。
-- 修复前 Browser Smoke：[43863892854](https://github.com/Kasign/llm-gateway/actions/runs/43863892854)：停在 Bundle 同步检查，未执行浏览器步骤。
-- 当前修复提交的 CI 与 Browser Smoke 结果待 Actions 完成后补记。
-- 真实 1Panel/OpenResty/Provider 验收仍未执行；代码级 CI 不代替生产环境验收。
+- 当前分支 HEAD：`6d02eb45684db188c2a5e1427cffe8a10fc6c3fc`
+- Go CI：[43866482448](https://github.com/Kasign/llm-gateway/actions/runs/43866482448)，5/5 Job 成功，包含默认 release Docker 镜像构建。
+- Browser Smoke：[43866482461](https://github.com/Kasign/llm-gateway/actions/runs/43866482461)，164/164 检查通过；无页面异常、无 JS Console 错误、无静态资源加载失败。
+- Browser Smoke 的 502 仅来自刻意未启动的本地模型上游，属于预期不可用场景，不是页面资源错误。
+- 真实 1Panel/OpenResty/真实 Provider 验收仍未执行；代码级 CI 不代替生产环境验收。
 
 
 ## 2026-11-16：管理台轮询与 Ollama 目录解析 Review（进行中）
@@ -192,4 +192,4 @@ UI 样式无需整体换肤。按现有 `docs/web-ui-style-interaction-review.md
 - Dockerfile 已调整为默认 `release` 继承 `release-with-web`，保证 Compose 默认构建也使用本次源码生成的静态资源；不再要求部署前手工替换 `app.js`。
 - `index.html` 的 app.js 查询版本同步更新，降低浏览器继续命中旧缓存的概率。
 - Go CI 与 Browser Smoke 改为校验本次构建产物本身的语法、关键字段和浏览器行为，不再要求仓库内跟踪的静态 Bundle 必须与当前源码逐字一致；生产镜像必须从 webbuilder 取资源。
-- 本修复仍需等待新 HEAD 对应的 Go CI、Docker 构建和 Browser Smoke 完成；真实公网反代与生产浏览器验收仍待用户部署后确认。
+- 本修复已由 Go CI 5/5 和 Browser Smoke 164/164 验证；默认 Docker release 已成功构建。真实公网反代与生产浏览器验收仍待用户部署后确认。

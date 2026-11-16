@@ -4,6 +4,9 @@
 
 ## 0. 变更前保护
 
+- [ ] 拉取目标提交后使用默认 Compose 构建：`docker compose build gateway`；当前 Dockerfile 的默认 release 会在镜像构建阶段执行前端 npm build，不需要手工下载或替换 `web/static/dist/app.js`。
+- [ ] 重建并启动 Gateway：`docker compose up -d --force-recreate gateway`；确认实际运行镜像对应本次提交。
+- [ ] 用 `curl -fsS -o /dev/null -w 'HTTP %{http_code}; Content-Type %{content_type}\\n' 'http://127.0.0.1:8088/static/dist/app.js?v=20261116-runtime-bundle-1'` 检查 app.js 返回 200 和 JavaScript Content-Type。
 - [ ] 记录当前镜像 tag/commit、Compose 配置版本和容器状态。
 - [ ] 确认数据库备份与恢复方式可用；本轮不删表、不清库、不重置无关设置。
 - [ ] 准备回滚到上一个已知可用镜像/提交的步骤。
@@ -18,6 +21,7 @@ curl -fsS http://127.0.0.1:8088/health
 ```
 
 - [ ] Gateway、MariaDB、Redis 状态正常；日志无持续重启、配置解析错误或数据库连接失败。
+- [ ] 浏览器 Network 中 app.js、providers-admin.js、password-toggle.js、key-service-picker.js 均返回成功；Console 无未捕获 JS 错误。
 - [ ] Compose 不再把密码哈希中的字符解释为环境变量；无相关插值警告。
 - [ ] 从 Gateway 容器内访问实际配置的 llama.cpp 根地址和 Ollama 地址；不要将容器内的 localhost 误当作另一个容器。
 - [ ] Gateway 发布端口只绑定预期的宿主机地址；不为方便测试而临时暴露管理端口到公网。
