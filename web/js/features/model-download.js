@@ -127,7 +127,8 @@ async function openOllamaPullDialog(model, hintTags) {
     return;
   }
   if (!tags.length) {
-    tags = [{ tag: 'latest', full_name: model + ':latest' }];
+    body.innerHTML = '<span class="err">目录没有返回可用 tag，不能自动假定 latest。可以手动输入完整模型 tag 后重试。</span>';
+    return;
   }
   const hintSet = new Set((hintTags || []).map((t) => String(t).toLowerCase()));
   let html =
