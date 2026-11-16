@@ -58,6 +58,16 @@ jobs:
       - name: 构建管理台与部署 Bundle
         working-directory: web
         run: npm run build
+      - name: 保存前端部署 Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-deployment-bundle-${{ github.sha }}
+          path: |
+            web/static/dist/app.js
+            web/static/dist/providers-admin.js
+            web/static/dist/key-service-picker.js
+          if-no-files-found: error
+          retention-days: 14
 
       - name: 校验前端语法、关键字段与 Bundle 一致性
         run: |
