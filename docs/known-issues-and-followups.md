@@ -55,6 +55,15 @@
 - 本批不把 HF 下载取消、Ollama Pull 取消或重启恢复当作新任务；这些已有实现和契约需在后续统一生命周期审查中按真实缺口处理。
 - 代码/契约门禁通过前保持进行中；以本提交对应的完整 Go CI 为验收依据。
 
+## 2026-11-16：Ollama 管理 API 契约补齐（进行中）
+
+- 对照 `server.go` 路由注册、`ollama_admin.go` 和 `admin_catalog_http.go`，确认 Ollama 专用列表、Pull、Pull 取消、加载、卸载、删除，以及 Library Tags 查询接口此前未进入 OpenAPI。
+- 已补齐以上 7 个现有路由的请求/响应 Schema、管理员 Web Session 鉴权声明与实际状态码；没有新增路由或改变 Handler 行为。
+- `GET /api/admin/ollama` 的目录和已加载项目复用 `llama.CatalogItem` JSON 字段定义；Tags 响应复用 `ollama.Tag` 字段定义。
+- Pull 为异步操作：创建接口返回 `job_id`，进度仍统一通过 `GET /api/downloads` 查看；状态沿用 `downloading/ready/download_failed/download_cancelled`。取消只作用于当前进程仍在运行的任务。
+- Ollama Delete 通过 `ModelOpsResult.success` 表达业务成功/失败，Handler 对业务失败仍返回 HTTP 200；契约明确记录该现状，不擅自改变状态码语义。
+- 已扩展契约门禁，对路由注册、Handler 请求字段、返回字段及 CatalogItem/Tag JSON 字段进行对账。待本提交完整 Go CI 通过后再关闭本批。
+
 ## 当前执行范围
 
 1. Provider 热更新已完成最后一轮静态审查：没有确认正常配置路径可触发的 setter 失败，不增加额外回滚框架或重复测试。
