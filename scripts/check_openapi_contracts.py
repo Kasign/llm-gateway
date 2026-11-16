@@ -311,8 +311,7 @@ def validate(
         )
         require(
             "http.MethodGet" in key_create_handler
-            and "http.StatusInternalServerError" in key_create_handler
-            and '"database_error"' in key_create_handler,
+            and 'jsonError(w, 500, "database_error"' in key_create_handler,
             "keysAPI GET must list key metadata and map storage errors to HTTP 500",
         )
 
@@ -336,7 +335,7 @@ def validate(
         key_update_operation = operation_block(source, "/api/admin/keys/{id}", "put")
         key_update_response = response_block(key_update_operation, "200")
         require(
-            "success: true" in key_update_response,
+            "const: true" in key_update_response,
             "PUT /api/admin/keys/{id} 200 must describe success=true",
         )
         for status in ("400", "401", "500"):
@@ -358,7 +357,7 @@ def validate(
             response_block(key_delete_operation, status)
         require(
             "http.MethodDelete" in key_action_handler
-            and "http.StatusNoContent" in key_action_handler
+            and "w.WriteHeader(204)" in key_action_handler
             and '"delete_failed"' in key_action_handler,
             "keyAction DELETE must return bodyless HTTP 204 and map storage errors",
         )
