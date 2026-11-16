@@ -115,8 +115,8 @@ API Key 编辑/创建表单增加每日预算字段，并展示当日已用金�
 - [x] 增加价格字段校验测试，覆盖负数、精度、币种和零价格。
 
 待完成：
-- [ ] 管理 API（Web Session）与 OpenAPI 契约。
-- [ ] 请求结束时根据可信上游 usage 生成费用快照。
+- [x] 管理 API（Web Session）与 OpenAPI 契约：`GET /api/admin/model-prices` 支持 Provider/模型筛选，`POST` 追加价格版本；未授权请求拒绝，未提供删除/覆盖接口。
+- [ ] 请求结束时根据可信上游 usage 生成费用快照。当前已确认审计 Writer 使用单 worker FIFO，后续应将费用快照与 FinishRequest 合并为同一关键队列任务，不能绕过队列直接并发写库。
 - [ ] 覆盖 usage 缺失、未知来源、无价格、旧记录和流式结束场景。
 
 ### C2：费用统计
