@@ -2193,7 +2193,7 @@ const REQUESTS_POLL_MS=15000;
 const DOWNLOADS_POLL_MS=5000;
 setInterval(()=>{
   if(!isAuthenticated())return;
-  if($('requests')?.classList.contains('active'))loadRequests().catch(()=>{});
+  if($('requests')?.classList.contains('active'))loadRequests({silent:true}).catch(()=>{});
 },REQUESTS_POLL_MS);
 setInterval(()=>{
   if(!isAuthenticated())return;

@@ -17,16 +17,29 @@ function statsFmt(value) {
   return Number.isFinite(n) ? Math.round(n).toLocaleString() : '0';
 }
 
-async function loadRequestStats() {
+let requestLoadEpoch = 0;
+let requestSnapshot = '';
+let requestStatsKey = '';
+let requestStatsLoadedAt = 0;
+let requestStatsEpoch = 0;
+
+async function loadRequestStats(force = false) {
   const el = $('requestStats');
   if (!el) return;
   const q = new URLSearchParams();
   q.set('range', $('rqStatsRange')?.value || '24h');
   const provider = $('rqProvider')?.value?.trim();
   if (provider) q.set('provider', provider);
-  el.innerHTML = '<p class="muted small">正在汇总统计…</p>';
+  const key = q.toString();
+  const now = Date.now();
+  if (!force && key === requestStatsKey && now - requestStatsLoadedAt < 60000) return;
+  requestStatsKey = key;
+  const epoch = ++requestStatsEpoch;
+  if (!el.hasChildNodes()) el.innerHTML = '<p class="muted small">正在汇总统计…</p>';
   try {
-    const s = await api('/api/requests/stats?' + q.toString());
+    const s = await api('/api/requests/stats?' + key);
+    if (epoch !== requestStatsEpoch) return;
+    requestStatsLoadedAt = Date.now();
     const r = s.requests || {};
     const lat = s.latency || {};
     const tok = s.tokens || {};
@@ -69,25 +82,33 @@ async function loadRequestStats() {
       (distribution || '<span class="muted small">暂无数据</span>') + '</div>' +
       '<p class="small muted" style="margin:8px 0">Token 口径：上游 usage 是上游响应提供的 usage；llama.cpp timings 是本地引擎计数，不等同于供应商计费数据；来源未知的数据单独展示，不会推断为真实 usage。</p>';
   } catch (e) {
-    el.innerHTML = '<span class="err">' + esc(e.message || '统计加载失败') + '</span>';
+    if (epoch !== requestStatsEpoch) return;
+    if (!el.hasChildNodes()) el.innerHTML = '<span class="err">' + esc(e.message || '统计加载失败') + '</span>';
   }
 }
 
-export async function loadRequests() {
+export async function loadRequests(options = {}) {
   const tableEl = $('requestsTable');
   if (!tableEl) return;
-  tableEl.setAttribute('aria-busy', 'true');
-  tableEl.innerHTML = '<p class="muted small">正在加载调用记录…</p>';
-  loadRequestStats();
+  const epoch = ++requestLoadEpoch;
   const q = new URLSearchParams();
   q.set('limit', '100');
   if ($('rqModel').value) q.set('model', $('rqModel').value);
   if ($('rqStatus').value) q.set('status', $('rqStatus').value);
   if ($('rqKey').value) q.set('key', $('rqKey').value);
   if ($('rqProvider').value.trim()) q.set('provider', $('rqProvider').value.trim());
+  const queryKey = q.toString();
+  loadRequestStats(Boolean(options.forceStats));
+  tableEl.setAttribute('aria-busy', 'true');
+  if (!tableEl.hasChildNodes()) tableEl.innerHTML = '<p class="muted small">正在加载调用记录…</p>';
   try {
-    const j = await api('/api/requests?' + q);
+    const j = await api('/api/requests?' + queryKey);
+    if (epoch !== requestLoadEpoch) return;
     const rows = j.data || [];
+    const snapshot = JSON.stringify(rows);
+    if (snapshot === requestSnapshot && queryKey === tableEl.dataset.queryKey) return;
+    requestSnapshot = snapshot;
+    tableEl.dataset.queryKey = queryKey;
     tableEl.innerHTML = !rows.length
       ? emptyState('暂无记录')
       : wrapTable(
@@ -112,10 +133,15 @@ export async function loadRequests() {
               .join(''),
         );
   } catch (e) {
-    tableEl.innerHTML = '<div class="msg err" role="alert"><span>加载调用记录失败：' + esc(e.message || '未知错误') +
-      '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">重试</button></div>';
+    if (epoch !== requestLoadEpoch) return;
+    if (!requestSnapshot) {
+      tableEl.innerHTML = '<div class="msg err" role="alert"><span>加载调用记录失败：' + esc(e.message || '未知错误') +
+        '</span> <button type="button" class="btn sm ghost" onclick="loadRequests()">重试</button></div>';
+    } else {
+      showToast('调用记录刷新失败：' + (e.message || '未知错误'), 'err');
+    }
   } finally {
-    tableEl.setAttribute('aria-busy', 'false');
+    if (epoch === requestLoadEpoch) tableEl.setAttribute('aria-busy', 'false');
   }
 }
 
