@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 当前代码/契约基线：`447a14d8773f58987467e90dba58294b7e474e3f`；Go CI [运行 43833571803](https://github.com/Kasign/llm-gateway/actions/runs/43833571803) 的 5 个 Job 全部成功，包含调用方 API Key 列表、创建、修改、删除、启用、禁用和轮换操作契约门禁。
+- 当前代码基线：`d422456006dca934f17cc206a73196ec0a472ce6`；Go CI [运行 43862999568](https://github.com/Kasign/llm-gateway/actions/runs/43862999568) 的 Go 测试/竞态、Docker 构建、稳态负载、故障注入均成功；前端契约 Job 因静态 Bundle 未同步失败，不能记为完整通过。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
 - 最近一次 Web UI 浏览器验收 [运行 40816685743](https://github.com/Kasign/llm-gateway/actions/runs/40816685743) 在 `8ece8c65d6884cbe0d104a343dcb5fce501c9e94` 上通过；之后的提交只修改配置/契约文档与检查脚本，没有改变前端运行时源码。
 - 目前没有开放 PR 或 Issue（2026-10-29 复核）。真实供应商、公网 OpenResty/公网链路和 1Panel 部署验收仍未完成；Mock/CI 不作为实际生产验收证据。
@@ -606,3 +606,12 @@
 - 非 Gateway 模型路径的 `UnloadAll` 错误也会中止目标加载。
 - 新增真实 HTTP Handler 模拟测试，验证旧模型卸载失败时不会继续发送目标模型 Load。提交 `a5c8a712d44830146f2cccfa4a7d0be926e980a8`；Go CI [运行 43849359264](https://github.com/Kasign/llm-gateway/actions/runs/43849359264) 5/5 Job 全部成功，浏览器验收 [运行 43849359250](https://github.com/Kasign/llm-gateway/actions/runs/43849359250) 成功。
 
+
+
+## 2026-11-16：管理台轮询与 Ollama 目录解析 Review（进行中）
+
+- 调用记录轮询：提交 `5f596290171019a19d1bab010e04a0505c2569ab`。轮询不再先清空记录区域；列表快照无变化时跳过 DOM 重建；统计数据最多每 60 秒刷新；通过请求 epoch 丢弃过期列表/统计响应。待静态 Bundle 同步及 Browser Smoke 完整通过。
+- Ollama 搜索：提交 `d422456006dca934f17cc206a73196ec0a472ce6`。模型卡片匹配改为不依赖固定 class 和属性顺序；标题/描述支持嵌套标签和 HTML 实体；无可识别模型链接时返回明确解析错误。
+- Ollama Tags：同一提交移除空解析结果时自动伪造 `latest` 的行为；页面结构不兼容或没有可解析标签时返回错误，避免误导用户下载规格。
+- Go CI [运行 43862999568](https://github.com/Kasign/llm-gateway/actions/runs/43862999568)：Go 测试/竞态、Docker 构建、稳态负载、故障注入通过；前端契约 Job 因 `web/static/dist/app.js` 未同步源码失败。浏览器 Smoke [运行 43862999564](https://github.com/Kasign/llm-gateway/actions/runs/43862999564) 也因 Bundle 同步检查失败，尚无浏览器验收结论。
+- 待办：同步前端 Bundle；增加目录来源级状态提示前先对照现有 API/前端契约，避免只为提示新增不必要字段；随后重跑完整 CI 与 Browser Smoke。
