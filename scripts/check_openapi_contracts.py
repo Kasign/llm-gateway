@@ -892,12 +892,12 @@ def validate(
         catalog_decl = re.search(r"(?ms)^type CatalogItem struct \{(.*?)^\}", runtime_types)
         if catalog_decl is None:
             raise ValueError("internal/llama/runtime.go: CatalogItem struct not found")
-        catalog_schema = schema_block(source, "RuntimeCatalogItem")
+        catalog_schema = schema_block(source, "OllamaCatalogItem")
         for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', catalog_decl.group(1)) if tag and tag != "-" }):
             try:
                 schema_field_block(catalog_schema, field)
             except ValueError:
-                errors.append(f"RuntimeCatalogItem: missing CatalogItem JSON field {field!r}")
+                errors.append(f"OllamaCatalogItem: missing CatalogItem JSON field {field!r}")
         for handler_name, request_fields, response_fields in (
             ("ollamaPullAPI", ("name",), ("success", "name", "job_id")),
             ("ollamaPullCancelAPI", ("job_id",), ("success",)),
@@ -926,18 +926,18 @@ def validate(
         tag_decl = re.search(r"(?ms)^type Tag struct \{(.*?)^\}", ollama_tag_types)
         if tag_decl is None:
             raise ValueError("internal/catalog/ollama/tags.go: Tag struct not found")
-        tag_schema = schema_block(source, "OllamaTagsResult")
+        tag_schema = schema_block(source, "OllamaTagList")
         tag_items = re.search(
             r"(?ms)^        tags:\n          type: array\n          items:\n            type: object\n(.*?)(?=^      additionalProperties:)",
             tag_schema,
         )
         if tag_items is None:
-            raise ValueError("OllamaTagsResult.tags.items schema not found")
+            raise ValueError("OllamaTagList.tags.items schema not found")
         tag_fields = set(re.findall(r"(?m)^              ([a-z][a-z0-9_]*):", tag_items.group(1)))
         for field in sorted({tag for tag in re.findall(r'json:"([^",]+)', tag_decl.group(1)) if tag and tag != "-"}):
             require(
                 field in tag_fields,
-                f"OllamaTagsResult.tags: missing Tag JSON field {field!r}",
+                f"OllamaTagList.tags: missing Tag JSON field {field!r}",
             )
 
         # GET /api/models returns GatewayModel rows, including runtime-name
