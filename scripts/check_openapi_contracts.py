@@ -797,13 +797,21 @@ def validate(
         )
         if download_item_schema is None:
             raise ValueError("DownloadsEnvelope.data.items schema not found")
+        download_item_fields = set(
+            re.findall(r"(?m)^              ([a-z][a-z0-9_]*):", download_item_schema.group(1))
+        )
         for field in sorted(download_json_fields):
-            try:
-                schema_field_block(download_item_schema.group(1), field)
-            except ValueError:
+            if field not in download_item_fields:
                 errors.append(f"DownloadsEnvelope item: missing Handler JSON field {field!r}")
-        required_line = re.search(r"(?m)^            required: \\[(.*?)\\]$", download_item_schema.group(1))
-        required_fields = set(required_line.group(1).replace(" ", "").split(",")) if required_line else set()
+        required_line = next(
+            (line for line in download_item_schema.group(1).splitlines() if line.strip().startswith("required: [")),
+            "",
+        )
+        required_fields = (
+            set(required_line.partition("[")[2].partition("]")[0].replace(" ", "").split(","))
+            if required_line
+            else set()
+        )
         for field in ("model_key", "kind", "status", "done", "total"):
             require(
                 field in required_fields,
