@@ -1219,6 +1219,55 @@
       el.innerHTML = '<span class="err small">' + esc(e.message) + "</span>";
     }
   }
+
+function formatTokenCount(value){
+  const n=Number(value);
+  return Number.isFinite(n)&&n>=0?Math.trunc(n).toLocaleString('zh-CN):"—";
+}
+async function loadDashboardStats(){
+  const root=$(dashTokenStats);
+  const range=$(dashTokenRange);
+  if(!root)return;
+  const selected=["24h","7d","30d"].includes(range?.value)?range.value:"24h";
+  root.setAttribute("aria-busy",'true);
+  try{
+    const stats=await api("api/requests/stats?range=" + encodeURIComponent(selected));
+    const sources=[
+      {key:"upstream_usage",label:"远程上游 usage",hint:"上游返回的 Token 用量"},
+      {key:"llama_timings",label:"本地 llama.cpp",hint:"本地引擎 timings 统计"},
+      {key:"unknown_source",label:"来源未知",hint:"旧记录或缺少可识别来源"},
+    ];
+    const totals=sources.reduce((sum,item)=>{
+      const v=stats.tokens?.[item.key]||{};
+      sum.input+=Number(v.input_tokens)||0;
+      sum.output+=Number(v.output_tokens)||0;
+      sum.total+=Number(v.total_tokens)||0;
+      return sum;
+    },{input:0,output:0,total:0});
+    const requests=stats.requests||{};
+    root.innerHTML=`
+      <div class="token-stats-summary">
+        <div class="stat"><span>请求总数</span><b>${formatTokenCount(requests.total_requests)}</b><small>成功 ${formatTokenCount(requests.success_requests)} · 失败 ${formatTokenCount(requests.error_requests)} · 取消 ${formatTokenCount(requests.cancelled_requests)}</small></div>
+        <div class="stat"><span>Token 总量</span><b>${formatTokenCount(totals.total)}</b><small>输入 ${formatTokenCount(totals.input)} · 输出 ${formatTokenCount(totals.output)}</small></div>
+        <div class="stat"><span>成功率</span><b>${Number(requests.success_rate_percent||0).toFixed(1)}%</b><small>按已结束请求计算</small></div>
+        <div class="stat"><span>平均延迟</span><b>${stats.latency?.average_ms==null?"—":Math.round(Number(stats.latency.average_ms)).toLocaleString('zh-CN)+" ms"}</b><small>${formatTokenCount(stats.latency?.sample_count)} 个有效样本</small></div>
+      </div>
+      <div class="table-wrap token-source-table">
+        <table><thead><tr><th>统计来源</th><th>有 Token 记录的请求</th><th>输入 Token</th><th>输出 Token</th><th>合计</th></tr></thead><tbody>
+          ${sources.map(item=>{
+            const v=stats.tokens?.[item.key]||{};
+            return `<tr><td><strong>${item.label}</strong><div class="small muted">${item.hint}</div></td><td>${formatTokenCount(v.requests)}</td><td>${formatTokenCount(v.input_tokens)}</td><td>${formatTokenCount(v.output_tokens)}</td><td><strong>${formatTokenCount(v.total_tokens)}</strong></td></tr>`;
+          }).join(')}
+        </tbody></table>
+      </div>
+      <p class="small muted token-stats-note">${esc(stats.tokens?.note||'Token 来源按请求审计记录分类；不同来源不可直接视为供应商账单用量。)}</p>`;
+  }catch(e){
+    root.innerHTML='<span class="err small">Token 统计加载失败：'+esc(e.message)+'</span>';
+  }finally{
+    root.setAttribute("aria-busy",'false);
+  }
+}
+
   function adminKeyStatus() {
     const el = $("adminKeyStatus");
     if (!el) return;
@@ -1288,7 +1337,8 @@
         jobs.push(
           loadSystem({ force: "bootstrap" }).then(() => applyBackendFormFromStore()).catch(() => {
           }),
-          loadDashboardRecent()
+          loadDashboardRecent(),
+          loadDashboardStats()
         );
       }
       if ($("keys")?.classList.contains("active")) jobs.push(loadKeys());
@@ -2745,6 +2795,8 @@
         if (b.dataset.tab === "dashboard") {
           loadDashboardRecent().catch(() => {
           });
+          loadDashboardStats().catch(() => {
+          });
           loadSystem().catch(() => {
           });
           dashboardPoll.start({ skipImmediate: true });
@@ -2765,6 +2817,7 @@
         syncTopbarRefresh();
       });
       syncTopbarRefresh();
+      $("dashTokenRange")?.addEventListener("change", () => loadDashboardStats().catch(() => {}));
       $("models-local")?.addEventListener("click", handleInferClick);
       modelHub = {
         rows: [],
@@ -2983,6 +3036,8 @@
               await loadDashboardRecent().catch(() => {
               });
             }
+            const statsEvery = this.intervalMs <= 4e3 ? 30 : 10;
+            if (this.auxTick % statsEvery === 0) await loadDashboardStats().catch(() => {});
           } finally {
             this.inFlight = false;
             if (this.active && $("dashboard")?.classList.contains("active")) this.schedule();
