@@ -57,13 +57,12 @@ func main() {
 	s := server.New(cfg, d.SQL)
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	if err := s.CheckDependencies(ctx); err != nil {
-		cancel()
-		// Redis 或上游 LLM 暂时不可用时仍启动，只记日志；可用时会恢复未完成的模型下载。
+		// Redis 或活动推理 Provider 不可用时仍启动；模型下载恢复与活动推理 Provider 无关。
 		applog.Printf("dependency check failed at startup: %v", err)
-	} else {
-		cancel()
-		s.RecoverDownloads()
 	}
+	cancel()
+	s.RecoverDownloads()
+	s.RecoverOllamaPullJobs()
 	s.ReconcileModelDiskSizes()
 
 	// 4. 在单独 goroutine 里监听 HTTP；主 goroutine 等待退出信号。

@@ -19,6 +19,10 @@ const (
 )
 
 // ollamaPullJobListed decides whether a job row should appear in /api/downloads.
+func ollamaPullJobInterrupted(status string, running bool) bool {
+	return strings.TrimSpace(status) == "downloading" && !running
+}
+
 func ollamaPullJobListed(status string, updatedAt, now int64) bool {
 	status = strings.TrimSpace(status)
 	if status == "" {
@@ -38,6 +42,41 @@ func ollamaPullJobListed(status string, updatedAt, now int64) bool {
 		return age <= ollamaPullFailedVisibleSec
 	default:
 		return age <= ollamaPullDoneVisibleSec
+	}
+}
+
+
+// RecoverOllamaPullJobs reconciles persisted jobs left in downloading state by a previous process.
+// Ollama Pull is not resumed automatically; users can start a new pull after the interrupted row is visible.
+func (s *Server) RecoverOllamaPullJobs() {
+	ctx := context.Background()
+	jobIDs, err := s.limiter.ListOllamaPullJobs(ctx)
+	if err != nil {
+		applog.Printf("recover Ollama pull jobs: list failed: %v", err)
+		return
+	}
+	for _, jobID := range jobIDs {
+		values, err := s.limiter.GetDownload(ctx, jobID)
+		if err != nil {
+			applog.Printf("recover Ollama pull jobs: job=%s read failed: %v", jobID, err)
+			continue
+		}
+		s.downloadMu.Lock()
+		_, running := s.downloadCancel[jobID]
+		s.downloadMu.Unlock()
+		if !ollamaPullJobInterrupted(values["status"], running) {
+			continue
+		}
+		message := "Gateway restarted while the Ollama pull was running; start the pull again"
+		if err := s.limiter.SetDownload(ctx, jobID, map[string]interface{}{
+			"status": "download_failed",
+			"error": message,
+			"updated_at": time.Now().Unix(),
+		}); err != nil {
+			applog.Printf("recover Ollama pull jobs: job=%s update failed: %v", jobID, err)
+			continue
+		}
+		applog.Printf("Ollama pull marked interrupted after restart: job=%s", jobID)
 	}
 }
 

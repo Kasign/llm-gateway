@@ -566,10 +566,18 @@
 - 本批只修改 OpenAPI、契约检查和台账，没有改动 Benchmark 业务 Handler 或任务状态机。
 
 
-## 2026-11-16：HF 下载取消/删除生命周期修复（进行中）
+## 2026-11-16：HF 下载取消/删除生命周期修复（已完成）
 
-- 生命周期联调发现真实竞态：`CancelModelDownload` 在仅发出 Context cancel 后立即删除运行任务登记并把数据库状态改为 cancelled；下载 goroutine 可能仍在退出过程中。此时用户重试会与旧任务同时写入同一 `.part` 文件，删除模型也可能先于旧任务停止写文件。
-- 本批已将 HF 下载任务登记前移到启动 goroutine 之前，增加 worker 完成信号；取消只发出取消请求，由 worker 实际退出后写终态并清理登记。
-- 删除模型前无条件检查并等待同 Key 的活动 worker（不依赖可能滞后的数据库状态），避免重试刚启动时删除操作漏过任务；重试复用统一启动入口，活动任务仍登记时拒绝重复启动。
+- 生命周期联调发现真实竞态：取消仅发出 Context cancel 后就删除运行任务登记，下载 goroutine 可能仍在退出；立即重试可能与旧任务同时写同一 `.part` 文件，删除模型也可能先于旧任务停止写文件。
+- 将 HF 下载任务登记前移到启动 goroutine 之前，增加 worker 完成信号；取消只发出取消请求，由 worker 实际退出后写终态并清理登记。
+- 删除模型前无条件检查并等待同 Key 的活动 worker（不依赖可能滞后的数据库状态）；重试复用统一启动入口，活动任务未退出时拒绝重复启动。
 - 新增取消任务仍保持登记、删除等待 worker 退出的回归测试。
-- 本批只处理 HF 下载任务的进程内并发/文件生命周期，不改变断点续传协议、下载状态枚举或 Ollama Pull 状态机；完整 CI 通过后再关闭。
+- 提交 `4a4b0c1b82faf994c5a07d57531283a08d414eed`；Go CI [运行 43845976641](https://github.com/Kasign/llm-gateway/actions/runs/43845976641) 5/5 Job 全部成功，浏览器验收 [运行 43845976519](https://github.com/Kasign/llm-gateway/actions/runs/43845976519) 成功。
+- 本批只处理 HF 下载任务的进程内并发/文件生命周期，不改变断点续传协议或下载状态枚举。
+
+## 2026-11-16：Ollama Pull 进程重启状态恢复（进行中）
+
+- 生命周期审查发现 Ollama Pull 的任务 ID 与进度存放在 Redis，但任务执行 goroutine 只存在于当前进程内；Gateway 重启后 Redis 中的 `status=downloading` 会被持续展示为下载中，而取消接口已无法找到对应运行任务。
+- 本批在启动时扫描 Redis 跟踪的 Ollama Pull 任务，将没有当前进程执行者的 `downloading` 标记为 `download_failed`，保留已有进度并写明需要重新发起 Pull；不假设 Ollama Pull 能跨进程自动续传。
+- HF 下载恢复从活动推理 Provider 健康检查分支中解耦：HF 下载依赖数据库和 HF 网络，不应因当前推理 Provider 不可达而跳过恢复。
+- 增加重启状态判定测试；完整 CI 通过后关闭本批。
