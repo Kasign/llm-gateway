@@ -144,7 +144,7 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   currency CHAR(3) NOT NULL DEFAULT 'USD',
   effective_at DATETIME(6) NOT NULL,
   created_at DATETIME(6) NOT NULL,
-  INDEX idx_model_price_lookup (provider_id, model_id, effective_at, id)
+  UNIQUE KEY uk_model_price_effective (provider_id, model_id, effective_at), INDEX idx_model_price_lookup (provider_id, model_id, effective_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return fmt.Errorf("schema upgrade failed (model_prices): %w", err)
 	}
