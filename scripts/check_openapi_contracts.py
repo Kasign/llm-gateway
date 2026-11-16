@@ -281,6 +281,22 @@ def validate(
             "provider_id_exists" in create_operation and "409" in create_operation,
             "Provider creation must document the stable provider_id_exists conflict code",
         )
+
+        # 调用方 API Key 名称冲突必须与创建 Handler 的 409 响应保持一致。
+        key_create_operation = operation_block(source, "/api/admin/keys", "post")
+        key_create_conflict = response_block(key_create_operation, "409")
+        require(
+            "#/components/responses/AdminError" in key_create_conflict,
+            "POST /api/admin/keys 409 must use the stable AdminError envelope",
+        )
+        key_create_handler = go_function(
+            request_list_handler, "func (s *Server) keysAPI("
+        )
+        require(
+            "http.StatusConflict" in key_create_handler
+            and '"key_name_conflict"' in key_create_handler,
+            "keysAPI must return HTTP 409 with key_name_conflict for duplicate names",
+        )
         delete_response = response_block(
             operation_block(source, "/api/admin/providers/{id}", "delete"), "204"
         )

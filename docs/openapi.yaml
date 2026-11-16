@@ -517,6 +517,8 @@ paths:
           $ref: "#/components/responses/AdminError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/AdminError"
   /api/admin/keys/{id}:
     parameters:
       - name: id
