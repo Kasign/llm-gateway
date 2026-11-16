@@ -802,17 +802,21 @@ def validate(
                 schema_field_block(download_item_schema.group(1), field)
             except ValueError:
                 errors.append(f"DownloadsEnvelope item: missing Handler JSON field {field!r}")
+        required_line = re.search(r"(?m)^            required: \\[(.*?)\\]$", download_item_schema.group(1))
+        required_fields = set(required_line.group(1).replace(" ", "").split(",")) if required_line else set()
         for field in ("model_key", "kind", "status", "done", "total"):
             require(
-                re.search(rf"(?m)^            required:.*\\b{re.escape(field)}\\b", downloads_schema) is not None,
+                field in required_fields,
                 f"DownloadsEnvelope item must require {field}",
             )
+        kind_field = re.search(r"(?m)^              kind:.*$", download_item_schema.group(1))
+        status_field = re.search(r"(?m)^              status:.*$", download_item_schema.group(1))
         require(
-            "enum: [hf, ollama]" in schema_field_block(download_item_schema.group(1), "kind"),
+            kind_field is not None and "enum: [hf, ollama]" in kind_field.group(0),
             "DownloadsEnvelope.kind must enumerate the Handler's hf/ollama task kinds",
         )
         require(
-            "enum: [downloading, download_failed, download_cancelled, ready]" in schema_field_block(download_item_schema.group(1), "status"),
+            status_field is not None and "enum: [downloading, download_failed, download_cancelled, ready]" in status_field.group(0),
             "DownloadsEnvelope.status must enumerate the supported download states",
         )
         require(
