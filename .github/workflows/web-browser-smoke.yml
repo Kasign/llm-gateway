@@ -109,12 +109,12 @@ jobs:
           import pathlib, sys
           path = pathlib.Path(sys.argv[1])
           content = path.read_text()
-          start = content.index("\\ntools:\\n")
-          end = content.index("\\nstorage:\\n", start)
+          start = content.index("\ntools:\n")
+          end = content.index("\nstorage:\n", start)
           section = content[start:end]
           replacements = {
               "  enabled: false": "  enabled: true",
-              "  allowed_models: []": "  allowed_models:\\n    - provider_id: llamacpp\\n      model_key: browser-smoke-model",
+              "  allowed_models: []": "  allowed_models:\n    - provider_id: llamacpp\n      model_key: browser-smoke-model",
               "  allowed_tools: []": "  allowed_tools: [web.search]",
               '    base_url: ""': '    base_url: "http://127.0.0.1:18080"',
               "    allow_insecure_http: false": "    allow_insecure_http: true",
