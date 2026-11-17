@@ -79,6 +79,7 @@ Agent 前缀限制为单个小写路径段（例如 `/deepseek`），禁止与 `
 | `request_logs` | 请求状态、耗时、HTTP 状态、Provider 分析字段。 | 新增可空 `provider_id`，由解析出的实际 Provider 写入；`idx_provider_started` 支持按 Provider 和时间窗口聚合。列表筛选通过规范化后的 `provider_id=?` 精确查询，旧记录保持 NULL/空值，不根据当前活动上游反推历史 Provider。 |
 | `request_payloads` | 可选请求/响应正文及请求/上游 Header。 | 正文可能包含敏感业务内容；由日志存储设置控制。 |
 | `request_stream_events` | SSE 事件序号、时间、类型、字段和可选原始行。 | 原始流事件字段通过 `ensureColumns` 升级。 |
+| `request_tool_call_events` | 按 `request_id + seq` 保存每次工具调用的轮次、工具名、状态、耗时、结果字节数、稳定错误码和落库时间。 | 不保存原始参数、搜索词、结果正文或原始错误；主键支持详情按序查询。无外键，ClearRequests 与 retention 必须在删除 request_logs 前显式清理子事件；初始 SQL 与 ensureColumns 均需保持同步。 |
 | `gateway_settings` | 持久化全局活动后端及管理台可调设置。 | 不适合存储远程 Provider 密钥，也不承载 Agent 路由静态配置。 |
 
 **迁移系统现状与风险**：目前没有独立的 `schema_migrations` 版本账本；SQL 执行依靠单个 `001_init.sql` 加程序内 `ensureColumns`，重复列通过匹配 MariaDB 的 duplicate-column 错误忽略。当前 SQL 是简单 DDL，可按现有契约运行，但继续增加多版本/数据迁移时应先引入有序、可追踪、可观测的迁移记录，而不是无限扩展硬编码列清单。分号拆分也不适合包含分号的过程体/复杂 SQL。

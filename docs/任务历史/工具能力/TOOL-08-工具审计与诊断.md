@@ -1,0 +1,144 @@
+# TOOL-08 工具审计与诊断
+
+> 状态：已完成
+> 更新日期：2026-11-17
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 开始基线：3ebe47fff33c4141048f010b808baa6634f00535
+> 前置任务：[TOOL-07 权限与管理配置](任务历史/工具能力/TOOL-07-权限与管理配置.md)
+> 任务状态权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 任务目标
+
+为一次 Gateway 推理请求中的每次工具调用建立可查询的审计明细，并在现有请求详情页按 request_id 展示工具调用轮次、工具名称、执行状态、耗时、结果大小及请求级 Token 总量。
+
+同一客户端请求仍只有一条顶层请求记录、一次 Pipeline 生命周期；工具审计是该请求的子事件，不创建独立推理请求。
+
+## 2. 不可破坏的约束
+
+- 复用现有 audit.Writer、store.Repo、request_logs 和请求详情接口，不新增独立审计服务。
+- 审计写入不得阻塞或改变模型响应；队列满、数据库错误或审计失败不能使推理请求失败。
+- 所有工具事件必须关联顶层 request_id，并能稳定排序还原模型轮次与工具调用顺序。
+- 不保存工具原始参数、搜索词、完整结果、Authorization、Provider Key 或其他凭据；仅保存诊断必需的元数据。
+- 工具错误对外继续使用稳定错误分类；内部审计也不得持久化未经脱敏的原始错误文本。
+- 请求级 Token 总量继续使用所有模型轮次 usage 的聚合结果；缺失或不完整时保持 unknown，不得用最后一轮 usage 代替总量。
+- 普通非工具请求不增加不必要的审计事件或数据库往返。
+- 保持现有异步审计队列优先级、关闭和 Flush 语义；明确工具事件丢弃/写入失败的诊断指标。
+- 兼容已有数据库和历史请求记录；旧请求没有工具事件时详情页正常展示空列表。
+
+## 3. 已确认的现有结构
+
+1. internal/tools/coordinator.Result 当前只有 ModelRounds、ToolRounds、ToolCalls 和 RoundUsage 聚合数据，没有逐次工具调用事件。
+2. Coordinator 在循环内调用 ToolExecutor.Execute，具备工具名称、轮次和执行边界；需要审查合适的事件采集点，避免让 Coordinator 依赖数据库或 Server。
+3. internal/server/tool_usage.go 已聚合所有模型轮次 Token，并写入 callState.tokens；Finish 阶段会把请求级 Token 写入现有 request_logs。
+4. internal/audit.Writer 已提供异步 CreateRequest、FinishRequest、SaveRequestAnalysis、InsertStreamEvents 等方法，可扩展工具事件写入，不应在工具执行 goroutine 中直接操作数据库。
+5. internal/store.RequestLog 保存顶层请求摘要；当前 store 仅有 StreamEvent，没有工具调用事件模型与查询方法。
+6. internal/server/request_detail.go 已组装请求摘要、timing、diagnosis、payload 和 stream events；工具事件应作为同一详情响应中的独立字段。
+7. callState 按 request ID 管理单次请求状态；工具审计事件应使用现有请求 ID 传递，不创建第二套请求标识。
+8. migrations/001_init.sql 与 internal/db/migrate.go 分别维护初始表结构和旧库增量升级；新增表/索引必须两处同步。
+
+## 4. 设计与实施顺序
+
+1. Review Coordinator、Runtime、ToolExecutionError、Audit Writer 和请求 Finish 生命周期，明确成功、失败、超时、取消、拒绝等终态的实际采集点。
+2. 设计最小工具事件模型：request_id、顺序号、工具轮次、工具名称、状态、耗时、结果字节数、落库时间及稳定错误码；不存参数或结果正文。
+3. 明确工具事件的排序规则、重复写入处理、事件上限、字段长度和数据库索引。
+4. 通过接口/回调把 Coordinator 执行结果传给 Server；Coordinator 不依赖 Audit、Store、SQL 或具体工具模块。
+5. 扩展 store 的事件写入与查询方法，并为旧数据库增加兼容迁移。
+6. 扩展 audit.Writer 异步写入工具事件；审计失败不影响推理结果，并具备队列丢弃/失败诊断。
+7. 在请求详情 API 中按 request_id 查询并返回工具事件；请求无工具事件时返回空数组或兼容空值，需在 API 契约中明确。
+8. 在现有请求详情页增加工具调用明细展示，显示轮次、工具名、状态、耗时、结果大小和请求级 Token 汇总。
+9. 完成 Review、数据库迁移测试、并发/队列压力测试、Go CI 与 Browser Smoke。
+
+## 5. 必须覆盖的测试
+
+- 单轮、多轮、多工具调用：事件顺序、轮次、工具名和 request_id 正确。
+- 成功、执行失败、超时、取消、授权拒绝和未知工具等路径的状态与错误码准确。
+- 结果字节数准确；不落库原始 arguments、query、结果正文或凭据。
+- 同一请求仍只有一条 request_logs 记录；Finish 后详情可查询完整工具事件。
+- 审计队列满、写入失败和 Shutdown/Flush 时序不会改变推理响应。
+- 新数据库建表和旧数据库增量迁移均通过；删除/清理顶层请求时工具事件不会成为孤儿记录。
+- Token 多轮完整聚合；usage 缺失/不完整时明确 unknown，不错误展示最后一轮数值。
+- 普通请求没有工具事件，现有请求详情与请求响应行为不变。
+- 历史请求没有工具事件时详情页正常显示。
+- Browser Smoke 覆盖请求详情中的工具调用列表及空状态。
+
+## 6. 本任务不实现
+
+- 新的通用日志平台、独立审计服务或实时事件总线。
+- 保存工具参数、搜索词、完整工具结果或模型中间响应正文。
+- 工具调用统计分析仪表盘、成本估算或工具排行榜。
+- Gateway 容器到真实 SearXNG 的网络验收（TOOL-09）。
+- 流式工具调用（TOOL-10）。
+
+## 7. Review 发现
+
+- Coordinator 当前只返回 ModelRounds、ToolRounds、ToolCalls 和 RoundUsage；ToolCalls 仅在执行成功后递增，不能作为逐次调用审计记录。
+- Coordinator 会先校验整轮工具调用，再顺序执行；未知工具名、非法参数等拒绝发生在执行前，审计模型需要区分“请求被拒绝”和“实际执行”。
+- Runtime 已提供稳定错误分类：授权拒绝/不可用、并发限制、超时、取消、参数无效、结果无效/超限、Executor panic/失败；审计只存稳定分类，不存原始错误。
+- Coordinator 调用 Runtime.Execute 的边界适合测量单次工具执行耗时与输出字节数；目前没有逐次事件观察接口，需设计可选 Observer/回调，不让 Coordinator 依赖 Audit、Store 或 SQL。
+- Audit Writer 使用有界队列和单 worker，区分关键与普通写入；工具事件应异步入队，队列满时不能影响模型响应。
+- Request retention 已在同一事务中显式删除 request_tool_call_events、request_stream_events 和 request_payloads；ClearRequests 同样删除工具事件，避免孤儿记录。
+- 请求详情由 Handler 查询 RequestLog、Payload、StreamEvents 后交给 buildRequestDetail 拼装；工具事件应沿用这条查询/组装链路。
+
+## 8. 事件模型设计结论
+
+### 8.1 采集边界
+
+- Coordinator 增加可选的请求级 Observer 回调；Coordinator 只产生内存事件，不依赖 Server、Audit、Store、SQL 或数据库。
+- Server 在一次请求调用 Coordinator 时提供 Observer，并在 Coordinator 返回后把事件批量交给现有 Audit Writer；request_id 只由 Server 关联，不传入 Coordinator。
+- 事件覆盖两类情况：实际进入 ToolExecutor.Execute 的调用；模型提出但在执行前被 Coordinator 拒绝的调用（例如未知工具、工具名不匹配、参数 JSON/Schema 不合法）。不记录模型响应解析失败且无法可靠识别工具项的内容。
+- 整轮预校验仍保持原子性：一轮中某项预校验失败时，不执行此前已通过预校验的项；只为明确失败的工具项记录 rejected 事件，不伪造其他项的执行记录。
+- 超出每轮调用数/总轮数预算时，保持现有快速拒绝语义；不遍历或持久化超预算的任意数量条目。
+
+### 8.2 事件字段与语义
+
+每条事件只保存：
+- `seq`：请求内从 1 开始的严格递增序号，按 Coordinator 实际观察顺序分配。
+- `round`：模型工具调用轮次，从 1 开始。
+- `tool_name`：工具名；不存在时为空，非空名称按 UTF-8 安全截断至 64 字节；未知工具名保留截断后的名称用于诊断。
+- `status`：`succeeded`、`failed`、`rejected`、`cancelled`、`timed_out`。
+- `duration_ms`：实际执行耗时；执行前拒绝为 0。
+- `result_bytes`：Executor 返回的结果字节数；未返回输出为 0。结果无效或累计预算超限时，仍记录已返回的字节数。
+- `error_code`：稳定分类码；成功为空，不保存原始错误文本。
+- `created_at`：事件落库时间。
+
+稳定错误分类：
+- Coordinator 预校验：`unknown_tool`、`invalid_tool_call`、`invalid_arguments`。
+- Runtime 授权：`tool_unauthorized`、`tool_authorization_unavailable`。
+- Runtime 执行：`tool_timeout`、`tool_cancelled`、`tool_concurrency_limit`、`tool_result_invalid`、`tool_result_too_large`、`tool_execution_failed`、`tool_executor_panicked`。
+- Coordinator 累计结果预算：`tool_result_budget_exceeded`。
+
+不持久化 tool_call_id、原始 arguments、搜索词、工具结果正文、Provider 内容或原始错误。请求级 Token 总量继续只写入既有 request_logs；详情页复用已有 Token 汇总，不在每条工具事件重复存储。
+
+### 8.3 有界性、排序与失败语义
+
+- 当前 Coordinator 上限为 3 轮 × 每轮 3 次调用；事件序号由单次 Run 内的计数器产生，批量插入顺序与序号一致。
+- 新表使用 `(request_id, seq)` 唯一约束及查询索引；查询按 seq ASC，限制最多 9 条。无外键，兼容现有历史库；清空请求和保留清理必须显式删除子事件。
+- Audit Writer 通过单个普通优先级批量任务写入，不能占用 Create/Finish 关键事件预留容量；队列满、Writer 关闭和数据库失败均不得改变推理响应。
+- 工具事件丢弃和写入失败增加独立计数，接入现有审计运行状态/诊断快照；不能只依赖日志或把通用 dropped 数字误当工具事件计数。
+- 请求详情新增 `tool_calls` 数组；旧请求和普通请求返回空数组，查询失败按现有详情接口的依赖错误处理，不伪装成空列表。
+- `tool_calls` 在详情 UI 中按轮次/序号展示；Token 总量继续显示在请求级摘要/Timing 区域。
+
+## 9. 最终实施结果
+
+- Coordinator 增加兼容原有 Run 接口的 RunWithObserver；实际执行和可识别的执行前拒绝均产生有界内存事件，不依赖 Server、Audit、Store 或数据库。
+- 事件覆盖成功、失败、超时、取消、授权拒绝、并发限制、未知工具、非法调用和参数拒绝；使用稳定状态/错误码，不持久化原始错误。
+- 新增 request_tool_call_events，使用 (request_id, seq) 主键；记录轮次、工具名、状态、耗时、结果字节数、错误码和落库时间。初始 SQL 与旧库 ensureColumns 均已覆盖。
+- Audit Writer 使用普通优先级批量写入，不占用 Create/Finish 关键事件预留容量；独立统计工具事件入队、丢弃、写入成功和失败。
+- 请求详情 API 返回 tool_calls；前端按序号/轮次展示工具名、状态、耗时、结果大小和错误分类。请求级 Token 总量继续复用原有聚合结果，没有在工具事件中重复存储。
+- ClearRequests 与 retention 清理均删除工具事件；旧请求和普通请求返回空数组，工具事件查询失败不会伪装为空列表。
+- OpenAPI、AuditMetrics Schema、数据库契约、迁移、存储测试和 Browser Smoke 均已同步。
+
+## 10. 验收证据
+
+- 最终代码基线：`f96d07d16dda57f8d1452e4cbea410de71ce63b6`。
+- Go CI：[`44044177513`](https://github.com/Kasign/llm-gateway/actions/runs/44044177513)，结论 success。Go 单元/集成、race、静态检查、配置/API 契约、前端 Bundle、MariaDB 审计积压、并发与审计负载、故障注入/恢复、Gateway 编译和 Docker 镜像均通过。
+- Browser Smoke：[`44044177775`](https://github.com/Kasign/llm-gateway/actions/runs/44044177775)，结论 success。报告 passed=true、failures=[]；请求详情工具调用数量、顺序、轮次、工具名、状态及弹窗键盘可访问性检查均通过。
+- Browser Smoke 曾暴露 Mock 请求列表刷新顺序和 Playwright glob 未覆盖嵌套路径的问题，均已修正；不是业务代码故障。
+- Dockerfile 的 release 目标从 webbuilder 构建并复制前端资源；仓库内 static/dist 不作为生产镜像输入。CI 已构建并保存部署 Bundle，不需要为了生产镜像手工提交旧的 static/dist。
+- 未执行 Gateway 容器到真实 SearXNG 的网络验收；该项明确移交 TOOL-09，不以宿主机 API 可达代替容器网络验收。
+
+## 11. 后续任务
+
+- TOOL-09：完成 CI / Browser Smoke 回归与 Gateway 容器到真实 SearXNG 的端到端验收。
+- TOOL-10：在非流式工具调用稳定后再评估流式工具调用；不阻塞当前第一版。
