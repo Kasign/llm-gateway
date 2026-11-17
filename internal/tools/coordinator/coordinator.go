@@ -142,6 +142,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			return result, fmt.Errorf("%w: encode model request", ErrInvalidRequest)
 		}
 		modelResponse, err := c.model.Complete(ctx, encodedRequest)
+		result.ModelRounds++
 		if err != nil {
 			// Provider 收到上游非 2xx 响应时可能同时返回响应体与错误；
 			// 保留完整上游响应供 Server 按既有错误语义处理。传输错误没有上游状态，不保留半截响应。
@@ -153,7 +154,6 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			}
 			return result, err
 		}
-		result.ModelRounds++
 		if modelResponse.StatusCode < 100 || modelResponse.StatusCode > 599 {
 			return result, fmt.Errorf("%w: invalid model HTTP status", ErrInvalidModelResponse)
 		}
@@ -223,6 +223,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			prepared = append(prepared, preparedCall{id: call.ID, name: call.Function.Name, arguments: arguments})
 		}
 
+		result.ToolRounds++
 		messages = append(messages, append(json.RawMessage(nil), round.message...))
 		for _, call := range prepared {
 			if err := ctx.Err(); err != nil {
@@ -251,7 +252,6 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			seenCallIDs[call.id] = struct{}{}
 			result.ToolCalls++
 		}
-		result.ToolRounds++
 		request["messages"], err = json.Marshal(messages)
 		if err != nil {
 			return result, fmt.Errorf("%w: encode conversation messages", ErrInvalidRequest)
