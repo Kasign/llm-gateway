@@ -104,10 +104,10 @@ func (f inferenceForwarder) forwardWithTools(
 	}
 	if len(allowedNames) == 0 {
 		if !clientIntent { return core.Result{}, nil, false }
-		if clientIntent {
-			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_registry_unavailable", Message: "no configured tools are available"}, true
+		if call == nil || call.key == nil || len(call.key.AllowedTools) == 0 {
+			return core.Result{}, &core.Error{Status: http.StatusForbidden, Code: "tool_not_allowed", Message: "this API key is not authorized to use tools"}, true
 		}
-		return core.Result{}, nil, false
+		return core.Result{}, &core.Error{Status: http.StatusForbidden, Code: "tool_not_allowed", Message: "no configured tools are authorized for this API key"}, true
 	}
 
 	modelCaller := &bufferedModelCaller{

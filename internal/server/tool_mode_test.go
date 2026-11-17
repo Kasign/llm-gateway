@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
@@ -161,6 +162,7 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 		},
 		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"},
 	}
+	s.callBegin("request-1", &auth.Key{AllowedTools: []string{"test.echo"}})
 	forwarder := inferenceForwarder{s: s}
 	result, runErr, handled := forwarder.forwardWithTools(context.Background(), state, providerInstance, req, "/v1/chat/completions", recorder)
 	if !handled || runErr != nil {
@@ -307,6 +309,8 @@ func TestForwardWithToolsPreservesProviderNonSuccessResponse(t *testing.T) {
 		},
 		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"},
 	}
+	state.ID = "request-2"
+	s.callBegin(state.ID, &auth.Key{AllowedTools: []string{"test.echo"}})
 	result, runErr, handled := (inferenceForwarder{s: s}).forwardWithTools(
 		context.Background(), state, &toolLoopRateLimitProvider{}, req, "/v1/chat/completions", recorder,
 	)
@@ -521,4 +525,17 @@ func TestToolLoopRunsInsideOnePipelineLifecycle(t *testing.T) {
 		providerInstance.modelIDs[1] != "active-model" {
 		t.Fatalf("active ModelID changed between rounds: %v", providerInstance.modelIDs)
 	}
+}
+
+func TestForwardWithToolsRejectsClientIntentWithoutKeyToolGrant(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.Definition{Name:"test.echo",Description:"Echo",Parameters:json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}, toolLoopTestExecutor{}); err != nil { t.Fatal(err) }
+	runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
+	if err != nil { t.Fatal(err) }
+	s := &Server{cfg:&config.Config{Tools:config.ToolsConfig{Enabled:true,AllowedModels:[]config.ToolModelAllowlist{{ProviderID:"llamacpp",ModelKey:"stable-key"}},AllowedTools:[]string{"test.echo"}}},toolRegistry:registry,toolRuntime:runtime}
+	s.callBegin("unauthorized-request", &auth.Key{})
+	state := core.State{Request:core.Request{ID:"unauthorized-request",Path:"/v1/chat/completions",Body:[]byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`)},Model:core.ModelChoice{ProviderID:"llamacpp",ModelKey:"stable-key"}}
+	_, err, handled := (inferenceForwarder{s:s}).forwardWithTools(context.Background(),state,&toolLoopTestProvider{},httptest.NewRequest(http.MethodPost,"http://gateway/v1/chat/completions",nil),"/v1/chat/completions",httptest.NewRecorder())
+	coreErr, ok := err.(*core.Error)
+	if !handled || !ok || coreErr.Status != http.StatusForbidden || coreErr.Code != "tool_not_allowed" { t.Fatalf("expected fail-closed 403, handled=%v err=%#v",handled,err) }
 }
