@@ -233,6 +233,10 @@ try {
   check('管理员 Key 通过现有服务密钥接口验证', report.adminKeySuccesses.length >= 1, report.adminKeySuccesses);
 
   await page.locator('#keyServicesList .key-service-option').first().waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#keyToolsList input[value="web.search"]').waitFor({ state: 'visible', timeout: 15000 });
+  check('工具授权目录只显示服务端已注册的 web.search', await page.locator('#keyToolsList input[value="web.search"]').count() === 1);
+  await page.locator('#keyToolsList input[value="web.search"]').check();
+  check('创建表单选择工具后同步独立授权字段', await page.locator('#keyTools').inputValue() === 'web.search');
   const servicePickerMetrics = await page.locator('#keyServicesList').evaluate(el => ({
     count: el.querySelectorAll('input[type="checkbox"]').length,
     overflowY: getComputedStyle(el).overflowY,
@@ -255,12 +259,42 @@ try {
   await page.locator('#keyCreateButton').click();
   const scopedCreateResponse = await scopedCreateResponsePromise;
   let scopedKey = null; try { scopedKey = await scopedCreateResponse.json(); } catch {}
-  check('真实服务密钥接口收到所选服务权限', scopedCreateResponse.status() === 200 &&
-    JSON.stringify(scopedKey?.api_key?.allowed_models || []) === JSON.stringify(['llamacpp']),
-    {status:scopedCreateResponse.status(),allowed_models:scopedKey?.api_key?.allowed_models||null});
+  check('真实服务密钥接口保存服务和工具两套独立权限', scopedCreateResponse.status() === 200 &&
+    JSON.stringify(scopedKey?.api_key?.allowed_models || []) === JSON.stringify(['llamacpp']) &&
+    JSON.stringify(scopedKey?.api_key?.allowed_tools || []) === JSON.stringify(['web.search']),
+    {status:scopedCreateResponse.status(),allowed_models:scopedKey?.api_key?.allowed_models||null,allowed_tools:scopedKey?.api_key?.allowed_tools||null});
   await page.waitForFunction(() => document.getElementById('newKeyBox')?.style.display === 'block', null, {timeout:10000});
 
   if(scopedKey?.api_key?.id){
+    const aclSemantics = await page.evaluate(async({key,id}) => {
+      const headers={'X-Admin-Key':key,'Content-Type':'application/json'};
+      const get=async()=>{const r=await fetch('/api/admin/keys',{headers:{'X-Admin-Key':key},cache:'no-store'});const b=await r.json();return (b.data||[]).find(x=>Number(x.id)===Number(id))||null};
+      const put=async(body)=>{const r=await fetch('/api/admin/keys/'+id,{method:'PUT',headers,body:JSON.stringify(body)});return r.status};
+      const initial=await get();
+      const common={name:initial.name,rpm:initial.rpm,allowed_models:initial.allowed_models,expires_at:null};
+      const nullStatus=await put({...common,allowed_tools:null});
+      const afterNull=await get();
+      const omittedStatus=await put(common);
+      const afterOmitted=await get();
+      const clearStatus=await put({...common,allowed_tools:[]});
+      const afterClear=await get();
+      const restoreStatus=await put({...common,allowed_tools:['web.search']});
+      const afterRestore=await get();
+      const rotate=await fetch('/api/admin/keys/'+id+'/rotate',{method:'POST',headers:{'X-Admin-Key':key}});
+      const afterRotate=await get();
+      return {nullStatus,omittedStatus,clearStatus,restoreStatus,rotateStatus:rotate.status,
+        afterNull:afterNull?.allowed_tools,afterOmitted:afterOmitted?.allowed_tools,
+        afterClear:afterClear?.allowed_tools,afterRestore:afterRestore?.allowed_tools,afterRotate:afterRotate?.allowed_tools};
+    },{key:adminKey,id:scopedKey.api_key.id});
+    check('更新时 null 和省略字段保留工具授权、空数组清空授权',aclSemantics.nullStatus===200&&aclSemantics.omittedStatus===200&&
+      aclSemantics.clearStatus===200&&aclSemantics.restoreStatus===200&&
+      JSON.stringify(aclSemantics.afterNull||[])===JSON.stringify(['web.search'])&&
+      JSON.stringify(aclSemantics.afterOmitted||[])===JSON.stringify(['web.search'])&&
+      JSON.stringify(aclSemantics.afterClear||[])===JSON.stringify([])&&
+      JSON.stringify(aclSemantics.afterRestore||[])===JSON.stringify(['web.search']),aclSemantics);
+    check('Key 轮换保留原工具授权',aclSemantics.rotateStatus===200&&
+      JSON.stringify(aclSemantics.afterRotate||[])===JSON.stringify(['web.search']),aclSemantics);
+
     const scopedId = scopedKey.api_key.id;
     const editButton = page.locator('#keyTable .key-edit-button[data-key-id="' + scopedId + '"]');
     await editButton.waitFor({state:'visible',timeout:10000});
@@ -329,6 +363,7 @@ try {
       return Boolean(save && !save.disabled);
     }, null, {timeout:10000});
     check('编辑弹窗会恢复当前服务权限', await page.locator('#keyEditServicesList input[value="llamacpp"]').isChecked());
+    check('编辑弹窗会恢复当前工具授权', await page.locator('#keyEditToolsList input[value="web.search"]').isChecked());
     await page.locator('#keyEditServicesList input[value="llamacpp"]').uncheck();
     await page.locator('#keyEditServicesList input[value="ollama"]').check();
     await page.locator('#keyEditName').fill('browser-smoke-service-scope-edited');
@@ -351,9 +386,10 @@ try {
       return (body.data||[]).find(item=>Number(item.id)===Number(id))||null;
     },{key:adminKey,id:scopedId});
     let editedKey=await getEditedKey();
-    check('保存后服务范围与 RPM 已写入后端',editedKey?.name==='browser-smoke-service-scope-edited' &&
-      Number(editedKey?.rpm)===120 && JSON.stringify(editedKey?.allowed_models||[])===JSON.stringify(['ollama']),
-      {name:editedKey?.name,rpm:editedKey?.rpm,allowed_models:editedKey?.allowed_models});
+    check('保存后服务范围、工具授权与 RPM 已写入后端',editedKey?.name==='browser-smoke-service-scope-edited' &&
+      Number(editedKey?.rpm)===120 && JSON.stringify(editedKey?.allowed_models||[])===JSON.stringify(['ollama']) &&
+      JSON.stringify(editedKey?.allowed_tools||[])===JSON.stringify(['web.search']),
+      {name:editedKey?.name,rpm:editedKey?.rpm,allowed_models:editedKey?.allowed_models,allowed_tools:editedKey?.allowed_tools});
 
     const legacySeedStatus=await page.evaluate(async({key,id})=>{
       const response=await fetch('/api/admin/keys/'+id,{method:'PUT',headers:{'X-Admin-Key':key,'Content-Type':'application/json'},

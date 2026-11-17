@@ -105,6 +105,27 @@ jobs:
             -e "s#/app/migrations/001_init.sql#${GITHUB_WORKSPACE}/migrations/001_init.sql#" \
             -e "s#/data/models#${RUNNER_TEMP}/models#" \
             config.example.yaml > "${CONFIG_FILE}"
+          python3 - "${CONFIG_FILE}" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+          start = content.index("\\ntools:\\n")
+          end = content.index("\\nstorage:\\n", start)
+          section = content[start:end]
+          replacements = {
+              "  enabled: false": "  enabled: true",
+              "  allowed_models: []": "  allowed_models:\\n    - provider_id: llamacpp\\n      model_key: browser-smoke-model",
+              "  allowed_tools: []": "  allowed_tools: [web.search]",
+              '    base_url: ""': '    base_url: "http://127.0.0.1:18080"',
+              "    allow_insecure_http: false": "    allow_insecure_http: true",
+              "    allow_private_network: false": "    allow_private_network: true",
+          }
+          for old, new in replacements.items():
+              if old not in section:
+                  raise SystemExit(f"missing expected tools config: {old}")
+              section = section.replace(old, new, 1)
+          path.write_text(content[:start] + section + content[end:])
+          PY
           test -f "${GITHUB_WORKSPACE}/migrations/001_init.sql"
           test -d "${RUNNER_TEMP}/models"
           test -s "${CONFIG_FILE}"
