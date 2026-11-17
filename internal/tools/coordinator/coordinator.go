@@ -112,21 +112,21 @@ func New(registry *tools.Registry, executor ToolExecutor, model ModelCaller) (*C
 // 请求体中的客户端 tools 会被服务端 Registry 定义替换，不能注册或覆盖工具。
 func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNames []string) (Result, error) {
 	if c == nil || c.registry == nil || isNil(c.executor) || isNil(c.model) {
-		return Result{}, ErrCoordinatorUnavailable
+		return result, ErrCoordinatorUnavailable
 	}
 	if ctx == nil {
-		return Result{}, ErrInvalidContext
+		return result, ErrInvalidContext
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return result, err
 	}
 	if len(allowedToolNames) == 0 {
-		return Result{}, ErrNoAllowedTools
+		return result, ErrNoAllowedTools
 	}
 
 	request, messages, allowed, err := c.prepareRequest(requestBody, allowedToolNames)
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 
 	result := Result{}
@@ -135,22 +135,30 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return Result{}, err
+			return result, err
 		}
 		encodedRequest, err := json.Marshal(request)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: encode model request", ErrInvalidRequest)
+			return result, fmt.Errorf("%w: encode model request", ErrInvalidRequest)
 		}
 		modelResponse, err := c.model.Complete(ctx, encodedRequest)
 		if err != nil {
-			return Result{}, err
+			// Provider 收到上游非 2xx 响应时可能同时返回响应体与错误；
+			// 保留完整上游响应供 Server 按既有错误语义处理。传输错误没有上游状态，不保留半截响应。
+			if modelResponse.StatusCode >= http.StatusMultipleChoices &&
+				modelResponse.StatusCode <= 599 &&
+				modelResponse.UpstreamStatus == modelResponse.StatusCode &&
+				len(modelResponse.Body) > 0 {
+				result.Response = cloneModelResponse(modelResponse)
+			}
+			return result, err
 		}
 		result.ModelRounds++
 		if modelResponse.StatusCode < 100 || modelResponse.StatusCode > 599 {
-			return Result{}, fmt.Errorf("%w: invalid model HTTP status", ErrInvalidModelResponse)
+			return result, fmt.Errorf("%w: invalid model HTTP status", ErrInvalidModelResponse)
 		}
 		if len(modelResponse.Body) > MaxModelResponseBytes {
-			return Result{}, ErrModelResponseTooLarge
+			return result, ErrModelResponseTooLarge
 		}
 		if modelResponse.StatusCode < http.StatusOK || modelResponse.StatusCode >= http.StatusMultipleChoices {
 			result.Response = cloneModelResponse(modelResponse)
@@ -159,26 +167,26 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 
 		round, err := parseToolRound(modelResponse.Body)
 		if err != nil {
-			return Result{}, err
+			return result, err
 		}
 		if len(round.usage) > 0 && string(round.usage) != "null" {
 			result.RoundUsage = append(result.RoundUsage, append(json.RawMessage(nil), round.usage...))
 		}
 		if round.finishReason != "tool_calls" {
 			if len(round.calls) != 0 {
-				return Result{}, ErrInvalidModelResponse
+				return result, ErrInvalidModelResponse
 			}
 			result.Response = cloneModelResponse(modelResponse)
 			return result, nil
 		}
 		if len(round.calls) == 0 {
-			return Result{}, ErrInvalidModelResponse
+			return result, ErrInvalidModelResponse
 		}
 		if result.ToolRounds >= MaxToolRounds {
-			return Result{}, ErrToolBudgetExceeded
+			return result, ErrToolBudgetExceeded
 		}
 		if len(round.calls) > MaxToolCallsPerRound {
-			return Result{}, ErrToolBudgetExceeded
+			return result, ErrToolBudgetExceeded
 		}
 
 		// 整轮先完成协议、工具存在性和参数校验，避免明显无效的后续调用导致前序工具先执行。
@@ -186,31 +194,31 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		roundCallIDs := make(map[string]struct{}, len(round.calls))
 		for _, call := range round.calls {
 			if call.ID == "" || len(call.ID) > MaxToolCallIDBytes || !utf8.ValidString(call.ID) {
-				return Result{}, ErrInvalidModelResponse
+				return result, ErrInvalidModelResponse
 			}
 			if _, exists := seenCallIDs[call.ID]; exists {
-				return Result{}, ErrInvalidModelResponse
+				return result, ErrInvalidModelResponse
 			}
 			if _, exists := roundCallIDs[call.ID]; exists {
-				return Result{}, ErrInvalidModelResponse
+				return result, ErrInvalidModelResponse
 			}
 			roundCallIDs[call.ID] = struct{}{}
 			if call.Type != "function" || call.Function.Name == "" {
-				return Result{}, ErrInvalidModelResponse
+				return result, ErrInvalidModelResponse
 			}
 			if _, ok := allowed[call.Function.Name]; !ok {
-				return Result{}, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
+				return result, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
 			}
 			definition, _, lookupErr := c.registry.Lookup(call.Function.Name)
 			if lookupErr != nil {
-				return Result{}, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
+				return result, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
 			}
 			arguments := json.RawMessage(call.Function.Arguments)
 			if err := validateStrictJSON(arguments, MaxStrictJSONDepth); err != nil {
-				return Result{}, fmt.Errorf("%w: invalid arguments JSON", ErrInvalidModelResponse)
+				return result, fmt.Errorf("%w: invalid arguments JSON", ErrInvalidModelResponse)
 			}
 			if err := tools.ValidateArguments(definition.Parameters, arguments); err != nil {
-				return Result{}, fmt.Errorf("%w: invalid tool arguments", ErrInvalidModelResponse)
+				return result, fmt.Errorf("%w: invalid tool arguments", ErrInvalidModelResponse)
 			}
 			prepared = append(prepared, preparedCall{id: call.ID, name: call.Function.Name, arguments: arguments})
 		}
@@ -218,17 +226,17 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		messages = append(messages, append(json.RawMessage(nil), round.message...))
 		for _, call := range prepared {
 			if err := ctx.Err(); err != nil {
-				return Result{}, err
+				return result, err
 			}
 			output, executeErr := c.executor.Execute(ctx, call.name, append(json.RawMessage(nil), call.arguments...))
 			if executeErr != nil {
-				return Result{}, &ToolExecutionError{ToolName: call.name, Cause: executeErr}
+				return result, &ToolExecutionError{ToolName: call.name, Cause: executeErr}
 			}
 			if len(output) == 0 || !json.Valid(output) || !utf8.Valid(output) {
-				return Result{}, fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
+				return result, fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
 			}
 			if len(output) > MaxToolResultBytes-totalToolResultBytes {
-				return Result{}, ErrToolResultBudget
+				return result, ErrToolResultBudget
 			}
 			totalToolResultBytes += len(output)
 			toolMessage, marshalErr := json.Marshal(struct {
@@ -237,7 +245,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 				Content    string `json:"content"`
 			}{Role: "tool", ToolCallID: call.id, Content: string(output)})
 			if marshalErr != nil {
-				return Result{}, fmt.Errorf("%w: encode tool result", ErrToolExecutionFailed)
+				return result, fmt.Errorf("%w: encode tool result", ErrToolExecutionFailed)
 			}
 			messages = append(messages, toolMessage)
 			seenCallIDs[call.id] = struct{}{}
@@ -246,7 +254,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		result.ToolRounds++
 		request["messages"], err = json.Marshal(messages)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: encode conversation messages", ErrInvalidRequest)
+			return result, fmt.Errorf("%w: encode conversation messages", ErrInvalidRequest)
 		}
 	}
 }
