@@ -481,3 +481,34 @@ func TestRunEnforcesNamedToolChoice(t *testing.T) {
 		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
 	}
 }
+
+func TestRunResetsRequiredToolChoiceAfterFirstToolRound(t *testing.T) {
+	body := strings.TrimSuffix(requestBody, "}") + `,"tool_choice":"required"}`
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(toolCallResponse("call-1", `{"query":"hello"}`)),
+		modelResponse(finalResponse),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	result, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ToolCalls != 1 || result.ModelRounds != 2 {
+		t.Fatalf("unexpected result counters: %+v", result)
+	}
+	var first, second map[string]json.RawMessage
+	if err := json.Unmarshal(model.requests[0], &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(model.requests[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	if string(first["tool_choice"]) != `"required"` {
+		t.Fatalf("first tool_choice = %s, want required", first["tool_choice"])
+	}
+	if string(second["tool_choice"]) != `"auto"` {
+		t.Fatalf("follow-up tool_choice = %s, want auto", second["tool_choice"])
+	}
+}
