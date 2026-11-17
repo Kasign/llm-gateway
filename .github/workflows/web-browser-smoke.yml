@@ -24,7 +24,7 @@ permissions:
 jobs:
   browser-smoke:
     name: 启动 Gateway 并执行真实浏览器验收
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       MARIADB_ROOT_PASSWORD: gateway-browser-root-pass
