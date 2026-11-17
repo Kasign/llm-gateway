@@ -52,6 +52,7 @@
       <button type="button" data-tab="keys"><span class="dot"></span>服务密钥</button>
       <button type="button" data-tab="requests"><span class="dot"></span>调用记录</button>
       <button type="button" data-tab="benchmark"><span class="dot"></span>性能测试</button>
+      <button type="button" data-tab="tools-test"><span class="dot"></span>工具测试</button>
       <button type="button" data-tab="providers"><span class="dot"></span>远程 Provider</button>
     </nav>
     <div class="sidebar-bottom">
@@ -494,6 +495,41 @@
           </details>
         </div>
       </section>
+
+      <!-- Tool test -->
+      <section id="tools-test" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>工具调用测试</h2>
+              <p>通过真实服务密钥调用当前活动模型，验证 Gateway → 模型 → web.search → 模型的非流式完整链路。</p>
+            </div>
+          </div>
+          <div class="msg muted">
+            使用已在「服务密钥」中授予当前 Provider 服务范围和 web.search 权限的客户端 Key。
+            Key 仅保存在当前页面内存中，不写入 localStorage，也不会发送到管理 API。
+          </div>
+          <div class="field">
+            <label for="toolTestApiKey">客户端服务密钥</label>
+            <input id="toolTestApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务密钥（sk-…）">
+          </div>
+          <div class="field">
+            <label for="toolTestPrompt">测试提示词</label>
+            <textarea id="toolTestPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果简要说明版本号和发布日期。必须实际调用搜索工具，不要只凭已有知识回答。</textarea>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="toolTestRunBtn">开始工具调用测试</button>
+            <button type="button" class="btn ghost" id="toolTestClearKeyBtn">清除密钥</button>
+          </div>
+          <div id="toolTestStatus" class="msg muted" role="status" aria-live="polite">尚未执行测试。</div>
+          <div id="toolTestRequest" class="small muted"></div>
+          <div id="toolTestAnswer" class="bench-answer" style="white-space:pre-wrap"></div>
+          <div id="toolTestAuditHint" class="req-note" hidden>
+            请求已结束。请使用上方 Request ID 打开「调用记录」详情，确认工具事件为 web.search 且状态成功；仅有模型文本回复不代表工具确实执行。
+            <button type="button" class="btn sm ghost" id="toolTestOpenDetailBtn">查看请求详情</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -562,5 +598,107 @@
 <script src="/static/dist/providers-admin.js?v=20261028-provider-key-contrast-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
+<script>
+(() => {
+  const keyInput = document.getElementById('toolTestApiKey');
+  const promptInput = document.getElementById('toolTestPrompt');
+  const runButton = document.getElementById('toolTestRunBtn');
+  const clearButton = document.getElementById('toolTestClearKeyBtn');
+  const status = document.getElementById('toolTestStatus');
+  const request = document.getElementById('toolTestRequest');
+  const answer = document.getElementById('toolTestAnswer');
+  const auditHint = document.getElementById('toolTestAuditHint');
+  const detailButton = document.getElementById('toolTestOpenDetailBtn');
+  let lastRequestId = '';
+
+  clearButton?.addEventListener('click', () => {
+    if (keyInput) keyInput.value = '';
+    keyInput?.focus();
+  });
+
+  detailButton?.addEventListener('click', () => {
+    if (!lastRequestId) return;
+    if (typeof globalThis.showDetail === 'function') {
+      globalThis.showDetail(encodeURIComponent(lastRequestId));
+    }
+  });
+
+  runButton?.addEventListener('click', async () => {
+    const apiKey = (keyInput?.value || '').trim();
+    const prompt = (promptInput?.value || '').trim();
+    if (!apiKey) {
+      status.className = 'msg err';
+      status.textContent = '请先输入已授权 web.search 的客户端服务密钥。';
+      keyInput?.focus();
+      return;
+    }
+    if (!prompt) {
+      status.className = 'msg err';
+      status.textContent = '测试提示词不能为空。';
+      promptInput?.focus();
+      return;
+    }
+    runButton.disabled = true;
+    status.className = 'msg muted';
+    status.textContent = '正在调用当前活动模型，请等待模型完成工具调用…';
+    request.textContent = '';
+    answer.textContent = '';
+    auditHint.hidden = true;
+    lastRequestId = '';
+    try {
+      const response = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'active',
+          messages: [{ role: 'user', content: prompt }],
+          stream: false,
+          max_tokens: 512,
+          tool_choice: 'auto',
+          tools: [{
+            type: 'function',
+            function: {
+              name: 'web.search',
+              description: 'Search the web for current information.',
+              parameters: {
+                type: 'object',
+                properties: { query: { type: 'string', minLength: 1, maxLength: 512 } },
+                required: ['query'],
+                additionalProperties: false
+              }
+            }
+          }]
+        })
+      });
+      lastRequestId = response.headers.get('X-Request-ID') || '';
+      const raw = await response.text();
+      let payload = null;
+      try { payload = JSON.parse(raw); } catch {}
+      if (!response.ok) {
+        const message = payload?.error?.message || payload?.message || ('HTTP ' + response.status);
+        throw new Error(message + (payload?.error?.code ? '（' + payload.error.code + '）' : ''));
+      }
+      const message = payload?.choices?.[0]?.message || {};
+      const text = typeof message.content === 'string' ? message.content : '';
+      answer.textContent = text || '模型没有返回可展示的正文，请检查请求详情。';
+      status.className = 'msg ok';
+      status.textContent = '请求已完成（HTTP ' + response.status + '）。仍需检查审计事件，确认 web.search 实际执行。';
+      request.textContent = 'Request ID：' + (lastRequestId || '响应头未提供');
+      auditHint.hidden = !lastRequestId;
+    } catch (error) {
+      status.className = 'msg err';
+      status.textContent = '工具调用测试失败：' + (error?.message || '未知错误');
+      request.textContent = lastRequestId ? 'Request ID：' + lastRequestId : '';
+      auditHint.hidden = !lastRequestId;
+    } finally {
+      runButton.disabled = false;
+    }
+  });
+})();
+</script>
 </body>
 </html>
