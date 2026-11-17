@@ -117,7 +117,7 @@
 
 **最终验收结论：已完成。**
 
-- 调用方 Key 使用独立 allowed_tools ACL；有效权限为全局工具配置、模型白名单、Key 授权和 Registry 注册集合的交集。
+- 调用方 Key 使用独立 allowed_tools ACL；有效权限为全局工具配置、Key 的 allowed_models、Key 的 allowed_tools 和 Registry 注册集合的交集。
 - 旧 Key 的 NULL、空值和无效 JSON 均 fail-closed 为空授权；缺少调用方 Key 上下文时工具请求返回 403。
 - 创建、更新、列表、轮换均保持权限语义；更新字段缺省或 null 保留，[] 清空；轮换不改变授权。
 - 管理台支持工具授权查看、创建和编辑；管理员 Key 验证成功后自动刷新可授予工具目录。
