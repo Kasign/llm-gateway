@@ -249,3 +249,71 @@ func TestForwardWithToolsRejectsExplicitIntentWhenRemoteBudgetBlocks(t *testing.
 		t.Fatalf("explicit tool request was not safely rejected: handled=%v err=%v", handled, err)
 	}
 }
+
+type toolLoopRateLimitProvider struct{}
+
+func (*toolLoopRateLimitProvider) ID() string { return "llamacpp" }
+func (*toolLoopRateLimitProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{Protocol: "openai-compatible", ChatCompletions: true}
+}
+func (*toolLoopRateLimitProvider) Forward(_ context.Context, call provider.InferenceCall) (core.Result, error) {
+	body := []byte(`{"error":{"message":"upstream rate limited"}}`)
+	call.Writer.Header().Set("Content-Type", "application/json")
+	call.Writer.WriteHeader(http.StatusTooManyRequests)
+	if _, err := call.Writer.Write(body); err != nil {
+		return core.Result{}, err
+	}
+	return core.Result{
+		Status: http.StatusTooManyRequests,
+		UpstreamStatus: http.StatusTooManyRequests,
+		Body: body,
+	}, &provider.ProviderError{
+		ProviderID: "llamacpp",
+		Kind: provider.ErrorRateLimit,
+		StatusCode: http.StatusTooManyRequests,
+	}
+}
+
+func TestForwardWithToolsPreservesProviderNonSuccessResponse(t *testing.T) {
+	registry := tools.NewRegistry()
+	definition := tools.Definition{
+		Name: "test.echo",
+		Description: "Echo",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	}
+	if err := registry.Register(definition, toolLoopTestExecutor{}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg: &config.Config{Tools: config.ToolsConfig{
+			Enabled: true,
+			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
+			AllowedTools: []string{"test.echo"},
+		}},
+		toolRegistry: registry,
+		toolRuntime: runtime,
+	}
+	recorder := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
+	state := core.State{
+		Request: core.Request{
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"hello"}]}`),
+		},
+		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"},
+	}
+	result, runErr, handled := (inferenceForwarder{s: s}).forwardWithTools(
+		context.Background(), state, &toolLoopRateLimitProvider{}, req, "/v1/chat/completions", recorder,
+	)
+	if !handled || runErr == nil {
+		t.Fatalf("provider error was not returned: handled=%v err=%v", handled, runErr)
+	}
+	if result.Status != http.StatusTooManyRequests || recorder.Code != http.StatusTooManyRequests ||
+		!strings.Contains(recorder.Body.String(), "rate limited") {
+		t.Fatalf("upstream error response was not written back: result=%+v status=%d body=%q", result, recorder.Code, recorder.Body.String())
+	}
+}
