@@ -69,17 +69,29 @@ func (f inferenceForwarder) forwardWithTools(
 		return core.Result{}, nil, false
 	}
 	if s.toolInitErr != nil || s.toolRegistry == nil || s.toolRuntime == nil {
-		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_system_unavailable", Message: "tool system is unavailable"}, true
+		if clientIntent {
+			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_system_unavailable", Message: "tool system is unavailable"}, true
+		}
+		return core.Result{}, nil, false
 	}
 	if !p.Capabilities().ChatCompletions {
-		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_provider_unsupported", Message: "active Provider does not support Chat Completions"}, true
+		if clientIntent {
+			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_provider_unsupported", Message: "active Provider does not support Chat Completions"}, true
+		}
+		return core.Result{}, nil, false
 	}
 	if s.toolModelBudgetBlocked(s.providerIDForState(st)) {
-		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_token_budget_unsupported", Message: "tool calling is disabled for Providers with daily token budgets"}, true
+		if clientIntent {
+			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_token_budget_unsupported", Message: "tool calling is disabled for Providers with daily token budgets"}, true
+		}
+		return core.Result{}, nil, false
 	}
 	allowedNames := s.configuredToolNames(st)
 	if len(allowedNames) == 0 {
-		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_registry_unavailable", Message: "no configured tools are available"}, true
+		if clientIntent {
+			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_registry_unavailable", Message: "no configured tools are available"}, true
+		}
+		return core.Result{}, nil, false
 	}
 
 	modelCaller := &bufferedModelCaller{
@@ -93,7 +105,10 @@ func (f inferenceForwarder) forwardWithTools(
 	}
 	toolCoordinator, err := coordinator.New(s.toolRegistry, s.toolRuntime, modelCaller)
 	if err != nil {
-		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_coordinator_unavailable", Message: "tool coordinator is unavailable"}, true
+		if clientIntent {
+			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_coordinator_unavailable", Message: "tool coordinator is unavailable"}, true
+		}
+		return core.Result{}, nil, false
 	}
 	toolCtx := withRequestToolAllowlist(ctx, allowedNames)
 	result, runErr := toolCoordinator.Run(toolCtx, st.Body, allowedNames)
