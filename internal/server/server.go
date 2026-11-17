@@ -51,6 +51,7 @@ type Server struct {
 	models   *model.Repo    // 模型仓库：管理本地安装了哪些 AI 模型、下载状态、是否启用
 	keys     *auth.Repo     // API Key 仓库：管理调用方的密钥、限速、过期时间
 	logs     *store.Repo    // 请求日志仓库：每次 AI 请求的详细记录（耗时、token、状态等）
+	benchmarkRepo *store.BenchmarkRepo // Benchmark Task/Run 元数据仓库；正文仍由请求审计按配置保存。
 	audit    *audit.Writer  // 审计写入器：异步批量把日志写进数据库（不阻塞请求）
 	settings *settings.Repo // 设置仓库：管理员在后台保存的上游配置、推理参数等
 	// —— 外部服务客户端 ——
@@ -145,6 +146,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 5. 把所有组件组装成 Server 结构体
 	srv := &Server{
 		cfg: cfg, db: dbx, models: model.NewRepo(dbx), keys: auth.NewRepo(dbx), logs: logsRepo,
+		benchmarkRepo: store.NewBenchmarkRepo(dbx),
 		audit:    audit.NewWriter(logsRepo, 0),                                                                                                   // 审计写入器（异步批量写日志）
 		settings: settings.NewRepo(dbx),                                                                                                          // 设置仓库
 		llama:    llama.New(cfg.Llama.BaseURL, time.Duration(cfg.Llama.RequestTimeout)*time.Second, cfg.Llama.Backend, cfg.Llama.UpstreamAPIKey), // llama.cpp 客户端
@@ -157,6 +159,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 6. 从数据库加载管理员在后台保存的上游设置（如果有的话，覆盖配置文件的默认值）
 	srv.pipe = srv.newInferencePipeline()
 	srv.runs = newRunCancels()
+	srv.recoverBenchmarkTasks(context.Background())
 	srv.loadWebProviders(context.Background())
 	srv.initUpstreamFromDB(context.Background())
 	srv.toolInitErr = srv.initToolSystem()

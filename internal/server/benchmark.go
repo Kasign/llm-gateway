@@ -10,6 +10,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -22,6 +24,7 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/logutil"
 	"github.com/whl/llm-gateway/internal/model"
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 // benchmarkJobTTL 已完成任务在内存中保留时长，避免 benchmarkStore 无限增长。
@@ -58,6 +61,9 @@ type benchmarkJob struct {
 	ContentText    string     `json:"content_text,omitempty"`
 	ReasoningText  string     `json:"reasoning_text,omitempty"`
 	ContentChars   int        `json:"content_chars,omitempty"`
+	ErrorCode      string     `json:"error_code,omitempty"`
+	taskRecord     store.BenchmarkTask
+	runRecord      store.BenchmarkRun
 	cancel         context.CancelFunc
 }
 
@@ -143,7 +149,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
 		ReasoningChars: j.ReasoningChars, ContentText: j.ContentText, ReasoningText: j.ReasoningText,
-		ContentChars: j.ContentChars,
+		ContentChars: j.ContentChars, ErrorCode: j.ErrorCode,
 	}
 	return out
 }
@@ -189,6 +195,20 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 	}
 	if err != nil {
 		j.Error = err.Error()
+		_, code, _ := core.Unpack(err)
+		if code != "" {
+			j.ErrorCode = code
+		} else if isCancelErr(err) {
+			j.ErrorCode = "cancelled"
+		} else {
+			j.ErrorCode = "benchmark_failed"
+		}
+	} else if httpStatus >= 400 {
+		j.Error = "benchmark request returned a non-success status"
+		j.ErrorCode = "upstream_error"
+	} else {
+		j.Error = ""
+		j.ErrorCode = ""
 	}
 	in, out, total := usageFromResponse(resp)
 	j.InputTokens = ptrVal(in)
@@ -412,12 +432,52 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if modelKey == "" && m != nil {
 		modelKey = m.ModelKey
 	}
+	activeUpstream := s.effectiveUpstream()
+	target := benchmarkTargetSnapshot{Backend: activeUpstream.Backend, ModelName: activeUpstream.ModelName}
+	taskModelID := upstreamOnly
+	if taskModelID == "" {
+		taskModelID = activeUpstream.ModelName
+	}
+	configJSON, configErr := json.Marshal(map[string]interface{}{
+		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey,
+		"model_id": taskModelID, "max_tokens": in.MaxTokens, "stream": true,
+		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
+		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
+		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
+	})
+	if configErr != nil {
+		jsonError(w, http.StatusInternalServerError, "benchmark_config_failed", "failed to snapshot benchmark configuration")
+		return
+	}
+	promptHash := sha256.Sum256([]byte(in.Prompt))
+	now := time.Now()
+	keyID := key.ID
+	taskRecord := store.BenchmarkTask{
+		TaskID: jobID, APIKeyID: &keyID, Scenario: "performance", Status: "running",
+		ProviderID: target.Backend, Backend: target.Backend, ModelKey: modelKey, ModelID: taskModelID,
+		PromptSHA256: hex.EncodeToString(promptHash[:]), PromptLength: int64(len(in.Prompt)),
+		MaxTokens: in.MaxTokens, ConfigJSON: string(configJSON), RunCount: 1, StartedAt: now,
+	}
+	runRecord := store.BenchmarkRun{
+		RunID: jobID, TaskID: jobID, RunNo: 1, RequestID: jobID, Status: "running",
+		ProviderID: target.Backend, ModelKey: modelKey, ModelID: taskModelID, StartedAt: now,
+	}
 	job := &benchmarkJob{
 		ID: jobID, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: true,
-		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: time.Now(),
+		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
+		taskRecord: taskRecord, runRecord: runRecord,
+	}
+	if s.benchmarkRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "benchmark task storage is unavailable")
+		return
+	}
+	if err := s.benchmarkRepo.CreateTaskAndRun(r.Context(), taskRecord, runRecord); err != nil {
+		applog.Printf("[benchmark:%s] task persistence failed: %v", jobID, err)
+		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to persist benchmark task")
+		return
 	}
 	s.benchmarks.put(job)
-	go s.runBenchmark(job, m, upstreamOnly, runIn, key)
+	go s.runBenchmark(job, m, upstreamOnly, runIn, key, target)
 	applog.Infof("[benchmark:%s] queued model_key=%q upstream_only=%q prompt_len=%d max_tokens=%d", jobID, modelKey, upstreamOnly, len(in.Prompt), in.MaxTokens)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -454,6 +514,13 @@ func (s *Server) benchmarkStatusAPI(w http.ResponseWriter, r *http.Request) {
 func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string) {
 	job, ok := s.benchmarks.get(id)
 	if !ok {
+		if s.benchmarkRepo != nil {
+			if task, err := s.benchmarkRepo.GetTask(r.Context(), id); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": task.Status, "stopped": false})
+				return
+			}
+		}
 		jsonError(w, 404, "not_found", "benchmark job not found")
 		return
 	}
@@ -474,7 +541,7 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string) {
 	job, ok := s.benchmarks.get(id)
 	if !ok {
-		jsonError(w, 404, "not_found", "benchmark job not found")
+		s.benchmarkGetFromStore(w, r, id)
 		return
 	}
 	events, _ := s.logs.ListStreamEvents(r.Context(), id, 2000)
@@ -578,8 +645,14 @@ func buildBenchmarkChatBody(llamaName string, in benchRunInput) []byte {
 //
 // m 非 nil 时用 m.ModelKey 做网关侧 load（InferenceLoad 的 modelKey 参数）；m 为 nil 时用 upstreamOnly 作为上游模型名 load。
 // llamaName 为最终写入 JSON "model" 字段的名字，可能在 load 后被 LoadedAs 改写。
-func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput, key *auth.Key) {
+type benchmarkTargetSnapshot struct {
+	Backend   string
+	ModelName string
+}
+
+func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput, key *auth.Key, target benchmarkTargetSnapshot) {
 	defer s.benchmarks.cleanup()
+	defer s.persistBenchmarkJob(job)
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	defer stopCancel()
 	job.setCancel(stopCancel)
@@ -587,11 +660,10 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	ctx, cancel := contextWithOptionalTimeout(stopCtx, s.cfg.Llama.RequestTimeout)
 	defer cancel()
 
-	activeUpstream := s.effectiveUpstream()
-	be := activeUpstream.Backend
+	be := target.Backend
 	var llamaName string
 	if m != nil {
-		llamaName = s.resolveLlamaModelForBackend(ctx, be, activeUpstream.ModelName, m)
+		llamaName = s.resolveLlamaModelForBackend(ctx, be, target.ModelName, m)
 	} else {
 		llamaName = upstreamOnly
 	}
