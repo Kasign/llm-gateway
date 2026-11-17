@@ -217,7 +217,7 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 	j.TotalTokens = ptrVal(total)
 }
 
-// benchmarkStore 进程内 job 表；重启后历史 benchmark 不可恢复（管理台需重新发起测试）。
+// benchmarkStore 是运行期 Job 快照缓存；Task/Run 元数据持久化在 MariaDB，重启后通过仓储恢复历史摘要。
 type benchmarkStore struct {
 	mu   sync.RWMutex
 	jobs map[string]*benchmarkJob
