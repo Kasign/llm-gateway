@@ -260,11 +260,13 @@ func TestForwardWithToolsRejectsExplicitIntentWhenRemoteBudgetBlocks(t *testing.
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
 	state := core.State{
 		Request: core.Request{
+			ID: "remote-budget-request",
 			Path: "/v1/chat/completions",
 			Body: []byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`),
 		},
 		Model: core.ModelChoice{ProviderID: "remote", ModelKey: "stable-alias", UpstreamID: "upstream-model"},
 	}
+	s.callBegin("remote-budget-request", &auth.Key{AllowedTools: []string{"web.search"}})
 	_, err, handled := (inferenceForwarder{s: s}).forwardWithTools(context.Background(), state, &toolLoopTestProvider{}, req, "/v1/chat/completions", httptest.NewRecorder())
 	coreErr, ok := err.(*core.Error)
 	if !handled || !ok || coreErr.Status != http.StatusServiceUnavailable {

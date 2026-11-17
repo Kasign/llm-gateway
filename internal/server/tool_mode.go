@@ -97,7 +97,7 @@ func (f inferenceForwarder) forwardWithTools(
 		return core.Result{}, nil, false
 	}
 	allowedNames := s.configuredToolNames(st)
-	// 调用方 Key 的授权与全局/模型白名单取交集；缺少请求认证上下文时 fail closed。
+	// 当前 Key 的模型范围和工具授权共同生效；缺少请求认证上下文时 fail closed。
 	if call == nil || call.key == nil || len(call.key.AllowedTools) == 0 {
 		allowedNames = nil
 	} else {
