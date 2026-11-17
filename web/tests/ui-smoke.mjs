@@ -209,16 +209,22 @@ try {
   const modelTestKey = page.locator('#modelTestApiKey');
   check('模型测试共用密码输入框接收客户端服务密钥',
     await modelTestKey.count() === 1 && await modelTestKey.evaluate(el => el.type === 'password'));
+  await page.locator('#modelTestModeTools').click();
+  check('工具测试模式切换后只显示工具测试面板',
+    await page.locator('#modelTestTools').isVisible() && !(await page.locator('#modelTestPerformance').isVisible()));
+  await page.locator('#toolTestRunBtn').click();
+  check('工具测试缺少客户端 Key 时在本地拒绝且不发起请求',
+    (await page.locator('#toolTestStatus').textContent()).includes('请先输入'));
+  await page.locator('#modelTestModePerformance').click();
+  check('性能测试模式切换后只显示性能测试面板',
+    await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
+  await page.locator('#benchRunBtn').click();
+  check('性能测试缺少客户端 Key 时在本地拒绝',
+    (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
   await modelTestKey.fill('sk-browser-smoke-not-a-real-secret');
   check('模型测试密钥只保留在页面内存，不写入浏览器存储',
     await page.evaluate(() => localStorage.getItem('llm_gateway_model_test_key')) === null &&
     await page.evaluate(() => sessionStorage.getItem('llm_gateway_model_test_key')) === null);
-  await page.locator('#modelTestModeTools').click();
-  check('工具测试模式切换后只显示工具测试面板',
-    await page.locator('#modelTestTools').isVisible() && !(await page.locator('#modelTestPerformance').isVisible()));
-  await page.locator('#modelTestModePerformance').click();
-  check('性能测试模式切换后只显示性能测试面板',
-    await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
   await page.locator('#modelTestClearKeyBtn').click();
   check('统一入口可以主动清除客户端密钥', await modelTestKey.inputValue() === '');
 

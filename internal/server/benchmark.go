@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -334,7 +335,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiter unavailable")
 		return
 	}
-	allowed, _, limitErr := s.limiter.Allow(r.Context(), fmt.Sprint(key.ID), key.RPM)
+	allowed, _, limitErr := s.limiter.Allow(r.Context(), strconv.FormatUint(key.ID, 10), key.RPM)
 	if limitErr != nil {
 		jsonError(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiter unavailable")
 		return
