@@ -539,7 +539,7 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	snap := job.snapshot()
-	if snap.Status != "running" {
+	if snap.Status != "running" && snap.Status != "cancelling" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": snap.Status, "stopped": false})
 		return
@@ -579,7 +579,7 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 	events, _ := s.logs.ListStreamEvents(r.Context(), id, 2000)
 	snap := job.snapshot()
 	payloadPersisted := false
-	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" {
+	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" && snap.Status != "cancelling" {
 		_, payloadErr := s.logs.GetPayload(r.Context(), snap.RequestID)
 		payloadPersisted = payloadErr == nil
 	}
@@ -587,7 +587,7 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		"job": snap, "stream_events": events, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
 	}
-	if snap.Status != "running" {
+	if snap.Status != "running" && snap.Status != "cancelling" {
 		if raw, err := s.logs.GetRequestAnalysis(r.Context(), id); err == nil {
 			if a, err := decodeRequestAnalysis(raw); err == nil && a != nil {
 				out["analysis"] = a
