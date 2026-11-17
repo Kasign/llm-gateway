@@ -33,6 +33,23 @@ func TestValidateSchema(t *testing.T) {
 	}
 }
 
+func TestSchemaDepthBoundary(t *testing.T) {
+	base := `{"type":"object","properties":{},"additionalProperties":false}`
+	build := func(depth int) string {
+		raw := base
+		for i := 1; i < depth; i++ {
+			raw = `{"type":"object","properties":{"nested":` + raw + `},"additionalProperties":false}`
+		}
+		return raw
+	}
+	if err := ValidateSchema([]byte(build(MaxSchemaDepth))); err != nil {
+		t.Fatalf("schema at maximum depth should pass: %v", err)
+	}
+	if err := ValidateSchema([]byte(build(MaxSchemaDepth + 1))); err == nil {
+		t.Fatal("schema beyond maximum depth should fail")
+	}
+}
+
 func TestValidateArguments(t *testing.T) {
 	valid := []string{
 		`{"query":"Go","limit":2,"enabled":true,"tags":["a","b"]}`,
