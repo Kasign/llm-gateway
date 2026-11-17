@@ -1183,6 +1183,8 @@ try {
     }
     await route.continue();
   });
+  // 请求记录标签此前已在全局布局检查中加载过；Mock 注册后显式重载，确保详情请求使用固定测试数据。
+  await page.evaluate(() => window.loadRequests({ forceStats: true }));
   await clickTab(page, 'requests', '调用记录');
   const detailTrigger = page.locator('#requestsTable button').filter({ hasText: '详情' }).first();
   await detailTrigger.waitFor({ state: 'visible', timeout: 10000 });
