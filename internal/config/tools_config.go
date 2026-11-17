@@ -30,8 +30,8 @@ type SearXNGConfig struct {
 	Categories            []string `yaml:"categories"`
 }
 
-// ToolsConfig 是 Gateway 侧全局工具能力开关和静态白名单。
-// 默认 Enabled=false、白名单为空；API Key 级权限由后续管理配置任务扩展。
+// ToolsConfig 是 Gateway 侧全局工具开关、Provider/Model 白名单和工具白名单。
+// 实际调用还会与请求 API Key 的 AllowedTools 取交集；任一层未授权即拒绝。
 type ToolsConfig struct {
 	Enabled       bool                 `yaml:"enabled"`
 	AllowedModels []ToolModelAllowlist `yaml:"allowed_models"`

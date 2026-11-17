@@ -121,7 +121,7 @@
 
 ## 9. 最终实施结果
 
-- Coordinator 增加兼容原有 Run 接口的 RunWithObserver；实际执行和可识别的执行前拒绝均产生有界内存事件，不依赖 Server、Audit、Store 或数据库。
+- Coordinator 增加兼容原有 Run 接口的 RunWithObserver；实际执行和可识别的执行前拒绝均产生有界内存事件，不依赖 Server、Audit、Store 或数据库。运行时将全局/模型白名单与请求 API Key 的 AllowedTools 取交集，未授权 Key 不会执行工具。
 - 事件覆盖成功、失败、超时、取消、授权拒绝、并发限制、未知工具、非法调用和参数拒绝；使用稳定状态/错误码，不持久化原始错误。
 - 新增 request_tool_call_events，使用 (request_id, seq) 主键；记录轮次、工具名、状态、耗时、结果字节数、错误码和落库时间。初始 SQL 与旧库 ensureColumns 均已覆盖。
 - Audit Writer 使用普通优先级批量写入，不占用 Create/Finish 关键事件预留容量；独立统计工具事件入队、丢弃、写入成功和失败。
