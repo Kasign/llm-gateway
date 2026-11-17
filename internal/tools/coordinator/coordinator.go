@@ -111,6 +111,7 @@ func New(registry *tools.Registry, executor ToolExecutor, model ModelCaller) (*C
 // Run 使用服务端提供的允许工具名称执行一次非流式 Chat Completions 请求。
 // 请求体中的客户端 tools 会被服务端 Registry 定义替换，不能注册或覆盖工具。
 func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNames []string) (Result, error) {
+	result := Result{}
 	if c == nil || c.registry == nil || isNil(c.executor) || isNil(c.model) {
 		return result, ErrCoordinatorUnavailable
 	}
@@ -129,7 +130,6 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		return result, err
 	}
 
-	result := Result{}
 	seenCallIDs := make(map[string]struct{})
 	totalToolResultBytes := 0
 
