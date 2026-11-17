@@ -49,7 +49,7 @@ func testCoordinator(t *testing.T, model *testModel, executor *testExecutor) *Co
 		Description: "Search the web",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1}},"required":["query"],"additionalProperties":false}`),
 	}
-	if err := registry.Register(definition, executor); err != nil {
+	if err := registry.Register(definition, executorAdapter{executor: executor}); err != nil {
 		t.Fatalf("register tool: %v", err)
 	}
 	coordinator, err := New(registry, executor, model)
