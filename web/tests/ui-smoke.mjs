@@ -1130,6 +1130,7 @@ try {
   // 请求详情弹窗使用只读 Mock 验证真实键盘路径，不写入 Gateway 审计记录。
   const smokeRequestID = 'browser-smoke-detail-1';
   let failNextRequestList = false;
+  let mockDetailRequestCount = 0;
   await page.route('**/api/requests*', async route => {
     const request = route.request();
     if (request.method() !== 'GET') return route.continue();
@@ -1166,7 +1167,8 @@ try {
       });
       return;
     }
-    if (pathname === '/api/requests/' + smokeRequestID) {
+    if (pathname.startsWith('/api/requests/')) {
+      mockDetailRequestCount += 1;
       await route.fulfill({
         status: 200, contentType: 'application/json',
         body: JSON.stringify({
@@ -1192,6 +1194,7 @@ try {
   await detailTrigger.click();
   const detailModal = page.locator('#detailModal');
   await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
+  check('请求详情使用 Mock 详情接口响应', mockDetailRequestCount === 1, mockDetailRequestCount);
   await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
   check('请求详情弹窗打开后将焦点移入关闭按钮',
     await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
