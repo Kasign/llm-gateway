@@ -531,3 +531,51 @@ func TestRunRejectsLegacyFunctionCallingFields(t *testing.T) {
 		}
 	}
 }
+
+type errorResponseModel struct {
+	response ModelResponse
+	err      error
+}
+
+func (m errorResponseModel) Complete(context.Context, []byte) (ModelResponse, error) {
+	return m.response, m.err
+}
+
+func TestRunPreservesNonSuccessProviderResponseReturnedWithError(t *testing.T) {
+	body := []byte(`{"error":{"message":"upstream rate limited"}}`)
+	upstreamErr := errors.New("provider returned HTTP 429")
+	registry := tools.NewRegistry()
+	executor := &testExecutor{}
+	definition := tools.Definition{
+		Name: "web.search",
+		Description: "Search the web",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	}
+	if err := registry.Register(definition, executor); err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := New(registry, executor, errorResponseModel{
+		response: ModelResponse{
+			StatusCode: http.StatusTooManyRequests,
+			UpstreamStatus: http.StatusTooManyRequests,
+			Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: body,
+		},
+		err: upstreamErr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, runErr := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if !errors.Is(runErr, upstreamErr) {
+		t.Fatalf("Run() error = %v, want original Provider error", runErr)
+	}
+	if result.Response.StatusCode != http.StatusTooManyRequests ||
+		result.Response.UpstreamStatus != http.StatusTooManyRequests ||
+		string(result.Response.Body) != string(body) {
+		t.Fatalf("upstream error response was lost: %+v", result.Response)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
