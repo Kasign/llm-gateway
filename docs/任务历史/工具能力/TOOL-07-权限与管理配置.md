@@ -1,0 +1,132 @@
+# 当前任务：TOOL-07 权限与管理配置
+
+> 状态：已完成
+> 更新日期：2026-11-17
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 开始基线：10cf08161a5ed19a213be3745681ccfb444092ba
+> 前置任务：[TOOL-06 非流式工具闭环接入](任务历史/工具能力/TOOL-06-非流式工具闭环接入.md)
+> 任务状态权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 任务目标
+
+将工具权限接入现有调用方 API Key 管理体系，使每个调用方 Key 只能使用管理员明确授予的工具；提供现有服务密钥管理 API、OpenAPI 和管理台配置入口。不得改变管理员 API Key、Web Session、调用方 API Key 和 Provider 上游 Key 的用途边界。
+
+## 2. 不可破坏的约束
+
+- `tools.enabled` 和全局模型/工具白名单继续作为第一层服务端门控。
+- 最终可用工具集合必须取交集：全局启用工具、模型白名单、调用方 Key 授权、Registry 已注册工具。
+- 调用方 Key 未配置工具授权或授权列表为空时，默认不能使用任何工具；旧 Key 迁移后也必须默认无工具权限。
+- 不改变 `allowed_models` 当前语义：空列表表示不限制模型；工具权限使用独立字段，不能复用或混淆。
+- 客户端 `tools`、`tool_choice` 只能表达请求意图，不能授予工具权限或扩大服务端授权集合。
+- 每次执行仍由 Runtime 再次授权，保持 fail-closed。
+- 管理员 API Key 仍仅用于 `/api/admin/keys` 及其子路径；其他管理操作继续要求 Web Session。
+- Web Session 不得用于 `/v1/*` 推理鉴权；Provider 上游 Key 不得暴露给管理台或调用方。
+- 不新增第二套 API Key、Session 或 Provider 凭据体系。
+- 先复用现有 `api_keys` 表和管理流程；只有明确需要时才新增字段/迁移，不新增独立权限服务。
+- API、OpenAPI、管理台和数据库变更必须保持兼容；默认配置和旧数据必须安全拒绝工具访问。
+
+## 3. 已确认的现有结构
+
+1. `auth.Key` 当前包含 `AllowedModels`，没有工具权限字段；`Hash` 使用 `json:"-"`，不会通过管理 API 返回。
+2. `auth.Repo` 通过 `api_keys` 表完成创建、查询、列表、更新、轮换、启用/禁用和删除；`allowed_models` 以 JSON 文本保存。
+3. `api_keys` 表已有 `allowed_models TEXT NULL`，尚无工具授权字段。迁移入口是 `internal/db/migrate.go` 的 `ensureColumns`，初始结构在 `migrations/001_init.sql`。
+4. 服务密钥管理 API 已存在：`GET/POST /api/admin/keys`、`PUT/DELETE /api/admin/keys/{id}`，以及 disable / enable / rotate 子路径。
+5. `adminAuthorized` 明确限制管理员 API Key 只能访问服务密钥管理路径；其他管理 API 使用 Web Session。前端 `web/js/core/api.js` 也执行同样的路径限制。
+6. 管理台服务密钥页面位于 `web/index.html` 与 `web/js/app/main.js`，目前展示和编辑名称、RPM、允许模型、过期时间及 Key 状态。
+7. `docs/openapi.yaml` 已定义 API Key 路由和 `APIKeyMetadata`、`APIKeyMutation` 等 Schema，需同步扩展。
+8. 每个推理请求的 `callState` 已保存鉴权得到的 `*auth.Key`；工具模式可通过 request ID 取得当前调用方 Key，无需从请求体或 Header 再解析权限。
+9. 当前工具模式已按服务端全局模型/工具白名单生成请求级允许集合；TOOL-07 应在此基础上叠加调用方 Key 授权，不重写 Coordinator 或 Runtime。
+
+10. `serveInference` 是所有 `/v1/*` 推理入口的统一门外：完成 API Key 鉴权后，在进入 Pipeline 前调用 `callBegin(id, key)`；Pipeline Forward 期间 `callState.key` 可按 request ID 读取，Finish 后统一清理。工具模式无需再次解析 Authorization Header。
+11. `auth.Key` 在每次请求认证时从数据库加载，`callState` 保存的是该请求的权限快照。权限更新对新请求立即生效；已开始的请求按认证时快照完成，不在每次工具调用时额外查询数据库。
+12. 现有 `PUT /api/admin/keys/{id}` 是完整元数据更新；若直接新增普通切片字段，旧客户端不提交 `allowed_tools` 会意外清空权限。新字段必须支持“PUT 未提交时保留、显式空数组时清空”的兼容语义。
+13. 当前管理台有创建和列表、启用/禁用、轮换、删除，但没有编辑 Key 权限的完整入口；TOOL-07 需要补充现有服务密钥页面，不新建第二套管理页面。
+14. `APIKeyMetadata`、`APIKeyMutation` 和现有 Key 路由已在 `docs/openapi.yaml` 定义；扩展现有契约即可，不需要新增权限 API 服务。
+
+## 4. 初步权限模型
+
+- 全局配置决定 Gateway 是否开放工具，以及当前模型和部署允许哪些工具。
+- 调用方 API Key 增加独立的工具授权列表，例如 `allowed_tools: ["web.search"]`。
+- 有效权限为全局配置、当前模型允许集合、调用方 Key 授权集合和 Registry 注册集合的交集。
+- `allowed_tools` 缺失或为空表示无工具权限；不提供“空列表代表全部工具”的隐式授权。
+- 创建 Key 时未提交 `allowed_tools` 等同空数组；更新 Key 时未提交或传 `null` 表示保留原授权，显式传 `[]` 才清空。列表响应统一返回数组，空值返回 `[]`。
+- 权限在请求认证时形成快照；撤销或更新权限影响后续请求，不中断已经开始的请求。
+- Key 被禁用、过期、删除或无效时，现有认证流程先行拒绝；不得让缓存权限绕过 Key 状态。
+- 管理员只能为当前已注册且全局允许的工具授予调用方 Key 权限；未知工具名、重复项和无效标识应拒绝保存。
+- 权限字段不包含 Provider 配置、Base URL、API Key、策略指纹或执行参数；工具标识保持稳定，例如 `web.search`。
+
+## 5. 实施顺序
+
+1. 完成 API Key 从认证、callState、Guard 到工具模式的逐路径审查，确认权限读取时机与并发/缓存边界。
+2. 固化 `allowed_tools` 的缺省拒绝语义、全局与 Key 级权限交集、创建/更新兼容策略。
+3. 扩展现有 `api_keys` 存储与增量迁移；旧记录迁移后不获得工具权限。
+4. 扩展现有服务密钥管理 API 和 OpenAPI Schema，校验授权只能授予已注册且全局允许的工具。
+5. 在工具模式中读取当前请求的调用方 Key，计算有效工具集合；普通请求、无授权 Key 和无工具配置时保持安全行为。
+6. 扩展现有管理台服务密钥页面，支持查看和编辑工具授权；不改变管理员 API Key 的存储和用途。
+7. 补齐旧 Key 兼容、授权拒绝、权限交集、Key 状态、管理认证边界、API/OpenAPI/前端测试。
+8. 完成代码 Review、全量 Go CI 和管理台构建验收。
+
+## 6. 必须覆盖的测试
+
+- 旧数据库记录和旧 API Key：`allowed_tools` 为 NULL、空值或无效 JSON 时均解析为空授权，不能调用任何工具。
+- 新建/更新 Key：允许列表可持久化、读取、展示；重复、未知或未全局启用的工具不能授予。
+- 全局关闭、模型不允许、Key 不允许、Registry 不存在时均不能执行工具。
+- Key 授权是全局工具集合的子集，不能覆盖全局禁用或模型限制。
+- 客户端伪造工具定义或工具名不能扩大授权集合。
+- Key 禁用、过期、删除后不能继续使用工具；权限更新不依赖长期缓存。
+- Key 轮换不意外改变工具授权；更新普通字段不清空未提交的权限字段（API 语义需明确）。
+- 管理员 API Key 仅可管理调用方 Key；不能访问其他管理 API 或登录 Web Session。
+- Web Session、调用方 API Key、Provider 上游 Key 互不混用。
+- API 响应不包含 Key Hash、Provider Key 或其他凭据。
+
+## 7. 本任务不实现
+
+- 工具调用审计明细和请求详情展示（TOOL-08）。
+- Gateway 容器到真实 SearXNG 的网络验收与完整真实环境回归（TOOL-09）。
+- 流式工具调用（TOOL-10）。
+- 新的通用权限引擎、动态策略 DSL、独立 ACL 服务或工具市场。
+
+## 8. 当前进度
+
+**已完成第一段后端实现：**
+- `auth.Key` 增加独立 `allowed_tools` 字段；不复用 `allowed_models`。
+- `api_keys.allowed_tools` 增量迁移；旧记录为 NULL 时读取为空数组，因此旧 Key 默认没有工具权限。
+- Repository 新增带工具权限的创建/更新方法；旧方法保留兼容。更新时未提供权限字段保留原授权，显式空数组清空。
+- 服务密钥 API 创建/更新已接入字段；只允许授予当前全局启用且 Registry 已注册的工具。
+- 工具请求按全局配置、模型白名单、调用方 Key 授权和 Registry 求交集；缺少请求 Key 上下文时 fail closed。
+- 普通推理请求不因调用方 Key 没有工具授权而改变原路径。
+
+**已完成：**
+- 管理台创建、编辑、列表已接入独立工具授权选择器；可授予目录仅暴露全局启用且已注册工具。
+- OpenAPI 已同步管理 API 字段与响应目录。
+- Go CI（单元/集成、竞态、静态检查）在提交 `dace5fa3a52264955fe081dc88a6f662db84fbbf` 已全部通过。
+- Gateway 故障注入和 Docker 构建已通过。
+
+**Review 中已修复：**
+- 旧 Key 的 NULL / 空值 / 无效 JSON 统一 fail-closed 为空授权，并增加解析边界测试。
+- `allowed_tools` 更新字段改为按 JSON 语义识别 `null`，包括带空白的合法 `null`；缺省/null 保留原授权，`[]` 清空。
+- 补充工具目录和授权名称校验单元测试。
+- 修复 OpenAPI Schema 中 `allowed_tools` / `expires_at` 的字段边界与类型声明。
+- Browser Smoke Runner 固定为 Ubuntu 24.04，避开 Playwright 1.56.1 不支持 Ubuntu 26.04 的环境问题。
+
+**验收证据：**
+- Go CI：单元/集成、竞态、静态检查、配置/API/前端契约、Docker 构建、故障注入及稳态负载全部通过（提交 `e4e2e1f3ac565fa12ffc5a9a7f0819cdef25d37c`）。
+- Browser Smoke：真实 Gateway + MariaDB 环境通过桌面/窄屏及服务密钥工具授权流程；验证创建、编辑、列表持久化、缺省/null 保留、空数组清空、Key 轮换保留（Run `44037952184`）。
+- 管理员 API Key 与 Web Session 边界已有 `admin_auth_scope_test.go` 覆盖；工具请求无调用方 Key 授权时返回 403；普通请求路径保持原样。
+
+**最终验收结论：已完成。**
+
+- 调用方 Key 使用独立 allowed_tools ACL；有效权限为全局工具配置、模型白名单、Key 授权和 Registry 注册集合的交集。
+- 旧 Key 的 NULL、空值和无效 JSON 均 fail-closed 为空授权；缺少调用方 Key 上下文时工具请求返回 403。
+- 创建、更新、列表、轮换均保持权限语义；更新字段缺省或 null 保留，[] 清空；轮换不改变授权。
+- 管理台支持工具授权查看、创建和编辑；管理员 Key 验证成功后自动刷新可授予工具目录。
+- 管理员 API Key / Web Session / 调用方 API Key / Provider Key 的既有用途边界保持不变。
+- OpenAPI 已修复并同步字段结构；无工具普通请求路径保持不变。
+
+**最终验证证据：**
+- Go CI Run 44038368731：单元/集成测试、竞态测试、静态检查、配置/API/前端契约、Docker 构建、故障注入、MariaDB 审计积压与稳态负载全部通过；对应提交 3ebe47fff33c4141048f010b808baa6634f00535。
+- Browser Smoke Run 44038368734：真实 Gateway + MariaDB 环境通过；覆盖工具目录加载、创建授权、编辑回显、持久化、缺省/null 保留、空数组清空、Key 轮换保留及桌面/窄屏验收。
+- 管理员 API Key 与 Web Session 边界已有 admin_auth_scope_test.go 覆盖；工具请求无调用方 Key 授权时返回 403；普通请求路径保持原样。
+
+未实现工具审计明细；该范围归入 TOOL-08。
