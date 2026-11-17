@@ -175,6 +175,9 @@ func mapToolCoordinatorError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, toolruntime.ErrExecutionTimeout) || errors.Is(err, searxng.ErrUpstreamTimeout) {
+		return &core.Error{Status: http.StatusGatewayTimeout, Code: "tool_execution_timeout", Message: "tool execution timed out"}
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
@@ -188,8 +191,6 @@ func mapToolCoordinatorError(err error) error {
 		return &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_authorization_unavailable", Message: "tool authorization is unavailable"}
 	case errors.Is(err, toolruntime.ErrConcurrencyLimit):
 		return &core.Error{Status: http.StatusTooManyRequests, Code: "tool_execution_busy", Message: "tool execution capacity is exhausted"}
-	case errors.Is(err, toolruntime.ErrExecutionTimeout), errors.Is(err, searxng.ErrUpstreamTimeout):
-		return &core.Error{Status: http.StatusGatewayTimeout, Code: "tool_execution_timeout", Message: "tool execution timed out"}
 	case errors.Is(err, coordinator.ErrUnsupportedRequest), errors.Is(err, coordinator.ErrInvalidRequest):
 		return &core.Error{Status: http.StatusBadRequest, Code: "tool_request_unsupported", Message: "tool request is not supported"}
 	case errors.Is(err, coordinator.ErrNoAllowedTools):

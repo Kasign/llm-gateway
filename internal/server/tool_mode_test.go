@@ -317,3 +317,14 @@ func TestForwardWithToolsPreservesProviderNonSuccessResponse(t *testing.T) {
 		t.Fatalf("upstream error response was not written back: result=%+v status=%d body=%q", result, recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestMapToolCoordinatorTimeoutIsGatewayTimeout(t *testing.T) {
+	mapped := mapToolCoordinatorError(&coordinator.ToolExecutionError{
+		ToolName: "web.search",
+		Cause: toolruntime.ErrExecutionTimeout,
+	})
+	coreErr, ok := mapped.(*core.Error)
+	if !ok || coreErr.Status != http.StatusGatewayTimeout || coreErr.Code != "tool_execution_timeout" {
+		t.Fatalf("tool timeout was not mapped to 504: %#v", mapped)
+	}
+}
