@@ -69,6 +69,20 @@ type ExecutionError struct {
 	cause error
 }
 
+// AuthorizationError 对外隐藏授权依赖的原始错误，同时保留 Unwrap 供内部诊断。
+type AuthorizationError struct {
+	cause error
+}
+
+func (e *AuthorizationError) Error() string { return ErrAuthorizationUnavailable.Error() }
+
+func (e *AuthorizationError) Unwrap() error {
+	if e == nil { return nil }
+	return e.cause
+}
+
+func (e *AuthorizationError) Is(target error) bool { return target == ErrAuthorizationUnavailable }
+
 func (e *ExecutionError) Error() string { return ErrExecutionFailed.Error() }
 
 func (e *ExecutionError) Unwrap() error {
@@ -130,12 +144,12 @@ func (r *Runtime) Execute(ctx context.Context, name string, arguments json.RawMe
 	if r.authorizer == nil {
 		return nil, ErrAuthorizationUnavailable
 	}
-	allowed, authErr := r.authorizer.Authorize(ctx, definition.Name)
+	allowed, authErr := invokeAuthorizer(ctx, r.authorizer, definition.Name)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
 	if authErr != nil {
-		return nil, ErrAuthorizationUnavailable
+		return nil, &AuthorizationError{cause: authErr}
 	}
 	if !allowed {
 		return nil, ErrUnauthorized
@@ -150,6 +164,9 @@ func (r *Runtime) Execute(ctx context.Context, name string, arguments json.RawMe
 		return nil, ErrConcurrencyLimit
 	}
 	defer r.release()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	executionCtx, cancel := context.WithTimeout(ctx, r.executionTimeout)
 	defer cancel()
@@ -201,6 +218,16 @@ func (r *Runtime) release() {
 		r.active--
 	}
 	r.mu.Unlock()
+}
+
+func invokeAuthorizer(ctx context.Context, authorizer Authorizer, name string) (allowed bool, err error) {
+	defer func() {
+		if recover() != nil {
+			allowed = false
+			err = ErrAuthorizationUnavailable
+		}
+	}()
+	return authorizer.Authorize(ctx, name)
 }
 
 func invokeExecutor(ctx context.Context, executor tools.Executor, arguments json.RawMessage) (result json.RawMessage, err error) {

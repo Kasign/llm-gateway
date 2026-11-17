@@ -125,6 +125,18 @@ func TestExecuteFailsClosedOnMissingOrDeniedAuthorization(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	t.Run("authorization panic", func(t *testing.T) {
+		r := newTestRuntime(t, Config{}, authorizerFunc(func(context.Context, string) (bool, error) {
+			panic("sensitive authorization panic")
+		}), executor)
+		_, err := r.Execute(context.Background(), "web.search", json.RawMessage(`{"query":"x"}`))
+		if !errors.Is(err, ErrAuthorizationUnavailable) {
+			t.Fatalf("error = %v", err)
+		}
+		if strings.Contains(err.Error(), "sensitive authorization panic") {
+			t.Fatalf("authorization panic leaked: %v", err)
+		}
+	})
 	t.Run("authorization dependency failure", func(t *testing.T) {
 		r := newTestRuntime(t, Config{}, authorizerFunc(func(context.Context, string) (bool, error) { return false, errors.New("sensitive authorization backend detail") }), executor)
 		_, err := r.Execute(context.Background(), "web.search", json.RawMessage(`{"query":"x"}`))
