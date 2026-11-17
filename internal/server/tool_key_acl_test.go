@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/config"
@@ -71,5 +72,32 @@ func TestValidateKeyToolsRejectsWhenGlobalToolsDisabled(t *testing.T) {
 	s.cfg.Tools.Enabled = false
 	if err := s.validateKeyTools([]string{"web.search"}); err == nil {
 		t.Fatal("expected grant rejection while tools are globally disabled")
+	}
+}
+
+func TestDecodeOptionalAllowedTools(t *testing.T) {
+	cases := []struct {
+		name string
+		raw json.RawMessage
+		want []string
+		wantNil bool
+		wantErr bool
+	}{
+		{name:"omitted", wantNil:true},
+		{name:"null", raw:json.RawMessage(`null`), wantNil:true},
+		{name:"whitespace around null", raw:json.RawMessage("  null \n"), wantNil:true},
+		{name:"empty array clears", raw:json.RawMessage(`[]`), want:[]string{}},
+		{name:"values", raw:json.RawMessage(`["web.search"]`), want:[]string{"web.search"}},
+		{name:"object rejected", raw:json.RawMessage(`{}`), wantErr:true},
+		{name:"string rejected", raw:json.RawMessage(`"web.search"`), wantErr:true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodeOptionalAllowedTools(tc.raw)
+			if (err != nil) != tc.wantErr { t.Fatalf("error = %v, wantErr %v", err, tc.wantErr) }
+			if tc.wantErr { return }
+			if (got == nil) != tc.wantNil { t.Fatalf("got %#v, wantNil %v", got, tc.wantNil) }
+			if !tc.wantNil && !reflect.DeepEqual(got, tc.want) { t.Fatalf("got %v, want %v", got, tc.want) }
+		})
 	}
 }

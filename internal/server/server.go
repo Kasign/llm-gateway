@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -654,6 +655,18 @@ func (s *Server) validateKeyTools(names []string) error {
 	return nil
 }
 
+// decodeOptionalAllowedTools 解析更新请求中的工具授权字段：缺省或 null 表示保留，[] 表示清空。
+func decodeOptionalAllowedTools(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil || names == nil {
+		return nil, fmt.Errorf("allowed_tools must be an array of tool names or null")
+	}
+	return names, nil
+}
+
 // API key management
 // keysAPI 是 /api/admin/keys 接口：管理 API Key 的列表和创建。
 // GET  → 列出所有 Key（给管理后台展示用）
@@ -791,13 +804,16 @@ func (s *Server) keyAction(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 400, "invalid_request", "name is required")
 			return
 		}
-		var allowedTools []string
-		if len(in.AllowedTools) > 0 && string(in.AllowedTools) != "null" {
-			if json.Unmarshal(in.AllowedTools, &allowedTools) != nil || allowedTools == nil {
-				jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", "allowed_tools must be an array of tool names or null")
+		allowedTools, decodeErr := decodeOptionalAllowedTools(in.AllowedTools)
+		if decodeErr != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", decodeErr.Error())
+			return
+		}
+		if allowedTools != nil {
+			if err := s.validateKeyTools(allowedTools); err != nil {
+				jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", err.Error())
 				return
 			}
-			if err := s.validateKeyTools(allowedTools); err != nil { jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", err.Error()); return }
 		}
 		if e := s.keys.UpdateWithTools(r.Context(), id, in.Name, in.RPM, in.AllowedModels, allowedTools, in.ExpiresAt); e != nil {
 			applog.Printf("update api key failed: id=%d err=%v", id, e)

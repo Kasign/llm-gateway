@@ -2509,7 +2509,8 @@ components:
         allowed_tools:
           type: array
           description: 允许调用的工具稳定名称；空数组表示不授予任何工具权限。
-          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*
+          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$' }
+        expires_at:
           type: [string, "null"]
           format: date-time
         created_at:
@@ -2549,8 +2550,10 @@ components:
           type: array
           items: { type: string }
         allowed_tools:
-          type: array
-          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*
+          type: [array, "null"]
+          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$' }
+          description: 创建时缺省或 null 表示无工具授权；更新时缺省或 null 表示保留原授权，空数组表示清空。
+        expires_at:
           type: [string, "null"]
           format: date-time
           description: null 表示不设置过期时间。
