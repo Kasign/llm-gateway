@@ -478,7 +478,9 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.benchmarks.put(job)
-	go s.runBenchmark(job, m, upstreamOnly, runIn, key, target)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	job.setCancel(workerCancel)
+	go s.runBenchmark(workerCtx, workerCancel, job, m, upstreamOnly, runIn, key, target)
 	applog.Infof("[benchmark:%s] queued model_key=%q upstream_only=%q prompt_len=%d max_tokens=%d", jobID, modelKey, upstreamOnly, len(in.Prompt), in.MaxTokens)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -654,14 +656,12 @@ type benchmarkTargetSnapshot struct {
 	ModelName string
 }
 
-func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput, key *auth.Key, target benchmarkTargetSnapshot) {
+func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.CancelFunc, job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput, key *auth.Key, target benchmarkTargetSnapshot) {
 	defer s.benchmarks.cleanup()
 	defer s.persistBenchmarkJob(job)
-	stopCtx, stopCancel := context.WithCancel(context.Background())
-	defer stopCancel()
-	job.setCancel(stopCancel)
+	defer workerCancel()
 	defer job.clearCancel()
-	ctx, cancel := contextWithOptionalTimeout(stopCtx, s.cfg.Llama.RequestTimeout)
+	ctx, cancel := contextWithOptionalTimeout(workerCtx, s.cfg.Llama.RequestTimeout)
 	defer cancel()
 
 	be := target.Backend
