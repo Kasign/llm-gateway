@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"time"
 	"unicode/utf8"
 
 	"github.com/whl/llm-gateway/internal/tools"
@@ -69,6 +70,21 @@ type Result struct {
 	RoundUsage  []json.RawMessage
 }
 
+ // ToolCallEvent 是单次请求内一条工具调用的最小审计事件；Cause 仅供进程内分类，不得持久化。
+type ToolCallEvent struct {
+	Seq         int
+	Round       int
+	ToolName    string
+	Status      string
+	DurationMS  int64
+	ResultBytes int64
+	ErrorCode   string
+	Cause       error `json:"-"`
+}
+
+// Observer 接收 Coordinator 产生的工具调用事件。回调不得影响模型响应。
+type Observer func(ToolCallEvent)
+
 // ToolExecutionError 隐藏工具实现的原始错误文本，同时保留 Unwrap 供内部诊断。
 type ToolExecutionError struct {
 	ToolName string
@@ -111,7 +127,25 @@ func New(registry *tools.Registry, executor ToolExecutor, model ModelCaller) (*C
 // Run 使用服务端提供的允许工具名称执行一次非流式 Chat Completions 请求。
 // 请求体中的客户端 tools 会被服务端 Registry 定义替换，不能注册或覆盖工具。
 func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNames []string) (Result, error) {
+	return c.RunWithObserver(ctx, requestBody, allowedToolNames, nil)
+}
+
+// RunWithObserver 在不改变 Run 原有行为的前提下，可选地观察每次被拒绝或实际执行的工具调用。
+func (c *Coordinator) RunWithObserver(ctx context.Context, requestBody []byte, allowedToolNames []string, observer Observer) (Result, error) {
 	result := Result{}
+	var eventSeq int
+	emit := func(event ToolCallEvent) {
+		if observer == nil {
+			return
+		}
+		eventSeq++
+		event.Seq = eventSeq
+		event.ToolName = truncateToolName(event.ToolName)
+		func() {
+			defer func() { _ = recover() }()
+			observer(event)
+		}()
+	}
 	if c == nil || c.registry == nil || isNil(c.executor) || isNil(c.model) {
 		return result, ErrCoordinatorUnavailable
 	}
@@ -198,30 +232,38 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		roundCallIDs := make(map[string]struct{}, len(round.calls))
 		for _, call := range round.calls {
 			if call.ID == "" || len(call.ID) > MaxToolCallIDBytes || !utf8.ValidString(call.ID) {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
 				return result, ErrInvalidModelResponse
 			}
 			if _, exists := seenCallIDs[call.ID]; exists {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
 				return result, ErrInvalidModelResponse
 			}
 			if _, exists := roundCallIDs[call.ID]; exists {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
 				return result, ErrInvalidModelResponse
 			}
 			roundCallIDs[call.ID] = struct{}{}
 			if call.Type != "function" || call.Function.Name == "" || (choice.name != "" && call.Function.Name != choice.name) {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
 				return result, ErrInvalidModelResponse
 			}
 			if _, ok := allowed[call.Function.Name]; !ok {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "unknown_tool"})
 				return result, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
 			}
 			definition, _, lookupErr := c.registry.Lookup(call.Function.Name)
 			if lookupErr != nil {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "unknown_tool", Cause: lookupErr})
 				return result, fmt.Errorf("%w: %s", ErrUnknownTool, call.Function.Name)
 			}
 			arguments := json.RawMessage(call.Function.Arguments)
 			if err := validateStrictJSON(arguments, MaxStrictJSONDepth); err != nil {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call", Cause: err})
 				return result, fmt.Errorf("%w: invalid arguments JSON", ErrInvalidModelResponse)
 			}
 			if err := tools.ValidateArguments(definition.Parameters, arguments); err != nil {
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_arguments", Cause: err})
 				return result, fmt.Errorf("%w: invalid tool arguments", ErrInvalidModelResponse)
 			}
 			prepared = append(prepared, preparedCall{id: call.ID, name: call.Function.Name, arguments: arguments})
@@ -230,28 +272,40 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		result.ToolRounds++
 		messages = append(messages, append(json.RawMessage(nil), round.message...))
 		for _, call := range prepared {
+			roundNo := result.ToolRounds
 			if err := ctx.Err(); err != nil {
+				status, code := classifyToolCallError(err)
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: status, ErrorCode: code, Cause: err})
 				return result, err
 			}
+			started := time.Now()
 			output, executeErr := c.executor.Execute(ctx, call.name, append(json.RawMessage(nil), call.arguments...))
+			duration := time.Since(started).Milliseconds()
 			if executeErr != nil {
+				status, code := classifyToolCallError(executeErr)
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: status, DurationMS: duration, ErrorCode: code, Cause: executeErr})
 				return result, &ToolExecutionError{ToolName: call.name, Cause: executeErr}
 			}
 			if len(output) == 0 || !json.Valid(output) || !utf8.Valid(output) {
-				return result, fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
+				err := fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "failed", DurationMS: duration, ErrorCode: "tool_result_invalid", Cause: err})
+				return result, err
 			}
 			if len(output) > MaxToolResultBytes-totalToolResultBytes {
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "failed", DurationMS: duration, ResultBytes: int64(len(output)), ErrorCode: "tool_result_budget_exceeded", Cause: ErrToolResultBudget})
 				return result, ErrToolResultBudget
 			}
-			totalToolResultBytes += len(output)
 			toolMessage, marshalErr := json.Marshal(struct {
 				Role       string `json:"role"`
 				ToolCallID string `json:"tool_call_id"`
 				Content    string `json:"content"`
 			}{Role: "tool", ToolCallID: call.id, Content: string(output)})
 			if marshalErr != nil {
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "failed", DurationMS: duration, ResultBytes: int64(len(output)), ErrorCode: "tool_execution_failed", Cause: marshalErr})
 				return result, fmt.Errorf("%w: encode tool result", ErrToolExecutionFailed)
 			}
+			emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "succeeded", DurationMS: duration, ResultBytes: int64(len(output))})
+			totalToolResultBytes += len(output)
 			messages = append(messages, toolMessage)
 			seenCallIDs[call.id] = struct{}{}
 			result.ToolCalls++
@@ -267,6 +321,29 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			request["tool_choice"] = json.RawMessage(`"auto"`)
 		}
 	}
+}
+
+
+func classifyToolCallError(err error) (status, code string) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed_out", "tool_timeout"
+	case errors.Is(err, context.Canceled):
+		return "cancelled", "tool_cancelled"
+	default:
+		return "failed", "tool_execution_failed"
+	}
+}
+
+func truncateToolName(name string) string {
+	if len(name) <= 64 {
+		return name
+	}
+	name = name[:64]
+	for !utf8.ValidString(name) {
+		name = name[:len(name)-1]
+	}
+	return name
 }
 
 type toolChoiceConstraint struct {
