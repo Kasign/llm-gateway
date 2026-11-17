@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
@@ -428,5 +429,96 @@ func TestToolLoopRunsInsideSinglePipelineLifecycle(t *testing.T) {
 		strings.Contains(recorder.Body.String(), "tool_calls") ||
 		strings.Contains(recorder.Body.String(), "echo") {
 		t.Fatalf("client received intermediate tool content: %q", recorder.Body.String())
+	}
+}
+
+type pipelineLifecycleCounter struct {
+	parsed       int
+	upstreamStart int
+	finish       int
+}
+
+func (c *pipelineLifecycleCounter) On(_ context.Context, event core.Event) {
+	switch event.Stage {
+	case core.StageParsed:
+		c.parsed++
+	case core.StageUpstreamStart:
+		c.upstreamStart++
+	case core.StageFinish:
+		c.finish++
+	}
+}
+
+func TestToolLoopRunsInsideOnePipelineLifecycle(t *testing.T) {
+	registry := tools.NewRegistry()
+	definition := tools.Definition{
+		Name: "test.echo",
+		Description: "Echo",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	}
+	if err := registry.Register(definition, toolLoopTestExecutor{}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerInstance := &toolLoopTestProvider{}
+	providerRegistry := provider.NewRegistry()
+	factoryCalls := 0
+	if err := providerRegistry.Register("llamacpp", func() provider.Provider {
+		factoryCalls++
+		return providerInstance
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg: &config.Config{Tools: config.ToolsConfig{
+			Enabled: true,
+			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
+			AllowedTools: []string{"test.echo"},
+		}},
+		providers: providerRegistry,
+		toolRegistry: registry,
+		toolRuntime: runtime,
+	}
+	observer := &pipelineLifecycleCounter{}
+	pipe := &core.Pipeline{
+		Resolve: func(context.Context, core.State) (core.ModelChoice, error) {
+			return core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"}, nil
+		},
+		Forward: inferenceForwarder{s: s},
+		Observe: observer,
+	}
+	recorder := httptest.NewRecorder()
+	sink := &responseSink{w: recorder}
+	result, runErr := pipe.Run(context.Background(), core.Request{
+		ID: "pipeline-tool-loop",
+		Method: http.MethodPost,
+		Path: "/v1/chat/completions",
+		Body: []byte(`{"model":"client-model","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"client.injected","parameters":{"type":"object"}}}]}`),
+		Sink: sink,
+		Started: time.Now(),
+	})
+	if runErr != nil {
+		t.Fatalf("Pipeline.Run() error = %v", runErr)
+	}
+	if result.Status != http.StatusOK || recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), "done") ||
+		strings.Contains(recorder.Body.String(), "tool_calls") {
+		t.Fatalf("unexpected final response: result=%+v status=%d body=%q", result, recorder.Code, recorder.Body.String())
+	}
+	if observer.parsed != 1 || observer.upstreamStart != 1 || observer.finish != 1 {
+		t.Fatalf("Pipeline lifecycle repeated: parsed=%d upstreamStart=%d finish=%d",
+			observer.parsed, observer.upstreamStart, observer.finish)
+	}
+	if factoryCalls != 1 || providerInstance.calls != 2 {
+		t.Fatalf("expected one Provider resolve and two model rounds: factory=%d calls=%d",
+			factoryCalls, providerInstance.calls)
+	}
+	if len(providerInstance.modelIDs) != 2 ||
+		providerInstance.modelIDs[0] != "active-model" ||
+		providerInstance.modelIDs[1] != "active-model" {
+		t.Fatalf("active ModelID changed between rounds: %v", providerInstance.modelIDs)
 	}
 }
