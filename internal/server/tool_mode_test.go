@@ -570,6 +570,8 @@ func TestMapToolCallAuditEventUsesStableRuntimeErrorCodes(t *testing.T) {
 		{"authorization unavailable", toolruntime.ErrAuthorizationUnavailable, "rejected", "tool_authorization_unavailable"},
 		{"concurrency", toolruntime.ErrConcurrencyLimit, "rejected", "tool_concurrency_limit"},
 		{"timeout", toolruntime.ErrExecutionTimeout, "timed_out", "tool_timeout"},
+		{"deadline", context.DeadlineExceeded, "timed_out", "tool_timeout"},
+		{"cancelled", context.Canceled, "cancelled", "tool_cancelled"},
 		{"invalid result", toolruntime.ErrInvalidResult, "failed", "tool_result_invalid"},
 		{"result too large", toolruntime.ErrResultTooLarge, "failed", "tool_result_too_large"},
 		{"executor panic", toolruntime.ErrExecutorPanicked, "failed", "tool_executor_panicked"},

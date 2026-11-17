@@ -175,7 +175,9 @@ func mapToolCallAuditEvent(event coordinator.ToolCallEvent) store.ToolCallEvent 
 		status, code = "rejected", "tool_concurrency_limit"
 	case errors.Is(err, toolruntime.ErrExecutionTimeout), errors.Is(err, searxng.ErrUpstreamTimeout):
 		status, code = "timed_out", "tool_timeout"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded):
+		status, code = "timed_out", "tool_timeout"
+	case errors.Is(err, context.Canceled):
 		status, code = "cancelled", "tool_cancelled"
 	case errors.Is(err, toolruntime.ErrResultTooLarge):
 		status, code = "failed", "tool_result_too_large"
