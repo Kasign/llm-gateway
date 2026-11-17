@@ -3079,7 +3079,7 @@ components:
       required: [job_id, status, stopped]
       properties:
         job_id: { type: string }
-        status: { type: string, enum: [running, completed, failed, cancelled] }
+        status: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
         stopped: { type: boolean }
         message: { type: string }
       additionalProperties: false
