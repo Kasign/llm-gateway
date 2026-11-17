@@ -75,8 +75,8 @@ func TestValidateArguments(t *testing.T) {
 }
 
 func TestStrictJSONLimitsAndUTF8(t *testing.T) {
-	if _, err := parseStrictJSON([]byte(`{"a":{"b":1}}`), 100, 2); err != nil { t.Fatal(err) }
-	if _, err := parseStrictJSON([]byte(`{"a":{"b":1}}`), 100, 1); err == nil { t.Fatal("expected depth error") }
+	if _, err := parseStrictJSON([]byte(`{"a":{"b":1}}`), 100, 3); err != nil { t.Fatal(err) }
+	if _, err := parseStrictJSON([]byte(`{"a":{"b":1}}`), 100, 2); err == nil { t.Fatal("expected depth error") }
 	if _, err := parseStrictJSON([]byte{0xff}, 100, 4); err == nil { t.Fatal("expected UTF-8 error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1} {"y":2}`), 100, 4); err == nil { t.Fatal("expected trailing JSON error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1,"x":2}`), 100, 4); err == nil { t.Fatal("expected duplicate key error") }
