@@ -246,3 +246,11 @@ func TestBenchmarkObserverBoundsCapturedResponse(t *testing.T) {
 	snapshot := job.snapshot()
 	if !snapshot.ResponseTruncated || snapshot.ErrorCode != "benchmark_response_too_large" || snapshot.Status != "failed" { t.Fatalf("unexpected truncated result: %+v", snapshot) }
 }
+// TestBenchmarkCancellationTakesPrecedenceOverResponseLimit 验证用户取消不会被响应上限错误覆盖。
+func TestBenchmarkCancellationTakesPrecedenceOverResponseLimit(t *testing.T) {
+	job := &benchmarkJob{}
+	observer := &benchRunObserver{job: job, started: time.Now(), truncated: true}
+	observer.On(context.Background(), core.Event{Stage: core.StageFinish, Err: context.Canceled, Result: &core.Result{Status: 499}})
+	snapshot := job.snapshot()
+	if snapshot.Status != "cancelled" || snapshot.ErrorCode != "cancelled" || snapshot.ResponseTruncated { t.Fatalf("unexpected cancellation result: %+v", snapshot) }
+}

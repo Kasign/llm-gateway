@@ -906,7 +906,7 @@ func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
 			status = ev.Result.Status
 		}
 		err := ev.Err
-		if b.truncated || errors.Is(err, errBenchmarkResponseTooLarge) {
+		if !isCancelErr(err) && (b.truncated || errors.Is(err, errBenchmarkResponseTooLarge)) {
 			b.truncated = true
 			err = errBenchmarkResponseTooLarge
 		}
