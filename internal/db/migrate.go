@@ -177,7 +177,10 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   finished_at DATETIME(6) NULL,
   latency_ms BIGINT UNSIGNED NULL,
   model_load_ms BIGINT UNSIGNED NULL,
+  model_load_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
   inference_latency_ms BIGINT UNSIGNED NULL,
+  inference_latency_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
+  ttft_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
   http_status SMALLINT UNSIGNED NULL,
   response_bytes BIGINT UNSIGNED NULL,
   input_tokens BIGINT UNSIGNED NULL,
@@ -225,6 +228,9 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE request_logs ADD COLUMN upstream_http_status SMALLINT UNSIGNED NULL`,
 		`ALTER TABLE request_payloads ADD COLUMN request_headers_json LONGTEXT NULL`,
 		`ALTER TABLE request_payloads ADD COLUMN upstream_headers_json LONGTEXT NULL`,
+		`ALTER TABLE benchmark_runs ADD COLUMN model_load_status VARCHAR(24) NOT NULL DEFAULT 'unknown'`,
+		`ALTER TABLE benchmark_runs ADD COLUMN inference_latency_status VARCHAR(24) NOT NULL DEFAULT 'unknown'`,
+		`ALTER TABLE benchmark_runs ADD COLUMN ttft_status VARCHAR(24) NOT NULL DEFAULT 'unknown'`,
 	}
 	for _, sqlText := range alters {
 		if _, err := db.ExecContext(ctx, sqlText); err != nil {

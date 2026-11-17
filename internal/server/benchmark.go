@@ -563,6 +563,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	job := &benchmarkJob{
 		ID: jobID, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: true,
+		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown",
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
 		taskRecord: taskRecord, runRecord: runRecord,
 	}
@@ -821,14 +822,18 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	if localClientErr == nil {
 		modelLoadStatus = "measured"
 	}
-	defer func() {
+	modelLoadRecorded := false
+	recordModelLoad := func() {
+		if modelLoadRecorded { return }
+		modelLoadRecorded = true
 		if modelLoadStatus == "measured" {
 			value := time.Since(loadStart).Milliseconds()
 			job.setModelLoadMetric(&value, modelLoadStatus)
 		} else {
 			job.setModelLoadMetric(nil, modelLoadStatus)
 		}
-	}()
+	}
+	defer recordModelLoad()
 	if m != nil {
 		applog.Infof("[benchmark:%s] ensure model loaded: model_key=%s llama=%s", job.ID, m.ModelKey, llamaName)
 		if res, err := s.InferenceLoad(ctx, be, "", m.ModelKey, nil); err != nil {
@@ -879,6 +884,7 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	} else if err := localClient.WaitUntilModelReady(ctx, llamaName); err != nil {
 		applog.Printf("[benchmark:%s] model ready wait: %v (will still call chat)", job.ID, err)
 	}
+	recordModelLoad()
 	if ctx.Err() != nil {
 		if isCancelErr(ctx.Err()) {
 			job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, context.Canceled, nil, 0, 0)
