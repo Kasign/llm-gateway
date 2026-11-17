@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"sort"
 	"unicode/utf8"
 
 	"github.com/whl/llm-gateway/internal/tools"
@@ -66,6 +67,30 @@ type Result struct {
 	ToolRounds  int
 	ToolCalls   int
 	RoundUsage  []json.RawMessage
+}
+
+// ToolExecutionError 隐藏工具实现的原始错误文本，同时保留 Unwrap 供内部诊断。
+type ToolExecutionError struct {
+	ToolName string
+	Cause    error
+}
+
+func (e *ToolExecutionError) Error() string {
+	if e == nil {
+		return ErrToolExecutionFailed.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrToolExecutionFailed, e.ToolName)
+}
+
+func (e *ToolExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *ToolExecutionError) Is(target error) bool {
+	return target == ErrToolExecutionFailed
 }
 
 // Coordinator 协调同一请求中的模型调用和工具执行。
@@ -197,7 +222,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			}
 			output, executeErr := c.executor.Execute(ctx, call.name, append(json.RawMessage(nil), call.arguments...))
 			if executeErr != nil {
-				return Result{}, fmt.Errorf("%w: %s", ErrToolExecutionFailed, call.name)
+				return Result{}, &ToolExecutionError{ToolName: call.name, Cause: executeErr}
 			}
 			if len(output) == 0 || !json.Valid(output) || !utf8.Valid(output) {
 				return Result{}, fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
@@ -288,9 +313,11 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 		}
 	}
 
-	allowed := make(map[string]struct{}, len(allowedNames))
-	definitions := make([]tools.Definition, 0, len(allowedNames))
-	for _, name := range allowedNames {
+	orderedNames := append([]string(nil), allowedNames...)
+	sort.Strings(orderedNames)
+	allowed := make(map[string]struct{}, len(orderedNames))
+	definitions := make([]tools.Definition, 0, len(orderedNames))
+	for _, name := range orderedNames {
 		if name == "" {
 			return nil, nil, nil, ErrUnknownTool
 		}
