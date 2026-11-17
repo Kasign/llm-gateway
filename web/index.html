@@ -51,8 +51,7 @@
       <button type="button" data-tab="models-inference"><span class="dot"></span>服务参数</button>
       <button type="button" data-tab="keys"><span class="dot"></span>服务密钥</button>
       <button type="button" data-tab="requests"><span class="dot"></span>调用记录</button>
-      <button type="button" data-tab="benchmark"><span class="dot"></span>性能测试</button>
-      <button type="button" data-tab="tools-test"><span class="dot"></span>工具测试</button>
+      <button type="button" data-tab="model-test"><span class="dot"></span>模型测试</button>
       <button type="button" data-tab="providers"><span class="dot"></span>远程 Provider</button>
     </nav>
     <div class="sidebar-bottom">
@@ -450,8 +449,22 @@
         </div>
       </section>
 
-      <!-- Benchmark -->
-      <section id="benchmark" class="panel">
+      <!-- 模型测试：共用客户端服务密钥，测试模式分别执行。 -->
+      <section id="model-test" class="panel">
+        <div class="card">
+          <div class="card-head"><div><h2>模型测试</h2><p>统一使用客户端服务密钥；性能测试与工具测试保留各自的请求协议和指标。</p></div></div>
+          <div class="field">
+            <label for="modelTestApiKey">客户端服务密钥（必填）</label>
+            <input id="modelTestApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务密钥（sk-…）">
+            <p class="small muted">密钥仅保留在当前页面内存，不写入 localStorage / sessionStorage，也不会发送到管理 API。性能测试要求模型访问权限；工具测试还要求 web.search 权限。</p>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="modelTestModePerformance" aria-pressed="true">性能测试</button>
+            <button type="button" class="btn ghost" id="modelTestModeTools" aria-pressed="false">工具测试</button>
+            <button type="button" class="btn ghost" id="modelTestClearKeyBtn">清除密钥</button>
+          </div>
+        </div>
+        <div id="modelTestPerformance">
         <div class="card">
           <div class="card-head">
             <div>
@@ -494,10 +507,10 @@
             <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
           </details>
         </div>
-      </section>
+        </div>
 
-      <!-- Tool test -->
-      <section id="tools-test" class="panel">
+      <!-- 工具调用模式 -->
+      <div id="modelTestTools" hidden>
         <div class="card">
           <div class="card-head">
             <div>
@@ -506,20 +519,15 @@
             </div>
           </div>
           <div class="msg muted">
-            使用已在「服务密钥」中授予当前 Provider 服务范围和 web.search 权限的客户端 Key。
-            Key 仅保存在当前页面内存中，不写入 localStorage，也不会发送到管理 API。
+            使用已授予当前模型访问范围和 web.search 权限的客户端 Key。
           </div>
-          <div class="field">
-            <label for="toolTestApiKey">客户端服务密钥</label>
-            <input id="toolTestApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务密钥（sk-…）">
-          </div>
+          <p class="small muted">本模式使用上方共用的客户端服务密钥，要求该 Key 已获准访问当前模型并授予 web.search。</p>
           <div class="field">
             <label for="toolTestPrompt">测试提示词</label>
             <textarea id="toolTestPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果简要说明版本号和发布日期。必须实际调用搜索工具，不要只凭已有知识回答。</textarea>
           </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="toolTestRunBtn">开始工具调用测试</button>
-            <button type="button" class="btn ghost" id="toolTestClearKeyBtn">清除密钥</button>
           </div>
           <div id="toolTestStatus" class="msg muted" role="status" aria-live="polite">尚未执行测试。</div>
           <div id="toolTestRequest" class="small muted"></div>
@@ -529,6 +537,7 @@
             <button type="button" class="btn sm ghost" id="toolTestOpenDetailBtn">查看请求详情</button>
           </div>
         </div>
+      </div>
       </section>
     </div>
   </div>
@@ -600,16 +609,35 @@
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
 <script>
 (() => {
-  const keyInput = document.getElementById('toolTestApiKey');
+  const keyInput = document.getElementById('modelTestApiKey');
   const promptInput = document.getElementById('toolTestPrompt');
   const runButton = document.getElementById('toolTestRunBtn');
-  const clearButton = document.getElementById('toolTestClearKeyBtn');
+  const clearButton = document.getElementById('modelTestClearKeyBtn');
   const status = document.getElementById('toolTestStatus');
   const request = document.getElementById('toolTestRequest');
   const answer = document.getElementById('toolTestAnswer');
   const auditHint = document.getElementById('toolTestAuditHint');
   const detailButton = document.getElementById('toolTestOpenDetailBtn');
   let lastRequestId = '';
+
+  const performanceModeButton = document.getElementById('modelTestModePerformance');
+  const toolsModeButton = document.getElementById('modelTestModeTools');
+  const performancePanel = document.getElementById('modelTestPerformance');
+  const toolsPanel = document.getElementById('modelTestTools');
+  const setModelTestMode = mode => {
+    const toolsMode = mode === 'tools';
+    if (performancePanel) performancePanel.hidden = toolsMode;
+    if (toolsPanel) toolsPanel.hidden = !toolsMode;
+    performanceModeButton?.classList.toggle('primary', !toolsMode);
+    performanceModeButton?.classList.toggle('ghost', toolsMode);
+    performanceModeButton?.setAttribute('aria-pressed', String(!toolsMode));
+    toolsModeButton?.classList.toggle('primary', toolsMode);
+    toolsModeButton?.classList.toggle('ghost', !toolsMode);
+    toolsModeButton?.setAttribute('aria-pressed', String(toolsMode));
+  };
+  performanceModeButton?.addEventListener('click', () => setModelTestMode('performance'));
+  toolsModeButton?.addEventListener('click', () => setModelTestMode('tools'));
+  setModelTestMode('performance');
 
   clearButton?.addEventListener('click', () => {
     if (keyInput) keyInput.value = '';
