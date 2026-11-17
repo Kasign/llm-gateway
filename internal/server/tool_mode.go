@@ -129,7 +129,13 @@ func (f inferenceForwarder) forwardWithTools(
 		return core.Result{}, nil, false
 	}
 	toolCtx := withRequestToolAllowlist(ctx, allowedNames)
-	result, runErr := toolCoordinator.Run(toolCtx, st.Body, allowedNames)
+	var auditEvents []store.ToolCallEvent
+	result, runErr := toolCoordinator.RunWithObserver(toolCtx, st.Body, allowedNames, func(event coordinator.ToolCallEvent) {
+		auditEvents = append(auditEvents, mapToolCallAuditEvent(event))
+	})
+	if len(auditEvents) > 0 && s.audit != nil {
+		s.audit.InsertToolCallEvents(st.ID, auditEvents)
+	}
 	s.storeCoordinatorUsage(st.ID, result)
 
 	response := result.Response
@@ -153,6 +159,37 @@ func (f inferenceForwarder) forwardWithTools(
 		return coreResult, writeErr, true
 	}
 	return coreResult, mapToolCoordinatorError(runErr), true
+}
+
+// mapToolCallAuditEvent 将 Coordinator/Runtime 错误映射为稳定审计分类，不保存原始错误文本。
+func mapToolCallAuditEvent(event coordinator.ToolCallEvent) store.ToolCallEvent {
+	status, code := event.Status, event.ErrorCode
+	err := event.Cause
+	switch {
+	case errors.Is(err, toolruntime.ErrUnauthorized):
+		status, code = "rejected", "tool_unauthorized"
+	case errors.Is(err, toolruntime.ErrAuthorizationUnavailable):
+		status, code = "rejected", "tool_authorization_unavailable"
+	case errors.Is(err, toolruntime.ErrConcurrencyLimit):
+		status, code = "rejected", "tool_concurrency_limit"
+	case errors.Is(err, toolruntime.ErrExecutionTimeout), errors.Is(err, searxng.ErrUpstreamTimeout):
+		status, code = "timed_out", "tool_timeout"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		status, code = "cancelled", "tool_cancelled"
+	case errors.Is(err, toolruntime.ErrResultTooLarge):
+		status, code = "failed", "tool_result_too_large"
+	case errors.Is(err, toolruntime.ErrInvalidResult):
+		status, code = "failed", "tool_result_invalid"
+	case errors.Is(err, toolruntime.ErrExecutorPanicked):
+		status, code = "failed", "tool_executor_panicked"
+	case errors.Is(err, toolruntime.ErrExecutionFailed):
+		status, code = "failed", "tool_execution_failed"
+	}
+	return store.ToolCallEvent{
+		Seq: event.Seq, Round: event.Round, ToolName: event.ToolName,
+		Status: status, DurationMS: event.DurationMS, ResultBytes: event.ResultBytes,
+		ErrorCode: code,
+	}
 }
 
 func writeBufferedModelResponse(w http.ResponseWriter, response coordinator.ModelResponse) error {
