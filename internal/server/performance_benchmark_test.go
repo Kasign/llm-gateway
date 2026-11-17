@@ -410,3 +410,16 @@ func TestBenchmarkConditionMetadataHandlesMissingSnapshotFields(t *testing.T) {
 		t.Fatalf("missing snapshot metadata = %q/%q/%v, err=%v", fingerprint, status, missing, err)
 	}
 }
+
+
+// TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords 验证历史配置快照兼容与条件元数据恢复。
+func TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords(t *testing.T) {
+	hash, status, missing := benchmarkConditionFromConfigJSON(`{"condition_sha256":"abc","condition_status":"partial","condition_missing":["backend_version_unknown"]}`)
+	if hash != "abc" || status != "partial" || len(missing) != 1 || missing[0] != "backend_version_unknown" {
+		t.Fatalf("restored condition metadata = %q/%q/%v", hash, status, missing)
+	}
+	hash, status, missing = benchmarkConditionFromConfigJSON(`{"backend":"llamacpp"}`)
+	if hash != "" || status != "unknown" || len(missing) != 0 {
+		t.Fatalf("legacy condition metadata = %q/%q/%v", hash, status, missing)
+	}
+}

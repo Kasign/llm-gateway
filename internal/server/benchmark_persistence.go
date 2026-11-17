@@ -100,18 +100,10 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	run := runs[len(runs)-1]
-	var condition struct {
-		SHA256 string `json:"condition_sha256"`
-		Status string `json:"condition_status"`
-		Missing []string `json:"condition_missing"`
-	}
-	_ = json.Unmarshal([]byte(task.ConfigJSON), &condition)
-	if condition.Status == "" {
-		condition.Status = "unknown"
-	}
+	conditionSHA256, conditionStatus, conditionMissing := benchmarkConditionFromConfigJSON(task.ConfigJSON)
 	snap := benchmarkJobSnapshot{
 		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
-		ConditionSHA256: condition.SHA256, ConditionStatus: condition.Status, ConditionMissing: condition.Missing,
+		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: conditionMissing,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
 		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large",
@@ -157,6 +149,19 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// benchmarkConditionFromConfigJSON 从 Task 配置快照恢复比较元数据；兼容早期没有这些字段的历史记录。
+func benchmarkConditionFromConfigJSON(raw string) (string, string, []string) {
+	var condition struct {
+		SHA256  string   `json:"condition_sha256"`
+		Status  string   `json:"condition_status"`
+		Missing []string `json:"condition_missing"`
+	}
+	if err := json.Unmarshal([]byte(raw), &condition); err != nil || condition.Status == "" {
+		return "", "unknown", nil
+	}
+	return condition.SHA256, condition.Status, append([]string(nil), condition.Missing...)
 }
 
 func valueOrZero(value *int64) int64 {
