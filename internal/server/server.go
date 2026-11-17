@@ -633,8 +633,9 @@ func (s *Server) validateKeyTools(names []string) error {
 	global := make(map[string]struct{})
 	if s != nil && s.cfg != nil && s.cfg.Tools.Enabled { for _, name := range s.cfg.Tools.AllowedTools { global[name] = struct{}{} } }
 	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" { return fmt.Errorf("tool name must not be empty") }
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" { return fmt.Errorf("tool name must not be empty") }
+		if trimmed != name { return fmt.Errorf("tool name must not contain surrounding whitespace: %q", name) }
 		if _, ok := seen[name]; ok { return fmt.Errorf("duplicate tool name: %s", name) }
 		seen[name] = struct{}{}
 		if _, ok := global[name]; !ok { return fmt.Errorf("tool is not globally enabled: %s", name) }
