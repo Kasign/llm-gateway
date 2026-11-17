@@ -230,3 +230,66 @@ func TestRunRejectsDuplicateJSONKeysInModelResponse(t *testing.T) {
 		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
 	}
 }
+
+func TestRunReturnsNonSuccessProviderResponseWithoutParsing(t *testing.T) {
+	body := []byte("upstream error body")
+	model := &testModel{responses: []ModelResponse{{
+		StatusCode: http.StatusTooManyRequests,
+		UpstreamStatus: http.StatusTooManyRequests,
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body: body,
+	}}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	result, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Response.StatusCode != http.StatusTooManyRequests || string(result.Response.Body) != string(body) {
+		t.Fatalf("provider response was not preserved: %+v", result.Response)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
+
+func TestRunRejectsToolResultBudgetOverflow(t *testing.T) {
+	call := func(id string) string {
+		return fmt.Sprintf(`{"id":%q,"type":"function","function":{"name":"web.search","arguments":"{\"query\":\"hello\"}"}}`, id)
+	}
+	body := `{"choices":[{"message":{"role":"assistant","tool_calls":[` +
+		call("one") + `,` + call("two") + `,` + call("three") +
+		`]},"finish_reason":"tool_calls"}]}`
+	model := &testModel{responses: []ModelResponse{modelResponse(body)}}
+	executor := &testExecutor{result: json.RawMessage(`"` + strings.Repeat("x", 20*1024) + `"`)}
+	coordinator := testCoordinator(t, model, executor)
+
+	_, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if !errors.Is(err, ErrToolResultBudget) {
+		t.Fatalf("Run() error = %v, want ErrToolResultBudget", err)
+	}
+	if len(executor.calls) != 3 {
+		t.Fatalf("executor calls = %d, want 3", len(executor.calls))
+	}
+}
+
+func TestRunRejectsMoreThanThreeCallsInOneRound(t *testing.T) {
+	call := func(id string) string {
+		return fmt.Sprintf(`{"id":%q,"type":"function","function":{"name":"web.search","arguments":"{\"query\":\"hello\"}"}}`, id)
+	}
+	body := `{"choices":[{"message":{"role":"assistant","tool_calls":[` +
+		call("one") + `,` + call("two") + `,` + call("three") + `,` + call("four") +
+		`]},"finish_reason":"tool_calls"}]}`
+	model := &testModel{responses: []ModelResponse{modelResponse(body)}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	_, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if !errors.Is(err, ErrToolBudgetExceeded) {
+		t.Fatalf("Run() error = %v, want ErrToolBudgetExceeded", err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
