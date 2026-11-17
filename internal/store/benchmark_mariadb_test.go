@@ -59,6 +59,24 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	if len(runs) != 1 || runs[0].RequestID != id || runs[0].RunNo != 1 {
 		t.Fatalf("unexpected runs: %+v", runs)
 	}
+
+	// 取消请求必须在同一事务中转换 Task 与 Run，重复取消不能覆盖状态。
+	changed, err := repo.MarkTaskCancelling(ctx, id)
+	if err != nil || !changed {
+		t.Fatalf("mark task cancelling = %v, err=%v", changed, err)
+	}
+	got, err = repo.GetTask(ctx, id)
+	if err != nil || got.Status != "cancelling" {
+		t.Fatalf("cancelling task = %+v, err=%v", got, err)
+	}
+	runs, err = repo.ListRuns(ctx, id)
+	if err != nil || len(runs) != 1 || runs[0].Status != "cancelling" {
+		t.Fatalf("cancelling runs = %+v, err=%v", runs, err)
+	}
+	changed, err = repo.MarkTaskCancelling(ctx, id)
+	if err != nil || changed {
+		t.Fatalf("duplicate cancellation = %v, err=%v; want false, nil", changed, err)
+	}
 	finished := time.Now()
 	latency := int64(1200)
 	task.Status, task.FinishedAt, task.LatencyMS = "completed", &finished, latency
@@ -67,6 +85,10 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	got, err = repo.GetTask(ctx, id)
 	if err != nil || got.Status != "completed" || got.LatencyMS != latency || got.FinishedAt == nil {
 		t.Fatalf("updated task = %+v, err=%v", got, err)
+	}
+	changed, err = repo.MarkTaskCancelling(ctx, id)
+	if err != nil || changed {
+		t.Fatalf("terminal task cancellation = %v, err=%v; want false, nil", changed, err)
 	}
 	// 单独验证活动任务恢复；创建第二条活动任务后 MarkInterrupted 应同时更新 Task 与 Run。
 	interruptedID := id + "-restart"
