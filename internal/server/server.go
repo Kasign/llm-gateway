@@ -37,7 +37,6 @@ import (
 	"github.com/whl/llm-gateway/internal/store"
 	"github.com/whl/llm-gateway/internal/tools"
 	toolruntime "github.com/whl/llm-gateway/internal/tools/runtime"
-	"github.com/whl/llm-gateway/internal/tools/modules/searxng"
 )
 
 // Server 是网关的"大脑"，把所有组件组装在一起。

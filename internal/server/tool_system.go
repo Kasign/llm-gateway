@@ -39,7 +39,10 @@ func withRequestToolAllowlist(ctx context.Context, names []string) context.Conte
 
 func (s *Server) initToolSystem() error {
 	registry := tools.NewRegistry()
-	if s == nil || s.cfg == nil {
+	if s == nil {
+		return fmt.Errorf("server is nil")
+	}
+	if s.cfg == nil {
 		s.toolRegistry = registry
 		runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
 		if err != nil {
