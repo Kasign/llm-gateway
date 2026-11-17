@@ -321,3 +321,27 @@ func TestBenchmarkPipelineFallbackPreservesErrorClassification(t *testing.T) {
 		}
 	})
 }
+
+
+// TestBenchmarkMetricAvailabilityStates 验证 unknown/not_applicable 不使用 0 伪装。
+func TestBenchmarkMetricAvailabilityStates(t *testing.T) {
+	job := &benchmarkJob{Stream: true}
+	job.setModelLoadMetric(nil, "not_applicable")
+	job.setInferenceLatencyMetric(nil, "unknown")
+	job.finish("failed", http.StatusBadGateway, 12, nil, errors.New("load failed"), nil, 0, 0)
+	snapshot := job.snapshot()
+	if snapshot.ModelLoadMS != nil || snapshot.ModelLoadStatus != "not_applicable" {
+		t.Fatalf("model load metric = %v/%s", snapshot.ModelLoadMS, snapshot.ModelLoadStatus)
+	}
+	if snapshot.InferenceLatencyMS != nil || snapshot.InferenceLatencyStatus != "unknown" {
+		t.Fatalf("inference metric = %v/%s", snapshot.InferenceLatencyMS, snapshot.InferenceLatencyStatus)
+	}
+	if snapshot.TTFTMS != nil || snapshot.TTFTStatus != "unknown" {
+		t.Fatalf("TTFT metric = %v/%s", snapshot.TTFTMS, snapshot.TTFTStatus)
+	}
+	value := int64(0)
+	job.setModelLoadMetric(&value, "measured")
+	if got := job.snapshot(); got.ModelLoadMS == nil || *got.ModelLoadMS != 0 || got.ModelLoadStatus != "measured" {
+		t.Fatalf("measured zero-duration metric = %+v", got)
+	}
+}

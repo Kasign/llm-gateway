@@ -81,7 +81,16 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	latency := int64(1200)
 	task.Status, task.FinishedAt, task.LatencyMS = "completed", &finished, latency
 	run.Status, run.FinishedAt, run.LatencyMS, run.HTTPStatus = "completed", &finished, latency, 200
+	modelLoad, inference := int64(321), int64(876)
+	run.ModelLoadMS, run.ModelLoadStatus = &modelLoad, "measured"
+	run.InferenceLatencyMS, run.InferenceLatencyStatus = &inference, "measured"
+	run.TTFTStatus = "measured"
 	if err := repo.UpdateTaskAndRun(ctx, task, run); err != nil { t.Fatalf("update task/run: %v", err) }
+	runs, err = repo.ListRuns(ctx, id)
+	if err != nil || len(runs) != 1 || runs[0].ModelLoadMS == nil || *runs[0].ModelLoadMS != modelLoad || runs[0].ModelLoadStatus != "measured" ||
+		runs[0].InferenceLatencyMS == nil || *runs[0].InferenceLatencyMS != inference || runs[0].InferenceLatencyStatus != "measured" || runs[0].TTFTStatus != "measured" {
+		t.Fatalf("persisted timing metrics = %+v, err=%v", runs, err)
+	}
 	got, err = repo.GetTask(ctx, id)
 	if err != nil || got.Status != "completed" || got.LatencyMS != latency || got.FinishedAt == nil {
 		t.Fatalf("updated task = %+v, err=%v", got, err)

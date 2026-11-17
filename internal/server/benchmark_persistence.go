@@ -33,6 +33,11 @@ func (j *benchmarkJob) persistenceRecords() (store.BenchmarkTask, store.Benchmar
 	run.ModelID = j.LlamaModel
 	run.FinishedAt = j.FinishedAt
 	run.LatencyMS = j.LatencyMS
+	run.ModelLoadMS = j.ModelLoadMS
+	run.ModelLoadStatus = j.ModelLoadStatus
+	run.InferenceLatencyMS = j.InferenceLatencyMS
+	run.InferenceLatencyStatus = j.InferenceLatencyStatus
+	run.TTFTStatus = j.TTFTStatus
 	run.HTTPStatus = j.HTTPStatus
 	run.ResponseBytes = j.ResponseBytes
 	if j.InputTokens > 0 { v := j.InputTokens; run.InputTokens = &v }
@@ -99,7 +104,10 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
-		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large", InputTokens: valueOrZero(run.InputTokens),
+		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large",
+		ModelLoadMS: run.ModelLoadMS, ModelLoadStatus: run.ModelLoadStatus,
+		InferenceLatencyMS: run.InferenceLatencyMS, InferenceLatencyStatus: run.InferenceLatencyStatus, TTFTStatus: run.TTFTStatus,
+		InputTokens: valueOrZero(run.InputTokens),
 		OutputTokens: valueOrZero(run.OutputTokens), TotalTokens: valueOrZero(run.TotalTokens),
 		Error: task.ErrorMessage, ErrorCode: task.ErrorCode, RequestID: run.RequestID, Stream: true,
 		TTFTMS: run.TTFTMS, StreamEvents: run.StreamEvents, ReasoningChars: run.ReasoningChars,

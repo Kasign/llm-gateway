@@ -45,8 +45,11 @@ type BenchmarkRun struct {
 	StartedAt          time.Time
 	FinishedAt         *time.Time
 	LatencyMS          int64
-	ModelLoadMS        int64
-	InferenceLatencyMS int64
+	ModelLoadMS            *int64
+	ModelLoadStatus        string
+	InferenceLatencyMS     *int64
+	InferenceLatencyStatus string
+	TTFTStatus             string
 	HTTPStatus         int
 	ResponseBytes      int64
 	InputTokens        *int64
@@ -123,11 +126,12 @@ func (r *BenchmarkRepo) CreateTaskAndRun(ctx context.Context, task BenchmarkTask
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO benchmark_runs
-		(run_id,task_id,run_no,request_id,status,provider_id,model_key,model_id,started_at,finished_at,latency_ms,model_load_ms,inference_latency_ms,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,error_code,error_message,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(run_id,task_id,run_no,request_id,status,provider_id,model_key,model_id,started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,error_code,error_message,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.RunID, run.TaskID, run.RunNo, run.RequestID, defaultString(run.Status, "running"),
 		nullIfEmpty(run.ProviderID), nullIfEmpty(run.ModelKey), nullIfEmpty(run.ModelID), run.StartedAt, run.FinishedAt,
-		nullablePositiveInt64(run.LatencyMS), nullablePositiveInt64(run.ModelLoadMS), nullablePositiveInt64(run.InferenceLatencyMS),
+		nullablePositiveInt64(run.LatencyMS), nullableMetricMS(run.ModelLoadMS), defaultString(run.ModelLoadStatus, "unknown"),
+		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"),
 		nullablePositiveInt64(int64(run.HTTPStatus)), nullablePositiveInt64(run.ResponseBytes),
 		run.InputTokens, run.OutputTokens, run.TotalTokens, run.TTFTMS, run.StreamEvents, run.ReasoningChars,
 		run.ContentChars, nullIfEmpty(run.ErrorCode), nullIfEmpty(run.ErrorMessage), run.CreatedAt, run.UpdatedAt)
@@ -176,12 +180,13 @@ func (r *BenchmarkRepo) UpdateTaskAndRun(ctx context.Context, task BenchmarkTask
 		}
 	}
 	res, err = tx.ExecContext(ctx, `UPDATE benchmark_runs SET
-		status=?,provider_id=?,model_key=?,model_id=?,finished_at=?,latency_ms=?,model_load_ms=?,inference_latency_ms=?,
+		status=?,provider_id=?,model_key=?,model_id=?,finished_at=?,latency_ms=?,model_load_ms=?,model_load_status=?,inference_latency_ms=?,inference_latency_status=?,ttft_status=?,
 		http_status=?,response_bytes=?,input_tokens=?,output_tokens=?,total_tokens=?,ttft_ms=?,stream_event_count=?,
 		reasoning_chars=?,content_chars=?,error_code=?,error_message=?,updated_at=?
 		WHERE run_id=? AND task_id=?`,
 		run.Status, nullIfEmpty(run.ProviderID), nullIfEmpty(run.ModelKey), nullIfEmpty(run.ModelID), run.FinishedAt,
-		nullablePositiveInt64(run.LatencyMS), nullablePositiveInt64(run.ModelLoadMS), nullablePositiveInt64(run.InferenceLatencyMS),
+		nullablePositiveInt64(run.LatencyMS), nullableMetricMS(run.ModelLoadMS), defaultString(run.ModelLoadStatus, "unknown"),
+		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"),
 		nullablePositiveInt64(int64(run.HTTPStatus)), nullablePositiveInt64(run.ResponseBytes),
 		run.InputTokens, run.OutputTokens, run.TotalTokens, run.TTFTMS, run.StreamEvents,
 		run.ReasoningChars, run.ContentChars, nullIfEmpty(run.ErrorCode), nullIfEmpty(run.ErrorMessage),
@@ -233,7 +238,7 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT run_id,task_id,run_no,request_id,status,COALESCE(provider_id,''),COALESCE(model_key,''),COALESCE(model_id,''),started_at,finished_at,latency_ms,model_load_ms,inference_latency_ms,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
+	rows, err := r.db.QueryContext(ctx, `SELECT run_id,task_id,run_no,request_id,status,COALESCE(provider_id,''),COALESCE(model_key,''),COALESCE(model_id,''),started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
 		FROM benchmark_runs WHERE task_id=? ORDER BY run_no ASC`, taskID)
 	if err != nil {
 		return nil, err
@@ -244,10 +249,11 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 		var run BenchmarkRun
 		var finishedAt sql.NullTime
 		var latency, load, inference, status, responseBytes sql.NullInt64
+		var loadStatus, inferenceStatus, ttftStatus string
 		var input, output, total, ttft sql.NullInt64
 		if err := rows.Scan(&run.RunID, &run.TaskID, &run.RunNo, &run.RequestID, &run.Status,
 			&run.ProviderID, &run.ModelKey, &run.ModelID, &run.StartedAt, &finishedAt,
-			&latency, &load, &inference, &status, &responseBytes, &input, &output, &total, &ttft,
+			&latency, &load, &loadStatus, &inference, &inferenceStatus, &ttftStatus, &status, &responseBytes, &input, &output, &total, &ttft,
 			&run.StreamEvents, &run.ReasoningChars, &run.ContentChars, &run.ErrorCode, &run.ErrorMessage,
 			&run.CreatedAt, &run.UpdatedAt); err != nil {
 			return nil, err
@@ -256,8 +262,11 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 			run.FinishedAt = &finishedAt.Time
 		}
 		if latency.Valid { run.LatencyMS = latency.Int64 }
-		if load.Valid { run.ModelLoadMS = load.Int64 }
-		if inference.Valid { run.InferenceLatencyMS = inference.Int64 }
+		if load.Valid { v := load.Int64; run.ModelLoadMS = &v }
+		run.ModelLoadStatus = loadStatus
+		if inference.Valid { v := inference.Int64; run.InferenceLatencyMS = &v }
+		run.InferenceLatencyStatus = inferenceStatus
+		run.TTFTStatus = ttftStatus
 		if status.Valid { run.HTTPStatus = int(status.Int64) }
 		if responseBytes.Valid { run.ResponseBytes = responseBytes.Int64 }
 		if input.Valid { v := input.Int64; run.InputTokens = &v }
@@ -355,6 +364,12 @@ func defaultString(value, fallback string) string {
 func nullablePositiveInt64(value int64) any {
 	if value < 0 { return nil }
 	return value
+}
+
+// nullableMetricMS 保留已测得的 0ms；nil 才表示没有可用数值。
+func nullableMetricMS(value *int64) any {
+	if value == nil || *value < 0 { return nil }
+	return *value
 }
 
 

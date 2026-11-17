@@ -64,6 +64,11 @@ type benchmarkJob struct {
 	HTTPStatus     int        `json:"http_status,omitempty"`
 	ResponseBytes  int64      `json:"response_bytes,omitempty"`
 	ResponseTruncated bool `json:"response_truncated,omitempty"`
+	ModelLoadMS *int64 `json:"model_load_ms,omitempty"`
+	ModelLoadStatus string `json:"model_load_status"`
+	InferenceLatencyMS *int64 `json:"inference_latency_ms,omitempty"`
+	InferenceLatencyStatus string `json:"inference_latency_status"`
+	TTFTStatus string `json:"ttft_status"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -180,13 +185,32 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		ID: j.ID, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
 		PromptLen: j.PromptLen, MaxTokens: j.MaxTokens, StartedAt: j.StartedAt,
 		FinishedAt: j.FinishedAt, LatencyMS: j.LatencyMS, HTTPStatus: j.HTTPStatus,
-		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated, InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
+		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated,
+		ModelLoadMS: j.ModelLoadMS, ModelLoadStatus: j.ModelLoadStatus,
+		InferenceLatencyMS: j.InferenceLatencyMS, InferenceLatencyStatus: j.InferenceLatencyStatus, TTFTStatus: j.TTFTStatus,
+		InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
 		ReasoningChars: j.ReasoningChars, ContentText: j.ContentText, ReasoningText: j.ReasoningText,
 		ContentChars: j.ContentChars, ErrorCode: j.ErrorCode,
 	}
 	return out
+}
+
+// setModelLoadMetric 记录模型加载/就绪耗时及可用状态；nil 表示没有可测量数值。
+func (j *benchmarkJob) setModelLoadMetric(value *int64, status string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.ModelLoadMS = value
+	j.ModelLoadStatus = status
+}
+
+// setInferenceLatencyMetric 记录一次 Pipeline.Run 的墙钟耗时。
+func (j *benchmarkJob) setInferenceLatencyMetric(value *int64, status string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.InferenceLatencyMS = value
+	j.InferenceLatencyStatus = status
 }
 
 func (j *benchmarkJob) updateStreamText(content, reasoning string) {
@@ -225,6 +249,13 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 		j.Answer = extractChatAnswer(resp)
 	}
 	j.TTFTMS = ttft
+	if ttft != nil {
+		j.TTFTStatus = "measured"
+	} else if j.Stream {
+		j.TTFTStatus = "unknown"
+	} else {
+		j.TTFTStatus = "not_applicable"
+	}
 	j.StreamEvents = streamEvents
 	if j.ReasoningChars == 0 {
 		j.ReasoningChars = reasoningChars
@@ -784,7 +815,20 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		}
 	}()
 
+	localClient, localClientErr := s.localClientForBackend(be)
 	loadStart := time.Now()
+	modelLoadStatus := "not_applicable"
+	if localClientErr == nil {
+		modelLoadStatus = "measured"
+	}
+	defer func() {
+		if modelLoadStatus == "measured" {
+			value := time.Since(loadStart).Milliseconds()
+			job.setModelLoadMetric(&value, modelLoadStatus)
+		} else {
+			job.setModelLoadMetric(nil, modelLoadStatus)
+		}
+	}()
 	if m != nil {
 		applog.Infof("[benchmark:%s] ensure model loaded: model_key=%s llama=%s", job.ID, m.ModelKey, llamaName)
 		if res, err := s.InferenceLoad(ctx, be, "", m.ModelKey, nil); err != nil {
@@ -830,9 +874,9 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	job.mu.Lock()
 	job.LlamaModel = llamaName
 	job.mu.Unlock()
-	if client, clientErr := s.localClientForBackend(be); clientErr != nil {
-		applog.Printf("[benchmark:%s] backend client: %v (will still call chat)", job.ID, clientErr)
-	} else if err := client.WaitUntilModelReady(ctx, llamaName); err != nil {
+	if localClientErr != nil {
+		applog.Printf("[benchmark:%s] backend client: %v (will still call chat)", job.ID, localClientErr)
+	} else if err := localClient.WaitUntilModelReady(ctx, llamaName); err != nil {
 		applog.Printf("[benchmark:%s] model ready wait: %v (will still call chat)", job.ID, err)
 	}
 	if ctx.Err() != nil {
@@ -852,7 +896,8 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	}
 	cleanupRun := s.beginInferenceRun(job.ID, key, cancel, false)
 	defer cleanupRun()
-	obs := &benchRunObserver{job: job, started: job.StartedAt}
+	inferenceStart := time.Now()
+	obs := &benchRunObserver{job: job, started: inferenceStart}
 	applog.Infof("[benchmark:%s] calling inference pipeline stream=true max_tokens=%d timeout=%ds body=%d bytes", job.ID, in.MaxTokens, s.cfg.Llama.RequestTimeout, len(body))
 	_, err := s.pipe.Run(ctx, core.Request{
 		ID: job.ID, Method: http.MethodPost, Path: "/v1/chat/completions",
@@ -861,12 +906,14 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		ServiceModel:       llamaName,
 		ServiceProviderID: be,
 		Sink:               newMemSink(),
-		Started:      job.StartedAt,
+		Started:      inferenceStart,
 		ClientName:   "benchmark",
 		UserAgent:    "llm-gateway/benchmark",
 		Observe:      obs,
 		Guards:       s.inferenceRequestGuards(key),
 	})
+	inferenceLatency := time.Since(inferenceStart).Milliseconds()
+	job.setInferenceLatencyMetric(&inferenceLatency, "measured")
 	// 取消或超时后 ctx 已失效，用独立的短超时把这次的请求日志刷进库。
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = s.audit.Flush(flushCtx)
