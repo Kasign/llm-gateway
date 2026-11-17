@@ -362,8 +362,13 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		EnableThinking   *bool    `json:"enable_thinking"`
 		Stop             []string `json:"stop"`
 	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
-		jsonError(w, 400, "invalid_request", "invalid JSON body")
+	if err := decodeBenchmarkRequestBody(w, r, &in, maxInferenceRequestBodyBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			jsonError(w, http.StatusRequestEntityTooLarge, "request_too_large", "benchmark request body exceeds the 64 MiB limit")
+		} else {
+			jsonError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		}
 		return
 	}
 	in.ModelKey = strings.TrimSpace(in.ModelKey)
