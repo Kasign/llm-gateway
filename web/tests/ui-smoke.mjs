@@ -205,6 +205,17 @@ try {
     Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) &&
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
+  await clickTab(page, 'tools-test', '工具测试');
+  const toolTestKey = page.locator('#toolTestApiKey');
+  check('工具测试入口使用密码输入框接收客户端服务密钥',
+    await toolTestKey.count() === 1 && await toolTestKey.evaluate(el => el.type === 'password'));
+  await toolTestKey.fill('sk-browser-smoke-not-a-real-secret');
+  check('工具测试密钥只保留在页面内存，不写入浏览器存储',
+    await page.evaluate(() => localStorage.getItem('llm_gateway_tool_test_key')) === null &&
+    await page.evaluate(() => sessionStorage.getItem('llm_gateway_tool_test_key')) === null);
+  await page.locator('#toolTestClearKeyBtn').click();
+  check('工具测试入口可以主动清除客户端密钥', await toolTestKey.inputValue() === '');
+
   await clickTab(page, 'keys', '服务密钥');
   const panelText = await page.locator('#keys .admin-auth-card').evaluate(el => el.textContent || '');
   check('管理员 API Key 只用于服务密钥管理', panelText.includes('仅用于服务密钥管理') &&
