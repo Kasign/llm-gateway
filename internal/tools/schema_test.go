@@ -2,6 +2,7 @@ package tools
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +80,27 @@ func TestStrictJSONLimitsAndUTF8(t *testing.T) {
 	if _, err := parseStrictJSON([]byte{0xff}, 100, 4); err == nil { t.Fatal("expected UTF-8 error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1} {"y":2}`), 100, 4); err == nil { t.Fatal("expected trailing JSON error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1,"x":2}`), 100, 4); err == nil { t.Fatal("expected duplicate key error") }
+}
+
+func TestStringLengthUsesUnicodeCodePoints(t *testing.T) {
+	schema := []byte(`{"type":"object","properties":{"value":{"type":"string","minLength":2,"maxLength":2}},"required":["value"],"additionalProperties":false}`)
+	if err := ValidateArguments(schema, []byte(`{"value":"é中"}`)); err != nil {
+		t.Fatalf("two Unicode code points should pass: %v", err)
+	}
+	if err := ValidateArguments(schema, []byte(`{"value":"é"}`)); err == nil {
+		t.Fatal("one Unicode code point should fail minLength=2")
+	}
+}
+
+func TestSchemaAndArgumentByteLimits(t *testing.T) {
+	if err := ValidateSchema([]byte(strings.Repeat(" ", MaxSchemaBytes+1))); err == nil {
+		t.Fatal("schema exceeding byte limit should fail")
+	}
+	schema := []byte(`{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}`)
+	arguments := []byte(`{"value":"` + strings.Repeat("a", MaxArgumentBytes) + `"}`)
+	if err := ValidateArguments(schema, arguments); err == nil {
+		t.Fatal("arguments exceeding byte limit should fail")
+	}
 }
 
 func TestSchemaErrorClassification(t *testing.T) {
