@@ -1131,7 +1131,7 @@ try {
   const smokeRequestID = 'browser-smoke-detail-1';
   let failNextRequestList = false;
   let mockDetailRequestCount = 0;
-  await page.route('**/api/requests*', async route => {
+  await page.route('**/api/requests**', async route => {
     const request = route.request();
     if (request.method() !== 'GET') return route.continue();
     const pathname = new URL(request.url()).pathname;
