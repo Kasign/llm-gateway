@@ -232,7 +232,9 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 	if err != nil {
 		j.Error = err.Error()
 		_, code, _ := core.Unpack(err)
-		if errors.Is(err, errBenchmarkResponseTooLarge) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			j.ErrorCode = "gateway_timeout"
+		} else if errors.Is(err, errBenchmarkResponseTooLarge) {
 			j.ErrorCode = "benchmark_response_too_large"
 		} else if code != "" {
 			j.ErrorCode = code
@@ -791,6 +793,10 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 				job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
 				return
 			}
+			if isDeadline(ctx, err) {
+				job.finish("failed", http.StatusGatewayTimeout, time.Since(job.StartedAt).Milliseconds(), nil, context.DeadlineExceeded, nil, 0, 0)
+				return
+			}
 			if !isLlamaNotFound(err) && !isLlamaAlreadyRunning(err) {
 				job.finish("failed", 502, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
 				return
@@ -806,6 +812,10 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		if res, err := s.InferenceLoad(ctx, be, llamaName, "", nil); err != nil {
 			if isCancelErr(err) || isCancelErr(ctx.Err()) {
 				job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
+				return
+			}
+			if isDeadline(ctx, err) {
+				job.finish("failed", http.StatusGatewayTimeout, time.Since(job.StartedAt).Milliseconds(), nil, context.DeadlineExceeded, nil, 0, 0)
 				return
 			}
 			if !isLlamaAlreadyRunning(err) && !isLlamaNotFound(err) {
@@ -824,6 +834,14 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		applog.Printf("[benchmark:%s] backend client: %v (will still call chat)", job.ID, clientErr)
 	} else if err := client.WaitUntilModelReady(ctx, llamaName); err != nil {
 		applog.Printf("[benchmark:%s] model ready wait: %v (will still call chat)", job.ID, err)
+	}
+	if ctx.Err() != nil {
+		if isCancelErr(ctx.Err()) {
+			job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, context.Canceled, nil, 0, 0)
+		} else {
+			job.finish("failed", http.StatusGatewayTimeout, time.Since(job.StartedAt).Milliseconds(), nil, context.DeadlineExceeded, nil, 0, 0)
+		}
+		return
 	}
 	applog.Debugf("[benchmark:%s] model ready in %dms resolved=%s", job.ID, time.Since(loadStart).Milliseconds(), llamaName)
 
@@ -875,7 +893,7 @@ type benchRunObserver struct {
 	truncated bool
 }
 
-func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
+func (b *benchRunObserver) On(ctx context.Context, ev core.Event) {
 	switch ev.Stage {
 	case core.StageChunk:
 		b.events++
@@ -906,6 +924,9 @@ func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
 			status = ev.Result.Status
 		}
 		err := ev.Err
+		if isDeadline(ctx, err) {
+			status = http.StatusGatewayTimeout
+		}
 		if !isCancelErr(err) && (b.truncated || errors.Is(err, errBenchmarkResponseTooLarge)) {
 			b.truncated = true
 			err = errBenchmarkResponseTooLarge

@@ -260,3 +260,13 @@ func TestBenchmarkCancellationTakesPrecedenceOverResponseLimit(t *testing.T) {
 	snapshot := job.snapshot()
 	if snapshot.Status != "cancelled" || snapshot.ErrorCode != "cancelled" || snapshot.ResponseTruncated { t.Fatalf("unexpected cancellation result: %+v", snapshot) }
 }
+
+// TestBenchmarkDeadlineUsesGatewayTimeoutCode 验证硬时限在任务结果中使用稳定的超时错误码。
+func TestBenchmarkDeadlineUsesGatewayTimeoutCode(t *testing.T) {
+	job := &benchmarkJob{}
+	job.finish("failed", http.StatusGatewayTimeout, 10, nil, context.DeadlineExceeded, nil, 0, 0)
+	snapshot := job.snapshot()
+	if snapshot.Status != "failed" || snapshot.HTTPStatus != http.StatusGatewayTimeout || snapshot.ErrorCode != "gateway_timeout" {
+		t.Fatalf("unexpected timeout result: %+v", snapshot)
+	}
+}
