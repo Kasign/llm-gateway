@@ -8,7 +8,6 @@ import (
 
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
-	"github.com/whl/llm-gateway/internal/tools/coordinator"
 )
 
 type bufferedTestProvider struct {
