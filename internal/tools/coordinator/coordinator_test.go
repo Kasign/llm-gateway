@@ -551,7 +551,7 @@ func TestRunPreservesNonSuccessProviderResponseReturnedWithError(t *testing.T) {
 		Description: "Search the web",
 		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	}
-	if err := registry.Register(definition, executor); err != nil {
+	if err := registry.Register(definition, executorAdapter{executor: executor}); err != nil {
 		t.Fatal(err)
 	}
 	coordinator, err := New(registry, executor, errorResponseModel{
