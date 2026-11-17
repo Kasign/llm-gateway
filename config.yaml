@@ -56,11 +56,9 @@ llama:
   # 单次输出上限，同时裁剪 max_tokens 和 max_output_tokens。管理台可按上游覆盖。
   max_output_tokens: 8192
 
-# 工具调用默认关闭。开启前必须显式配置允许的 Provider + Gateway ModelKey 和工具名称。
-# ModelKey 是稳定 Gateway 身份，不要填可变的上游模型 ID。
+# 工具调用默认关闭。模型范围与调用方工具授权在 Web「服务密钥」中配置。
 tools:
   enabled: false
-  allowed_models: []
   allowed_tools: []
   searxng:
     # 仅当 allowed_tools 包含 web.search 时必填。

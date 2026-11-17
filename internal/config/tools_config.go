@@ -5,17 +5,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 )
 
 var toolConfigNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
-
-// ToolModelAllowlist 使用稳定的 Gateway 模型身份授权工具调用。
-// 不使用可变的上游 ModelID、Base URL 或 Provider 配置指纹。
-type ToolModelAllowlist struct {
-	ProviderID string `yaml:"provider_id"`
-	ModelKey   string `yaml:"model_key"`
-}
 
 // SearXNGConfig 是服务端固定搜索端点配置，不接受模型或客户端覆盖。
 type SearXNGConfig struct {
@@ -30,13 +22,12 @@ type SearXNGConfig struct {
 	Categories            []string `yaml:"categories"`
 }
 
-// ToolsConfig 是 Gateway 侧全局工具开关、Provider/Model 白名单和工具白名单。
-// 实际调用还会与请求 API Key 的 AllowedTools 取交集；任一层未授权即拒绝。
+// ToolsConfig 只保存部署级工具开关、工具目录和固定执行器配置。
+// 模型与工具的调用授权统一通过 Web 服务密钥的 allowed_models / allowed_tools 管理。
 type ToolsConfig struct {
-	Enabled       bool                 `yaml:"enabled"`
-	AllowedModels []ToolModelAllowlist `yaml:"allowed_models"`
-	AllowedTools  []string             `yaml:"allowed_tools"`
-	SearXNG       SearXNGConfig        `yaml:"searxng"`
+	Enabled      bool          `yaml:"enabled"`
+	AllowedTools []string      `yaml:"allowed_tools"`
+	SearXNG      SearXNGConfig `yaml:"searxng"`
 }
 
 func (c *ToolsConfig) Normalize() error {
@@ -46,24 +37,6 @@ func (c *ToolsConfig) Normalize() error {
 	c.SearXNG.BaseURL = strings.TrimSpace(c.SearXNG.BaseURL)
 	if strings.Contains(c.SearXNG.BaseURL, "${") {
 		return fmt.Errorf("tools.searxng.base_url contains an unresolved environment placeholder")
-	}
-	seenModels := make(map[string]struct{}, len(c.AllowedModels))
-	for i := range c.AllowedModels {
-		item := &c.AllowedModels[i]
-		item.ProviderID = strings.ToLower(strings.TrimSpace(item.ProviderID))
-		item.ModelKey = strings.TrimSpace(item.ModelKey)
-		if !providerIDPattern.MatchString(item.ProviderID) {
-			return fmt.Errorf("tools.allowed_models[%d].provider_id is invalid", i)
-		}
-		if item.ModelKey == "" || strings.Contains(item.ModelKey, "${") || len(item.ModelKey) > 256 || !utf8.ValidString(item.ModelKey) ||
-			strings.ContainsAny(item.ModelKey, "\x00\r\n") {
-			return fmt.Errorf("tools.allowed_models[%d].model_key is invalid", i)
-		}
-		key := item.ProviderID + "\x00" + item.ModelKey
-		if _, exists := seenModels[key]; exists {
-			return fmt.Errorf("tools.allowed_models[%d] duplicates a Provider/model identity", i)
-		}
-		seenModels[key] = struct{}{}
 	}
 	seenTools := make(map[string]struct{}, len(c.AllowedTools))
 	for i := range c.AllowedTools {
@@ -79,9 +52,6 @@ func (c *ToolsConfig) Normalize() error {
 	}
 	if !c.Enabled {
 		return nil
-	}
-	if len(c.AllowedModels) == 0 {
-		return fmt.Errorf("tools.allowed_models must not be empty when tools.enabled is true")
 	}
 	if len(c.AllowedTools) == 0 {
 		return fmt.Errorf("tools.allowed_tools must not be empty when tools.enabled is true")

@@ -107,21 +107,6 @@ func (s *Server) configuredToolNames(st core.State) []string {
 		s.toolRegistry == nil || s.toolRuntime == nil {
 		return nil
 	}
-	providerID := strings.ToLower(strings.TrimSpace(st.Model.ProviderID))
-	modelKey := strings.TrimSpace(st.Model.ModelKey)
-	if providerID == "" || modelKey == "" {
-		return nil
-	}
-	modelAllowed := false
-	for _, item := range s.cfg.Tools.AllowedModels {
-		if strings.EqualFold(item.ProviderID, providerID) && item.ModelKey == modelKey {
-			modelAllowed = true
-			break
-		}
-	}
-	if !modelAllowed {
-		return nil
-	}
 	names := make([]string, 0, len(s.cfg.Tools.AllowedTools))
 	for _, name := range s.cfg.Tools.AllowedTools {
 		if _, _, err := s.toolRegistry.Lookup(name); err == nil {

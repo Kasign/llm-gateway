@@ -42,15 +42,21 @@ func TestWriteBufferedModelResponseCopiesSafeHeadersAndBody(t *testing.T) {
 	}
 }
 
-func TestToolModelAllowedUsesProviderAndStableModelKey(t *testing.T) {
+func TestToolModelAllowedUsesWebManagedKeyModelACL(t *testing.T) {
 	s := &Server{cfg: &config.Config{}}
 	s.cfg.Tools.Enabled = true
-	s.cfg.Tools.AllowedModels = []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}}
-	if !s.toolModelAllowed(core.State{Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "changed-upstream-id"}}) {
-		t.Fatal("stable provider/model key allowlist was not matched")
+	state := core.State{Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "changed-upstream-id"}}
+	if !s.toolModelAllowed(state, &auth.Key{}) {
+		t.Fatal("empty Web model ACL should allow all models")
 	}
-	if s.toolModelAllowed(core.State{Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "other-key", UpstreamID: "changed-upstream-id"}}) {
-		t.Fatal("unlisted model key was allowed")
+	if !s.toolModelAllowed(state, &auth.Key{AllowedModels: []string{"stable-key"}}) {
+		t.Fatal("Web model ACL did not allow the selected stable model key")
+	}
+	if s.toolModelAllowed(state, &auth.Key{AllowedModels: []string{"other-key"}}) {
+		t.Fatal("Web model ACL allowed an unlisted model")
+	}
+	if s.toolModelAllowed(state, nil) {
+		t.Fatal("missing request key must fail closed")
 	}
 }
 
@@ -146,7 +152,6 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 		audit: auditWriter,
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
 			AllowedTools: []string{"test.echo"},
 		}},
 		toolRegistry: registry,
@@ -198,7 +203,7 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 	}
 }
 
-func TestForwardWithToolsRejectsClientToolsWhenModelNotAllowlisted(t *testing.T) {
+func TestForwardWithToolsRejectsClientToolsWithoutRequestKey(t *testing.T) {
 	s := &Server{cfg: &config.Config{Tools: config.ToolsConfig{Enabled: true}}}
 	recorder := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
@@ -222,7 +227,6 @@ func TestForwardWithToolsFallsBackForRemoteDailyBudgetWithoutClientToolIntent(t 
 	s := &Server{
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "remote", ModelKey: "stable-alias"}},
 			AllowedTools: []string{"web.search"},
 		}},
 		webProviders: map[string]managedProvider{
@@ -247,7 +251,6 @@ func TestForwardWithToolsRejectsExplicitIntentWhenRemoteBudgetBlocks(t *testing.
 	s := &Server{
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "remote", ModelKey: "stable-alias"}},
 			AllowedTools: []string{"web.search"},
 		}},
 		webProviders: map[string]managedProvider{
@@ -310,7 +313,6 @@ func TestForwardWithToolsPreservesProviderNonSuccessResponse(t *testing.T) {
 	s := &Server{
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
 			AllowedTools: []string{"test.echo"},
 		}},
 		toolRegistry: registry,
@@ -353,7 +355,6 @@ func TestMapToolCoordinatorTimeoutIsGatewayTimeout(t *testing.T) {
 func TestForwardWithToolsFallsBackForOrdinaryMultipleChoiceRequest(t *testing.T) {
 	s := &Server{cfg: &config.Config{Tools: config.ToolsConfig{
 		Enabled: true,
-		AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
 		AllowedTools: []string{"web.search"},
 	}}}
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
@@ -401,7 +402,6 @@ func TestToolLoopRunsInsideSinglePipelineLifecycle(t *testing.T) {
 	s := &Server{
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
 			AllowedTools: []string{"test.echo"},
 		}},
 		providers: providers,
@@ -496,7 +496,6 @@ func TestToolLoopRunsInsideOnePipelineLifecycle(t *testing.T) {
 	s := &Server{
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
-			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
 			AllowedTools: []string{"test.echo"},
 		}},
 		providers: providerRegistry,
@@ -550,7 +549,7 @@ func TestForwardWithToolsRejectsClientIntentWithoutKeyToolGrant(t *testing.T) {
 	if err := registry.Register(tools.Definition{Name:"test.echo",Description:"Echo",Parameters:json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}, toolLoopTestExecutor{}); err != nil { t.Fatal(err) }
 	runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
 	if err != nil { t.Fatal(err) }
-	s := &Server{cfg:&config.Config{Tools:config.ToolsConfig{Enabled:true,AllowedModels:[]config.ToolModelAllowlist{{ProviderID:"llamacpp",ModelKey:"stable-key"}},AllowedTools:[]string{"test.echo"}}},toolRegistry:registry,toolRuntime:runtime}
+	s := &Server{cfg:&config.Config{Tools:config.ToolsConfig{Enabled:true,AllowedTools:[]string{"test.echo"}}},toolRegistry:registry,toolRuntime:runtime}
 	s.callBegin("unauthorized-request", &auth.Key{})
 	state := core.State{Request:core.Request{ID:"unauthorized-request",Path:"/v1/chat/completions",Body:[]byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`)},Model:core.ModelChoice{ProviderID:"llamacpp",ModelKey:"stable-key"}}
 	_, err, handled := (inferenceForwarder{s:s}).forwardWithTools(context.Background(),state,&toolLoopTestProvider{},httptest.NewRequest(http.MethodPost,"http://gateway/v1/chat/completions",nil),"/v1/chat/completions",httptest.NewRecorder())

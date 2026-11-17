@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/store"
@@ -14,8 +15,8 @@ import (
 	toolruntime "github.com/whl/llm-gateway/internal/tools/runtime"
 )
 
-func (s *Server) toolModelAllowed(st core.State) bool {
-	if s == nil || s.cfg == nil || !s.cfg.Tools.Enabled {
+func (s *Server) toolModelAllowed(st core.State, key *auth.Key) bool {
+	if s == nil || s.cfg == nil || !s.cfg.Tools.Enabled || key == nil {
 		return false
 	}
 	providerID := strings.ToLower(strings.TrimSpace(st.Model.ProviderID))
@@ -23,12 +24,8 @@ func (s *Server) toolModelAllowed(st core.State) bool {
 	if providerID == "" || modelKey == "" {
 		return false
 	}
-	for _, item := range s.cfg.Tools.AllowedModels {
-		if strings.EqualFold(item.ProviderID, providerID) && item.ModelKey == modelKey {
-			return true
-		}
-	}
-	return false
+	// 模型范围复用 Web 服务密钥的 allowed_models：空列表不限制，非空列表按现有模型 ACL 匹配。
+	return modelAllowedForKey(key, providerID, modelKey, st.Model.UpstreamID)
 }
 
 func (s *Server) toolModelBudgetBlocked(providerID string) bool {
@@ -65,7 +62,12 @@ func (f inferenceForwarder) forwardWithTools(
 		}
 		return core.Result{}, nil, false
 	}
-	modelAllowed := s.toolModelAllowed(st)
+	call := s.callGet(st.ID)
+	var requestKey *auth.Key
+	if call != nil {
+		requestKey = call.key
+	}
+	modelAllowed := s.toolModelAllowed(st, requestKey)
 	if !modelAllowed {
 		if clientIntent {
 			return core.Result{}, &core.Error{Status: http.StatusForbidden, Code: "tool_model_not_allowed", Message: "tool calling is not enabled for the active model"}, true
@@ -96,7 +98,6 @@ func (f inferenceForwarder) forwardWithTools(
 	}
 	allowedNames := s.configuredToolNames(st)
 	// 调用方 Key 的授权与全局/模型白名单取交集；缺少请求认证上下文时 fail closed。
-	call := s.callGet(st.ID)
 	if call == nil || call.key == nil || len(call.key.AllowedTools) == 0 {
 		allowedNames = nil
 	} else {
