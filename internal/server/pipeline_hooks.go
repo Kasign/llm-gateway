@@ -199,7 +199,7 @@ func (s *Server) guardModelReady(ctx context.Context, st core.State) error {
 	return &core.Error{Status: http.StatusServiceUnavailable, Code: "model_load_failed", Message: "model load failed"}
 }
 
-// allowModelsGuard 只由 /v1 门外按请求附加（benchmark 不附加）。
+// allowModelsGuard 由 /v1 门外或管理台 Benchmark 任务按请求附加。
 // 必须在 Resolve 之后检查，因为允许列表比对的是服务选定的模型，而不是客户端传的 model。
 // 列表项可以写网关 model_key、上游 ID 或管理台 hint，任一匹配即放行。
 func (s *Server) allowModelsGuard(key *auth.Key) core.Guard {

@@ -13,13 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/applog"
-	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/logutil"
 	"github.com/whl/llm-gateway/internal/model"
@@ -277,18 +275,6 @@ func (bs *benchmarkStore) cleanup() {
 	}
 }
 
-// authenticateBenchmarkKey 只读取独立的客户端服务密钥头，不复用管理员 Session / Admin Key。
-func (s *Server) authenticateBenchmarkKey(r *http.Request) (*auth.Key, string) {
-	raw := strings.TrimSpace(r.Header.Get("X-Client-API-Key"))
-	if raw == "" {
-		return nil, "invalid_api_key"
-	}
-	keyRequest := r.Clone(r.Context())
-	keyRequest.Header = r.Header.Clone()
-	keyRequest.Header.Set("Authorization", "Bearer "+raw)
-	return s.authenticateOutcome(r.Context(), keyRequest)
-}
-
 // benchmarkAPI 处理 POST /api/benchmark：创建异步 benchmark 任务并返回 poll URL。
 //
 // # model_key 是什么、从哪来？
@@ -322,26 +308,6 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		jsonError(w, 405, "method_not_allowed", "POST required")
-		return
-	}
-	key, authCode := s.authenticateBenchmarkKey(r)
-	if authCode != "" {
-		status, message := http.StatusUnauthorized, "Invalid client API key"
-		if authCode == "key_expired" { message = "Client API key expired" }
-		jsonError(w, status, authCode, message)
-		return
-	}
-	if s.limiter == nil {
-		jsonError(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiter unavailable")
-		return
-	}
-	allowed, _, limitErr := s.limiter.Allow(r.Context(), strconv.FormatUint(key.ID, 10), key.RPM)
-	if limitErr != nil {
-		jsonError(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiter unavailable")
-		return
-	}
-	if !allowed {
-		jsonError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "rate limit exceeded")
 		return
 	}
 	var in struct {
@@ -417,7 +383,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: time.Now(),
 	}
 	s.benchmarks.put(job)
-	go s.runBenchmark(job, m, upstreamOnly, runIn, key)
+	go s.runBenchmark(job, m, upstreamOnly, runIn)
 	applog.Infof("[benchmark:%s] queued model_key=%q upstream_only=%q prompt_len=%d max_tokens=%d", jobID, modelKey, upstreamOnly, len(in.Prompt), in.MaxTokens)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -578,7 +544,7 @@ func buildBenchmarkChatBody(llamaName string, in benchRunInput) []byte {
 //
 // m 非 nil 时用 m.ModelKey 做网关侧 load（InferenceLoad 的 modelKey 参数）；m 为 nil 时用 upstreamOnly 作为上游模型名 load。
 // llamaName 为最终写入 JSON "model" 字段的名字，可能在 load 后被 LoadedAs 改写。
-func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput, key *auth.Key) {
+func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly string, in benchRunInput) {
 	defer s.benchmarks.cleanup()
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	defer stopCancel()
@@ -658,7 +624,7 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 	}
 	s.runs.Register(job.ID, cancel)
 	defer s.runs.Unregister(job.ID)
-	s.callBegin(job.ID, key)
+	s.callBegin(job.ID, nil)
 	defer s.callDrop(job.ID)
 	obs := &benchRunObserver{job: job, started: job.StartedAt}
 	applog.Infof("[benchmark:%s] calling inference pipeline stream=true max_tokens=%d timeout=%ds body=%d bytes", job.ID, in.MaxTokens, s.cfg.Llama.RequestTimeout, len(body))
@@ -673,7 +639,6 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		ClientName:   "benchmark",
 		UserAgent:    "llm-gateway/benchmark",
 		Observe:      obs,
-		Guards:       []core.Guard{s.allowModelsGuard(key), s.providerRateLimitGuard()},
 	})
 	// 取消或超时后 ctx 已失效，用独立的短超时把这次的请求日志刷进库。
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -121,4 +123,22 @@ func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
 		s.callDrop(id)
 		s.liveFinish(context.Background(), id)
 	})
+}
+
+// Benchmark 创建同时要求管理员会话与独立的调用方服务密钥，不能用 Authorization 中的管理员凭据代替。
+func TestAuthenticateBenchmarkKeyRequiresDedicatedClientKey(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodPost, "/api/benchmark", nil)
+	r.Header.Set("Authorization", "Bearer admin-session-or-admin-key")
+	if _, code := s.authenticateBenchmarkKey(r); code != "invalid_api_key" {
+		t.Fatalf("authenticateBenchmarkKey() code = %q, want invalid_api_key", code)
+	}
+}
+
+func TestAuthenticateBenchmarkKeyRejectsMissingClientKey(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodPost, "/api/benchmark", nil)
+	if _, code := s.authenticateBenchmarkKey(r); code != "invalid_api_key" {
+		t.Fatalf("authenticateBenchmarkKey() code = %q, want invalid_api_key", code)
+	}
 }
