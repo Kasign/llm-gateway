@@ -1190,15 +1190,15 @@ try {
   await detailTrigger.click();
   const detailModal = page.locator('#detailModal');
   await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
+  check('请求详情弹窗打开后将焦点移入关闭按钮',
+    await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
   const toolCallSummary = detailModal.locator('summary').filter({ hasText: '工具调用明细 (2)' });
   check('请求详情展示工具调用审计明细及事件数量', await toolCallSummary.count() === 1);
   await toolCallSummary.click();
   check('工具调用明细展示顺序、轮次、工具名与执行状态',
-    await detailModal.getByText(/#1 · 第1轮 · web\\.search · 成功 · 35 ms/).count() === 1 &&
-    await detailModal.getByText(/#2 · 第1轮 · web\\.search · 失败 · 5 ms/).count() === 1);
-  await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
-  check('请求详情弹窗打开后将焦点移入关闭按钮',
-    await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
+    await detailModal.getByText('#1 · 第1轮 · web.search · 成功 · 35 ms', { exact: true }).count() === 1 &&
+    await detailModal.getByText('#2 · 第1轮 · web.search · 失败 · 5 ms', { exact: true }).count() === 1);
   const focusState = await detailModal.evaluate(root => {
     const selector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
     const visible = [...root.querySelectorAll(selector)].filter(el => {
