@@ -1,0 +1,317 @@
+# 历史归档：BENCH-03 Benchmark 任务生命周期与持久化
+
+> 状态：已完成
+> 更新日期：2026-11-17
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 完成代码基线：fe8eee61d4f8148df42f28835362bbf2b39e3ad3
+> BENCH-01 审查基线：9d48ab5d76d4c4eb381dedadadbb36244b016779
+> 任务规划权威来源：[整体任务规划](整体任务规划.md)
+> 架构设计权威来源：[产品能力技术方案](产品能力技术方案.md)
+
+## 1. 任务目标
+
+在不破坏现有 /v1 API、Pipeline、工具调用和已完成模型测试入口的前提下，升级 Benchmark 体系。
+
+本任务先完成真实代码审查、差距确认和文件级改造设计，不在审查阶段直接重构核心请求流程。
+
+目标方向：
+- 普通性能、工具调用性能、工具功能和稳定性测试共用统一请求执行核心。
+- Benchmark 任务由服务端管理，不受页面切换、刷新或关闭影响。
+- 测试结果可追溯、可解释、可复现；不满足比较条件时明确标记不可比较。
+- 测试权限遵循客户端 Key、模型 ACL、工具 ACL 和 Key 撤销策略。
+- 保留现有异步任务、进度、取消、请求审计关联和 UI 能力，不因升级丢失已有结果语义。
+
+## 2. 当前基线与 CI
+
+- 完成代码基线：`fe8eee61d4f8148df42f28835362bbf2b39e3ad3`。
+- 已完成统一「模型测试」入口、性能/工具模式切换、共享客户端 Key 输入，以及 BENCH-02 请求执行边界抽取。
+- Go CI：[44084381158](https://github.com/Kasign/llm-gateway/actions/runs/44084381158)，代码基线 `fe8eee6`，结果 success。
+- Browser Smoke：[44084381125](https://github.com/Kasign/llm-gateway/actions/runs/44084381125)，代码基线 `fe8eee6`，结果 success。
+- BENCH-03 的 Task/Run 持久化、历史查询、启动恢复、取消状态机、资源限制和错误审计口径均已完成自动化验收。
+
+## 3. 现状审查结果
+
+### 3.1 Benchmark 任务与执行
+
+审查文件：internal/server/benchmark.go、internal/server/performance_benchmark_test.go。
+
+已确认：
+- POST /api/benchmark 创建异步任务，后台 goroutine 执行；GET 查询，DELETE 取消。
+- 当前一个 Benchmark Job 对应一次模型请求，不是批量任务；当前 UI/请求结构没有可配置的重复轮次或并发压测参数。此前规划中“保留已有批量、并发和轮次控制”的描述不符合当前代码，后续设计不得把它当成既有能力。
+- benchmarkStore 仅作为运行中 Job 的内存快照缓存；数据库中的 Task/Run 元数据不随内存 TTL 清理。完成任务从内存移除后，GET 会回退 MariaDB 查询；Gateway 重启时会把遗留活动任务标记为 interrupted，不自动重放。
+- 当前任务状态主要为 running、completed、failed、cancelled；没有 queued、cancelling、interrupted 等完整生命周期。
+- Worker 负责模型加载/就绪等待、请求构造、Pipeline 调用和 UI 结果更新；请求审计通过同一 request_id 关联。
+
+### 3.2 与标准 /v1 请求链路的关系
+
+审查文件：internal/server/pipeline_http.go、internal/server/pipeline_hooks.go、internal/server/pipeline_forward.go、internal/server/proxy_v1_chat_flow.go、internal/core/pipeline.go。
+
+关键结论：
+- Benchmark 已经复用同一个 core.Pipeline.Run 和同一套 Resolve / Mutate / Guard / WarmStart / Forward / Finish 核心，并非完全独立的模型调用引擎。
+- 但 Benchmark 不经过标准 HTTP 入口 serveInference 的完整门外流程。标准入口负责请求方法、调用方 Key 鉴权、Key RPM、请求体大小限制、客户端连接 Context、请求取消登记和请求级调用状态；Benchmark 通过管理 API 创建任务，单独验证客户端 Key/RPM，再直接构造 core.Request 调用 Pipeline。
+- Benchmark 使用内部 ServiceModel / ServiceProviderID 固定模型和 Provider，并使用内存 Sink；标准 API 使用客户端 HTTP 请求解析出的状态和 ResponseWriter。
+- Benchmark 为 Pipeline 附加 allowModelsGuard(key) 与 providerRateLimitGuard()，但不能因此认为标准入口与 Benchmark 的所有鉴权、限流、取消和请求上下文语义完全一致。
+- 因此下一步不是再造一套 Pipeline，也不是让 Worker loopback HTTP 调用自身，而是审查并抽取可复用的请求准入/执行服务边界，明确标准 HTTP Adapter 与 Benchmark Adapter 的差异。
+
+### 3.3 工具调用链路
+
+审查文件：internal/server/tool_mode.go、internal/server/tool_model_caller.go、internal/tools/coordinator/coordinator.go、internal/server/tool_system.go。
+
+已确认：
+- 工具编排在 inferenceForwarder.forwardWithTools 内接入，当前只处理启用工具能力且通过权限检查的非流式 Chat Completions。
+- 工具模式使用 Coordinator 和 bufferedModelCaller；模型中间轮次缓冲，不直接提交给客户端，最终响应再写回。
+- Coordinator 已返回模型轮数、工具轮数、工具调用次数和各轮 Usage；工具事件已有工具执行耗时、结果字节数、状态和错误分类。
+- 当前工具事件没有完整的模型每轮请求耗时/首包耗时数据，Benchmark 也没有工具场景输入和阶段化统计。
+- 现有 Benchmark 固定构造单条 user message、stream=true，因此不会进入当前非流式工具编排路径。工具性能测试应作为独立测试场景，不能把工具耗时混入普通流式生成速度。
+
+### 3.4 Web UI 与任务生命周期
+
+审查文件：web/js/app/main.js、web/index.html。
+
+已确认：
+- 导航切换只隐藏/显示面板，没有主动调用 Benchmark DELETE，也不会递增 Benchmark 轮询 token；页面切换本身不会取消服务端 Worker。
+- 前端以约 800ms 间隔轮询任务；进入模型测试页面时会尝试恢复上次任务。
+- 当前任务 ID 和测试参数保存在 localStorage；客户端 Key 仅保存在页面内存，不写入 localStorage/sessionStorage。
+- 浏览器刷新后可凭本地保存的 job_id 查询；内存任务不存在时由 MariaDB Task/Run 仓储恢复摘要。Gateway 重启后，遗留 running/cancelling 任务会标记为 interrupted。
+- 页面关闭不会主动取消服务端任务；页面生命周期与服务端任务生命周期保持分离。
+
+### 3.5 权限与安全差距
+
+- Benchmark 创建时校验独立的 X-Client-API-Key，不接受管理员 Session/Admin Key 替代。
+- 创建时单独执行 Key RPM 检查；模型 ACL 和 Provider 限流在 Pipeline Guard 中执行。
+- 创建时取得的 *auth.Key 被传给后台 Worker。当前代码未显示任务执行期间重新读取 Key 状态，因此 Key 被撤销、过期或权限被修改后的在途任务行为需要明确并补测试。
+- 工具模式要求 Key 的模型权限与工具权限共同满足；Benchmark 工具场景必须复用这一边界，不能自行扩大工具权限。
+- 不应在任务持久化记录中保存明文 Key；需设计安全的凭据引用/执行授权上下文和撤销策略。
+
+### 3.6 当前测试覆盖
+
+- performance_benchmark_test.go 已覆盖 Benchmark 必须提供独立客户端 Key、管理员凭据不能代替客户端 Key。
+- Coordinator、Tool Runtime 和工具模式已有各自测试，但尚不能替代 Benchmark 工具性能、任务持久化/恢复、Key 撤销、阶段耗时和多任务资源限制的专项验收。
+- 最新 Go CI 与 Browser Smoke 已通过；它们证明当前提交的自动化门禁通过，不代表上述未实现能力已完成。
+
+## 4. 已确认的设计约束
+
+1. 普通 API 与 Benchmark 共享内部请求执行核心；不通过 HTTP loopback 自调用。
+2. 保留标准 API 的 HTTP 协议、流式写回和错误语义；Benchmark 保留异步任务、进度、取消和结果统计职责。
+3. 页面切换、刷新和关闭浏览器不得取消服务端任务；只有明确的用户取消动作或服务端策略才终止任务。
+4. 普通性能测试与工具调用性能测试分开测量、分开统计；工具功能测试继续独立验证正确性。
+5. 工具性能测试至少拆分模型决策、工具执行、模型最终生成和端到端耗时。
+6. 任务、单次执行和阶段事件分层；部分失败不得丢失已完成执行结果。
+7. 测试条件、环境快照、指标来源和计算口径必须随结果保存；不满足条件时标记不可比较。
+8. 不把 Provider/模型加载时间、工具等待时间、Gateway 排队时间错误计入模型 Decode 速度。
+9. Key 撤销、权限变化、并发上限、请求/工具超时和内容大小限制必须 fail closed。
+10. 先复用现有 request audit、tool audit 和 Request Analysis，不复制第二套审计系统。
+
+## 5. 后续实施顺序
+
+| 顺序 | 子任务 | 目标 | 进入下一步条件 |
+|---|---|---|---|
+| 1 | BENCH-01 现状审查与改造规划 | 本文任务；确认调用边界、差距和文件级方案 | 方案 Review 完成 |
+| 2 | BENCH-02 统一执行边界 | 已完成；共享 Key RPM、请求级 ACL/Provider RPM Guard、Run 生命周期登记与清理 | Go CI、Browser Smoke 通过；保留主流程行为 |
+| 3 | BENCH-03 任务生命周期 | 当前任务；任务/Run 持久化、取消、中断恢复和资源限制 | 重启、刷新、取消和部分结果验收 |
+| 4 | BENCH-04 指标与结果模型 | 统一请求、模型、工具、Gateway 分层指标和可比性元数据 | 指标口径有测试与文档 |
+| 5 | BENCH-05 工具调用性能 | 非流式工具性能场景、模型轮次计时和工具阶段统计 | 真实工具闭环性能验收 |
+| 6 | BENCH-06 UI 与历史分析 | 多场景配置、任务列表、明细、历史对比 | Browser Smoke 和端到端验收 |
+
+BENCH-01、BENCH-02 已完成；当前执行 BENCH-03。不要提前实现并发压测、长上下文、自动排名等 P1/P2 扩展。
+
+## 6. BENCH-02 实施记录
+
+### 第一组：统一 Pipeline 执行边界（已提交，CI 通过）
+
+新增 `internal/server/pipeline_execution.go`：
+- `inferenceRequestGuards` 统一返回调用方模型 ACL 与 Provider 限流 Guard，顺序与原请求完全一致。
+- `beginInferenceRun` 统一请求状态创建/清理、活动 Run 登记/注销；两种入口仍在原位置直接调用 `core.Pipeline.Run`。
+- 普通 HTTP 请求继续由 `serveInference` 自己处理认证、RPM、Body 上限、客户端 Context、路由信息和 HTTP Sink；只把原有 Run 周围的生命周期登记/清理代码交给公共方法。
+- Benchmark Worker 继续由任务管理层处理加载、等待、任务取消和内存 Sink；只把原有 Run 周围的生命周期登记/清理代码交给公共方法。
+- HTTP 请求保留 `setCallCancel` 注册；Benchmark 保留 Job 自身的取消控制，不额外改变取消语义。
+- 没有修改 `internal/core/Pipeline`、Pipeline 阶段、Provider Forwarder、工具编排或任何 API 协议。
+
+新增 `internal/server/pipeline_execution_test.go`，分别覆盖 HTTP 与 Benchmark 两种生命周期注册差异，验证活动请求可取消、Key 状态在 Run 期间可见、Run 结束后状态与取消登记均清理。执行调用位置和 Pipeline 参数保持不变。
+
+本组属于机械边界抽取，不等同于 BENCH-02 全部完成。尚需审查/处理：
+- Benchmark 请求体 64 MiB 上限和严格单 JSON 值解码已作为第二组实现，等待 CI 验证。
+- 当前一次 Benchmark Run 在创建入口鉴权后视为已接受的在途请求；之后 Key 被禁用/过期不追溯中断该次 Run，与普通 /v1 请求的一次请求级鉴权语义一致。未来引入排队或多 Run 时，必须在每次 Run 开始前按 Key ID 重新校验状态/过期时间/权限，并比较 Key 哈希版本，禁止保存明文 Key。
+- 已确认客户端 Key RPM 与 Provider RPM 是两个独立计数桶：入口处执行 Key RPM，Pipeline Guard 执行 Provider 自身 RPM；本次抽取统一 Key RPM 计数调用，不合并两种额度。未来增加单任务多 Run 时，必须对每个 Run 执行 Key RPM 准入，不能只在创建 Task 时计一次。
+
+### 第二组：Benchmark 请求体入口防护（已提交，CI 通过）
+
+- `POST /api/benchmark` 复用现有 `readLimitedRequestBody`，使用与标准推理请求一致的 64 MiB 上限。
+- 超限返回 413 / `request_too_large`；无效 JSON、空 Body 或尾随第二个 JSON 值返回 400 / `invalid_request`。
+- 保留原有管理员认证、客户端 Key 鉴权和 RPM 检查顺序；未修改 `/v1` 请求体处理。
+- 增加有效 JSON、尾随 JSON、Body 超限三个单元测试。
+
+### 第三组：统一客户端 Key RPM 准入（已提交，CI 通过）
+
+- 新增 `allowClientKeyRequest`，普通 `/v1` 请求与 Benchmark 创建入口复用同一客户端 Key RPM 计数逻辑。
+- 保留各自的错误响应映射；Key RPM 仍在原来的入口时点执行。
+- Provider RPM 仍由 Pipeline 的 `providerRateLimitGuard` 独立执行，使用 Provider ID 作为 Redis 计数桶；不与客户端 Key RPM 合并。
+- 当前 Benchmark 每个 Job 只有一次 Run，创建时的一次 Key RPM 检查与一次请求对应。未来增加多 Run 时，每个 Run 必须恰好消耗一次 Key RPM；Task 创建请求应另设控制面防刷限制，避免只计 Task 一次导致绕过，也避免 Task 创建和 Run 双重计数。
+
+## 7. BENCH-03 任务生命周期与持久化审查
+
+### 7.1 已确认的现状
+
+- `benchmarkStore` 只保留运行期快照；Task/Run 元数据持久化在 MariaDB，完成快照保留一小时，重启后 GET 从数据库恢复历史摘要。
+- 当前 `benchmarkJob` 仍是运行期聚合 DTO，持久化层已拆为 Task/Run；当前每个 Task 创建一个 Run，首个 Run 的 Request ID 暂与 Job ID 相同。
+- DELETE 已原子持久化 `running → cancelling`，随后发送 Worker 取消信号；Worker 最终写入 `cancelled`。取消与自然完成通过 Job 状态锁排序，防止终态被取消覆盖。页面关闭/切换不取消任务；进程重启由启动恢复逻辑标记 `interrupted`。
+- MariaDB 已有 `request_logs`、`request_payloads`、`request_stream_events`、`request_tool_call_events`。请求审计、流事件和工具事件已有独立持久化能力。
+- `request_logs` 是请求级审计事实来源；Benchmark 表不应复制请求正文、响应正文、流事件或工具事件。
+- 当前 `logging.store_payload` 控制请求/响应正文是否持久化。Benchmark 持久化不得绕过该开关，把 Prompt、模型回答或 Reasoning 文本另存一份。
+- 数据库迁移通过 `migrations/001_init.sql`、`internal/db/migrate.go` 的 `ensureColumns` 与 `requiredTables` 共同兼容新旧部署；新增表必须覆盖三处和迁移验收。
+
+### 7.2 持久化设计约束
+
+1. Task 与 Run 分表：Task 保存测试场景/配置快照和聚合状态；Run 保存单次请求状态与指标。当前一个 Task 创建一个 Run，数据模型为后续重复轮次/并发留出空间。
+2. Task ID 与 Request ID 解耦。保留现有 `job_id` 和轮询 URL；当前兼容期可让首个 Run 的 Request ID 与旧 Job ID 相同，后续 Run 使用独立 Request ID。
+3. Task 保存配置快照，但不保存明文 Prompt。记录 Prompt 长度与 SHA-256；若 `store_payload=true`，通过现有 `request_payloads` 按 Request ID 取回正文；关闭时只显示指标和明确的 payload unavailable 状态。
+4. Run 只保存请求级摘要/指标，并以 Request ID 关联 `request_logs`、流事件和工具事件；不重复存储已有审计数据。
+5. 进程启动时把遗留的 running/cancelling 任务标记为 interrupted；不自动重跑，避免模型请求重复执行、重复计费或副作用。
+6. 任务创建必须先持久化成功，再启动 Worker。最终状态更新失败时保留可诊断错误日志；下次启动仍能把未完成记录标记 interrupted。
+7. 取消是状态机：running → cancelling → cancelled；若完成先于取消取得状态锁，则保留 completed/failed，不谎报取消成功。
+8. 页面生命周期与任务生命周期彻底解耦；GET 可从 DB 恢复历史 Task，DELETE 仅对本进程仍活动的 Worker 发出取消。
+9. 任务历史保留与请求日志保留策略协调；只删除终态任务，并确保 Task/Run 成组清理，避免孤儿 Run。
+10. 资源保护先实现单 Gateway 活动任务上限与单任务时长/输出上限；后续并发测试作为显式场景控制 Run 并发，不允许多个无约束 Task 同时压垮本地模型。
+
+### 7.3 当前发现的指标问题（移交 BENCH-04）
+
+当前 `runBenchmark` 在 Pipeline 之前执行 InferenceLoad 和 WaitUntilModelReady，但传给 Pipeline 的 `Started`、`benchRunObserver.started` 仍是 Task 创建时的 `job.StartedAt`。因此：
+- Benchmark 的 TTFT 和请求总耗时包含模型加载/就绪等待；
+- Request Analysis 的 `model_load_ms` 只按 Pipeline 内 PreparedAt→ReadyAt 计算，无法看到 Pipeline 之前的加载时间；
+- 同一份 Benchmark 结果可能把加载等待误读为模型 Prefill/TTFT，冷启动与热启动比较失真。
+
+BENCH-04 必须分别记录 Task 总耗时、模型加载耗时、Run 推理耗时和 Run TTFT；不能只改一个 Started 时间戳而丢失端到端数据。
+
+#### 7.4 取消状态机进展（HEAD 9c2d082）
+
+- DELETE 先通过 MariaDB 事务将 Task 与当前 Run 从 `running` 转为 `cancelling`，只有数据库状态仍为 running 才允许转换；终态不会被重复取消请求覆盖。
+- 持久化转换成功后更新内存快照并触发 Worker Context / 活动 Run 取消；Worker 结束后统一写入 `cancelled` 终态。
+- 增加运行期状态转换测试，覆盖 running → cancelling、重复转换拒绝、终态不可回退。
+- 仍需验证 MariaDB 事务路径与自然完成并发竞态；当前新增单元测试不替代真实 DB 集成测试。若取消持久化失败，接口 fail closed，不发送取消信号。
+
+### 7.4 阶段性代码复核记录（早期基线，后续缺口已在本归档末尾关闭）
+
+- 已存在 `internal/server/benchmark_persistence.go`：负责 Task/Run 快照、终态持久化、启动恢复和 DB fallback 查询。
+- 已存在 `internal/store/benchmark.go`：Task 与首个 Run 在同一事务创建，Task/Run 终态在同一事务更新；支持历史查询、活动任务 interrupted 标记及终态任务批量清理。
+- 已存在 `benchmark_tasks` / `benchmark_runs` 表，已同时写入 `migrations/001_init.sql` 和 `ensureColumns`；`requiredTables` 已包含两表。
+- OpenAPI 的 `BenchmarkJob.error_code` 字段在当前 HEAD 已补齐；当前 HEAD 的 Go CI 与 Browser Smoke 均通过。先前记录的 Schema 缺失问题不再是当前阻塞项。
+- 当前仍有真实缺口：DELETE 未持久化 `cancelling` 状态，状态检查与取消信号之间存在竞态；活动任务数量/时长/输出预算尚未形成服务端强制限制；MariaDB 集成测试依赖 `MYSQL_TEST_DSN`，CI 通过不等同于真实 MariaDB 环境已验收。
+- `benchmarkStore`、Task/Run 持久化和重启恢复职责已在代码注释中明确；当前资源硬限制与验证结果见 7.9、7.10。
+
+## 7.5 BENCH-03 文件审查范围
+
+| 范围 | 文件/能力 | 处理方向 |
+|---|---|---|
+| 任务与执行模型 | internal/server/benchmark.go | 拆分 Task/Run DTO、状态转换、持久化调用；保留现有 API 兼容 |
+| 数据仓库 | internal/store/store.go 及新增 Benchmark Repo | 新增 Task/Run 的事务化读写；复用 request_logs 作为请求事实来源 |
+| 数据库迁移 | migrations/001_init.sql、internal/db/migrate.go、internal/db/migrate_test.go | 增加 Task/Run 表、requiredTables 和旧库增量建表验证 |
+| Server 组装/恢复 | internal/server/server.go | 注入 Benchmark Repo；启动时恢复未完成任务为 interrupted |
+| 请求保留策略 | internal/server/request_retention.go、store retention 方法 | 与 request retention 对齐；终态任务/Run 成组清理 |
+| API 查询 | internal/server/benchmark.go | 内存优先、DB fallback；刷新/重启后能查询历史任务 |
+| 测试 | benchmark 专项测试、MariaDB 迁移/集成测试 | 创建失败不启动 Worker、终态持久化、重启中断恢复、取消竞态、部分结果可查 |
+
+BENCH-03 先完成 Schema/Repository 设计 Review，再实施迁移和 Worker 接入；不在本阶段改 Web UI 或指标口径。
+
+## 8. 文件级改造建议（待 BENCH-02 开始前再次核对）
+
+| 范围 | 现有文件/能力 | 建议方向 | 阶段 |
+|---|---|---|---|
+| 请求准入与执行 | internal/server/pipeline_http.go、internal/core/pipeline.go | 将标准 API 的 HTTP 解析/响应职责与可复用的请求准入、执行上下文边界分开；保留 core.Pipeline 的固定阶段顺序 | BENCH-02 |
+| Pipeline 装配与策略 | internal/server/pipeline_hooks.go、internal/server/pipeline_forward.go | 优先复用现有 Resolve/Mutate/Guard/Forward/Observe；避免把任务调度、统计逻辑塞入 core.Pipeline | BENCH-02 |
+| Benchmark API/Worker | internal/server/benchmark.go、internal/server/server.go | 保留现有 API 兼容；逐步拆分任务应用服务、Worker 和 HTTP Handler；Worker 使用统一执行服务，不做 HTTP loopback | BENCH-02/03 |
+| 工具执行 | internal/server/tool_mode.go、internal/server/tool_model_caller.go、internal/tools/coordinator/coordinator.go | 复用现有非流式工具闭环；后续为每轮模型调用补充可观测计时，不复制工具执行器 | BENCH-05 |
+| 请求分析与工具审计 | internal/server/request_analysis.go、internal/server/tool_usage.go、internal/store/store.go、internal/audit/writer.go | 复用 request_logs.analysis_json、request_tool_call_events 和异步 Audit Writer；只补充缺失的 Benchmark 专属数据 | BENCH-04/05 |
+| 数据库迁移 | internal/db/migrate.go、migrations/001_init.sql、internal/db/migrate_test.go | 如确认需要任务/Run 表，采用向前兼容的增量建表/字段迁移，并更新 requiredTables 与迁移测试；不复制请求审计数据 | BENCH-03 |
+| Web UI | web/index.html、web/js/app/main.js、web/tests/ui-smoke.mjs | 页面只负责配置、任务查询和展示；服务端任务不绑定 DOM/页面生命周期；增加任务列表和重新进入详情 | BENCH-06 |
+| API 契约 | docs/openapi.yaml | 仅在新增/修改管理 API 或响应字段时同步更新 | 对应阶段 |
+
+补充数据层审查结论：
+- 当前 MariaDB 基础结构已有 request_logs、request_stream_events、request_tool_call_events、request_payloads；request_logs 已有 analysis_json、TTFT、Token 来源和请求状态字段。
+- Request Analysis 已提供总耗时、准备耗时、模型加载耗时、上游耗时、TTFT、首字节/上游 Header 时间和吞吐来源；应先复用，不能另建重复指标字段。
+- Coordinator 的工具事件已有单次工具耗时；模型每轮耗时尚未形成同等级事件。
+- 数据库迁移由 migrations/001_init.sql 和 internal/db/migrate.go 的 ensureColumns 共同负责；新任务表必须兼容已有部署，并覆盖 MariaDB 迁移测试。
+- 上述文件是候选改造范围，不表示所有文件都必然修改。BENCH-02 前需按最终设计再检查调用方、锁、取消和数据契约。
+
+## 9. TOOL-09 尚未完成事项
+
+原 TOOL-09 的统一模型测试入口与 Key 鉴权改造已通过当前 SHA 的 Go CI 和 Browser Smoke，但 TOOL-09 仍未完成。以下真实部署验收不能因 Benchmark 任务启动而被标记完成：
+- 真实部署配置下的客户端 Key 模型/工具权限验证。
+- Key 无权限、Key 撤销/过期、普通请求旁路、SearXNG 超时/不可用等失败场景。
+- 同一 request_id 的工具审计完整性与敏感信息脱敏检查。
+
+这些事项保留在整体规划中，BENCH-01 完成后按主线恢复验收。
+
+## 10. 不可破坏的约束
+
+- 只操作 dev 分支；不创建分支，不改动其他分支。
+- 先检查当前代码和文档，已有能力先复用，只修真实缺口。
+- 不虚构测试结果；CI、Mock、真实环境验收分别记录。
+- 不提交真实客户端 Key、Provider Key、密码、Prompt 私密内容或完整工具返回正文。
+- 中文文档、注释和提交说明。
+- 按可独立 Review 的功能组提交，不按单文件或极小改动频繁提交。
+
+
+## 7.6 取消状态机复核补充（HEAD fcb07ba）
+
+- 修正内存任务 GET：`cancelling` 与 `running` 一样属于活动状态，不提前查询/展示终态 Request Analysis，也不提前判断 payload 已完成持久化。
+- `BenchmarkStopResult.status` 的 OpenAPI 枚举同步覆盖 `cancelling` 与 `interrupted`；停止接口可能返回数据库中的历史终态，契约必须覆盖实际状态集合。
+- MariaDB 仓储集成测试新增取消事务验证：Task 与 Run 同时转为 `cancelling`、重复取消不重复转换、终态不允许回退。
+- 以上 MariaDB 用例仍依赖专用 `MYSQL_TEST_DSN`；未配置时会 Skip，不能把普通 CI 通过当作真实 MariaDB 已验收。
+- 下一步补充取消与自然完成并发更新测试，并继续检查内存快照与数据库最终状态的一致性。
+
+
+### 7.7 取消与自然完成并发顺序
+
+- 发现仅在数据库转换完成后再获取 Job 锁存在窗口：Worker 可能先在内存写入终态，取消事务随后却把数据库改成 `cancelling`，短暂造成内存与数据库状态倒置。
+- 已调整为持有 Job 状态锁执行取消持久化事务，再同步写入内存 `cancelling`；Worker 的 `finish` 使用同一把锁，因此两条路径有明确先后顺序。
+- 新增单元测试验证持久化期间自然完成等待取消转换结束，以及持久化失败时内存状态保持 `running`。
+- MariaDB 集成测试新增取消与自然完成并发更新，最终 Task/Run 均必须为 `completed`。该项只有在专用 MariaDB 测试环境实际运行后才算通过。
+
+
+- 取消接口在发出信号后重新读取 Job 状态作为响应，避免 Worker 恰好自然完成时仍固定返回 `cancelling`；`stopped` 只表示取消信号是否成功送达，不代表任务已经进入终态。
+
+
+### 7.8 CI 缺陷修复与取消事务完整性
+
+- HEAD `24b8cdf` 的 Go CI 暴露 MariaDB 集成测试变量命名错误（raceRun/traceRun 混用），导致 store 包编译失败；已按 CI 日志修正。
+- `MarkTaskCancelling` 现在检查当前运行 Run 的影响行数必须恰好为 1。Task 已转为 cancelling 但没有唯一活动 Run 时，事务回滚并返回错误，避免 Task/Run 状态脱节。
+- CI 工作流已提供隔离的 MariaDB `MYSQL_TEST_DSN`，修复后应以实际执行的 MariaDB 集成测试结果为准，不再将该项笼统标记为“仅依赖外部环境”。
+
+### 7.9 Benchmark 服务端资源硬限制
+
+- 单 Gateway 同时只允许一个活动 Benchmark Task。创建入口在数据库写入前原子预留名额，避免并发 POST 同时越过限制；数据库写入失败会释放名额；只有任务进入终态才释放活动名额。
+- 每个 Benchmark 最长执行 30 分钟；若通用 `llama.request_timeout_seconds` 配置了更短的正数，则采用更短值。配置为 0（通用请求不限时）也不能关闭 Benchmark 自身硬时限。
+- Benchmark 内存响应捕获上限为 8 MiB。超限时停止继续缓存并以 `benchmark_response_too_large` 失败结束；`response_truncated=true` 明确表示响应正文只保留了上限内的部分数据。该限制只作用于 Benchmark 内存 Sink/观察器，不改变普通 `/v1` 响应写回。
+- 新增活动任务名额、超时边界和内存 Sink 上限测试；仍需检查 Provider 对写入错误的传播路径以及超限时请求审计状态。
+
+- 补充观察器上限测试，并在 Provider 写入 Sink 返回上限错误时同样映射为 `benchmark_response_too_large`，避免只依赖观察器是否先收到 Chunk 回调。
+
+
+### 7.10 阶段性验收基线（代码 HEAD fa3afd16，后续以 7.11 为准）
+
+- Go CI `44083477107`：通过。包括 Go 单元/集成测试、MariaDB 专项测试（CI 注入 `MYSQL_TEST_DSN`）、竞态测试、静态检查、构建、Docker 镜像、故障注入与恢复、Gateway 并发负载及审计持久化。
+- Browser Smoke `44083477096`：通过，覆盖代码提交 `fa3afd16`。
+- OpenAPI 路由和高风险契约检查通过；`BenchmarkJob.response_truncated` 已放入正确 Schema。
+- 活动任务预留、30 分钟硬时限、8 MiB 响应捕获上限均有单元测试；MariaDB 取消事务和取消/自然完成并发测试已在带 `MYSQL_TEST_DSN` 的 CI 中执行。
+- 响应超限通过稳定 Fault `benchmark_response_too_large` 返回，内部 Sink 状态置为 502；请求审计终态、错误码与 Benchmark Task 结果保持一致。
+- 硬超时在模型加载/就绪阶段立即终止，在 Pipeline 阶段统一映射为 HTTP 504 / `gateway_timeout`；不会因通用请求超时配置为 0 而失去 Benchmark 时限。
+- 资源限制只作用于 Benchmark，不改变普通 `/v1` 推理入口、响应写回或 Pipeline 阶段。
+- BENCH-03 尚需最后一次整体 Review：核对状态/资源释放边界与历史查询一致性；完成后再进入 BENCH-04。
+
+- 资源超限错误使用稳定的 Core Fault（HTTP 502 / `benchmark_response_too_large`）；内部 MemSink 同步将状态码标记为 502，确保现有请求审计的终态、错误码与 Benchmark 任务结果一致，而不是记录为普通客户端写回失败。
+
+- 超过 Benchmark 硬时限时，模型加载/就绪阶段立即终止，不再继续进入 Pipeline；任务结果统一记录为 HTTP 504 / `gateway_timeout`，与请求审计的超时分类一致。
+
+
+### 7.11 BENCH-03 最终 Review 与验收结论
+
+- 最终代码基线：`fe8eee61d4f8148df42f28835362bbf2b39e3ad3`。
+- Go CI `44084381158`：success。包含 Go 单元/集成测试、MariaDB 集成测试、竞态测试、静态检查、构建、Docker 镜像、故障注入/恢复及 Gateway 并发审计负载。
+- Browser Smoke `44084381125`：success，真实 Gateway 桌面、窄屏和核心交互验收通过。
+- 最终 Review 发现 Pipeline 未触发 `StageFinish` 时，Benchmark 兜底路径会把 Deadline 错误记成普通 502；已在提交 `fe8eee6` 统一取消、超时、响应超限分类，并增加对应单元测试。
+- Task/Run 创建和终态更新使用事务；取消状态转换在 Job 锁内执行持久化事务，避免自然完成与取消请求导致内存/数据库状态倒置。
+- 活动任务名额在创建前预留，创建失败释放；任务进入终态后不再计入活动名额。单任务硬时限 30 分钟，响应内存捕获上限 8 MiB。
+- 持久化失败会记录错误日志；不会伪造数据库写入成功。未能确认终态的记录在下次启动时转为 `interrupted`，不自动重放。
+- 资源限制和取消状态机只作用于 Benchmark Adapter；普通 `/v1` 入口的认证、请求解析、流式写回和取消时序未迁移或重排。
+- BENCH-03 验收完成。指标口径问题转入 BENCH-04：模型加载/就绪时间发生在 Pipeline 之前，现有 TTFT 起点仍是 Task 创建时间；Run 已有 `model_load_ms` 与 `inference_latency_ms` 数据列，但当前快照尚未填充。
