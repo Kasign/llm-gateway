@@ -14,10 +14,10 @@
 
 ## 2. 不可破坏的约束
 
-- `tools.enabled` 和全局工具白名单继续作为第一层服务端门控；模型范围通过 Web 服务密钥的 `allowed_models` 管理。
+- `tools.enabled` 和全局工具白名单继续作为第一层服务端门控；服务范围通过 Web 服务密钥的 `allowed_models` 管理；该选择按 Provider 服务生效，不需要随服务内模型增删维护清单。
 - 最终可用工具集合必须取交集：全局启用工具、当前调用方 Key 的模型 ACL、当前调用方 Key 的工具 ACL、Registry 已注册工具。
 - 调用方 Key 未配置工具授权或授权列表为空时，默认不能使用任何工具；旧 Key 迁移后也必须默认无工具权限。
-- `allowed_models` 与 `allowed_tools` 均在 Web 服务密钥中配置：前者限制该 Key 可使用的模型，空列表表示不限制；后者限制该 Key 可调用的工具，空列表表示无工具权限。模型工具授权不再维护第二份 YAML 模型清单。
+- `allowed_models` 与 `allowed_tools` 均在 Web 服务密钥中配置：前者限制该 Key 可访问的 Provider 服务（兼容历史模型 ID），空列表表示不限制；后者限制该 Key 可调用的工具，空列表表示无工具权限。工具调用同时受服务范围和工具授权约束，不再维护第二份 YAML 模型清单。
 - 客户端 `tools`、`tool_choice` 只能表达请求意图，不能授予工具权限或扩大服务端授权集合。
 - 每次执行仍由 Runtime 再次授权，保持 fail-closed。
 - 管理员 API Key 仍仅用于 `/api/admin/keys` 及其子路径；其他管理操作继续要求 Web Session。

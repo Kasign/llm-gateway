@@ -52,6 +52,11 @@ func TestToolModelAllowedUsesWebManagedKeyModelACL(t *testing.T) {
 	if !s.toolModelAllowed(state, &auth.Key{AllowedModels: []string{"stable-key"}}) {
 		t.Fatal("Web model ACL did not allow the selected stable model key")
 	}
+	anotherModel := state
+	anotherModel.Model.ModelKey = "new-model-added-later"
+	if !s.toolModelAllowed(anotherModel, &auth.Key{AllowedModels: []string{"llamacpp"}}) {
+		t.Fatal("Provider-level Web ACL should cover newly added models without maintaining a model list")
+	}
 	if s.toolModelAllowed(state, &auth.Key{AllowedModels: []string{"other-key"}}) {
 		t.Fatal("Web model ACL allowed an unlisted model")
 	}
