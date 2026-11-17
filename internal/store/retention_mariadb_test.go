@@ -145,6 +145,9 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 			if tc.id == running || tc.id == recent {
 				wantChildren = 1
 			}
+			if table == "request_tool_call_events" && tc.id == recent {
+				wantChildren = 2
+			}
 			if count != wantChildren {
 				t.Fatalf("%s rows for %q = %d, want %d", table, tc.id, count, wantChildren)
 			}
