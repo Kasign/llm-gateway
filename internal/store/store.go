@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // RequestLog 是一条进入网关的调用记录：谁、从哪个 URL、何时、什么模型、耗时与 token 等。
@@ -119,16 +120,22 @@ func (r *Repo) InsertToolCallEvents(ctx context.Context, requestID string, event
 		return err
 	}
 	defer stmt.Close()
+	lastSeq, lastRound := 0, 0
 	for _, event := range events {
-		if event.Seq < 1 || event.Round < 1 || event.Round > 3 ||
+		validStatus := event.Status == "succeeded" || event.Status == "failed" ||
+			event.Status == "rejected" || event.Status == "cancelled" || event.Status == "timed_out"
+		if event.Seq <= lastSeq || event.Seq > maxToolCallEventsPerRequest ||
+			event.Round < 1 || event.Round > 3 || event.Round < lastRound ||
 			event.DurationMS < 0 || event.ResultBytes < 0 ||
-			len(event.ToolName) > 64 || len(event.Status) > 16 || len(event.ErrorCode) > 64 {
+			len(event.ToolName) > 64 || !utf8.ValidString(event.ToolName) ||
+			!validStatus || len(event.ErrorCode) > 64 || !utf8.ValidString(event.ErrorCode) {
 			return fmt.Errorf("invalid tool call event fields")
 		}
 		if _, err := stmt.ExecContext(ctx, requestID, event.Seq, event.Round, event.ToolName,
 			event.Status, event.DurationMS, event.ResultBytes, nullIfEmpty(event.ErrorCode)); err != nil {
 			return err
 		}
+		lastSeq, lastRound = event.Seq, event.Round
 	}
 	return tx.Commit()
 }

@@ -272,7 +272,11 @@ func (w *Writer) InsertStreamEvents(requestID string, events []store.StreamEvent
 
  // InsertToolCallEvents 批量异步写入工具审计事件，使用普通优先级，不占用请求 Finish 预留容量。
 func (w *Writer) InsertToolCallEvents(requestID string, events []store.ToolCallEvent) {
-	if w == nil || strings.TrimSpace(requestID) == "" || len(events) == 0 {
+	if w == nil || len(events) == 0 {
+		return
+	}
+	if strings.TrimSpace(requestID) == "" {
+		w.toolEventDropped.Add(uint64(len(events)))
 		return
 	}
 	evCopy := append([]store.ToolCallEvent(nil), events...)

@@ -9,7 +9,7 @@ import (
 
 const maxRequestRetentionBatchSize = 5000
 
-// DeleteFinishedRequestsBefore 删除开始时间早于 cutoff 且不再运行的请求记录及其 Payload/SSE 子记录。
+// DeleteFinishedRequestsBefore 删除开始时间早于 cutoff 且不再运行的请求记录及其 Payload/SSE/工具调用子记录。
 // 每次调用只在单个小事务内处理一个批次；调用方负责设置保留期限并决定下一批运行时间。
 func (r *Repo) DeleteFinishedRequestsBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
 	if r == nil || r.db == nil {

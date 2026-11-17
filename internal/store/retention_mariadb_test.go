@@ -90,14 +90,21 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	insertLog(running, "running", old)
 	insertLog(recent, "completed", recentTime)
 
+	if err := repo.InsertToolCallEvents(ctx, recent, []ToolCallEvent{{
+		Seq: 2, Round: 1, ToolName: "web.search", Status: "failed",
+		DurationMS: 7, ErrorCode: "tool_execution_failed",
+	}}); err != nil {
+		t.Fatalf("insert second tool call event: %v", err)
+	}
 	toolEvents, err := repo.ListToolCallEvents(ctx, recent, 9)
 	if err != nil {
 		t.Fatalf("list tool call events: %v", err)
 	}
-	if len(toolEvents) != 1 || toolEvents[0].ToolName != "web.search" ||
-		toolEvents[0].Status != "succeeded" || toolEvents[0].DurationMS != 12 ||
-		toolEvents[0].ResultBytes != 24 {
-		t.Fatalf("unexpected tool call events: %+v", toolEvents)
+	if len(toolEvents) != 2 || toolEvents[0].Seq != 1 || toolEvents[1].Seq != 2 ||
+		toolEvents[0].ToolName != "web.search" || toolEvents[0].Status != "succeeded" ||
+		toolEvents[0].DurationMS != 12 || toolEvents[0].ResultBytes != 24 ||
+		toolEvents[1].Status != "failed" || toolEvents[1].ErrorCode != "tool_execution_failed" {
+		t.Fatalf("tool call events are not returned in sequence order: %+v", toolEvents)
 	}
 	cutoff := time.Now().Add(-24 * time.Hour)
 	var deleted int64
