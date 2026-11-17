@@ -268,7 +268,7 @@ func TestAllowedSearXNGAddress(t *testing.T) {
 func TestSafeHTTPClientRejectsBlockedResolvedAddress(t *testing.T) {
 	client := newSafeHTTPClient(normalizedConfig{
 		requestTimeout: time.Second, allowPrivateNetwork: true,
-	}, fixedResolver{netip.MustParseAddr("127.0.0.1")})
+	}, fixedResolver{addresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")}})
 	req, err := http.NewRequest(http.MethodGet, "http://searxng.invalid:8080/search", nil)
 	if err != nil { t.Fatal(err) }
 	_, err = client.Do(req)
