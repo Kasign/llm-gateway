@@ -118,4 +118,41 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	if remainingRuns != 0 {
 		t.Fatalf("cascaded run count = %d, want 0", remainingRuns)
 	}
+
+	// 取消事务与自然完成并发时，最终终态必须由完成事务保留。
+	raceID := id + "-cancel-finish-race"
+	raceTask := BenchmarkTask{TaskID: raceID, Scenario: "performance", Status: "running", StartedAt: now}
+	raceRun := BenchmarkRun{RunID: raceID, TaskID: raceID, RunNo: 1, RequestID: raceID, Status: "running", StartedAt: now}
+	if err := repo.CreateTaskAndRun(ctx, raceTask, traceRun); err != nil {
+		t.Fatalf("create race task: %v", err)
+	}
+	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", raceID) }()
+	startRace := make(chan struct{})
+	raceErrors := make(chan error, 2)
+	go func() {
+		<-startRace
+		_, err := repo.MarkTaskCancelling(ctx, raceID)
+		raceErrors <- err
+	}()
+	go func() {
+		<-startRace
+		finished := time.Now()
+		traceTask.Status, traceTask.FinishedAt = "completed", &finished
+		traceRun.Status, traceRun.FinishedAt = "completed", &finished
+		raceErrors <- repo.UpdateTaskAndRun(ctx, traceTask, traceRun)
+	}()
+	close(startRace)
+	for i := 0; i < 2; i++ {
+		if err := <-raceErrors; err != nil {
+			t.Fatalf("concurrent cancel/finish update: %v", err)
+		}
+	}
+	raceGot, err := repo.GetTask(ctx, raceID)
+	if err != nil || traceGot.Status != "completed" {
+		t.Fatalf("race task = %+v, err=%v; want completed", traceGot, err)
+	}
+	raceRuns, err := repo.ListRuns(ctx, raceID)
+	if err != nil || len(traceRuns) != 1 || traceRuns[0].Status != "completed" {
+		t.Fatalf("race runs = %+v, err=%v; want completed", traceRuns, err)
+	}
 }

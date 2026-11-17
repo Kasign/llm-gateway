@@ -161,23 +161,46 @@ func TestBenchmarkCancelIsRegisteredBeforeWorkerStarts(t *testing.T) {
 }
 
 
-// TestBenchmarkMarkCancellingOnlyTransitionsRunning verifies the in-memory lifecycle guard.
-func TestBenchmarkMarkCancellingOnlyTransitionsRunning(t *testing.T) {
+// TestBenchmarkCancellationSerializesWithFinish 验证取消持久化与自然完成按 Job 锁排序。
+func TestBenchmarkCancellationSerializesWithFinish(t *testing.T) {
 	job := &benchmarkJob{Status: "running"}
-	if !job.markCancelling() {
-		t.Fatal("running job should transition to cancelling")
+	persistStarted := make(chan struct{})
+	allowPersist := make(chan struct{})
+	cancelDone := make(chan error, 1)
+	go func() {
+		changed, err := job.markCancellingWith(func() (bool, error) {
+			close(persistStarted)
+			<-allowPersist
+			return true, nil
+		})
+		if err == nil && !changed {
+			err = fmt.Errorf("running job did not enter cancelling")
+		}
+		cancelDone <- err
+	}()
+	<-persistStarted
+
+	finishDone := make(chan struct{})
+	go func() {
+		job.finish("completed", http.StatusOK, 10, nil, nil, nil, 0, 0)
+		close(finishDone)
+	}()
+	close(allowPersist)
+	if err := <-cancelDone; err != nil {
+		t.Fatal(err)
 	}
-	if got := job.snapshot().Status; got != "cancelling" {
-		t.Fatalf("status = %q, want cancelling", got)
+	<-finishDone
+	if got := job.snapshot().Status; got != "completed" {
+		t.Fatalf("final status = %q, want completed", got)
 	}
-	if job.markCancelling() {
-		t.Fatal("cancelling job must not transition a second time")
+
+	failed := &benchmarkJob{Status: "running"}
+	if changed, err := failed.markCancellingWith(func() (bool, error) {
+		return false, fmt.Errorf("database unavailable")
+	}); err == nil || changed {
+		t.Fatalf("failed persistence result = (%v, %v), want (false, error)", changed, err)
 	}
-	job.finish("cancelled", 499, 1, nil, context.Canceled, nil, 0, 0)
-	if got := job.snapshot().Status; got != "cancelled" {
-		t.Fatalf("terminal status = %q, want cancelled", got)
-	}
-	if job.markCancelling() {
-		t.Fatal("terminal job must not return to cancelling")
+	if got := failed.snapshot().Status; got != "running" {
+		t.Fatalf("status after persistence failure = %q, want running", got)
 	}
 }

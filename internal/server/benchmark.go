@@ -97,14 +97,20 @@ func (j *benchmarkJob) clearCancel() {
 }
 
 // markCancelling 更新运行期快照；持久化状态先由仓储事务成功转换。
-func (j *benchmarkJob) markCancelling() bool {
+// markCancellingWith 在持有 Job 状态锁时先完成持久化转换，再更新内存状态。
+// 这样自然完成与取消请求按同一把锁排序，避免数据库先进入 cancelling、内存却已终态。
+func (j *benchmarkJob) markCancellingWith(persist func() (bool, error)) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.Status != "running" {
-		return false
+		return false, nil
+	}
+	changed, err := persist()
+	if err != nil || !changed {
+		return false, err
 	}
 	j.Status = "cancelling"
-	return true
+	return true, nil
 }
 
 func (j *benchmarkJob) requestStop() bool {
@@ -539,7 +545,7 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	snap := job.snapshot()
-	if snap.Status != "running" && snap.Status != "cancelling" {
+	if snap.Status != "running" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": snap.Status, "stopped": false})
 		return
@@ -550,7 +556,9 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	changed, err := s.benchmarkRepo.MarkTaskCancelling(ctx, id)
+	changed, err := job.markCancellingWith(func() (bool, error) {
+		return s.benchmarkRepo.MarkTaskCancelling(ctx, id)
+	})
 	if err != nil {
 		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to persist cancellation request")
 		return
@@ -561,7 +569,6 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 		json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": snap.Status, "stopped": false})
 		return
 	}
-	job.markCancelling()
 	stopped := job.requestStop()
 	if s.runs != nil && s.runs.Cancel(id) {
 		stopped = true
