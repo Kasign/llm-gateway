@@ -1530,7 +1530,7 @@ async function loadKeys(){
   const table=$('keyTable');
   try{
     const j=await apiServiceKeys('/api/admin/keys');const rows=j.data||[];
-    table.innerHTML=!rows.length?emptyState('暂无密钥'):wrapTable('<tr><th>名称</th><th>前缀</th><th>状态</th><th>限流</th><th>允许模型</th><th>过期</th><th>操作</th></tr>'+rows.map(x=>`<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}…</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/分钟</td><td class="small">${esc((x.allowed_models||[]).join(', ')||'全部')}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status==='active'?'disable':'enable'}')">${x.status==='active'?'禁用':'启用'}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">轮换</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">删除</button></div></td></tr>`).join(''));
+    table.innerHTML=!rows.length?emptyState('暂无密钥'):wrapTable('<tr><th>名称</th><th>前缀</th><th>状态</th><th>限流</th><th>允许模型</th><th>允许工具</th><th>过期</th><th>操作</th></tr>'+rows.map(x=>`<tr><td>${esc(x.name)}</td><td><code>${esc(x.prefix)}…</code></td><td>${statusPill(x.status)}</td><td>${x.rpm}/分钟</td><td class="small">${esc((x.allowed_models||[]).join(', ')||'全部')}</td><td class="small">${esc((x.allowed_tools||[]).join(', ')||'无')}</td><td class="small">${fmtDate(x.expires_at)}</td><td><div class="td-actions"><button type="button" class="btn sm" onclick="toggleKey(${x.id},'${x.status==='active'?'disable':'enable'}')">${x.status==='active'?'禁用':'启用'}</button><button type="button" class="btn sm" onclick="rotateKey(${x.id})">轮换</button><button type="button" class="btn sm danger" onclick="deleteKey(${x.id})">删除</button></div></td></tr>`).join(''));
   }catch(e){
     if(table)table.innerHTML='<div class="msg"><span class="err">'+esc(e.message)+'</span></div>';
     throw e;
@@ -1545,7 +1545,7 @@ async function createKey(){
   if(button)button.disabled=true;
   const models=$('keyModels').value.split(',').map(x=>x.trim()).filter(Boolean);
   try{
-    const j=await apiServiceKeys('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,expires_at:$('keyExpires').value.trim()||null})});
+    const j=await apiServiceKeys('/api/admin/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('keyName').value.trim(),rpm:Number($('keyRPM').value)||60,allowed_models:models,allowed_tools:$('keyTools').value.split(',').map(x=>x.trim()).filter(Boolean),expires_at:$('keyExpires').value.trim()||null})});
     const resultBox=$('newKeyBox');
     if(!j.key)throw new Error('密钥已创建，但服务端未返回明文密钥；请检查接口响应，必要时轮换该密钥。');
     resultBox.style.display='block';

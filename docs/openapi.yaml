@@ -2524,12 +2524,16 @@ components:
       additionalProperties: false
     APIKeyList:
       type: object
-      required: [data]
+      required: [data, available_tools]
       properties:
         data:
           type: array
           items:
             $ref: "#/components/schemas/APIKeyMetadata"
+        available_tools:
+          type: array
+          description: 当前全局启用且已注册、可授予调用方 Key 的工具名。
+          items: { type: string }
     APIKeyMutation:
       type: object
       required: [name]

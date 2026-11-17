@@ -1,6 +1,8 @@
 (() => {
   const list=document.getElementById('keyServicesList'), summary=document.getElementById('keyServicesSelectionSummary');
   const hidden=document.getElementById('keyModels'), create=document.getElementById('keyCreateButton');
+  const toolList=document.getElementById('keyToolsList'),toolHidden=document.getElementById('keyTools'),toolSummary=document.getElementById('keyToolsSummary');
+  const editToolList=document.getElementById('keyEditToolsList'),editToolSummary=document.getElementById('keyEditToolsSummary');
   if(!list||!summary||!hidden||!create)return;
   const editModal=document.getElementById('keyEditModal'), editForm=document.getElementById('keyEditForm');
   const editList=document.getElementById('keyEditServicesList'), editSummary=document.getElementById('keyEditServiceSummary');
@@ -12,7 +14,7 @@
     {id:'llamacpp',name:'llama.cpp',description:'内置本地推理服务'},
     {id:'ollama',name:'Ollama',description:'内置本地推理服务'}
   ];
-  let services=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false,editTrigger=null,editTriggerKeyId='',editEpoch=0;
+  let services=[],toolCatalog=[],loading=false,catalogPromise=null,editingKey=null,editingLegacyModels=[],saving=false,editTrigger=null,editTriggerKeyId='',editEpoch=0;
   const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   function selectedIds(target){return [...target.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value)}
   async function loadServiceCatalog(){
@@ -50,6 +52,28 @@
     const headers={...(options.headers||{})};delete headers.Authorization;delete headers.authorization;headers['X-Admin-Key']=key;
     const response=await fetch(url,{...options,headers});let body=null;try{body=await response.json()}catch{/* 空响应 */}
     if(!response.ok)throw new Error(body?.error?.message||body?.message||('HTTP '+response.status));return body;
+  }
+  async function loadToolCatalog(){
+    const response=await serviceKeyRequest('/api/admin/keys',{cache:'no-store'});
+    toolCatalog=[...new Set((response?.available_tools||[]).map(v=>String(v).trim()).filter(Boolean))].sort();
+    return toolCatalog;
+  }
+  function renderToolOptions(target,selected){
+    if(!target)return;
+    const chosen=new Set(selected||[]);
+    if(!toolCatalog.length){target.innerHTML='<div class="muted small">当前没有全局启用且已注册的工具。</div>';return}
+    target.innerHTML=toolCatalog.map(name=>'<label class="key-service-option"><input type="checkbox" value="'+escapeHTML(name)+'"'+(chosen.has(name)?' checked':'')+'><span class="key-service-option-copy"><strong>'+escapeHTML(name)+'</strong></span></label>').join('');
+  }
+  function syncCreateTools(){
+    if(!toolList||!toolHidden||!toolSummary)return;
+    const selected=selectedIds(toolList);toolHidden.value=selected.join(',');
+    toolSummary.textContent=selected.length?'已授予工具：'+selected.join('、'):'当前未授予任何工具权限。';
+  }
+  async function loadCreateTools(){
+    if(!toolList)return;
+    toolList.innerHTML='<div class="muted small">正在读取已注册工具…</div>';
+    try{await loadToolCatalog();renderToolOptions(toolList,selectedIds(toolList));syncCreateTools()}
+    catch(e){toolList.innerHTML='<div class="err small">'+escapeHTML(e?.message||'读取工具列表失败')+'</div>';toolSummary.textContent='工具列表不可用；当前不会授予任何工具权限。'}
   }
   function syncEditSelection(){
     if(!editList||!editSummary)return;const selected=selectedIds(editList);
@@ -118,6 +142,10 @@
       const key=(keyResponse?.data||[]).find(item=>Number(item.id)===Number(id));
       if(!key)throw new Error('未找到这把密钥，刷新列表后重试');
       editingKey=key;
+      toolCatalog=[...new Set((keyResponse?.available_tools||[]).map(v=>String(v).trim()).filter(Boolean))].sort();
+      const currentTools=[...new Set((key.allowed_tools||[]).map(v=>String(v).trim()).filter(Boolean))];
+      renderToolOptions(editToolList,currentTools);
+      if(editToolSummary)editToolSummary.textContent=currentTools.length?'已授予工具：'+currentTools.join('、'):'当前未授予任何工具权限。';
       const current=[...new Set((key.allowed_models||[]).map(v=>String(v).trim()).filter(Boolean))];
       const known=new Set(services.map(s=>s.id)),selected=current.filter(v=>known.has(v));
       editingLegacyModels=current.filter(v=>!known.has(v));
@@ -156,7 +184,7 @@
     const allowedModels=selectedIds(editList);
     if(editingLegacyModels.length&&preserveLegacy.checked)allowedModels.push(...editingLegacyModels);
     const expires=document.getElementById('keyEditExpires').value.trim();
-    const payload={name,rpm,allowed_models:[...new Set(allowedModels)],expires_at:expires||null};
+    const payload={name,rpm,allowed_models:[...new Set(allowedModels)],allowed_tools:selectedIds(editToolList),expires_at:expires||null};
     saving=true;editSave.disabled=true;document.getElementById('keyEditCancel').disabled=true;editError.textContent='正在保存修改…';
     try{
       await serviceKeyRequest('/api/admin/keys/'+encodeURIComponent(String(editingKey.id)),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -166,6 +194,13 @@
     }catch(e){editError.textContent=e?.message||'保存修改失败'}
     finally{saving=false;editSave.disabled=false;document.getElementById('keyEditCancel').disabled=false}
   }
+  toolList?.addEventListener('change',syncCreateTools);
+  document.getElementById('btnRefreshKeyTools')?.addEventListener('click',()=>void loadCreateTools());
+  document.getElementById('btnRefreshEditTools')?.addEventListener('click',async()=>{
+    try{await loadToolCatalog();renderToolOptions(editToolList,selectedIds(editToolList));if(editToolSummary)editToolSummary.textContent=selectedIds(editToolList).length?'已授予工具：'+selectedIds(editToolList).join('、'):'当前未授予任何工具权限。';}
+    catch(e){if(editError)editError.textContent=e?.message||'刷新工具列表失败';}
+  });
+  editToolList?.addEventListener('change',()=>{const ids=selectedIds(editToolList);if(editToolSummary)editToolSummary.textContent=ids.length?'已授予工具：'+ids.join('、'):'当前未授予任何工具权限。'});
   document.getElementById('btnSelectAllKeyServices')?.addEventListener('click',()=>{list.querySelectorAll('input[type="checkbox"]').forEach(x=>x.checked=true);syncCreateSelection()});
   document.getElementById('btnClearKeyServices')?.addEventListener('click',()=>{list.querySelectorAll('input[type="checkbox"]').forEach(x=>x.checked=false);syncCreateSelection()});
   document.getElementById('btnRefreshKeyServices')?.addEventListener('click',()=>void loadCreateServices());
@@ -218,5 +253,5 @@
     });
   }
   if(keyTable){new MutationObserver(enhanceKeyTable).observe(keyTable,{childList:true,subtree:true});enhanceKeyTable()}
-  syncCreateSelection();void loadCreateServices();
+  syncCreateSelection();syncCreateTools();void loadCreateServices();void loadCreateTools();
 })();

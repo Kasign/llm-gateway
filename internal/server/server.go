@@ -627,6 +627,15 @@ func (s *Server) authenticateOutcome(ctx context.Context, r *http.Request) (*aut
 	return k, ""
 }
 
+// availableKeyTools 返回当前全局启用且已注册、可授予调用方 Key 的工具名。
+func (s *Server) availableKeyTools() []string {
+	out := make([]string, 0)
+	if s == nil || s.cfg == nil || !s.cfg.Tools.Enabled || s.toolRegistry == nil || s.toolInitErr != nil { return out }
+	for _, name := range s.cfg.Tools.AllowedTools { if _, _, err := s.toolRegistry.Lookup(name); err == nil { out = append(out, name) } }
+	sort.Strings(out)
+	return out
+}
+
 // validateKeyTools 只允许管理员授予当前全局启用且已注册的工具。
 func (s *Server) validateKeyTools(names []string) error {
 	seen := make(map[string]struct{}, len(names))
@@ -662,8 +671,8 @@ func (s *Server) keysAPI(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 500, "database_error", e.Error())
 			return
 		}
-		// 返回 Key 列表（注意：返回的是 Key 的元信息，不包含明文 Key）
-		json.NewEncoder(w).Encode(map[string]interface{}{"data": ks})
+		// 返回 Key 元信息及当前可授予的工具目录；不包含任何凭据。
+		json.NewEncoder(w).Encode(map[string]interface{}{"data": ks, "available_tools": s.availableKeyTools()})
 	case http.MethodPost:
 		// POST：创建新 Key，先解析请求体里的参数
 		var in struct {
