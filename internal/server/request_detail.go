@@ -11,7 +11,7 @@ import (
 	"github.com/whl/llm-gateway/internal/store"
 )
 
-func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePayloadEnabled bool, streamEvents []store.StreamEvent, analysisRaw string) map[string]interface{} {
+func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePayloadEnabled bool, streamEvents []store.StreamEvent, analysisRaw string, toolEventGroups ...[]store.ToolCallEvent) map[string]interface{} {
 	summary := buildRequestSummary(l)
 	effective := effectiveStream(l, len(streamEvents))
 	summary["stream_effective"] = effective
@@ -19,11 +19,19 @@ func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePay
 		summary["stream_note"] = "库中 stream=0（历史 bug 或未写入），根据 TTFT/流式事件推断为流式"
 	}
 	timing := buildRequestTiming(l)
+	toolCalls := make([]store.ToolCallEvent, 0)
+	if len(toolEventGroups) > 0 && len(toolEventGroups[0]) > 0 {
+		toolCalls = append(toolCalls, toolEventGroups[0]...)
+	}
 	out := map[string]interface{}{
-		"log":       l,
-		"summary":   summary,
-		"timing":    timing,
-		"diagnosis": buildRequestDiagnosis(l),
+		"log":        l,
+		"summary":    summary,
+		"timing":     timing,
+		"diagnosis":  buildRequestDiagnosis(l),
+		"tool_calls": toolCalls,
+	}
+	if len(toolCalls) > 0 {
+		out["tool_call_count"] = len(toolCalls)
 	}
 	if a, err := decodeRequestAnalysis(analysisRaw); err == nil && a != nil {
 		out["analysis"] = a

@@ -2791,6 +2791,21 @@ components:
         source: { type: string }
         note: { type: string }
       additionalProperties: false
+    ToolCallEvent:
+      type: object
+      required: [seq, round, tool_name, status, duration_ms, result_bytes, created_at]
+      properties:
+        seq: { type: integer, minimum: 1, maximum: 9 }
+        round: { type: integer, minimum: 1, maximum: 3 }
+        tool_name: { type: string, maxLength: 64 }
+        status: { type: string, enum: [succeeded, failed, rejected, cancelled, timed_out] }
+        duration_ms: { type: integer, format: int64, minimum: 0 }
+        result_bytes: { type: integer, format: int64, minimum: 0 }
+        error_code:
+          type: string
+          enum: [unknown_tool, invalid_tool_call, invalid_arguments, tool_unauthorized, tool_authorization_unavailable, tool_concurrency_limit, tool_timeout, tool_cancelled, tool_result_invalid, tool_result_too_large, tool_executor_panicked, tool_execution_failed, tool_result_budget_exceeded]
+        created_at: { type: string, format: date-time }
+      additionalProperties: false
     StreamEvent:
       type: object
       required: [seq, at_ms, kind]
@@ -2805,7 +2820,7 @@ components:
       additionalProperties: false
     RequestDetail:
       type: object
-      required: [log, summary, timing, diagnosis]
+      required: [log, summary, timing, diagnosis, tool_calls]
       description: 详情中的正文、Headers、分析说明等字段按存储策略和请求状态可选出现。
       properties:
         log:
@@ -2824,6 +2839,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StreamEvent"
+        tool_calls:
+          type: array
+          maxItems: 9
+          items:
+            $ref: "#/components/schemas/ToolCallEvent"
+        tool_call_count: { type: integer, minimum: 0, maximum: 9 }
         stream_event_count: { type: integer, minimum: 0 }
         payload:
           type: object

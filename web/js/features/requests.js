@@ -305,6 +305,31 @@ function detailRequestId(j) {
   return String(s.request_id || log.request_id || '');
 }
 
+function renderToolCallsSection(j) {
+  const events = Array.isArray(j.tool_calls) ? j.tool_calls : [];
+  if (!events.length) return '';
+  const statusLabels = {
+    succeeded: '成功',
+    failed: '失败',
+    rejected: '拒绝',
+    cancelled: '已取消',
+    timed_out: '超时',
+  };
+  const inner = '<div class="req-stream-list">' + events.map((event) => {
+    const status = statusLabels[event.status] || event.status || '未知';
+    const label = `#${event.seq} · 第${event.round}轮 · ${esc(event.tool_name || '未知工具')} · ${esc(status)} · ${Number(event.duration_ms || 0)} ms`;
+    const rows = [
+      ['状态', status],
+      ['耗时', Number(event.duration_ms || 0) + ' ms'],
+      ['结果大小', Number(event.result_bytes || 0).toLocaleString() + ' bytes'],
+      ['错误分类', event.error_code || '—'],
+      ['记录时间', event.created_at ? fmtDate(event.created_at) : '—'],
+    ];
+    return `<details class="req-fold req-nested-fold"><summary>${label}</summary><div class="req-fold-inner">${reqKv(rows)}</div></details>`;
+  }).join('') + '</div>';
+  return reqPanelFold(`工具调用明细 (${events.length})`, inner);
+}
+
 function detailSections(j) {
   const s = j.summary || {};
   const t = j.timing || {};
@@ -429,6 +454,8 @@ function detailSections(j) {
   }
   const stream = renderStreamEventsSection(j);
   if (stream) add('stream', 'stream', stream);
+  const toolCalls = renderToolCallsSection(j);
+  if (toolCalls) add('tool-calls', 'fold', toolCalls);
   const reqBody = j.request_body || j.request_preview || '';
   if (reqBody) {
     let inner = '';

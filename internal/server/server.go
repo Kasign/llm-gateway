@@ -1351,10 +1351,12 @@ func (s *Server) requestDetailAPI(w http.ResponseWriter, r *http.Request) {
 	// 获取请求体/响应体原文和流式事件
 	var payload map[string]string
 	var events []store.StreamEvent
+	var toolCalls []store.ToolCallEvent
 	if isLive {
 		// 正在进行的请求：从看板快照里取
 		payload = livePayloadFromSnapshot(*snap)
 		events = snap.Events
+		toolCalls = make([]store.ToolCallEvent, 0)
 		// 实时事件最多返回 500 条（太多会撑爆响应）
 		const maxLiveEventsAPI = 500
 		if len(events) > maxLiveEventsAPI {
@@ -1366,13 +1368,19 @@ func (s *Server) requestDetailAPI(w http.ResponseWriter, r *http.Request) {
 			payload = p
 		}
 		events, _ = s.logs.ListStreamEvents(r.Context(), id, 2000) // 最多 2000 条流式事件
+		toolCalls, e = s.logs.ListToolCallEvents(r.Context(), id, 9)
+		if e != nil {
+			applog.Printf("request detail tool call events failed: %v id=%s", e, id)
+			jsonError(w, 500, "database_error", e.Error())
+			return
+		}
 	}
 	// 获取性能分析数据（各阶段耗时、token 速度等）
 	analysisRaw, _ := s.logs.GetRequestAnalysis(r.Context(), id)
 	// 旧记录只存了 User-Agent、client_name 为空。这里补上显示名，列表和详情才能看到客户端。
 	l.ClientName = displayClientName(l.ClientName, l.UserAgent)
 	// 组装完整的详情响应
-	out := buildRequestDetail(l, payload, s.cfg.Logging.StorePayload, events, analysisRaw)
+	out := buildRequestDetail(l, payload, s.cfg.Logging.StorePayload, events, analysisRaw, toolCalls)
 	// 如果是实时请求，加一个标记让前端知道"这条还在跑"
 	if isLive {
 		out["live"] = true
