@@ -300,7 +300,8 @@ func TestRunRejectsMoreThanThreeCallsInOneRound(t *testing.T) {
 
 func TestRunExecutesMultipleToolCallsSequentially(t *testing.T) {
 	call := func(id, query string) string {
-		return fmt.Sprintf(`{"id":%q,"type":"function","function":{"name":"web.search","arguments":"{\"query\":%q}"}}`, id, query)
+		arguments := fmt.Sprintf(`{"query":%q}`, query)
+		return fmt.Sprintf(`{"id":%q,"type":"function","function":{"name":"web.search","arguments":%q}}`, id, arguments)
 	}
 	body := `{"choices":[{"message":{"role":"assistant","tool_calls":[` +
 		call("first", "alpha") + `,` + call("second", "beta") +
