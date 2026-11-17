@@ -99,7 +99,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		return Result{}, ErrNoAllowedTools
 	}
 
-	request, messages, definitions, allowed, err := c.prepareRequest(requestBody, allowedToolNames)
+	request, messages, allowed, err := c.prepareRequest(requestBody, allowedToolNames)
 	if err != nil {
 		return Result{}, err
 	}
@@ -158,6 +158,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 
 		// 整轮先完成协议、工具存在性和参数校验，避免明显无效的后续调用导致前序工具先执行。
 		prepared := make([]preparedCall, 0, len(round.calls))
+		roundCallIDs := make(map[string]struct{}, len(round.calls))
 		for _, call := range round.calls {
 			if call.ID == "" || len(call.ID) > MaxToolCallIDBytes || !utf8.ValidString(call.ID) {
 				return Result{}, ErrInvalidModelResponse
@@ -165,6 +166,10 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			if _, exists := seenCallIDs[call.ID]; exists {
 				return Result{}, ErrInvalidModelResponse
 			}
+			if _, exists := roundCallIDs[call.ID]; exists {
+				return Result{}, ErrInvalidModelResponse
+			}
+			roundCallIDs[call.ID] = struct{}{}
 			if call.Type != "function" || call.Function.Name == "" {
 				return Result{}, ErrInvalidModelResponse
 			}
@@ -243,12 +248,12 @@ type modelToolCall struct {
 	} `json:"function"`
 }
 
-func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[string]json.RawMessage, []json.RawMessage, []tools.Definition, map[string]struct{}, error) {
+func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[string]json.RawMessage, []json.RawMessage, map[string]struct{}, error) {
 	if len(body) == 0 || !utf8.Valid(body) {
-		return nil, nil, nil, nil, ErrInvalidRequest
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	if err := validateStrictJSON(body, MaxStrictJSONDepth); err != nil {
-		return nil, nil, nil, nil, ErrInvalidRequest
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(body, &request); err != nil || request == nil {
@@ -260,7 +265,7 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 			return nil, nil, nil, nil, ErrInvalidRequest
 		}
 		if stream {
-			return nil, nil, nil, nil, ErrUnsupportedRequest
+			return nil, nil, nil, ErrUnsupportedRequest
 		}
 	}
 	if raw := request["n"]; len(raw) > 0 {
@@ -284,23 +289,21 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	}
 
 	allowed := make(map[string]struct{}, len(allowedNames))
-	definitions := make([]tools.Definition, 0, len(allowedNames))
 	for _, name := range allowedNames {
 		if name == "" {
-			return nil, nil, nil, nil, ErrUnknownTool
+			return nil, nil, nil, ErrUnknownTool
 		}
 		if _, duplicate := allowed[name]; duplicate {
 			return nil, nil, nil, nil, ErrInvalidRequest
 		}
 		definition, _, err := c.registry.Lookup(name)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("%w: %s", ErrUnknownTool, name)
+			return nil, nil, nil, fmt.Errorf("%w: %s", ErrUnknownTool, name)
 		}
 		allowed[name] = struct{}{}
-		definitions = append(definitions, definition)
 	}
 	if err := validateToolChoice(request["tool_choice"], allowed); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	toolDefinitions := make([]map[string]any, 0, len(definitions))
@@ -320,7 +323,7 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	}
 	request["tools"] = encodedTools
 	request["messages"] = rawMessages
-	return request, messages, definitions, allowed, nil
+	return request, messages, allowed, nil
 }
 
 func validateToolChoice(raw json.RawMessage, allowed map[string]struct{}) error {
