@@ -149,13 +149,16 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 	}
 	recorder := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
+	sink := &responseSink{w: recorder}
 	state := core.State{
-		ID: "request-1",
-		Path: "/v1/chat/completions",
-		Method: http.MethodPost,
-		Body: []byte(`{"model":"client-model","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"client.injected","parameters":{"type":"object"}}}]}`),
+		Request: core.Request{
+			ID: "request-1",
+			Path: "/v1/chat/completions",
+			Method: http.MethodPost,
+			Body: []byte(`{"model":"client-model","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"client.injected","parameters":{"type":"object"}}}]}`),
+			Sink: sink,
+		},
 		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"},
-		Sink: recorder,
 	}
 	forwarder := inferenceForwarder{s: s}
 	result, runErr, handled := forwarder.forwardWithTools(context.Background(), state, providerInstance, req, "/v1/chat/completions", recorder)
@@ -181,8 +184,10 @@ func TestForwardWithToolsRejectsClientToolsWhenModelNotAllowlisted(t *testing.T)
 	recorder := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
 	state := core.State{
-		Path: "/v1/chat/completions",
-		Body: []byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`),
+		Request: core.Request{
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`),
+		},
 		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "not-allowed"},
 	}
 	_, err, handled := (inferenceForwarder{s: s}).forwardWithTools(context.Background(), state, &toolLoopTestProvider{}, req, "/v1/chat/completions", recorder)
