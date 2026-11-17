@@ -1,6 +1,8 @@
 # 技术架构
 
-Gateway 只做本地 Coding Agent 的入口。Cursor / Codex / Claude Code 访问 Gateway；Gateway 再调用已经在跑的 llama.cpp 或 Ollama。公网只开放 OpenResty。llama.cpp、Redis、MariaDB 使用现有容器，不由本仓库的 Compose 重建。
+LLM Gateway 是个人使用的模型接入、管理与能力扩展平台：统一接入本地模型和远程模型，并逐步提供受控工具调用、推理性能分析和模型来源管理。它不是通用 Chat UI，也不以让慢速本地模型承载 Codex / Claude Code 等长连接 Coding Agent 为主要目标。
+
+产品能力扩展的统一规划见 [产品能力扩展规划](product-capabilities-roadmap.md)。
 
 进程入口是 `cmd/gateway/main.go`：读配置、迁移 MariaDB、构造 `server.Server`、监听 HTTP。Redis 或上游暂时不可用时进程仍启动。
 
@@ -8,7 +10,7 @@ Gateway 只做本地 Coding Agent 的入口。Cursor / Codex / Claude Code 访�
 
 | 组件 | 职责 |
 |---|---|
-| Gateway | 鉴权、限流、选模型、改写出站 body、转发、调用记录、管理台 |
+| Gateway | 鉴权、限流、按既定产品语义解析活动模型、改写出站 body、转发、调用记录、管理台 |
 | llama.cpp / Ollama | 真正推理。工具类型是否支持由上游决定 |
 | MariaDB | 模型、API Key、请求日志、可选的请求/响应原文 |
 | Redis | API Key 的 RPM 限流、下载进度等瞬态状态 |
@@ -33,7 +35,7 @@ Gateway 只做本地 Coding Agent 的入口。Cursor / Codex / Claude Code 访�
 | 管理端 `POST /api/requests/{id}/cancel` | `cancelled`，`error_message` 为「管理端结束这次调用」。已经结束的请求返回 409 |
 | 达到 `request_timeout_seconds` | `error` / `gateway_timeout`，`error_message` 为「网关请求超时」 |
 
-先发生的原因保留，后面的取消不再覆盖。进程日志里的 `inference finished` 带同一条 `error`。流式保活用来避免长时间 prefill 被客户端空闲超时关掉；`warm_start` 关闭时，这种空闲断开同样会结束本次推理。
+先发生的原因保留，后面的取消不再覆盖。进程日志里的 `inference finished` 带同一条 `error`。流式保活用来避免长时间 prefill 被客户端空闲超时关掉；保活注释不属于模型回答，也不计入 TTFT。
 
 模型下载、Ollama pull、Benchmark 使用各自的后台 context。关掉管理页不会停止它们，由对应的取消入口或下载超时结束。
 
@@ -50,7 +52,7 @@ Parse → Resolve → Stamp → Mutate → Guard → WarmStart → Forward → F
 | 阶段 | 固定行为 |
 |---|---|
 | Parse | 复制 body，记下客户端 `model`、是否流式、原始路径 |
-| Resolve | 忽略客户端 JSON 里的 `model`。有 `ServiceModel`（仅 Benchmark 等进程内调用）才用它，否则用管理台当前推理模型 |
+| Resolve | 普通 HTTP 推理忽略客户端 JSON 里的 `model`，使用管理台当前活动模型；`ServiceModel` 仅供 Benchmark 等进程内调用 |
 | Stamp | 把选定的上游模型 ID 写回 body 的 `model`。之后改写和上游看到的是同一个模型 |
 | Mutate | 按注册顺序改路径和 body |
 | Guard | 出网前检查。先全局 Guard，再本次请求附加的 Guard |
@@ -60,35 +62,29 @@ Parse → Resolve → Stamp → Mutate → Guard → WarmStart → Forward → F
 
 ## 回调槽位
 
-`Pipeline` 的槽位保持注册。`Run` 按固定顺序调用它们。业务放在回调里，不写进 `Pipeline.Run`。
+`Pipeline` 的槽位保持注册。业务放在回调里，不写进 `Pipeline.Run`。
 
 当前注册（`newInferencePipeline`）：
 
 | 槽位 | 回调 | 现在做什么 |
 |---|---|---|
-| Resolve | `resolveInference` | 选定上游模型 |
-| Mutate | `mutateSanitize` | 按路径整理 body。system / developer 合并到首位；流式时注入 `stream_options.include_usage`。`tools` 不改 |
-| Mutate | `mutateInferenceParams` | 按管理台策略合并推理参数。作用于 chat、messages、responses |
-| Mutate | `mutateResponsesBridge` | 留在列表末尾。不改路径，不改 body |
-| Guard | `guardModelReady` | `auto_load_on_proxy` 打开时等待模型就绪。chat 加载失败返回 503。`/v1/responses` 最多等 20 秒，失败仍转发 |
-| Guard | `allowModelsGuard` | 仅 `/v1` 门外按 API Key 附加。比对的是服务选定的模型 |
-| WarmStart | `warmStart` | 流式保活注释。写出失败则取消这次推理 |
-| Forward | `inferenceForwarder` | POST 到上游。上游字节原样写回客户端。写回失败则取消这次推理 |
-| Observe | `inferenceObserver` | 调用记录、实时看板、流式事件、可选原文。只读事件，不改变响应 |
+| Resolve | `resolveInference` | 选定活动上游模型 |
+| Mutate | `mutateSanitize` | 按路径整理 body；`tools` 不改 |
+| Mutate | `mutateInferenceParams` | 按管理台策略合并推理参数 |
+| Mutate | `mutateResponsesBridge` | 保持路径与 body 的既有协议语义 |
+| Guard | `guardModelReady` | 检查模型就绪状态 |
+| Guard | `allowModelsGuard` | 检查调用方允许使用的模型 |
+| WarmStart | `warmStart` | 流式保活注释 |
+| Forward | `inferenceForwarder` | 唯一出网，上游响应原样写回 |
+| Observe | `inferenceObserver` | 调用记录、实时看板、流式事件、可选原文；只读事件，不改变响应 |
 
-Mutate 的注册顺序：先按客户端原始路径做 sanitize 和推理参数，最后 `mutateResponsesBridge` 保持路径与 body。`request_body` 在 Prepared 之后保存，内容是全部 Mutate 完成、真正发给上游的 JSON。调用记录上的 endpoint 仍是客户端路径。
+## 新能力接入边界
 
-## Responses 透传
+工具执行、本地模型性能分析和免费模型聚合的目标架构、任务拆解与验收条件见 [产品能力扩展规划](product-capabilities-roadmap.md)。这些是规划能力，并不代表当前代码已经实现。
 
-上游是 1Panel 中的 `ghcr.io/ggml-org/llama.cpp:server`，当前运行版本为 **b11580**。llama.cpp 自己提供 `POST /v1/responses`，内部再译成 chat completions：保留 `type: "function"` 的 tool，跳过它不执行的类型（如 `web_search`、`namespace`）。Codex 的 MCP 工具包在 `namespace` 里，跳过是 llama.cpp 的行为。
-
-Gateway 对 `/v1/responses` 的处理：
-
-- `/v1/responses` 的路径保持不变，原样 POST 给上游。
-- `tools` 原样保留。function、`namespace`、MCP、`web_search` 以及其他 Gateway 不认识的类型都不删、不改、不补。
-- 上游 SSE 直接写回客户端，其中的 `function_call` 也原样回去。
-- 调用记录写「`/v1/responses` 原样转发，tools 不改写」。`request_body` 是转发给上游的 JSON。
-
-`mutateSanitize` 负责 system / developer 合并，以及流式 `stream_options.include_usage`。Stamp 写入上游模型 ID。`mutateInferenceParams` 合并管理台推理参数。`guardModelReady` 对 `/v1/responses` 最多等 20 秒，超时仍转发；这只影响等待，不改 body，也不判断 tool 类型。
-
-Codex 的 function tool 和对应的 `function_call` 会到达 llama.cpp。`namespace` / MCP 是否可见由上游决定。
+特别注意：
+- 工具循环不能简单递归调用完整的 `Pipeline.Run`，否则可能为一次客户端请求生成多条最终审计记录。必须先设计请求级 Coordinator 和单一请求生命周期。
+- 工具 Runtime 不应放进 `internal/core.Pipeline.Run`；由组合根注入并在明确策略下调用。
+- 性能分析优先扩展现有 `request_analysis.go`、流事件和 llama.cpp timings，不重复建设指标系统。
+- 免费模型聚合复用现有 Provider Registry 和加密凭据管理，不在推理热路径抓取厂商免费政策。
+- 新功能默认关闭或只读，不改变当前活动模型选择语义。
