@@ -49,6 +49,25 @@ llama:
   warm_start_interval_seconds: 15
   max_output_tokens: 8192
 
+
+# 工具调用默认关闭。开启前必须显式配置允许的 Provider + Gateway ModelKey 和工具名称。
+# ModelKey 是稳定 Gateway 身份，不要填可变的上游模型 ID。
+tools:
+  enabled: false
+  allowed_models: []
+  allowed_tools: []
+  searxng:
+    # 仅当 allowed_tools 包含 web.search 时必填。
+    base_url: ""
+    allow_insecure_http: false
+    allow_private_network: false
+    request_timeout_seconds: 8
+    max_results: 5
+    max_response_bytes: 524288
+    safe_search: 1
+    default_language: ""
+    categories: [general]
+
 storage:
   models_dir: /data/models
 

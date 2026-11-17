@@ -75,6 +75,7 @@ type Config struct {
 		ModelsDir string `yaml:"models_dir"`
 	} `yaml:"storage"`
 	Agents []AgentRouteConfig `yaml:"agents"`
+	Tools   ToolsConfig       `yaml:"tools"`
 	Download struct {
 		HFBaseURL        string `yaml:"hf_base_url"`
 		OllamaLibraryURL string `yaml:"ollama_library_url"`
@@ -314,6 +315,7 @@ func validateResolvedConfigEnv(c *Config) error {
 		{"llama.backend", c.Llama.Backend},
 		{"llama.llamacpp_base_url", c.Llama.LlamaCppBaseURL},
 		{"llama.ollama_base_url", c.Llama.OllamaBaseURL},
+		{"tools.searxng.base_url", c.Tools.SearXNG.BaseURL},
 		{"llama.upstream_api_key", c.Llama.UpstreamAPIKey},
 		{"llama.warm_start_comment", c.Llama.WarmStartComment},
 		{"storage.models_dir", c.Storage.ModelsDir},
@@ -424,6 +426,7 @@ func Load(path string) (*Config, error) {
 	// 非活动的本地后端可以不配置。活动后端缺少地址会在下面的 BaseURL 检查中失败。
 	clearUnresolvedPlaceholder(&c.Llama.LlamaCppBaseURL)
 	clearUnresolvedPlaceholder(&c.Llama.OllamaBaseURL)
+	clearUnresolvedPlaceholder(&c.Tools.SearXNG.BaseURL)
 
 	if c.Server.Host == "" {
 		c.Server.Host = "127.0.0.1"
@@ -545,6 +548,9 @@ func Load(path string) (*Config, error) {
 		return nil, errors.New("auth.admin_api_key must be changed from the example value")
 	}
 	if err := c.validateAgentRouteConfigs(); err != nil {
+		return nil, err
+	}
+	if err := c.Tools.Normalize(); err != nil {
 		return nil, err
 	}
 	if err := adminuser.NormalizeWebLogin(&c.Auth.AdminUsername, &c.Auth.AdminPassword, &c.Auth.AdminPasswordHash); err != nil {
