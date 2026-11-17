@@ -142,3 +142,20 @@ func TestAuthenticateBenchmarkKeyRejectsMissingClientKey(t *testing.T) {
 		t.Fatalf("authenticateBenchmarkKey() code = %q, want invalid_api_key", code)
 	}
 }
+
+
+// TestBenchmarkCancelIsRegisteredBeforeWorkerStarts 验证任务在 Worker 调度前即可被取消。
+func TestBenchmarkCancelIsRegisteredBeforeWorkerStarts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	job := &benchmarkJob{}
+	job.setCancel(cancel)
+	if !job.requestStop() {
+		t.Fatal("requestStop() = false, want true before worker starts")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("worker context was not cancelled")
+	}
+}
