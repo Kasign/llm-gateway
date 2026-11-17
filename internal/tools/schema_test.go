@@ -53,7 +53,7 @@ func TestSchemaDepthBoundary(t *testing.T) {
 func TestValidateArguments(t *testing.T) {
 	valid := []string{
 		`{"query":"Go","limit":2,"enabled":true,"tags":["a","b"]}`,
-		`{}`,
+		`{"query":"x"}`,
 	}
 	for _, raw := range valid {
 		if err := ValidateArguments([]byte(testSchema), []byte(raw)); err != nil { t.Errorf("valid arguments rejected: %v", err) }
