@@ -96,6 +96,17 @@ func (j *benchmarkJob) clearCancel() {
 	j.mu.Unlock()
 }
 
+// markCancelling 更新运行期快照；持久化状态先由仓储事务成功转换。
+func (j *benchmarkJob) markCancelling() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.Status != "running" {
+		return false
+	}
+	j.Status = "cancelling"
+	return true
+}
+
 func (j *benchmarkJob) requestStop() bool {
 	j.mu.RLock()
 	c := j.cancel
@@ -533,12 +544,30 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 		json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": snap.Status, "stopped": false})
 		return
 	}
+	if s.benchmarkRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "benchmark task storage is unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	changed, err := s.benchmarkRepo.MarkTaskCancelling(ctx, id)
+	if err != nil {
+		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to persist cancellation request")
+		return
+	}
+	if !changed {
+		snap = job.snapshot()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": snap.Status, "stopped": false})
+		return
+	}
+	job.markCancelling()
 	stopped := job.requestStop()
 	if s.runs != nil && s.runs.Cancel(id) {
 		stopped = true
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": "running", "stopped": stopped, "message": "stop signalled"})
+	json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": "cancelling", "stopped": stopped, "message": "stop signalled"})
 }
 
 func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string) {
