@@ -456,7 +456,7 @@
           <div class="field">
             <label for="modelTestApiKey">客户端服务密钥（必填）</label>
             <input id="modelTestApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务密钥（sk-…）">
-            <p class="small muted">密钥仅保留在当前页面内存，不写入 localStorage / sessionStorage，也不会发送到管理 API。性能测试要求模型访问权限；工具测试还要求 web.search 权限。</p>
+            <p class="small muted">密钥仅保留在当前页面内存；仅在发起测试时作为请求凭据发送给 Gateway，不写入 localStorage / sessionStorage，也不会发送给模型上游。性能测试要求模型访问权限；工具测试还要求 web.search 权限。</p>
           </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="modelTestModePerformance" aria-pressed="true">性能测试</button>
