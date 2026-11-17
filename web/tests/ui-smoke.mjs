@@ -205,16 +205,22 @@ try {
     Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) &&
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
-  await clickTab(page, 'tools-test', '工具测试');
-  const toolTestKey = page.locator('#toolTestApiKey');
-  check('工具测试入口使用密码输入框接收客户端服务密钥',
-    await toolTestKey.count() === 1 && await toolTestKey.evaluate(el => el.type === 'password'));
-  await toolTestKey.fill('sk-browser-smoke-not-a-real-secret');
-  check('工具测试密钥只保留在页面内存，不写入浏览器存储',
-    await page.evaluate(() => localStorage.getItem('llm_gateway_tool_test_key')) === null &&
-    await page.evaluate(() => sessionStorage.getItem('llm_gateway_tool_test_key')) === null);
-  await page.locator('#toolTestClearKeyBtn').click();
-  check('工具测试入口可以主动清除客户端密钥', await toolTestKey.inputValue() === '');
+  await clickTab(page, 'model-test', '模型测试');
+  const modelTestKey = page.locator('#modelTestApiKey');
+  check('模型测试共用密码输入框接收客户端服务密钥',
+    await modelTestKey.count() === 1 && await modelTestKey.evaluate(el => el.type === 'password'));
+  await modelTestKey.fill('sk-browser-smoke-not-a-real-secret');
+  check('模型测试密钥只保留在页面内存，不写入浏览器存储',
+    await page.evaluate(() => localStorage.getItem('llm_gateway_model_test_key')) === null &&
+    await page.evaluate(() => sessionStorage.getItem('llm_gateway_model_test_key')) === null);
+  await page.locator('#modelTestModeTools').click();
+  check('工具测试模式切换后只显示工具测试面板',
+    await page.locator('#modelTestTools').isVisible() && !(await page.locator('#modelTestPerformance').isVisible()));
+  await page.locator('#modelTestModePerformance').click();
+  check('性能测试模式切换后只显示性能测试面板',
+    await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
+  await page.locator('#modelTestClearKeyBtn').click();
+  check('统一入口可以主动清除客户端密钥', await modelTestKey.inputValue() === '');
 
   await clickTab(page, 'keys', '服务密钥');
   const panelText = await page.locator('#keys .admin-auth-card').evaluate(el => el.textContent || '');
@@ -912,7 +918,7 @@ try {
     ['models-inference', '服务参数'],
     ['keys', '服务密钥'],
     ['requests', '调用记录'],
-    ['benchmark', '性能测试'],
+    ['model-test', '模型测试'],
     ['providers', '远程 Provider']
   ];
   for (const [tab, title] of tabs) {
@@ -942,7 +948,7 @@ try {
         heights);
     }
 
-    if (tab === 'benchmark') {
+    if (tab === 'model-test') {
       const opener = page.locator('#benchParamsOpenBtn');
       const drawer = page.locator('#benchParamsDrawer');
       const launcherSemantics = await opener.evaluate(el => ({

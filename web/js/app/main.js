@@ -39,7 +39,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
-  if(b.dataset.tab==='benchmark')loadBenchPanel().catch(()=>{});
+  if(b.dataset.tab==='model-test')loadBenchPanel().catch(()=>{});
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference'&&globalThis.InferenceParams)globalThis.InferenceParams.load().catch(()=>{});
@@ -2034,6 +2034,13 @@ async function stopBenchmark(){
 }
 
 async function runBenchmark(){
+  const clientKey=($('modelTestApiKey')?.value||'').trim();
+  if(!clientKey){
+    const answer=$('benchAnswer');
+    if(answer){answer.className='bench-answer err';answer.textContent='请先在模型测试页面输入客户端服务密钥。';}
+    $('modelTestApiKey')?.focus();
+    return;
+  }
   benchPollToken++;
   const token=benchPollToken;
   setBenchRunning(true);
@@ -2050,7 +2057,7 @@ async function runBenchmark(){
       throw new Error('当前 API 推理后端无已加载模型，请先在「模型管理」加载');
     }
     updateBenchReqPreview(upstream);
-    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(benchPayloadForApi(benchTarget))});
+    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget))});
     if(token!==benchPollToken)return;
     const jobId=start.job_id,t0=Date.now();
     writeBenchStore({jobId});
