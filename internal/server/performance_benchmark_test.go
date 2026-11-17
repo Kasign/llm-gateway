@@ -372,6 +372,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 		"model_identity": map[string]interface{}{"sha256": "abc123"},
 		"environment": map[string]interface{}{"vcs_revision": "deadbeef"},
 		"backend_version": "1.2.3",
+		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
 		"max_tokens": 256,
 	}
@@ -396,7 +397,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil},
 	}
 	_, status, missing, err = benchmarkConditionMetadata(partial, "prompt-hash")
-	if err != nil || status != "partial" || len(missing) != 5 {
+	if err != nil || status != "partial" || len(missing) != 6 {
 		t.Fatalf("partial condition metadata = %q/%v, err=%v", status, missing, err)
 	}
 }
