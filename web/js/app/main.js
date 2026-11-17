@@ -555,6 +555,7 @@ async function saveKey(event){
   try{
     await apiPublic('/api/admin/keys',{headers:{'X-Admin-Key':candidate},cache:'no-store'});
     localStorage.setItem('llm_gateway_admin_key',candidate);
+    window.dispatchEvent(new CustomEvent('llm-gateway-admin-key-changed',{detail:{configured:true}}));
     if(input)input.value=candidate;
     adminKeyStatus();
     if(message)message.innerHTML='<span class="ok">验证成功，已保存到当前浏览器。该 Key 只用于服务密钥管理。</span>';
@@ -567,6 +568,7 @@ async function saveKey(event){
 }
 function clearAdminKey(){
   localStorage.removeItem('llm_gateway_admin_key');
+  window.dispatchEvent(new CustomEvent('llm-gateway-admin-key-changed',{detail:{configured:false}}));
   const input=$('adminKey'), message=$('adminKeyMsg');
   if(input)input.value='';
   if(message)message.innerHTML='<span class="muted">管理员 Key 已清除；Web 登录状态不受影响。</span>';

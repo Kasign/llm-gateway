@@ -194,6 +194,15 @@
     }catch(e){editError.textContent=e?.message||'保存修改失败'}
     finally{saving=false;editSave.disabled=false;document.getElementById('keyEditCancel').disabled=false}
   }
+  window.addEventListener('llm-gateway-admin-key-changed',event=>{
+    if(event.detail?.configured){void loadCreateTools();return}
+    toolCatalog=[];
+    renderToolOptions(toolList,[]);
+    renderToolOptions(editToolList,[]);
+    if(toolHidden)toolHidden.value='';
+    if(toolSummary)toolSummary.textContent='请先验证管理员 API Key，再读取可授予工具。';
+    if(editToolSummary)editToolSummary.textContent='请先验证管理员 API Key，再读取可授予工具。';
+  });
   toolList?.addEventListener('change',syncCreateTools);
   document.getElementById('btnRefreshKeyTools')?.addEventListener('click',()=>void loadCreateTools());
   document.getElementById('btnRefreshEditTools')?.addEventListener('click',async()=>{
