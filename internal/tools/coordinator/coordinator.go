@@ -257,12 +257,12 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	}
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(body, &request); err != nil || request == nil {
-		return nil, nil, nil, nil, ErrInvalidRequest
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	if raw := request["stream"]; len(raw) > 0 {
 		var stream bool
 		if json.Unmarshal(raw, &stream) != nil {
-			return nil, nil, nil, nil, ErrInvalidRequest
+			return nil, nil, nil, ErrInvalidRequest
 		}
 		if stream {
 			return nil, nil, nil, ErrUnsupportedRequest
@@ -271,36 +271,38 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	if raw := request["n"]; len(raw) > 0 {
 		var n int
 		if json.Unmarshal(raw, &n) != nil || n != 1 {
-			return nil, nil, nil, nil, ErrUnsupportedRequest
+			return nil, nil, nil, ErrUnsupportedRequest
 		}
 	}
 	rawMessages, ok := request["messages"]
 	if !ok {
-		return nil, nil, nil, nil, ErrInvalidRequest
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	var messages []json.RawMessage
 	if err := json.Unmarshal(rawMessages, &messages); err != nil || len(messages) == 0 {
-		return nil, nil, nil, nil, ErrInvalidRequest
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	for _, message := range messages {
 		if err := validateMessageObject(message); err != nil {
-			return nil, nil, nil, nil, ErrInvalidRequest
+			return nil, nil, nil, ErrInvalidRequest
 		}
 	}
 
 	allowed := make(map[string]struct{}, len(allowedNames))
+	definitions := make([]tools.Definition, 0, len(allowedNames))
 	for _, name := range allowedNames {
 		if name == "" {
 			return nil, nil, nil, ErrUnknownTool
 		}
 		if _, duplicate := allowed[name]; duplicate {
-			return nil, nil, nil, nil, ErrInvalidRequest
+			return nil, nil, nil, ErrInvalidRequest
 		}
 		definition, _, err := c.registry.Lookup(name)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%w: %s", ErrUnknownTool, name)
 		}
 		allowed[name] = struct{}{}
+		definitions = append(definitions, definition)
 	}
 	if err := validateToolChoice(request["tool_choice"], allowed); err != nil {
 		return nil, nil, nil, err
@@ -319,7 +321,7 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	}
 	encodedTools, err := json.Marshal(toolDefinitions)
 	if err != nil {
-		return nil, nil, nil, nil, ErrCoordinatorUnavailable
+		return nil, nil, nil, ErrCoordinatorUnavailable
 	}
 	request["tools"] = encodedTools
 	request["messages"] = rawMessages
