@@ -167,7 +167,13 @@ func (r *BenchmarkRepo) UpdateTaskAndRun(ctx context.Context, task BenchmarkTask
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM benchmark_tasks WHERE task_id=?", task.TaskID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return sql.ErrNoRows
+		}
 	}
 	res, err = tx.ExecContext(ctx, `UPDATE benchmark_runs SET
 		status=?,provider_id=?,model_key=?,model_id=?,finished_at=?,latency_ms=?,model_load_ms=?,inference_latency_ms=?,
@@ -184,7 +190,13 @@ func (r *BenchmarkRepo) UpdateTaskAndRun(ctx context.Context, task BenchmarkTask
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM benchmark_runs WHERE run_id=? AND task_id=?", run.RunID, run.TaskID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return sql.ErrNoRows
+		}
 	}
 	return tx.Commit()
 }
@@ -194,7 +206,7 @@ func (r *BenchmarkRepo) GetTask(ctx context.Context, taskID string) (*BenchmarkT
 		return nil, err
 	}
 	var task BenchmarkTask
-	var keyID, finished, latency sql.NullInt64
+	var keyID, latency sql.NullInt64
 	var finishedAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `SELECT task_id,api_key_id,scenario,status,COALESCE(provider_id,''),COALESCE(backend,''),COALESCE(model_key,''),COALESCE(model_id,''),COALESCE(prompt_sha256,''),prompt_length,max_tokens,COALESCE(config_json,''),run_count,started_at,finished_at,latency_ms,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
 		FROM benchmark_tasks WHERE task_id=?`, taskID).Scan(
@@ -214,7 +226,6 @@ func (r *BenchmarkRepo) GetTask(ctx context.Context, taskID string) (*BenchmarkT
 	if latency.Valid {
 		task.LatencyMS = latency.Int64
 	}
-	_ = finished // retained for compatibility with nullable scans; not used.
 	return &task, nil
 }
 

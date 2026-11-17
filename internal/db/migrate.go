@@ -161,9 +161,10 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   updated_at DATETIME(6) NOT NULL,
   INDEX idx_benchmark_tasks_status_started (status, started_at),
   INDEX idx_benchmark_tasks_key_started (api_key_id, started_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS benchmark_runs (
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return fmt.Errorf("schema upgrade failed (benchmark_tasks): %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS benchmark_runs (
   run_id VARCHAR(64) NOT NULL PRIMARY KEY,
   task_id VARCHAR(64) NOT NULL,
   run_no INT UNSIGNED NOT NULL,
@@ -195,8 +196,8 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
   INDEX idx_benchmark_runs_task_status (task_id, status),
   CONSTRAINT fk_benchmark_runs_task FOREIGN KEY (task_id)
     REFERENCES benchmark_tasks(task_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`); err != nil {
-		return fmt.Errorf("schema upgrade failed (benchmark_tasks/runs): %w", err)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return fmt.Errorf("schema upgrade failed (benchmark_runs): %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS model_prices (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

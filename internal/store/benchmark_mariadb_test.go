@@ -83,10 +83,17 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	if err != nil || len(runs2) != 1 || runs2[0].Status != "interrupted" {
 		t.Fatalf("interrupted runs = %+v, err=%v", runs2, err)
 	}
-	if _, err := repo.DeleteFinishedBefore(ctx, time.Now().Add(time.Minute), 10); err != nil {
-		t.Fatalf("delete finished tasks: %v", err)
+	if _, err := db.ExecContext(ctx, "DELETE FROM benchmark_tasks WHERE task_id=?", interruptedID); err != nil {
+		t.Fatalf("delete task and cascade run: %v", err)
 	}
 	if _, err := repo.GetTask(ctx, interruptedID); err != sql.ErrNoRows {
 		t.Fatalf("deleted task lookup error = %v, want sql.ErrNoRows", err)
+	}
+	var remainingRuns int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM benchmark_runs WHERE task_id=?", interruptedID).Scan(&remainingRuns); err != nil {
+		t.Fatalf("count cascaded runs: %v", err)
+	}
+	if remainingRuns != 0 {
+		t.Fatalf("cascaded run count = %d, want 0", remainingRuns)
 	}
 }
