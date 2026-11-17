@@ -22,6 +22,7 @@ const (
 	MaxObjectProperties    = 64
 	MaxEnumItems            = 128
 	MaxArrayItems           = 128
+	MaxRegistryTools        = 64
 )
 
 var (
