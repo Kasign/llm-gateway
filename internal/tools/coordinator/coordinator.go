@@ -143,6 +143,9 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		}
 		modelResponse, err := c.model.Complete(ctx, encodedRequest)
 		result.ModelRounds++
+		if len(modelResponse.Body) > MaxModelResponseBytes {
+			return result, ErrModelResponseTooLarge
+		}
 		if err != nil {
 			// Provider 收到上游非 2xx 响应时可能同时返回响应体与错误；
 			// 保留完整上游响应供 Server 按既有错误语义处理。传输错误没有上游状态，不保留半截响应。
@@ -156,9 +159,6 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		}
 		if modelResponse.StatusCode < 100 || modelResponse.StatusCode > 599 {
 			return result, fmt.Errorf("%w: invalid model HTTP status", ErrInvalidModelResponse)
-		}
-		if len(modelResponse.Body) > MaxModelResponseBytes {
-			return result, ErrModelResponseTooLarge
 		}
 		if modelResponse.StatusCode < http.StatusOK || modelResponse.StatusCode >= http.StatusMultipleChoices {
 			result.Response = cloneModelResponse(modelResponse)
