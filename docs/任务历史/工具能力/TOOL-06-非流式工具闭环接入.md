@@ -119,20 +119,16 @@ Tool Coordinator
 - 流式工具调用（TOOL-10）。
 - 新数据库表、独立工具服务、自动重试、并行工具调度或通用 Agent 框架。
 
-## 8. 当前进度与下一步
+## 8. 验收状态
 
-**已完成实现：**
-- 默认关闭的服务端工具配置，以及稳定的 Provider + ModelKey 白名单；工具名称和 SearXNG 配置均由服务端管理。
-- 启动阶段组装统一 Tools Registry、SearXNG 工具模块和 fail-closed Runtime Authorizer。
-- 内部 Buffered ModelCaller 复用同一 Provider 实例与活动 ModelID；中间模型响应不会提交给客户端。
-- Coordinator 已接入单次 Forward；多轮 usage 完整时汇总，缺失时标记 unknown。
-- 配置每日 Token Budget 的远程 Provider 暂不进入工具模式；普通请求和多候选请求保留原路径。
-- 覆盖客户端工具定义替换、模型白名单、Provider 错误响应、超时、panic、最终响应和多轮 Provider 复用的测试。
+- Pipeline.Run 生命周期集成测试已覆盖 `StageParsed`、`StageUpstreamStart`、`StageFinish`，并确认 Provider 工厂只解析一次、两轮调用使用同一活动 ModelID。
+- 单元与集成测试、Race、静态检查、Gateway 构建、Docker 镜像、配置/API 契约/前端检查、Gateway 故障注入与恢复验证、稳定负载与审计持久化均通过。
+- 最新代码测试提交：`10cf08161a5ed19a213be3745681ccfb444092ba`；Go CI Run `44030952014`：success。
+- 文档归档提交：`936f1357102417a515a4e4bc62918fd9334d74c1`；对应 Go CI Run `44031172434`：success。
+- Browser Smoke Run `44030952034` 在 Playwright Chromium 安装阶段失败，原因是 Runner 使用 `ubuntu26.04-x64`，Playwright 1.56.1 不支持该平台；桌面/窄屏浏览器断言未执行，移交 TOOL-09。
+- Gateway 容器到真实 SearXNG 的部署网络连通性尚未验收，按计划移交 TOOL-09。
 
-**当前待验收：**
-1. 新增 Pipeline.Run / Finish 生命周期集成测试，确认工具多轮不会创建第二次 Pipeline 生命周期。
-2. 对最新提交完成全量 Go CI、Race、Vet 和构建验收。
-3. Review 后同步最终验收结果；Gateway 容器到真实 SearXNG 的网络测试归 TOOL-09。
+**验收结论：** TOOL-06 的非流式工具闭环、请求级生命周期、Provider / ModelID 复用、多轮 usage、错误处理和代码级测试均已完成；完整 Go CI 通过。Browser Smoke Runner 兼容性和真实 SearXNG 网络验收不属于本任务的代码闭环验收范围。
 
 
 ## 9. 实现记录与验收结果
@@ -157,13 +153,13 @@ Tool Coordinator
 - `543ccaa`：多轮 Token usage 汇总。
 - `e2923a7`：单次 Forward 接入 Coordinator。
 - `a30c0f1`：单次 Pipeline 生命周期集成测试。
-- 最终验收提交：`b2bb5ea`。
+- 最终代码验收提交：`10cf081`。
 
 ### 验收证据
 
 - 分支：`dev`
-- 验收提交：`b2bb5ea30ecde07c4b13dcdec2120edc25893aba`
-- Go CI Run：`44030373937`
+- 验收提交：`10cf08161a5ed19a213be3745681ccfb444092ba`
+- Go CI Run：`44030952014`
 - Go CI 结论：**success**
 - 通过项：单元与集成测试、Race、静态检查、Gateway 构建、Docker 镜像、配置/API 契约/前端检查、Gateway 故障注入与恢复验证、稳定负载与审计持久化测试。
 - Pipeline 生命周期测试确认：一次 Pipeline Run 内完成两轮模型调用，`StageUpstreamStart` 和 `StageFinish` 均只发生一次，客户端只收到最终模型响应。
