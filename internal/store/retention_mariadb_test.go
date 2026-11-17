@@ -60,7 +60,7 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	running, recent := prefix+"-running", prefix+"-recent"
 	ids := []string{expired1, expired2, running, recent}
 	defer func() {
-		for _, table := range []string{"request_stream_events", "request_payloads", "request_logs"} {
+		for _, table := range []string{"request_tool_call_events", "request_stream_events", "request_payloads", "request_logs"} {
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM "+table+" WHERE request_id LIKE ?", prefix+"%")
 		}
 	}()
@@ -77,6 +77,11 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 		if _, err := db.ExecContext(ctx, "INSERT INTO request_stream_events(request_id,seq,at_ms,kind) VALUES(?,?,?,?)", id, 1, 1, "test"); err != nil {
 			t.Fatalf("insert stream event: %v", err)
 		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO request_tool_call_events
+			(request_id,seq,round_no,tool_name,status,duration_ms,result_bytes,error_code)
+			VALUES(?,?,?,?,?,?,?,?)`, id, 1, 1, "web.search", "succeeded", 12, 24, nil); err != nil {
+			t.Fatalf("insert tool call event: %v", err)
+		}
 	}
 	insertLog(expired1, "completed", old)
 	insertLog(expired2, "error", old.Add(time.Minute))
@@ -84,6 +89,15 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	insertLog(recent, "completed", recentTime)
 
 	repo := NewRepo(db)
+	toolEvents, err := repo.ListToolCallEvents(ctx, recent, 9)
+	if err != nil {
+		t.Fatalf("list tool call events: %v", err)
+	}
+	if len(toolEvents) != 1 || toolEvents[0].ToolName != "web.search" ||
+		toolEvents[0].Status != "succeeded" || toolEvents[0].DurationMS != 12 ||
+		toolEvents[0].ResultBytes != 24 {
+		t.Fatalf("unexpected tool call events: %+v", toolEvents)
+	}
 	cutoff := time.Now().Add(-24 * time.Hour)
 	var deleted int64
 	for i := 0; i < 4; i++ {
@@ -115,7 +129,7 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 		if count != tc.want {
 			t.Fatalf("request %q remains %d times, want %d", tc.id, count, tc.want)
 		}
-		for _, table := range []string{"request_payloads", "request_stream_events"} {
+		for _, table := range []string{"request_payloads", "request_stream_events", "request_tool_call_events"} {
 			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE request_id=?", tc.id).Scan(&count); err != nil {
 				t.Fatalf("count %s for %q: %v", table, tc.id, err)
 			}
