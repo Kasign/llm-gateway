@@ -211,13 +211,31 @@ func (c *Coordinator) RunWithObserver(ctx context.Context, requestBody []byte, a
 			result.RoundUsage = append(result.RoundUsage, append(json.RawMessage(nil), round.usage...))
 		}
 		if round.finishReason != "tool_calls" {
-			if len(round.calls) != 0 || choice.mode == "required" || choice.name != "" {
+			if len(round.calls) != 0 {
+				for i, call := range round.calls {
+					if i >= MaxToolCallsPerRound {
+						break
+					}
+					emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
+				}
+				return result, ErrInvalidModelResponse
+			}
+			if choice.mode == "required" || choice.name != "" {
 				return result, ErrInvalidModelResponse
 			}
 			result.Response = cloneModelResponse(modelResponse)
 			return result, nil
 		}
-		if len(round.calls) == 0 || choice.mode == "none" {
+		if len(round.calls) == 0 {
+			return result, ErrInvalidModelResponse
+		}
+		if choice.mode == "none" {
+			for i, call := range round.calls {
+				if i >= MaxToolCallsPerRound {
+					break
+				}
+				emit(ToolCallEvent{Round: result.ToolRounds + 1, ToolName: call.Function.Name, Status: "rejected", ErrorCode: "invalid_tool_call"})
+			}
 			return result, ErrInvalidModelResponse
 		}
 		if result.ToolRounds >= MaxToolRounds {
@@ -288,7 +306,7 @@ func (c *Coordinator) RunWithObserver(ctx context.Context, requestBody []byte, a
 			}
 			if len(output) == 0 || !json.Valid(output) || !utf8.Valid(output) {
 				err := fmt.Errorf("%w: tool %s returned invalid JSON", ErrToolExecutionFailed, call.name)
-				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "failed", DurationMS: duration, ErrorCode: "tool_result_invalid", Cause: err})
+				emit(ToolCallEvent{Round: roundNo, ToolName: call.name, Status: "failed", DurationMS: duration, ResultBytes: int64(len(output)), ErrorCode: "tool_result_invalid", Cause: err})
 				return result, err
 			}
 			if len(output) > MaxToolResultBytes-totalToolResultBytes {

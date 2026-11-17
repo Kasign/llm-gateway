@@ -175,12 +175,16 @@ func TestRunRejectsInvalidArgumentsBeforeExecutingRound(t *testing.T) {
 	executor := &testExecutor{}
 	coordinator := testCoordinator(t, model, executor)
 
-	_, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	var events []ToolCallEvent
+	_, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
 	if !errors.Is(err, ErrInvalidModelResponse) {
-		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
+		t.Fatalf("RunWithObserver() error = %v, want ErrInvalidModelResponse", err)
 	}
-	if len(executor.calls) != 0 {
-		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	if len(executor.calls) != 0 || len(events) != 1 ||
+		events[0].Status != "rejected" || events[0].ErrorCode != "invalid_arguments" {
+		t.Fatalf("invalid arguments audit events = %+v; executor calls = %d", events, len(executor.calls))
 	}
 }
 
@@ -313,9 +317,17 @@ func TestRunExecutesMultipleToolCallsSequentially(t *testing.T) {
 	executor := &testExecutor{}
 	coordinator := testCoordinator(t, model, executor)
 
-	result, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	var events []ToolCallEvent
+	result, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
 	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+		t.Fatalf("RunWithObserver() error = %v", err)
+	}
+	if len(events) != 2 || events[0].Seq != 1 || events[1].Seq != 2 ||
+		events[0].Round != 1 || events[1].Round != 1 ||
+		events[0].Status != "succeeded" || events[1].Status != "succeeded" {
+		t.Fatalf("multi-call events are out of order: %+v", events)
 	}
 	if result.ToolCalls != 2 || len(executor.calls) != 2 {
 		t.Fatalf("tool call count = %d, executor calls = %d", result.ToolCalls, len(executor.calls))
@@ -441,12 +453,16 @@ func TestRunDoesNotExecuteToolsWhenToolChoiceIsNone(t *testing.T) {
 	executor := &testExecutor{}
 	coordinator := testCoordinator(t, model, executor)
 
-	_, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+	var events []ToolCallEvent
+	_, err := coordinator.RunWithObserver(context.Background(), []byte(body), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
 	if !errors.Is(err, ErrInvalidModelResponse) {
-		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
+		t.Fatalf("RunWithObserver() error = %v, want ErrInvalidModelResponse", err)
 	}
-	if len(executor.calls) != 0 {
-		t.Fatalf("tool executed despite tool_choice=none: %d calls", len(executor.calls))
+	if len(executor.calls) != 0 || len(events) != 1 ||
+		events[0].Status != "rejected" || events[0].ErrorCode != "invalid_tool_call" {
+		t.Fatalf("tool_choice=none events = %+v; executor calls = %d", events, len(executor.calls))
 	}
 }
 
