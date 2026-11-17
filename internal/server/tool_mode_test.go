@@ -587,3 +587,82 @@ func TestMapToolCallAuditEventUsesStableRuntimeErrorCodes(t *testing.T) {
 		})
 	}
 }
+
+
+// TestForwardWithToolsPreservesProviderPassThroughSemantics verifies that the tool
+// integration does not intercept other protocols or requests while disabled.
+func TestForwardWithToolsPreservesProviderPassThroughSemantics(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		stream     bool
+		toolsOn    bool
+		body       string
+		wantHandle bool
+		wantStatus int
+	}{
+		{
+			name:    "responses protocol with tools enabled",
+			path:    "/v1/responses",
+			toolsOn: true,
+			body:    `{"input":"hello","tools":[]}`,
+		},
+		{
+			name: "chat tools while tool feature disabled",
+			path: "/v1/chat/completions",
+			body: `{"messages":[{"role":"user","content":"hello"}],"tools":[]}`,
+		},
+		{
+			name:   "streaming chat tools while tool feature disabled",
+			path:   "/v1/chat/completions",
+			stream: true,
+			body:   `{"messages":[{"role":"user","content":"hello"}],"tools":[]}`,
+		},
+		{
+			name:       "streaming chat tools while tool feature enabled",
+			path:       "/v1/chat/completions",
+			stream:     true,
+			toolsOn:    true,
+			body:       `{"messages":[{"role":"user","content":"hello"}],"tools":[]}`,
+			wantHandle: true,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Tools.Enabled = tt.toolsOn
+			s := &Server{cfg: cfg}
+			req, err := http.NewRequest(http.MethodPost, "http://gateway"+tt.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := core.State{
+				Request: core.Request{
+					Path: tt.path,
+					Body: []byte(tt.body),
+				},
+				Stream: tt.stream,
+				Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key"},
+			}
+			recorder := httptest.NewRecorder()
+			_, gotErr, handled := (inferenceForwarder{s: s}).forwardWithTools(
+				context.Background(), state, &toolLoopTestProvider{}, req, tt.path, recorder,
+			)
+			if handled != tt.wantHandle {
+				t.Fatalf("handled = %v, want %v (error: %v)", handled, tt.wantHandle, gotErr)
+			}
+			if tt.wantStatus == 0 {
+				if gotErr != nil {
+					t.Fatalf("unexpected error: %v", gotErr)
+				}
+				return
+			}
+			coreErr, ok := gotErr.(*core.Error)
+			if !ok || coreErr.Status != tt.wantStatus {
+				t.Fatalf("error = %#v, want status %d", gotErr, tt.wantStatus)
+			}
+		})
+	}
+}

@@ -2,7 +2,7 @@
 
 LLM Gateway 是个人使用的模型接入、管理与能力扩展平台：统一接入本地模型和远程模型，并逐步提供受控工具调用、推理性能分析和模型来源管理。它不是通用 Chat UI，也不以让慢速本地模型承载 Codex / Claude Code 等长连接 Coding Agent 为主要目标。
 
-产品能力扩展的统一规划见 [产品能力扩展规划](product-capabilities-roadmap.md)。文档导航与权威范围见 [文档目录](README.md)。
+产品能力扩展的统一规划见 [产品能力技术方案](产品能力技术方案.md)。文档导航与权威范围见 [文档目录](README.md)。
 
 进程入口是 `cmd/gateway/main.go`：读配置、迁移 MariaDB、构造 `server.Server`、监听 HTTP。Redis 或上游暂时不可用时进程仍启动。
 
@@ -80,7 +80,7 @@ Parse → Resolve → Stamp → Mutate → Guard → WarmStart → Forward → F
 
 ## 新能力接入边界
 
-工具执行、本地模型性能分析和免费模型聚合的目标架构、任务拆解与验收条件见 [产品能力扩展规划](product-capabilities-roadmap.md)。这些是规划能力，并不代表当前代码已经实现。
+工具执行、本地模型性能分析和免费模型聚合的目标架构、任务拆解与验收条件见 [产品能力技术方案](产品能力技术方案.md)。这些是规划能力，并不代表当前代码已经实现。
 
 特别注意：
 - 工具循环不能简单递归调用完整的 `Pipeline.Run`，否则可能为一次客户端请求生成多条最终审计记录。必须先设计请求级 Coordinator 和单一请求生命周期。

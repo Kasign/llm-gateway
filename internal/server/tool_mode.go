@@ -50,15 +50,18 @@ func (f inferenceForwarder) forwardWithTools(
 	s := f.s
 	clientIntent := requestHasToolIntent(st.Body)
 	chatPath := isChatCompletionsPath(st.Path)
-	if clientIntent && (!chatPath || st.Stream) {
-		return core.Result{}, &core.Error{Status: http.StatusBadRequest, Code: "tool_request_unsupported", Message: "tool calling is only supported for non-streaming Chat Completions"}, true
-	}
-	if !chatPath || st.Stream {
+
+	// 工具能力只接管明确支持的 Chat Completions 请求；其他协议必须保持原 Provider 透传语义。
+	if !chatPath {
 		return core.Result{}, nil, false
 	}
+	// 工具功能关闭时完全旁路，不改变上游原本对 tools / functions 字段的处理行为。
 	if s == nil || s.cfg == nil || !s.cfg.Tools.Enabled {
+		return core.Result{}, nil, false
+	}
+	if st.Stream {
 		if clientIntent {
-			return core.Result{}, &core.Error{Status: http.StatusForbidden, Code: "tool_calling_disabled", Message: "tool calling is not enabled"}, true
+			return core.Result{}, &core.Error{Status: http.StatusBadRequest, Code: "tool_request_unsupported", Message: "tool calling is only supported for non-streaming Chat Completions"}, true
 		}
 		return core.Result{}, nil, false
 	}
