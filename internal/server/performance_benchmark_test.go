@@ -159,3 +159,25 @@ func TestBenchmarkCancelIsRegisteredBeforeWorkerStarts(t *testing.T) {
 		t.Fatal("worker context was not cancelled")
 	}
 }
+
+
+// TestBenchmarkMarkCancellingOnlyTransitionsRunning verifies the in-memory lifecycle guard.
+func TestBenchmarkMarkCancellingOnlyTransitionsRunning(t *testing.T) {
+	job := &benchmarkJob{Status: "running"}
+	if !job.markCancelling() {
+		t.Fatal("running job should transition to cancelling")
+	}
+	if got := job.snapshot().Status; got != "cancelling" {
+		t.Fatalf("status = %q, want cancelling", got)
+	}
+	if job.markCancelling() {
+		t.Fatal("cancelling job must not transition a second time")
+	}
+	job.finish("cancelled", 499, 1, nil, context.Canceled, nil, 0, 0)
+	if got := job.snapshot().Status; got != "cancelled" {
+		t.Fatalf("terminal status = %q, want cancelled", got)
+	}
+	if job.markCancelling() {
+		t.Fatal("terminal job must not return to cancelling")
+	}
+}
