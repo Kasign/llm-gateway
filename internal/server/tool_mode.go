@@ -68,6 +68,10 @@ func (f inferenceForwarder) forwardWithTools(
 		}
 		return core.Result{}, nil, false
 	}
+	if !clientIntent && !requestUsesSingleChoice(st.Body) {
+		// 多候选请求不能进入工具循环；没有明确工具意图时保留原 Provider 行为。
+		return core.Result{}, nil, false
+	}
 	if s.toolInitErr != nil || s.toolRegistry == nil || s.toolRuntime == nil {
 		if clientIntent {
 			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_system_unavailable", Message: "tool system is unavailable"}, true

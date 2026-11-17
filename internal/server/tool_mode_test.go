@@ -328,3 +328,23 @@ func TestMapToolCoordinatorTimeoutIsGatewayTimeout(t *testing.T) {
 		t.Fatalf("tool timeout was not mapped to 504: %#v", mapped)
 	}
 }
+
+func TestForwardWithToolsFallsBackForOrdinaryMultipleChoiceRequest(t *testing.T) {
+	s := &Server{cfg: &config.Config{Tools: config.ToolsConfig{
+		Enabled: true,
+		AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
+		AllowedTools: []string{"web.search"},
+	}}}
+	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
+	state := core.State{
+		Request: core.Request{
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"x"}],"n":2}`),
+		},
+		Model: core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"},
+	}
+	_, err, handled := (inferenceForwarder{s: s}).forwardWithTools(context.Background(), state, &toolLoopTestProvider{}, req, "/v1/chat/completions", httptest.NewRecorder())
+	if handled || err != nil {
+		t.Fatalf("ordinary n>1 request did not preserve the existing path: handled=%v err=%v", handled, err)
+	}
+}

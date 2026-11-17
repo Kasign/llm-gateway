@@ -150,3 +150,19 @@ func isChatCompletionsPath(path string) bool {
 	path = strings.TrimRight(strings.TrimSpace(strings.SplitN(path, "?", 2)[0]), "/")
 	return path == "/v1/chat/completions"
 }
+
+func requestUsesSingleChoice(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return false
+	}
+	raw, exists := object["n"]
+	if !exists {
+		return true
+	}
+	var count int
+	return json.Unmarshal(raw, &count) == nil && count == 1
+}
