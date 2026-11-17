@@ -28,7 +28,23 @@ import (
 )
 
 // benchmarkJobTTL 已完成任务在内存中保留时长，避免 benchmarkStore 无限增长。
-const benchmarkJobTTL = time.Hour
+const (
+	benchmarkJobTTL = time.Hour
+	maxActiveBenchmarkJobs = 1
+	maxBenchmarkResponseBytes = 8 << 20
+	maxBenchmarkExecutionTime = 30 * time.Minute
+)
+
+var errBenchmarkResponseTooLarge = errors.New("benchmark response exceeded the 8 MiB capture limit")
+
+func benchmarkExecutionTimeout(configuredSeconds int) time.Duration {
+	limit := maxBenchmarkExecutionTime
+	if configuredSeconds > 0 {
+		configured := time.Duration(configuredSeconds) * time.Second
+		if configured < limit { limit = configured }
+	}
+	return limit
+}
 
 // benchmarkJob 表示一次基准测试任务的状态与结果。
 //
@@ -47,6 +63,7 @@ type benchmarkJob struct {
 	LatencyMS      int64      `json:"latency_ms,omitempty"`
 	HTTPStatus     int        `json:"http_status,omitempty"`
 	ResponseBytes  int64      `json:"response_bytes,omitempty"`
+	ResponseTruncated bool `json:"response_truncated,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -137,6 +154,7 @@ type benchmarkJobSnapshot struct {
 	LatencyMS      int64      `json:"latency_ms,omitempty"`
 	HTTPStatus     int        `json:"http_status,omitempty"`
 	ResponseBytes  int64      `json:"response_bytes,omitempty"`
+	ResponseTruncated bool `json:"response_truncated,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -162,7 +180,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		ID: j.ID, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
 		PromptLen: j.PromptLen, MaxTokens: j.MaxTokens, StartedAt: j.StartedAt,
 		FinishedAt: j.FinishedAt, LatencyMS: j.LatencyMS, HTTPStatus: j.HTTPStatus,
-		ResponseBytes: j.ResponseBytes, InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
+		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated, InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
 		ReasoningChars: j.ReasoningChars, ContentText: j.ContentText, ReasoningText: j.ReasoningText,
@@ -190,6 +208,7 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 	j.LatencyMS = latency
 	j.HTTPStatus = httpStatus
 	j.ResponseBytes = int64(len(resp))
+	j.ResponseTruncated = errors.Is(err, errBenchmarkResponseTooLarge)
 	j.Response = string(resp)
 	if logutil.LooksLikeSSE(resp) {
 		content, reasoning := logutil.AggregateChatStream(resp)
@@ -213,7 +232,9 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 	if err != nil {
 		j.Error = err.Error()
 		_, code, _ := core.Unpack(err)
-		if code != "" {
+		if errors.Is(err, errBenchmarkResponseTooLarge) {
+			j.ErrorCode = "benchmark_response_too_large"
+		} else if code != "" {
 			j.ErrorCode = code
 		} else if isCancelErr(err) {
 			j.ErrorCode = "cancelled"
@@ -235,8 +256,9 @@ func (j *benchmarkJob) finish(status string, httpStatus int, latency int64, resp
 
 // benchmarkStore 是运行期 Job 快照缓存；Task/Run 元数据持久化在 MariaDB，重启后通过仓储恢复历史摘要。
 type benchmarkStore struct {
-	mu   sync.RWMutex
+	mu sync.RWMutex
 	jobs map[string]*benchmarkJob
+	reservations int
 }
 
 func usageFromResponse(body []byte) (*int64, *int64, *int64) {
@@ -291,6 +313,33 @@ func (bs *benchmarkStore) put(job *benchmarkJob) {
 	bs.jobs[job.ID] = job
 }
 
+// reserveSlot 在任务持久化前预留名额，避免并发创建请求同时越过活动任务上限。
+func (bs *benchmarkStore) reserveSlot(maxActive int) bool {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	active := bs.reservations
+	for _, job := range bs.jobs {
+		job.mu.RLock()
+		if job.Status == "running" || job.Status == "cancelling" { active++ }
+		job.mu.RUnlock()
+	}
+	if maxActive <= 0 || active >= maxActive { return false }
+	bs.reservations++
+	return true
+}
+
+func (bs *benchmarkStore) releaseSlot() {
+	bs.mu.Lock()
+	if bs.reservations > 0 { bs.reservations-- }
+	bs.mu.Unlock()
+}
+
+func (bs *benchmarkStore) putReserved(job *benchmarkJob) {
+	bs.mu.Lock()
+	if bs.reservations > 0 { bs.reservations-- }
+	bs.jobs[job.ID] = job
+	bs.mu.Unlock()
+}
 func (bs *benchmarkStore) get(id string) (*benchmarkJob, bool) {
 	bs.mu.RLock()
 	defer bs.mu.RUnlock()
@@ -488,12 +537,19 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "benchmark task storage is unavailable")
 		return
 	}
+	if !s.benchmarks.reserveSlot(maxActiveBenchmarkJobs) {
+		jsonError(w, http.StatusTooManyRequests, "benchmark_busy", "another benchmark task is still active")
+		return
+	}
+	reservationHeld := true
+	defer func() { if reservationHeld { s.benchmarks.releaseSlot() } }()
 	if err := s.benchmarkRepo.CreateTaskAndRun(r.Context(), taskRecord, runRecord); err != nil {
 		applog.Printf("[benchmark:%s] task persistence failed: %v", jobID, err)
 		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to persist benchmark task")
 		return
 	}
-	s.benchmarks.put(job)
+	s.benchmarks.putReserved(job)
+	reservationHeld = false
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	job.setCancel(workerCancel)
 	go s.runBenchmark(workerCtx, workerCancel, job, m, upstreamOnly, runIn, key, target)
@@ -697,7 +753,7 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	defer s.persistBenchmarkJob(job)
 	defer workerCancel()
 	defer job.clearCancel()
-	ctx, cancel := contextWithOptionalTimeout(workerCtx, s.cfg.Llama.RequestTimeout)
+	ctx, cancel := context.WithTimeout(workerCtx, benchmarkExecutionTimeout(s.cfg.Llama.RequestTimeout))
 	defer cancel()
 
 	be := target.Backend
@@ -816,13 +872,22 @@ type benchRunObserver struct {
 	ttft      *int64
 	reasoning int
 	finished  time.Time
+	truncated bool
 }
 
 func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
 	switch ev.Stage {
 	case core.StageChunk:
 		b.events++
-		b.buf = append(b.buf, ev.Chunk...)
+		remaining := maxBenchmarkResponseBytes - len(b.buf)
+		if remaining <= 0 {
+			b.truncated = true
+		} else if len(ev.Chunk) > remaining {
+			b.buf = append(b.buf, ev.Chunk[:remaining]...)
+			b.truncated = true
+		} else {
+			b.buf = append(b.buf, ev.Chunk...)
+		}
 		content, reasoning := logutil.AggregateChatStream(b.buf)
 		b.job.updateStreamText(content, reasoning)
 		b.reasoning = len(reasoning)
@@ -841,6 +906,7 @@ func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
 			status = ev.Result.Status
 		}
 		err := ev.Err
+		if b.truncated { err = errBenchmarkResponseTooLarge }
 		if isCancelErr(err) {
 			b.job.finish("cancelled", 499, latency, b.buf, err, b.ttft, b.events, b.reasoning)
 			return

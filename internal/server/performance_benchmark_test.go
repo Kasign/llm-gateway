@@ -204,3 +204,34 @@ func TestBenchmarkCancellationSerializesWithFinish(t *testing.T) {
 		t.Fatalf("status after persistence failure = %q, want running", got)
 	}
 }
+
+// TestBenchmarkExecutionTimeoutHasHardLimit 验证关闭通用请求超时也不能取消 Benchmark 硬时限。
+func TestBenchmarkExecutionTimeoutHasHardLimit(t *testing.T) {
+	if got := benchmarkExecutionTimeout(0); got != maxBenchmarkExecutionTime { t.Fatalf("zero timeout = %s", got) }
+	if got := benchmarkExecutionTimeout(60); got != time.Minute { t.Fatalf("short timeout = %s", got) }
+	if got := benchmarkExecutionTimeout(3600); got != maxBenchmarkExecutionTime { t.Fatalf("long timeout = %s", got) }
+}
+
+// TestBenchmarkStoreReservationLimitsActiveTasks 验证活动任务与并发创建预留受服务端上限约束。
+func TestBenchmarkStoreReservationLimitsActiveTasks(t *testing.T) {
+	bs := newBenchmarkStore()
+	if !bs.reserveSlot(maxActiveBenchmarkJobs) { t.Fatal("first reservation should succeed") }
+	if bs.reserveSlot(maxActiveBenchmarkJobs) { t.Fatal("second reservation must be rejected") }
+	bs.releaseSlot()
+	job := &benchmarkJob{ID: "active", Status: "running"}
+	if !bs.reserveSlot(maxActiveBenchmarkJobs) { t.Fatal("reservation should succeed after release") }
+	bs.putReserved(job)
+	if bs.reserveSlot(maxActiveBenchmarkJobs) { t.Fatal("active job must occupy the only slot") }
+	job.finish("completed", http.StatusOK, 1, nil, nil, nil, 0, 0)
+	if !bs.reserveSlot(maxActiveBenchmarkJobs) { t.Fatal("terminal job must release the active slot") }
+	bs.releaseSlot()
+}
+
+// TestMemSinkBoundsBenchmarkResponse 验证 Benchmark 内存响应缓存不会超过固定上限。
+func TestMemSinkBoundsBenchmarkResponse(t *testing.T) {
+	sink := newMemSink()
+	payload := make([]byte, maxBenchmarkResponseBytes+1)
+	n, err := sink.Write(payload)
+	if !errors.Is(err, errBenchmarkResponseTooLarge) { t.Fatalf("Write error = %v", err) }
+	if n != maxBenchmarkResponseBytes || len(sink.Bytes()) != maxBenchmarkResponseBytes { t.Fatalf("captured bytes = %d/%d", n, len(sink.Bytes())) }
+}

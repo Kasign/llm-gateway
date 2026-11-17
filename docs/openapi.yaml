@@ -2699,6 +2699,7 @@ components:
         token_source: { type: string, enum: [upstream_usage, llama_timings, unknown_source], description: Token 统计来源；无法确认时使用 unknown_source。 }
         request_bytes: { type: integer, format: int64, minimum: 0 }
         response_bytes: { type: integer, format: int64, minimum: 0 }
+        response_truncated: { type: boolean, description: "Benchmark 响应超过 8 MiB 捕获上限时为 true" }
         error_code: { type: string }
         error_message: { type: string }
         analysis_json: { type: string, description: 兼容性审计字段；具体分析内容优先使用详情接口的 analysis。 }
