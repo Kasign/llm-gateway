@@ -475,7 +475,11 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 		missing = append(missing, "backend_version_unknown")
 	}
 	hardware, _ := snapshot["hardware"].(map[string]interface{})
-	if hardware == nil || strings.TrimSpace(fmt.Sprint(hardware["cpu_model"])) == "" {
+	cpuModel := ""
+	if hardware != nil {
+		cpuModel, _ = hardware["cpu_model"].(string)
+	}
+	if strings.TrimSpace(cpuModel) == "" {
 		missing = append(missing, "hardware_model_unknown")
 	}
 	if hardware == nil || hardware["memory_bytes"] == nil {
