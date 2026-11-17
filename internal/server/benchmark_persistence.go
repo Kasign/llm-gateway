@@ -99,7 +99,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
-		ResponseBytes: run.ResponseBytes, InputTokens: valueOrZero(run.InputTokens),
+		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large", InputTokens: valueOrZero(run.InputTokens),
 		OutputTokens: valueOrZero(run.OutputTokens), TotalTokens: valueOrZero(run.TotalTokens),
 		Error: task.ErrorMessage, ErrorCode: task.ErrorCode, RequestID: run.RequestID, Stream: true,
 		TTFTMS: run.TTFTMS, StreamEvents: run.StreamEvents, ReasoningChars: run.ReasoningChars,
