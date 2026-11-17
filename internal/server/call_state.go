@@ -20,6 +20,7 @@ type callState struct {
 	trace           *requestTrace
 	resp            []byte // 仅 store_payload 开启时累积，最多 8MB
 	tokens          logutil.TokenHarvest
+	coordinatorUsageSet bool
 	lastLive        time.Time
 	respBytes       int64
 	cancel          context.CancelFunc

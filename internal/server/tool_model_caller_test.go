@@ -15,6 +15,7 @@ type bufferedTestProvider struct {
 	calls int
 	last  provider.InferenceCall
 	result core.Result
+	writerBody []byte
 	err   error
 }
 
@@ -29,8 +30,12 @@ func (p *bufferedTestProvider) Forward(_ context.Context, call provider.Inferenc
 		call.Writer.Header().Set("Content-Type", "application/json")
 		call.Writer.WriteHeader(p.result.Status)
 	}
-	if len(p.result.Body) > 0 {
-		if _, err := call.Writer.Write(p.result.Body); err != nil {
+	body := p.result.Body
+	if p.writerBody != nil {
+		body = p.writerBody
+	}
+	if len(body) > 0 {
+		if _, err := call.Writer.Write(body); err != nil {
 			return core.Result{}, err
 		}
 	}
@@ -109,13 +114,15 @@ func TestBufferedModelCallerPreservesUpstreamErrorResponse(t *testing.T) {
 }
 
 func TestBufferedModelCallerRejectsMismatchedProviderBody(t *testing.T) {
-	p := &bufferedTestProvider{result: core.Result{Status: http.StatusOK, Body: []byte("result-body")}}
-	// Provider fake writes the result body; use a custom Writer wrapper mismatch in the next test.
+	p := &bufferedTestProvider{
+		result: core.Result{Status: http.StatusOK, Body: []byte("result-body")},
+		writerBody: []byte("writer-body"),
+	}
 	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
 	caller := &bufferedModelCaller{provider: p, request: req, path: "/v1/chat/completions", modelID: "model"}
-	response, err := caller.Complete(context.Background(), []byte(`{"messages":[]}`))
-	if err != nil || string(response.Body) != "result-body" {
-		t.Fatalf("Complete() = %+v, %v", response, err)
+	_, err := caller.Complete(context.Background(), []byte(`{"messages":[]}`))
+	if !errors.Is(err, errBufferedResponseMismatch) {
+		t.Fatalf("Complete() error = %v, want response mismatch", err)
 	}
 }
 

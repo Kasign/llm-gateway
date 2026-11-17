@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
-	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/tools/coordinator"
 )
@@ -133,7 +131,11 @@ func (c *bufferedModelCaller) Complete(ctx context.Context, requestBody []byte) 
 	} else if len(writtenBody) > 0 && !bytes.Equal(body, writtenBody) {
 		return coordinator.ModelResponse{}, errBufferedResponseMismatch
 	}
-	if len(body) > c.maxBody && c.maxBody > 0 {
+	maxBody := c.maxBody
+	if maxBody <= 0 {
+		maxBody = coordinator.MaxModelResponseBytes
+	}
+	if len(body) > maxBody {
 		return coordinator.ModelResponse{}, errBufferedResponseTooLarge
 	}
 	if status == 0 && len(body) > 0 {
@@ -158,19 +160,3 @@ var _ interface {
 	Complete(context.Context, []byte) (coordinator.ModelResponse, error)
 } = (*bufferedModelCaller)(nil)
 
-func bufferedResponseErrorStatus(result core.Result, writer *bufferedResponseWriter) int {
-	if result.Status != 0 {
-		return result.Status
-	}
-	if writer != nil && writer.status != 0 {
-		return writer.status
-	}
-	return http.StatusBadGateway
-}
-
-func bufferedResponseDebugError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("buffered Provider call failed: %w", err)
-}

@@ -450,6 +450,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	var respBytes int64
 	var trace *requestTrace
 	var key *auth.Key
+	var coordinatorUsageSet bool
 	if ev.Result != nil {
 		if ev.Result.TTFT != nil {
 			ttft = ev.Result.TTFT
@@ -476,9 +477,10 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		inTok, outTok, totTok = cs.tokens.InputTokens, cs.tokens.OutputTokens, cs.tokens.TotalTokens
 		tokenSrc = cs.tokens.Source
 		pps = cs.tokens.PredictedPerSec
+		coordinatorUsageSet = cs.coordinatorUsageSet
 		cs.mu.Unlock()
 	}
-	if !st.Stream && len(resp) > 0 {
+	if !st.Stream && len(resp) > 0 && !coordinatorUsageSet {
 		meta := logutil.TokensFromResponse(resp)
 		inTok, outTok, totTok = meta.InputTokens, meta.OutputTokens, meta.TotalTokens
 		tokenSrc = meta.Source
