@@ -82,7 +82,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		s.rejectInference(w, r, id, start, key, status, code, msg)
 		return
 	}
-	allowed, _, err := s.limiter.Allow(r.Context(), strconv.FormatUint(key.ID, 10), key.RPM)
+	allowed, err := s.allowClientKeyRequest(r.Context(), key)
 	if err != nil {
 		applog.Printf("[%s] rate limiter unavailable: %v", id, err)
 		// 底层错误只进入服务端日志；不要把 Redis/网络诊断写入调用方响应和请求审计。
