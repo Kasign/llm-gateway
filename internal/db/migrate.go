@@ -18,6 +18,7 @@ var requiredTables = []string{
 	"request_logs",
 	"request_payloads",
 	"request_stream_events",
+	"request_tool_call_events",
 	"gateway_settings",
 	"model_prices",
 }
@@ -171,6 +172,20 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 			}
 			return fmt.Errorf("schema upgrade failed: %w", err)
 		}
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS request_tool_call_events (
+  request_id VARCHAR(64) NOT NULL,
+  seq SMALLINT UNSIGNED NOT NULL,
+  round_no TINYINT UNSIGNED NOT NULL,
+  tool_name VARCHAR(64) NOT NULL DEFAULT '',
+  status VARCHAR(16) NOT NULL,
+  duration_ms BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  result_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  error_code VARCHAR(64) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (request_id, seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return fmt.Errorf("schema upgrade failed (request_tool_call_events): %w", err)
 	}
 	applog.Infof("database migration: CREATE TABLE IF NOT EXISTS request_stream_events (ensureColumns)")
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS request_stream_events (

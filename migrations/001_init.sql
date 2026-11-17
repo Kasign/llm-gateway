@@ -111,3 +111,16 @@ CREATE TABLE IF NOT EXISTS model_prices (
   created_at DATETIME(6) NOT NULL,
   UNIQUE KEY uk_model_price_effective (provider_id, model_id, effective_at), INDEX idx_model_price_lookup (provider_id, model_id, effective_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS request_tool_call_events (
+  request_id VARCHAR(64) NOT NULL,
+  seq SMALLINT UNSIGNED NOT NULL,
+  round_no TINYINT UNSIGNED NOT NULL,
+  tool_name VARCHAR(64) NOT NULL DEFAULT '',
+  status VARCHAR(16) NOT NULL,
+  duration_ms BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  result_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  error_code VARCHAR(64) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (request_id, seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

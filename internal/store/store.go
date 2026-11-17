@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -52,6 +53,18 @@ type StreamEvent struct {
 	RawLine  string `json:"raw_line,omitempty"`
 }
 
+ // ToolCallEvent 是单次请求中的工具调用审计摘要，不包含调用参数或结果正文。
+type ToolCallEvent struct {
+	Seq         int       `json:"seq"`
+	Round       int       `json:"round"`
+	ToolName    string    `json:"tool_name"`
+	Status      string    `json:"status"`
+	DurationMS  int64     `json:"duration_ms"`
+	ResultBytes int64     `json:"result_bytes"`
+	ErrorCode   string    `json:"error_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // Repo 访问 request_logs、request_payloads、request_stream_events 等表。
 type Repo struct{ db *sql.DB }
 
@@ -79,6 +92,70 @@ func (r *Repo) ListStreamEvents(ctx context.Context, requestID string, limit int
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+
+const maxToolCallEventsPerRequest = 9
+
+// InsertToolCallEvents 批量写入单次请求的工具调用事件；同一批次在一个事务中提交。
+func (r *Repo) InsertToolCallEvents(ctx context.Context, requestID string, events []ToolCallEvent) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("tool call event repository is not configured")
+	}
+	if strings.TrimSpace(requestID) == "" || len(events) == 0 || len(events) > maxToolCallEventsPerRequest {
+		return fmt.Errorf("invalid tool call event batch")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO request_tool_call_events
+		(request_id,seq,round_no,tool_name,status,duration_ms,result_bytes,error_code)
+		VALUES(?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, event := range events {
+		if event.Seq < 1 || event.Round < 1 || event.Round > 3 ||
+			event.DurationMS < 0 || event.ResultBytes < 0 ||
+			len(event.ToolName) > 64 || len(event.Status) > 16 || len(event.ErrorCode) > 64 {
+			return fmt.Errorf("invalid tool call event fields")
+		}
+		if _, err := stmt.ExecContext(ctx, requestID, event.Seq, event.Round, event.ToolName,
+			event.Status, event.DurationMS, event.ResultBytes, nullIfEmpty(event.ErrorCode)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListToolCallEvents 按请求内序号读取工具调用事件；历史请求自然返回空数组。
+func (r *Repo) ListToolCallEvents(ctx context.Context, requestID string, limit int) ([]ToolCallEvent, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("tool call event repository is not configured")
+	}
+	if limit <= 0 || limit > maxToolCallEventsPerRequest {
+		limit = maxToolCallEventsPerRequest
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT seq,round_no,tool_name,status,duration_ms,result_bytes,
+		COALESCE(error_code,''),created_at
+		FROM request_tool_call_events WHERE request_id=? ORDER BY seq ASC LIMIT ?`, requestID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ToolCallEvent, 0)
+	for rows.Next() {
+		var event ToolCallEvent
+		if err := rows.Scan(&event.Seq, &event.Round, &event.ToolName, &event.Status,
+			&event.DurationMS, &event.ResultBytes, &event.ErrorCode, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
 	}
 	return out, rows.Err()
 }
@@ -290,6 +367,9 @@ func (r *Repo) ClearRequests(ctx context.Context) (int64, error) {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM request_payloads`); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM request_tool_call_events`); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM request_stream_events`); err != nil {

@@ -62,7 +62,7 @@ func (r *Repo) DeleteFinishedRequestsBefore(ctx context.Context, cutoff time.Tim
 		args = append(args, id)
 	}
 	// 无外键级联，按子表到父表顺序显式删除，确保 Payload/SSE 不会残留。
-	for _, table := range []string{"request_stream_events", "request_payloads"} {
+	for _, table := range []string{"request_tool_call_events", "request_stream_events", "request_payloads"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE request_id IN ("+placeholders+")", args...); err != nil {
 			return 0, err
 		}
