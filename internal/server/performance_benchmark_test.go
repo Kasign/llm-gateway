@@ -284,3 +284,40 @@ func TestBenchmarkObserverMapsDeadlineWithoutProviderError(t *testing.T) {
 		t.Fatalf("unexpected deadline result: %+v", snapshot)
 	}
 }
+
+
+// TestBenchmarkPipelineFallbackPreservesErrorClassification 验证 Pipeline 未发出 StageFinish 时兜底错误分类一致。
+func TestBenchmarkPipelineFallbackPreservesErrorClassification(t *testing.T) {
+	newObserver := func(job *benchmarkJob) *benchRunObserver {
+		return &benchRunObserver{job: job, started: time.Now()}
+	}
+
+	t.Run("deadline", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		job := &benchmarkJob{StartedAt: time.Now()}
+		finishBenchmarkPipelineError(job, ctx, newObserver(job), errors.New("upstream connection interrupted"))
+		snapshot := job.snapshot()
+		if snapshot.Status != "failed" || snapshot.HTTPStatus != http.StatusGatewayTimeout || snapshot.ErrorCode != "gateway_timeout" {
+			t.Fatalf("unexpected deadline fallback: %+v", snapshot)
+		}
+	})
+
+	t.Run("response limit", func(t *testing.T) {
+		job := &benchmarkJob{StartedAt: time.Now()}
+		finishBenchmarkPipelineError(job, context.Background(), newObserver(job), errBenchmarkResponseTooLarge)
+		snapshot := job.snapshot()
+		if snapshot.Status != "failed" || snapshot.HTTPStatus != http.StatusBadGateway || snapshot.ErrorCode != "benchmark_response_too_large" || !snapshot.ResponseTruncated {
+			t.Fatalf("unexpected response limit fallback: %+v", snapshot)
+		}
+	})
+
+	t.Run("cancel", func(t *testing.T) {
+		job := &benchmarkJob{StartedAt: time.Now()}
+		finishBenchmarkPipelineError(job, context.Background(), newObserver(job), context.Canceled)
+		snapshot := job.snapshot()
+		if snapshot.Status != "cancelled" || snapshot.HTTPStatus != 499 || snapshot.ErrorCode != "cancelled" {
+			t.Fatalf("unexpected cancellation fallback: %+v", snapshot)
+		}
+	})
+}

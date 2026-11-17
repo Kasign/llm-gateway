@@ -872,13 +872,26 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	_ = s.audit.Flush(flushCtx)
 	flushCancel()
 	if err != nil && obs.finished.IsZero() {
-		status := 502
-		if isCancelErr(err) || isCancelErr(ctx.Err()) {
-			job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), obs.buf, err, obs.ttft, obs.events, obs.reasoning)
-			return
-		}
-		job.finish("failed", status, time.Since(job.StartedAt).Milliseconds(), obs.buf, err, obs.ttft, obs.events, obs.reasoning)
+		finishBenchmarkPipelineError(job, ctx, obs, err)
 	}
+}
+
+
+// finishBenchmarkPipelineError 处理 Pipeline 未触发 StageFinish 时的兜底终态，保持取消、超时和响应上限错误口径一致。
+func finishBenchmarkPipelineError(job *benchmarkJob, ctx context.Context, obs *benchRunObserver, err error) {
+	latency := time.Since(job.StartedAt).Milliseconds()
+	if isCancelErr(err) || isCancelErr(ctx.Err()) {
+		job.finish("cancelled", 499, latency, obs.buf, err, obs.ttft, obs.events, obs.reasoning)
+		return
+	}
+	status := http.StatusBadGateway
+	if isDeadline(ctx, err) {
+		status = http.StatusGatewayTimeout
+		err = context.DeadlineExceeded
+	} else if errors.Is(err, errBenchmarkResponseTooLarge) {
+		err = errBenchmarkResponseTooLarge
+	}
+	job.finish("failed", status, latency, obs.buf, err, obs.ttft, obs.events, obs.reasoning)
 }
 
 // benchRunObserver 只更新基准测试任务的界面状态。请求日志仍由主流程的观察者写入。
