@@ -91,7 +91,19 @@ func (f inferenceForwarder) forwardWithTools(
 		return core.Result{}, nil, false
 	}
 	allowedNames := s.configuredToolNames(st)
+	// 调用方 Key 的授权与全局/模型白名单取交集；缺少请求认证上下文时 fail closed。
+	call := s.callGet(st.ID)
+	if call == nil || call.key == nil || len(call.key.AllowedTools) == 0 {
+		allowedNames = nil
+	} else {
+		granted := make(map[string]struct{}, len(call.key.AllowedTools))
+		for _, name := range call.key.AllowedTools { granted[name] = struct{}{} }
+		filtered := make([]string, 0, len(allowedNames))
+		for _, name := range allowedNames { if _, ok := granted[name]; ok { filtered = append(filtered, name) } }
+		allowedNames = filtered
+	}
 	if len(allowedNames) == 0 {
+		if !clientIntent { return core.Result{}, nil, false }
 		if clientIntent {
 			return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "tool_registry_unavailable", Message: "no configured tools are available"}, true
 		}

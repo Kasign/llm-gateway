@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   expires_at DATETIME(6) NULL,
   rpm INT NOT NULL DEFAULT 60,
   allowed_models TEXT NULL,
+  allowed_tools TEXT NULL,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
   last_used_at DATETIME(6) NULL,

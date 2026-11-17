@@ -18,6 +18,7 @@ type Key struct {
 	Status        string     `json:"status"`
 	RPM           int        `json:"rpm"`
 	AllowedModels []string   `json:"allowed_models"`
+	AllowedTools  []string   `json:"allowed_tools"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	CreatedAt     *time.Time `json:"created_at,omitempty"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`

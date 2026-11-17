@@ -627,6 +627,23 @@ func (s *Server) authenticateOutcome(ctx context.Context, r *http.Request) (*aut
 	return k, ""
 }
 
+// validateKeyTools 只允许管理员授予当前全局启用且已注册的工具。
+func (s *Server) validateKeyTools(names []string) error {
+	seen := make(map[string]struct{}, len(names))
+	global := make(map[string]struct{})
+	if s != nil && s.cfg != nil && s.cfg.Tools.Enabled { for _, name := range s.cfg.Tools.AllowedTools { global[name] = struct{}{} } }
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" { return fmt.Errorf("tool name must not be empty") }
+		if _, ok := seen[name]; ok { return fmt.Errorf("duplicate tool name: %s", name) }
+		seen[name] = struct{}{}
+		if _, ok := global[name]; !ok { return fmt.Errorf("tool is not globally enabled: %s", name) }
+		if s.toolRegistry == nil { return fmt.Errorf("tool registry is unavailable") }
+		if _, _, err := s.toolRegistry.Lookup(name); err != nil { return fmt.Errorf("tool is not registered: %s", name) }
+	}
+	return nil
+}
+
 // API key management
 // keysAPI 是 /api/admin/keys 接口：管理 API Key 的列表和创建。
 // GET  → 列出所有 Key（给管理后台展示用）
@@ -652,6 +669,7 @@ func (s *Server) keysAPI(w http.ResponseWriter, r *http.Request) {
 			Name          string     `json:"name"`           // Key 的名字（方便识别，比如"我的项目"）
 			RPM           int        `json:"rpm"`            // 每分钟最大请求数（限速）
 			AllowedModels []string   `json:"allowed_models"` // 允许使用的模型列表（空表示不限制）
+			AllowedTools  []string   `json:"allowed_tools"`  // 允许使用的工具列表（空表示不允许工具）
 			ExpiresAt     *time.Time `json:"expires_at"`     // 过期时间（空表示永不过期）
 		}
 		// 解析 JSON 失败或名字为空，返回 400
@@ -660,7 +678,11 @@ func (s *Server) keysAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 创建 Key：数据库会生成一个随机的明文 Key（sk-xxx），并只存哈希值
-		k, raw, e := s.keys.Create(r.Context(), strings.TrimSpace(in.Name), in.RPM, in.AllowedModels, in.ExpiresAt)
+		if err := s.validateKeyTools(in.AllowedTools); err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", err.Error())
+			return
+		}
+		k, raw, e := s.keys.CreateWithTools(r.Context(), strings.TrimSpace(in.Name), in.RPM, in.AllowedModels, in.AllowedTools, in.ExpiresAt)
 		if e != nil {
 			applog.Printf("create api key failed: %v", e)
 			if strings.Contains(e.Error(), "Duplicate entry") && strings.Contains(e.Error(), "uk_key_name") {
@@ -751,14 +773,23 @@ func (s *Server) keyAction(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name          string     `json:"name"`
 			RPM           int        `json:"rpm"`
-			AllowedModels []string   `json:"allowed_models"`
-			ExpiresAt     *time.Time `json:"expires_at"`
+			AllowedModels []string        `json:"allowed_models"`
+			AllowedTools  json.RawMessage `json:"allowed_tools"`
+			ExpiresAt     *time.Time      `json:"expires_at"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" {
 			jsonError(w, 400, "invalid_request", "name is required")
 			return
 		}
-		if e := s.keys.Update(r.Context(), id, in.Name, in.RPM, in.AllowedModels, in.ExpiresAt); e != nil {
+		var allowedTools []string
+		if len(in.AllowedTools) > 0 && string(in.AllowedTools) != "null" {
+			if json.Unmarshal(in.AllowedTools, &allowedTools) != nil || allowedTools == nil {
+				jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", "allowed_tools must be an array of tool names or null")
+				return
+			}
+			if err := s.validateKeyTools(allowedTools); err != nil { jsonError(w, http.StatusBadRequest, "invalid_allowed_tools", err.Error()); return }
+		}
+		if e := s.keys.UpdateWithTools(r.Context(), id, in.Name, in.RPM, in.AllowedModels, allowedTools, in.ExpiresAt); e != nil {
 			applog.Printf("update api key failed: id=%d err=%v", id, e)
 			jsonError(w, 500, "update_failed", e.Error())
 			return

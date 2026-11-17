@@ -149,6 +149,7 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("schema upgrade failed (model_prices): %w", err)
 	}
 	alters := []string{
+		`ALTER TABLE api_keys ADD COLUMN allowed_tools TEXT NULL`,
 		`ALTER TABLE models ADD COLUMN runtime_json LONGTEXT NULL`,
 		`ALTER TABLE request_logs ADD COLUMN client_name VARCHAR(128) NULL`,
 		`ALTER TABLE request_logs ADD COLUMN ttft_ms BIGINT UNSIGNED NULL`,
