@@ -314,7 +314,7 @@ func scalarMatchesType(n *jsonNode, typ string) bool {
 // ValidateArguments 使用已登记 Schema 的同一子集规则校验模型返回的参数 JSON。
 func ValidateArguments(schema, arguments []byte) error {
 	if err := ValidateSchema(schema); err != nil { return err }
-	rootSchema, err := parseStrictJSON(schema, MaxSchemaBytes, MaxSchemaDepth)
+	rootSchema, err := parseStrictJSON(schema, MaxSchemaBytes, MaxSchemaDepth*3+4)
 	if err != nil { return fmt.Errorf("%w: %v", ErrInvalidSchema, err) }
 	value, err := parseStrictJSON(arguments, MaxArgumentBytes, MaxArgumentDepth)
 	if err != nil { return fmt.Errorf("%w: %v", ErrInvalidArguments, err) }
