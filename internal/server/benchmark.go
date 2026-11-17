@@ -135,6 +135,7 @@ type benchmarkJobSnapshot struct {
 	ContentText    string     `json:"content_text,omitempty"`
 	ReasoningText  string     `json:"reasoning_text,omitempty"`
 	ContentChars   int        `json:"content_chars,omitempty"`
+	ErrorCode      string     `json:"error_code,omitempty"`
 }
 
 // snapshot 在锁内复制业务字段到独立 DTO，供 HTTP 序列化使用。
