@@ -547,11 +547,14 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 	}
 	events, _ := s.logs.ListStreamEvents(r.Context(), id, 2000)
 	snap := job.snapshot()
+	payloadPersisted := false
+	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" {
+		_, payloadErr := s.logs.GetPayload(r.Context(), snap.RequestID)
+		payloadPersisted = payloadErr == nil
+	}
 	out := map[string]interface{}{
-		"job":           snap,
-		"stream_events": events,
-		"request_id":    snap.RequestID,
-		"request_log":   "/api/requests/" + snap.RequestID,
+		"job": snap, "stream_events": events, "request_id": snap.RequestID,
+		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
 	}
 	if snap.Status != "running" {
 		if raw, err := s.logs.GetRequestAnalysis(r.Context(), id); err == nil {

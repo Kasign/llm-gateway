@@ -3048,7 +3048,7 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
-        status: { type: string, enum: [running, completed, failed, cancelled] }
+        status: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
         model_key: { type: string }
         llama_model: { type: string }
         prompt_len: { type: integer, minimum: 0 }
@@ -3072,6 +3072,7 @@ components:
         content_text: { type: string }
         reasoning_text: { type: string }
         content_chars: { type: integer, minimum: 0 }
+        error_code: { type: string }
       additionalProperties: false
     BenchmarkStopResult:
       type: object
@@ -3095,6 +3096,7 @@ components:
           nullable: true
         request_id: { type: string }
         request_log: { type: string }
+        payload_persisted: { type: boolean, description: "完整请求/响应正文是否已按 logging.store_payload 持久化" }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
       additionalProperties: false

@@ -111,7 +111,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	}
 	out := map[string]interface{}{
 		"job": snap, "stream_events": events, "request_id": snap.RequestID,
-		"request_log": "/api/requests/" + snap.RequestID, "payload_available": false,
+		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": false,
 	}
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil {
 		if payload, err := s.logs.GetPayload(r.Context(), run.RequestID); err == nil {
@@ -125,7 +125,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 					snap.ContentChars, snap.ReasoningChars = len(content), len(reasoning)
 				}
 				out["job"] = snap
-				out["payload_available"] = true
+				out["payload_persisted"] = true
 			}
 		}
 	}
