@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whl/llm-gateway/internal/audit"
 	"github.com/whl/llm-gateway/internal/auth"
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
@@ -140,7 +141,9 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 		t.Fatal(err)
 	}
 	providerInstance := &toolLoopTestProvider{}
+	auditWriter := audit.NewWriter(nil, 8)
 	s := &Server{
+		audit: auditWriter,
 		cfg: &config.Config{Tools: config.ToolsConfig{
 			Enabled: true,
 			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
@@ -179,6 +182,19 @@ func TestForwardWithToolsUsesOneProviderForAllRoundsAndWritesOnlyFinalResponse(t
 	if !strings.Contains(string(providerInstance.firstTools), "test.echo") ||
 		strings.Contains(string(providerInstance.firstTools), "client.injected") {
 		t.Fatalf("client tool definition was not replaced: %s", providerInstance.firstTools)
+	}
+	flushCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := auditWriter.Flush(flushCtx); err != nil {
+		t.Fatalf("flush tool audit event: %v", err)
+	}
+	if err := auditWriter.Shutdown(flushCtx); err != nil {
+		t.Fatalf("shutdown audit writer: %v", err)
+	}
+	stats := auditWriter.Stats()
+	if stats.ToolEventEnqueuedTotal != 1 || stats.ToolEventWriteFailedTotal != 1 {
+		t.Fatalf("tool audit pipeline metrics enqueued/write_failed = %d/%d, want 1/1",
+			stats.ToolEventEnqueuedTotal, stats.ToolEventWriteFailedTotal)
 	}
 }
 
@@ -540,4 +556,32 @@ func TestForwardWithToolsRejectsClientIntentWithoutKeyToolGrant(t *testing.T) {
 	_, err, handled := (inferenceForwarder{s:s}).forwardWithTools(context.Background(),state,&toolLoopTestProvider{},httptest.NewRequest(http.MethodPost,"http://gateway/v1/chat/completions",nil),"/v1/chat/completions",httptest.NewRecorder())
 	coreErr, ok := err.(*core.Error)
 	if !handled || !ok || coreErr.Status != http.StatusForbidden || coreErr.Code != "tool_not_allowed" { t.Fatalf("expected fail-closed 403, handled=%v err=%#v",handled,err) }
+}
+
+
+func TestMapToolCallAuditEventUsesStableRuntimeErrorCodes(t *testing.T) {
+	cases := []struct {
+		name string
+		err error
+		status string
+		code string
+	}{
+		{"authorization", toolruntime.ErrUnauthorized, "rejected", "tool_unauthorized"},
+		{"authorization unavailable", toolruntime.ErrAuthorizationUnavailable, "rejected", "tool_authorization_unavailable"},
+		{"concurrency", toolruntime.ErrConcurrencyLimit, "rejected", "tool_concurrency_limit"},
+		{"timeout", toolruntime.ErrExecutionTimeout, "timed_out", "tool_timeout"},
+		{"invalid result", toolruntime.ErrInvalidResult, "failed", "tool_result_invalid"},
+		{"result too large", toolruntime.ErrResultTooLarge, "failed", "tool_result_too_large"},
+		{"executor panic", toolruntime.ErrExecutorPanicked, "failed", "tool_executor_panicked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := mapToolCallAuditEvent(coordinator.ToolCallEvent{
+				Seq: 1, Round: 1, ToolName: "web.search", Status: "failed", Cause: tc.err,
+			})
+			if event.Status != tc.status || event.ErrorCode != tc.code {
+				t.Fatalf("mapped status/code = %s/%s, want %s/%s", event.Status, event.ErrorCode, tc.status, tc.code)
+			}
+		})
+	}
 }

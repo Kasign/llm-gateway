@@ -2907,7 +2907,7 @@ components:
     AuditMetrics:
       type: object
       description: 审计队列只读内存快照；各计数器独立读取，不承诺跨字段事务一致性。
-      required: [queue_depth, queue_capacity, normal_limit, closed, enqueued_total, attempted_total, dropped_total, dropped_writer_closed_total, dropped_normal_capacity_reserved_total, dropped_queue_full_total, drop_rate, write_succeeded_total, write_failed_total, queue_wait_count, queue_wait_total_ms, queue_wait_max_ms]
+      required: [queue_depth, queue_capacity, normal_limit, closed, enqueued_total, attempted_total, dropped_total, dropped_writer_closed_total, dropped_normal_capacity_reserved_total, dropped_queue_full_total, drop_rate, write_succeeded_total, write_failed_total, tool_event_enqueued_total, tool_event_dropped_total, tool_event_write_succeeded_total, tool_event_write_failed_total, queue_wait_count, queue_wait_total_ms, queue_wait_max_ms]
       properties:
         queue_depth: { type: integer, minimum: 0 }
         queue_capacity: { type: integer, minimum: 0 }
@@ -2922,6 +2922,10 @@ components:
         drop_rate: { type: number, minimum: 0, maximum: 1 }
         write_succeeded_total: { type: integer, format: int64, minimum: 0 }
         write_failed_total: { type: integer, format: int64, minimum: 0 }
+        tool_event_enqueued_total: { type: integer, format: int64, minimum: 0 }
+        tool_event_dropped_total: { type: integer, format: int64, minimum: 0 }
+        tool_event_write_succeeded_total: { type: integer, format: int64, minimum: 0 }
+        tool_event_write_failed_total: { type: integer, format: int64, minimum: 0 }
         queue_wait_count: { type: integer, format: int64, minimum: 0 }
         queue_wait_total_ms: { type: number, minimum: 0 }
         queue_wait_max_ms: { type: number, minimum: 0 }
