@@ -35,6 +35,9 @@ import (
 	"github.com/whl/llm-gateway/internal/ratelimit"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
+	"github.com/whl/llm-gateway/internal/tools"
+	toolruntime "github.com/whl/llm-gateway/internal/tools/runtime"
+	"github.com/whl/llm-gateway/internal/tools/modules/searxng"
 )
 
 // Server 是网关的"大脑"，把所有组件组装在一起。
@@ -53,6 +56,9 @@ type Server struct {
 	// —— 外部服务客户端 ——
 	llama      *llama.Client            // 当前活动本地后端客户端，负责推理传输和控制 API。
 	providers  *provider.Registry       // Provider 注册表，统一推理调用边界。
+	toolRegistry *tools.Registry        // 服务端启动时注册的工具定义和执行器。
+	toolRuntime  *toolruntime.Runtime   // 单次工具调用的授权与资源执行边界。
+	toolInitErr  error                  // 工具系统初始化失败时保留错误，工具功能 fail closed。
 	limiter    *ratelimit.Limiter       // Redis 限流器：控制每个 API Key 每分钟能请求多少次
 	live       *live.Registry           // 实时请求看板：内存里记录正在跑的请求，管理后台可实时查看
 	downloader *downloader.HFDownloader // HuggingFace 下载器：从网上下载 AI 模型文件（GGUF 格式）
@@ -153,6 +159,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	srv.runs = newRunCancels()
 	srv.loadWebProviders(context.Background())
 	srv.initUpstreamFromDB(context.Background())
+	srv.toolInitErr = srv.initToolSystem()
 	// 7. 加载网页登录状态（从数据库恢复上次的登录会话）
 	srv.loadWebLoginState(context.Background())
 	// 9. 按显式保留策略启动低频、分批次的历史请求清理；默认禁用。
@@ -190,6 +197,10 @@ func (s *Server) ShutdownAudit(ctx context.Context) error {
 // CheckDependencies 启动时探测 Redis 与 LLM 上游是否可达；失败不阻止进程启动但会打日志。
 // 作用：启动时做一次"健康体检"，看看 Redis 和 llama.cpp 能不能连上，连不上就警告但照样启动。
 func (s *Server) CheckDependencies(ctx context.Context) error {
+	if s != nil && s.toolInitErr != nil {
+		applog.Printf("dependency check failed: tool system: %v", s.toolInitErr)
+		return fmt.Errorf("tool system: %w", s.toolInitErr)
+	}
 	// Redis 是请求治理的必需依赖；推理端只检查当前活动 Provider，避免误探测被保留的旧本地客户端。
 	if err := s.limiter.Ping(ctx); err != nil {
 		applog.Printf("dependency check failed: redis: %v", err)
