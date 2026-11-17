@@ -1,0 +1,114 @@
+# 当前任务：TOOL-03 Runtime 执行边界
+
+> 状态：已完成
+> 更新日期：2026-11-17
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 开始基线：4598c04d3cd7ad4df47c83d34d8ec03130c25ce6
+> 前置任务：[TOOL-02 Tool Definition / Registry](任务历史/工具能力/TOOL-02-Tool-Definition与Registry.md)
+> 任务状态权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 任务目标
+
+在已完成的 Definition / Schema / Registry 之上，建立统一的单次工具执行 Runtime。Runtime 是工具执行安全边界，不负责一次推理请求中的模型—工具多轮调度。
+
+本任务重点：
+- 从 Registry 查找已注册工具及 Executor。
+- 执行前校验 Arguments，拒绝无效参数。
+- 执行前进行服务端授权检查，授权失败必须拒绝执行。
+- 统一管理单次执行的超时、取消和并发上限。
+- 限制工具输出大小，并验证输出为合法 JSON。
+- 明确执行错误分类，避免将工具内部错误或敏感信息直接暴露给模型/客户端。
+- 为超时、取消、并发、授权、输入输出边界和执行异常建立单元测试及竞态测试。
+
+## 2. 架构边界
+
+- Runtime 位于 `internal/tools/runtime`，属于统一 Tools 功能模块内部的独立 Go package。
+- Runtime 依赖 Tools 根包提供的 Registry、Executor、Definition 和参数校验能力。
+- Runtime 不依赖 `internal/server`、`internal/provider`、`internal/store`，也不反向依赖具体工具子模块。
+- 具体工具继续位于 `internal/tools/modules/<tool>`，只实现 Executor；不自行管理请求级并发、权限和调用超时。
+- Coordinator 后续调用 Runtime；Runtime 不调用 Coordinator，不触发模型请求，也不递归调用 Pipeline。
+- Policy 的授权语义由服务端控制。Runtime 必须在执行前通过显式注入的授权接口检查，授权接口缺失或拒绝时一律 fail closed；本任务不实现管理台权限配置和调用方 ACL 产品流程。
+
+## 3. 本任务范围
+
+### 3.1 必须实现
+
+1. Runtime 最小公共 API 和依赖注入方式。
+2. Registry Lookup 与 Executor 调用。
+3. 使用已登记 Definition 的 Schema 校验 Arguments。
+4. 授权检查接口及 fail-closed 行为。
+5. 单次执行超时和 Context 取消传播。
+6. 进程级全局并发上限，满额 fail-fast；默认 4、硬上限 64，不做等待队列或每工具单独限流。
+7. 工具输出默认 64 KiB、硬上限 1 MiB；超限拒绝，校验 UTF-8 与合法 JSON，返回副本。
+8. panic 防护与错误归一化策略评估；不得把 panic 内容、凭据或完整敏感参数写入普通错误。
+9. 单元测试、并发/竞态测试、中文包文档。
+
+### 3.2 不在本任务实现
+
+- Coordinator 的模型—工具多轮流程。
+- SearXNG HTTP Adapter 和真实搜索请求。
+- 工具管理 API、持久化配置和 Web UI。
+- 完整权限管理产品流程及管理台配置（归 TOOL-07）。
+- 工具审计存储和诊断页面（归 TOOL-08）。
+- 自动重试、并发工具批量调度、动态加载/卸载和通用 Agent 能力。
+
+## 4. 实现前审查与已确认决策
+
+### 4.1 现有能力审查
+
+- 请求取消：`internal/server/pipeline_http.go` 使用客户端 `r.Context()` 创建请求 Context，经 `proxyRequestContext` 加整体时限，并通过 `runCancels` 登记管理端取消函数。Runtime 只接收并派生该 Context，不建立第二套请求取消注册表。
+- 超时：`internal/server/request_timeout.go` 的 `contextWithOptionalTimeout` 已明确 0 表示不添加整体 Deadline，但父 Context 取消仍传播。Provider 还通过 `http.Client.Timeout` 覆盖完整 HTTP 请求。Runtime 的工具执行超时应使用 `context.WithTimeout`，不能依赖 HTTP Client 超时。
+- Provider 并发：`internal/provider/openai_compatible.go` 已有 FIFO、有界等待队列、等待超时、取消清理和迟到许可处理，测试覆盖较完整。但 Tools 根包不依赖 Provider，Runtime 不能直接导入该实现，也不应复制整套 Provider 专用队列。
+- 响应大小：Provider 非流式响应使用 `io.LimitReader(limit+1)` 判断超限，不截断后继续使用；工具结果也采用超限拒绝，不做静默截断。
+- 错误边界：Provider 使用稳定错误分类，并避免把上游正文直接写入通用错误文案。Tools Runtime 定义自己的错误分类，不依赖 `internal/core`；后续由 Coordinator / Server 映射对外错误。
+- 现有推理请求已经有整体取消和生命周期管理；Runtime 不修改 Pipeline，不创建新的顶层请求或审计生命周期。
+
+### 4.2 Runtime 第一版执行策略
+
+1. **并发策略：**采用进程级全局并发上限，满额时立即返回并发限制错误（fail-fast）；第一版不排队、不做每工具单独限流。默认并发 4，允许构造时配置，硬上限 64。这样避免额外等待队列和重复实现 Provider FIFO 队列。
+2. **执行超时：**默认 30 秒，构造时可调整，硬上限 300 秒；父 Context 的更早 Deadline / Cancel 始终优先。第一版不做每工具独立超时配置。
+3. **输入：**继续复用根包 `ValidateArguments`，Arguments 原文上限 8 KiB；执行前先完成 Registry 查找、授权和参数校验，再占用执行并发槽位。
+4. **授权：**注入显式 Authorizer；缺失时 fail closed。授权返回拒绝与授权服务错误分开分类；Runtime 不自行读取配置或调用方凭据。
+5. **输出：**默认最大 64 KiB，硬上限 1 MiB；超限直接拒绝，不截断。结果必须是有效 UTF-8 和合法 JSON，允许 JSON 标量/数组/对象/null；返回前复制 RawMessage，避免暴露执行器内部缓冲区。
+6. **取消语义：**Executor 必须遵守传入 Context。Go 无法安全强杀不响应 Context 的 goroutine；Runtime 不通过额外 goroutine 包装制造“超时已停止”的假象，也不会在 Executor 仍运行时提前释放并发槽位。
+7. **异常：**Executor panic 在 Runtime 边界恢复为稳定的内部执行错误，不把 panic 值或敏感内容放入对外错误；所有正常错误、超时、取消和 panic 路径都必须释放并发槽位。
+8. **重试：**不自动重试工具执行，避免重复副作用和不确定的外部请求。
+
+这些默认值先作为第一版 Runtime 的明确边界；如果后续真实工具场景证明不足，再基于证据调整，不提前建设队列、每工具策略或复杂配置系统。
+
+## 5. 验收条件
+
+- Runtime 只能执行 Registry 中已注册的工具。
+- 未授权、授权器缺失、参数不符合 Schema 时，Executor 不得被调用。
+- Context 取消和执行超时能够传递给 Executor，且不会泄漏并发执行槽位。
+- 并发数量始终不超过配置上限；等待中的请求可以被取消。
+- 超大、非法 JSON 输出被拒绝；错误响应不泄露内部敏感信息。
+- 工具 panic 不导致 Gateway 进程崩溃，且有稳定错误分类（若审查后确认需恢复 panic）。
+- 单元测试、竞态测试和全量 Go CI 通过。
+- 不修改 Pipeline 生命周期，不实现 Coordinator 或具体工具 Adapter。
+
+## 6. 实施结果
+
+1. 已实现 `internal/tools/runtime/runtime.go`：Runtime、Config、Authorizer、执行错误分类、全局 fail-fast 并发限制、Context 超时、结果校验和 panic 恢复。
+2. 已实现 `internal/tools/runtime/runtime_test.go`：覆盖授权缺失/拒绝/依赖错误/panic、参数校验、超时、父 Context 取消、并发上限、输出大小/JSON/UTF-8、Executor 错误与 panic。
+3. 已将竞态检测命令扩展为 `go test -race ./internal/tools/...`，确保 Tools 根包和所有工具子包都进入竞态测试。
+4. 未修改 Pipeline、Provider、HTTP 路由或数据库；Runtime 仍是 Tools 模块内部独立 package。
+5. 完成全量 Go CI 验收后归档，进入 TOOL-04 SearXNG Adapter。
+
+
+## 7. 最终执行记录与验收
+
+- TOOL-02 已完成，归档见 [TOOL-02 历史记录](任务历史/工具能力/TOOL-02-Tool-Definition与Registry.md)。
+- Runtime 代码提交：初始实现 `4ea2779bbf0dc08a2e66b135cdb2a10f5db48c70`；授权异常与竞态覆盖修正 `5e6732ad1e5992470d927fdfd712f6e6f10f44c6`。
+- 最终验收分支 HEAD：`5e6732ad1e5992470d927fdfd712f6e6f10f44c6`。
+- Go CI：<https://github.com/Kasign/llm-gateway/actions/runs/44014556169>，结论 success。
+- 已通过 `go test ./...`、`go test -race ./internal/tools/...`、`go vet ./...`、Gateway 编译、Docker 镜像构建、配置/API 契约与前端构建、故障注入与恢复、稳态负载及审计持久化。
+- 独立 Web UI Browser Smoke 工作流因安装 Chromium / Playwright 步骤失败；本任务未修改 Web UI，该失败不影响 Go CI 成功结论。
+- Runtime 默认边界：全局并发 4（硬上限 64），fail-fast 无等待队列；执行超时 30 秒（硬上限 5 分钟）；结果 64 KiB（硬上限 1 MiB）。
+- Authorizer 缺失/拒绝/错误/panic 均 fail closed；Executor 错误和 panic 不向外暴露原始敏感文案。
+- Executor 必须遵守 Context。Go 无法强杀不响应 Context 的 goroutine；Runtime 不会在 Executor 仍运行时提前释放并发槽位。
+
+## 8. 验收结论
+
+TOOL-03 的 Runtime 执行边界已实现并通过全量 Go CI。Coordinator、SearXNG Adapter、管理权限配置、工具审计和请求级闭环由后续任务完成。
