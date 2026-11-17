@@ -2,7 +2,9 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"strconv"
 	"testing"
 )
 
@@ -80,6 +82,59 @@ func TestStrictJSONLimitsAndUTF8(t *testing.T) {
 	if _, err := parseStrictJSON([]byte{0xff}, 100, 4); err == nil { t.Fatal("expected UTF-8 error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1} {"y":2}`), 100, 4); err == nil { t.Fatal("expected trailing JSON error") }
 	if _, err := parseStrictJSON([]byte(`{"x":1,"x":2}`), 100, 4); err == nil { t.Fatal("expected duplicate key error") }
+}
+
+func TestSchemaCollectionLimits(t *testing.T) {
+	buildProperties := func(count int) string {
+		items := make([]string, count)
+		for i := range items {
+			items[i] = fmt.Sprintf(`"p%d":{"type":"string"}`, i)
+		}
+		return `{"type":"object","properties":{` + strings.Join(items, ",") + `},"additionalProperties":false}`
+	}
+	if err := ValidateSchema([]byte(buildProperties(MaxObjectProperties))); err != nil {
+		t.Fatalf("maximum property count should pass: %v", err)
+	}
+	if err := ValidateSchema([]byte(buildProperties(MaxObjectProperties + 1))); err == nil {
+		t.Fatal("property count above limit should fail")
+	}
+
+	buildEnum := func(count int) string {
+		items := make([]string, count)
+		for i := range items { items[i] = strconv.Itoa(i) }
+		return `{"type":"object","properties":{"value":{"type":"integer","enum":[` + strings.Join(items, ",") + `]}},"additionalProperties":false}`
+	}
+	if err := ValidateSchema([]byte(buildEnum(MaxEnumItems))); err != nil {
+		t.Fatalf("maximum enum size should pass: %v", err)
+	}
+	if err := ValidateSchema([]byte(buildEnum(MaxEnumItems + 1))); err == nil {
+		t.Fatal("enum size above limit should fail")
+	}
+
+	arraySchema := func(max int) string {
+		return fmt.Sprintf(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"integer"},"maxItems":%d}},"additionalProperties":false}`, max)
+	}
+	if err := ValidateSchema([]byte(arraySchema(MaxArrayItems))); err != nil {
+		t.Fatalf("maximum array limit should pass: %v", err)
+	}
+	if err := ValidateSchema([]byte(arraySchema(MaxArrayItems + 1))); err == nil {
+		t.Fatal("schema array limit above maximum should fail")
+	}
+}
+
+func TestArgumentArrayElementLimit(t *testing.T) {
+	schema := []byte(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"integer"}}},"required":["items"],"additionalProperties":false}`)
+	buildArguments := func(count int) []byte {
+		items := make([]string, count)
+		for i := range items { items[i] = strconv.Itoa(i) }
+		return []byte(`{"items":[` + strings.Join(items, ",") + `]}`)
+	}
+	if err := ValidateArguments(schema, buildArguments(MaxArrayItems)); err != nil {
+		t.Fatalf("maximum argument array size should pass: %v", err)
+	}
+	if err := ValidateArguments(schema, buildArguments(MaxArrayItems + 1)); err == nil {
+		t.Fatal("argument array above maximum should fail")
+	}
 }
 
 func TestStringLengthUsesUnicodeCodePoints(t *testing.T) {
