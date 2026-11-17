@@ -15,6 +15,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"runtime"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +72,9 @@ type benchmarkJob struct {
 	InferenceLatencyMS *int64 `json:"inference_latency_ms,omitempty"`
 	InferenceLatencyStatus string `json:"inference_latency_status"`
 	TTFTStatus string `json:"ttft_status"`
+	ConditionSHA256 string `json:"condition_sha256,omitempty"`
+	ConditionStatus string `json:"condition_status"`
+	ConditionMissing []string `json:"condition_missing,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -165,6 +171,9 @@ type benchmarkJobSnapshot struct {
 	InferenceLatencyMS *int64 `json:"inference_latency_ms,omitempty"`
 	InferenceLatencyStatus string `json:"inference_latency_status"`
 	TTFTStatus string `json:"ttft_status"`
+	ConditionSHA256 string `json:"condition_sha256,omitempty"`
+	ConditionStatus string `json:"condition_status"`
+	ConditionMissing []string `json:"condition_missing,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -193,6 +202,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated,
 		ModelLoadMS: j.ModelLoadMS, ModelLoadStatus: j.ModelLoadStatus,
 		InferenceLatencyMS: j.InferenceLatencyMS, InferenceLatencyStatus: j.InferenceLatencyStatus, TTFTStatus: j.TTFTStatus,
+		ConditionSHA256: j.ConditionSHA256, ConditionStatus: j.ConditionStatus, ConditionMissing: append([]string(nil), j.ConditionMissing...),
 		InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
@@ -412,6 +422,65 @@ func (s *Server) authenticateBenchmarkKey(r *http.Request) (*auth.Key, string) {
 	return s.authenticateOutcome(r.Context(), keyRequest)
 }
 
+// benchmarkEnvironmentSnapshot 记录进程可直接读取的构建与运行环境信息；不探测硬件或增加上游请求。
+func benchmarkEnvironmentSnapshot() map[string]interface{} {
+	out := map[string]interface{}{
+		"go_version": runtime.Version(),
+		"goos": runtime.GOOS,
+		"goarch": runtime.GOARCH,
+		"logical_cpu_count": runtime.NumCPU(),
+		"vcs_revision": "",
+		"vcs_modified": "",
+		"module_version": "",
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		out["module_version"] = info.Main.Version
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				out["vcs_revision"] = setting.Value
+			case "vcs.modified":
+				out["vcs_modified"] = setting.Value
+			}
+		}
+	}
+	return out
+}
+
+// benchmarkConditionMetadata 计算条件指纹。信息不完整时保留部分指纹，但禁止自动视为严格可比较。
+func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 string) (string, string, []string, error) {
+	missing := make([]string, 0, 4)
+	modelIdentity, _ := snapshot["model_identity"].(map[string]interface{})
+	if modelIdentity == nil || strings.TrimSpace(fmt.Sprint(modelIdentity["sha256"])) == "" {
+		missing = append(missing, "model_sha256_unknown")
+	}
+	environment, _ := snapshot["environment"].(map[string]interface{})
+	if environment == nil || strings.TrimSpace(fmt.Sprint(environment["vcs_revision"])) == "" {
+		missing = append(missing, "gateway_revision_unknown")
+	}
+	if strings.TrimSpace(fmt.Sprint(snapshot["backend_version"])) == "" {
+		missing = append(missing, "backend_version_unknown")
+	}
+	hardware, _ := snapshot["hardware"].(map[string]interface{})
+	if hardware == nil || strings.TrimSpace(fmt.Sprint(hardware["cpu_model"])) == "" {
+		missing = append(missing, "hardware_model_unknown")
+	}
+	if hardware == nil || hardware["memory_bytes"] == nil {
+		missing = append(missing, "hardware_memory_unknown")
+	}
+	sort.Strings(missing)
+	status := "complete"
+	if len(missing) > 0 {
+		status = "partial"
+	}
+	payload, err := json.Marshal(map[string]interface{}{"prompt_sha256": promptSHA256, "snapshot": snapshot})
+	if err != nil {
+		return "", "unknown", missing, err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), status, missing, nil
+}
+
 // benchmarkAPI 处理 POST /api/benchmark：创建异步 benchmark 任务并返回 poll URL。
 //
 // # model_key 是什么、从哪来？
@@ -542,24 +611,58 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if taskModelID == "" {
 		taskModelID = activeUpstream.ModelName
 	}
-	configJSON, configErr := json.Marshal(map[string]interface{}{
+	promptHash := sha256.Sum256([]byte(in.Prompt))
+	promptSHA256 := hex.EncodeToString(promptHash[:])
+	modelIdentity := map[string]interface{}{
+		"model_key": modelKey, "model_id": taskModelID, "source_type": "", "hf_repo": "",
+		"hf_revision": "", "filename": "", "quantization": "", "sha256": "",
+	}
+	if m != nil {
+		modelIdentity["source_type"] = m.SourceType
+		modelIdentity["hf_repo"] = m.HFRepo
+		modelIdentity["hf_revision"] = m.HFRevision
+		modelIdentity["filename"] = m.Filename
+		modelIdentity["quantization"] = m.Quantization
+		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
+	}
+	configSnapshot := map[string]interface{}{
 		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey,
 		"model_id": taskModelID, "max_tokens": in.MaxTokens, "stream": true,
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
-	})
+		"model_identity": modelIdentity,
+		"environment": benchmarkEnvironmentSnapshot(),
+		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil, "logical_cpu_count": runtime.NumCPU()},
+		"backend_version": "",
+		"runtime_config": map[string]interface{}{
+			"warm_start": s.cfg.Llama.WarmStart,
+			"warm_start_interval_seconds": s.cfg.Llama.WarmStartInterval,
+			"request_timeout_seconds": s.cfg.Llama.RequestTimeout,
+			"max_output_tokens": s.cfg.Llama.MaxOutputTokens,
+			"models_max": s.cfg.Llama.ModelsMax,
+			"auto_load_on_proxy": s.cfg.Llama.AutoLoadOnProxy,
+		},
+	}
+	conditionSHA256, conditionStatus, conditionMissing, configErr := benchmarkConditionMetadata(configSnapshot, promptSHA256)
+	if configErr != nil {
+		jsonError(w, http.StatusInternalServerError, "benchmark_config_failed", "failed to snapshot benchmark comparison conditions")
+		return
+	}
+	configSnapshot["condition_sha256"] = conditionSHA256
+	configSnapshot["condition_status"] = conditionStatus
+	configSnapshot["condition_missing"] = conditionMissing
+	configJSON, configErr := json.Marshal(configSnapshot)
 	if configErr != nil {
 		jsonError(w, http.StatusInternalServerError, "benchmark_config_failed", "failed to snapshot benchmark configuration")
 		return
 	}
-	promptHash := sha256.Sum256([]byte(in.Prompt))
 	now := time.Now()
 	keyID := key.ID
 	taskRecord := store.BenchmarkTask{
 		TaskID: jobID, APIKeyID: &keyID, Scenario: "performance", Status: "running",
 		ProviderID: target.Backend, Backend: target.Backend, ModelKey: modelKey, ModelID: taskModelID,
-		PromptSHA256: hex.EncodeToString(promptHash[:]), PromptLength: int64(len(in.Prompt)),
+		PromptSHA256: promptSHA256, PromptLength: int64(len(in.Prompt)),
 		MaxTokens: in.MaxTokens, ConfigJSON: string(configJSON), RunCount: 1, StartedAt: now,
 	}
 	runRecord := store.BenchmarkRun{
@@ -569,6 +672,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	job := &benchmarkJob{
 		ID: jobID, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: true,
 		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown",
+		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: append([]string(nil), conditionMissing...),
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
 		taskRecord: taskRecord, runRecord: runRecord,
 	}

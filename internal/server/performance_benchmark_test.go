@@ -364,3 +364,39 @@ func TestBenchmarkObserverTTFTStartsAtRunBoundary(t *testing.T) {
 		t.Fatalf("TTFT = %dms; want roughly elapsed time since Run start", *observer.ttft)
 	}
 }
+
+
+// TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs 验证条件快照稳定，并显式暴露缺失维度。
+func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *testing.T) {
+	snapshot := map[string]interface{}{
+		"model_identity": map[string]interface{}{"sha256": "abc123"},
+		"environment": map[string]interface{}{"vcs_revision": "deadbeef"},
+		"backend_version": "1.2.3",
+		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
+		"max_tokens": 256,
+	}
+	first, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || status != "complete" || len(missing) != 0 || first == "" {
+		t.Fatalf("complete condition metadata = %q/%q/%v, err=%v", first, status, missing, err)
+	}
+	second, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || second != first {
+		t.Fatalf("condition fingerprint is not deterministic: %q != %q, err=%v", second, first, err)
+	}
+	snapshot["max_tokens"] = 512
+	changed, _, _, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || changed == first {
+		t.Fatalf("changed generation parameters retained fingerprint %q, err=%v", changed, err)
+	}
+
+	partial := map[string]interface{}{
+		"model_identity": map[string]interface{}{"sha256": ""},
+		"environment": map[string]interface{}{"vcs_revision": ""},
+		"backend_version": "",
+		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil},
+	}
+	_, status, missing, err = benchmarkConditionMetadata(partial, "prompt-hash")
+	if err != nil || status != "partial" || len(missing) != 5 {
+		t.Fatalf("partial condition metadata = %q/%v, err=%v", status, missing, err)
+	}
+}

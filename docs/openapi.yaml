@@ -3064,6 +3064,9 @@ components:
         inference_latency_ms: { type: integer, format: int64, minimum: 0, description: "一次 Pipeline.Run 的墙钟耗时，不等同模型 Decode 时间" }
         inference_latency_status: { type: string, enum: [measured, not_applicable, unknown] }
         ttft_status: { type: string, enum: [measured, not_applicable, unknown] }
+        condition_sha256: { type: string, description: "测试条件快照指纹；partial 状态不可作为严格可比较依据" }
+        condition_status: { type: string, enum: [complete, partial, unknown] }
+        condition_missing: { type: array, items: { type: string } }
         input_tokens: { type: integer, format: int64, minimum: 0 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
         total_tokens: { type: integer, format: int64, minimum: 0 }

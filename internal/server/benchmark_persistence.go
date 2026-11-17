@@ -100,8 +100,15 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	run := runs[len(runs)-1]
+	var condition struct {
+		SHA256 string `json:"condition_sha256"`
+		Status string `json:"condition_status"`
+		Missing []string `json:"condition_missing"`
+	}
+	_ = json.Unmarshal([]byte(task.ConfigJSON), &condition)
 	snap := benchmarkJobSnapshot{
 		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
+		ConditionSHA256: condition.SHA256, ConditionStatus: condition.Status, ConditionMissing: condition.Missing,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
 		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large",
