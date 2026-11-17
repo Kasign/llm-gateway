@@ -513,3 +513,21 @@ func TestRunResetsRequiredToolChoiceAfterFirstToolRound(t *testing.T) {
 		t.Fatalf("follow-up tool_choice = %s, want auto", second["tool_choice"])
 	}
 }
+
+func TestRunRejectsLegacyFunctionCallingFields(t *testing.T) {
+	for _, body := range []string{
+		`{"messages":[{"role":"user","content":"x"}],"functions":[]}`,
+		`{"messages":[{"role":"user","content":"x"}],"function_call":"auto"}`,
+	} {
+		model := &testModel{}
+		executor := &testExecutor{}
+		coordinator := testCoordinator(t, model, executor)
+		_, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+		if !errors.Is(err, ErrUnsupportedRequest) {
+			t.Fatalf("Run(%s) error = %v, want ErrUnsupportedRequest", body, err)
+		}
+		if len(model.requests) != 0 {
+			t.Fatal("legacy function calling request reached the model")
+		}
+	}
+}

@@ -78,7 +78,7 @@ func (s *Server) storeCoordinatorUsage(requestID string, result coordinator.Resu
 	if complete {
 		cs.tokens = usage
 	} else {
-		cs.tokens = logutil.TokenHarvest{}
+		cs.tokens = logutil.TokenHarvest{Source: "unknown"}
 	}
 	cs.mu.Unlock()
 }

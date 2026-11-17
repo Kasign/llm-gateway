@@ -141,7 +141,9 @@ func requestHasToolIntent(body []byte) bool {
 	}
 	_, hasTools := object["tools"]
 	_, hasChoice := object["tool_choice"]
-	return hasTools || hasChoice
+	_, hasLegacyFunctions := object["functions"]
+	_, hasLegacyFunctionCall := object["function_call"]
+	return hasTools || hasChoice || hasLegacyFunctions || hasLegacyFunctionCall
 }
 
 func isChatCompletionsPath(path string) bool {

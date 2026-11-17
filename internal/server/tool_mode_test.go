@@ -198,3 +198,54 @@ func TestForwardWithToolsRejectsClientToolsWhenModelNotAllowlisted(t *testing.T)
 		t.Fatalf("unexpected rejection: %#v", err)
 	}
 }
+
+func TestForwardWithToolsFallsBackForRemoteDailyBudgetWithoutClientToolIntent(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{Tools: config.ToolsConfig{
+			Enabled: true,
+			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "remote", ModelKey: "stable-alias"}},
+			AllowedTools: []string{"web.search"},
+		}},
+		webProviders: map[string]managedProvider{
+			"remote": {ID: "remote", Enabled: true, TokenBudgetPerDay: 1000},
+		},
+	}
+	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
+	state := core.State{
+		Request: core.Request{
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"ordinary request"}]}`),
+		},
+		Model: core.ModelChoice{ProviderID: "remote", ModelKey: "stable-alias", UpstreamID: "upstream-model"},
+	}
+	_, err, handled := (inferenceForwarder{s: s}).forwardWithTools(context.Background(), state, &toolLoopTestProvider{}, req, "/v1/chat/completions", httptest.NewRecorder())
+	if handled || err != nil {
+		t.Fatalf("ordinary request did not fall back: handled=%v err=%v", handled, err)
+	}
+}
+
+func TestForwardWithToolsRejectsExplicitIntentWhenRemoteBudgetBlocks(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{Tools: config.ToolsConfig{
+			Enabled: true,
+			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "remote", ModelKey: "stable-alias"}},
+			AllowedTools: []string{"web.search"},
+		}},
+		webProviders: map[string]managedProvider{
+			"remote": {ID: "remote", Enabled: true, TokenBudgetPerDay: 1000},
+		},
+	}
+	req, _ := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil)
+	state := core.State{
+		Request: core.Request{
+			Path: "/v1/chat/completions",
+			Body: []byte(`{"messages":[{"role":"user","content":"x"}],"tools":[]}`),
+		},
+		Model: core.ModelChoice{ProviderID: "remote", ModelKey: "stable-alias", UpstreamID: "upstream-model"},
+	}
+	_, err, handled := (inferenceForwarder{s: s}).forwardWithTools(context.Background(), state, &toolLoopTestProvider{}, req, "/v1/chat/completions", httptest.NewRecorder())
+	coreErr, ok := err.(*core.Error)
+	if !handled || !ok || coreErr.Status != http.StatusServiceUnavailable {
+		t.Fatalf("explicit tool request was not safely rejected: handled=%v err=%v", handled, err)
+	}
+}

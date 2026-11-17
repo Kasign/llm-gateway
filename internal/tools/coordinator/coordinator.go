@@ -307,6 +307,12 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 	if err := json.Unmarshal(body, &request); err != nil || request == nil {
 		return nil, nil, nil, ErrInvalidRequest
 	}
+	if _, exists := request["functions"]; exists {
+		return nil, nil, nil, ErrUnsupportedRequest
+	}
+	if _, exists := request["function_call"]; exists {
+		return nil, nil, nil, ErrUnsupportedRequest
+	}
 	if raw := request["stream"]; len(raw) > 0 {
 		var stream bool
 		if json.Unmarshal(raw, &stream) != nil {
