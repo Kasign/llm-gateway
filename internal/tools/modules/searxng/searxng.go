@@ -152,6 +152,12 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 		return normalizedConfig{}, fmt.Errorf("%w: base_url must be an absolute HTTP(S) URL without userinfo, query, or fragment", ErrInvalidConfig)
 	}
 	base.Scheme = strings.ToLower(base.Scheme)
+	if port := base.Port(); port != "" {
+		value, portErr := strconv.Atoi(port)
+		if portErr != nil || value < 1 || value > 65535 {
+			return normalizedConfig{}, fmt.Errorf("%w: base_url port is invalid", ErrInvalidConfig)
+		}
+	}
 	if base.Scheme != "http" && base.Scheme != "https" {
 		return normalizedConfig{}, fmt.Errorf("%w: base_url scheme must be HTTP or HTTPS", ErrInvalidConfig)
 	}
@@ -281,6 +287,7 @@ var blockedSearXNGPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("64:ff9b::/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("168.63.129.16/32"),
 	netip.MustParsePrefix("fd00:ec2::254/128"),
 }
 
@@ -396,7 +403,9 @@ func normalizeResultURL(raw string) string {
 	if u.Scheme != "http" && u.Scheme != "https" { return "" }
 	u.Fragment = ""
 	u.RawFragment = ""
-	return u.String()
+	normalized := u.String()
+	if len(normalized) > 1024 { return "" }
+	return normalized
 }
 
 func clipUTF8(value string, maxBytes int) string {

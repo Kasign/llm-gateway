@@ -79,9 +79,9 @@ func TestNewConfigDefaultsAndValidation(t *testing.T) {
 func intPtr(v int) *int { return &v }
 
 func TestExecuteNormalizesSearchResultsAndRequest(t *testing.T) {
-	var gotQuery url.Values
+	gotQuery := make(chan url.Values, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.Query()
+		gotQuery <- r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"query":"ignored","results":[
 			{"title":"  Go Release  ","url":"https://go.dev/doc/","content":"  Latest Go release  ","engine":"brave","score":1.5,"publishedDate":"2026-11-16"},
@@ -98,11 +98,12 @@ func TestExecuteNormalizesSearchResultsAndRequest(t *testing.T) {
 	executor := testExecutor(t, server, cfg)
 	result, err := executor.Execute(context.Background(), json.RawMessage(`{"query":" Go release "}`))
 	if err != nil { t.Fatal(err) }
-	if gotQuery.Get("q") != "Go release" || gotQuery.Get("format") != "json" || gotQuery.Get("safesearch") != "2" {
-		t.Fatalf("unexpected request query: %v", gotQuery)
+	queryValues := <-gotQuery
+	if queryValues.Get("q") != "Go release" || queryValues.Get("format") != "json" || queryValues.Get("safesearch") != "2" {
+		t.Fatalf("unexpected request query: %v", queryValues)
 	}
-	if gotQuery.Get("language") != "zh-CN" || gotQuery.Get("categories") != "general,news" {
-		t.Fatalf("unexpected configured search filters: %v", gotQuery)
+	if queryValues.Get("language") != "zh-CN" || queryValues.Get("categories") != "general,news" {
+		t.Fatalf("unexpected configured search filters: %v", queryValues)
 	}
 	var output searchOutput
 	if err := json.Unmarshal(result, &output); err != nil { t.Fatal(err) }
@@ -171,8 +172,8 @@ func TestExecuteDoesNotFollowRedirects(t *testing.T) {
 		fmt.Fprint(w, `{"results":[]}`)
 	}))
 	defer target.Close()
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Redirect(w, nil, target.URL, http.StatusFound)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
 	}))
 	defer redirect.Close()
 	executor := testExecutor(t, redirect, testConfig(redirect.URL))
@@ -227,7 +228,7 @@ func TestExecuteRejectsInvalidArguments(t *testing.T) {
 }
 
 func TestNormalizeResultURLAndClipUTF8(t *testing.T) {
-	for _, raw := range []string{"javascript:alert(1)", "file:///etc/passwd", "https://user:pass@example.com"} {
+	for _, raw := range []string{"javascript:alert(1)", "file:///etc/passwd", "https://user:pass@example.com", "https://example.com/" + strings.Repeat("x", 1100)} {
 		if got := normalizeResultURL(raw); got != "" { t.Errorf("unsafe URL %q was retained as %q", raw, got) }
 	}
 	if got := normalizeResultURL("https://example.com/path#fragment"); strings.Contains(got, "#") {
@@ -253,6 +254,7 @@ func TestAllowedSearXNGAddress(t *testing.T) {
 		{"169.254.169.254", true, false},
 		{"224.0.0.1", true, false},
 		{"192.0.2.1", true, false},
+		{"168.63.129.16", true, false},
 		{"fd00:ec2::254", true, false},
 	}
 	for _, tt := range tests {
@@ -263,10 +265,15 @@ func TestAllowedSearXNGAddress(t *testing.T) {
 	}
 }
 
-func TestNewSafeHTTPClientUsesInjectedResolver(t *testing.T) {
-	client := newSafeHTTPClient(normalizedConfig{requestTimeout: time.Second}, fixedResolver{netip.MustParseAddr("8.8.8.8")})
-	if client == nil || client.Transport == nil || client.CheckRedirect == nil {
-		t.Fatal("safe HTTP client was not fully configured")
+func TestSafeHTTPClientRejectsBlockedResolvedAddress(t *testing.T) {
+	client := newSafeHTTPClient(normalizedConfig{
+		requestTimeout: time.Second, allowPrivateNetwork: true,
+	}, fixedResolver{netip.MustParseAddr("127.0.0.1")})
+	req, err := http.NewRequest(http.MethodGet, "http://searxng.invalid:8080/search", nil)
+	if err != nil { t.Fatal(err) }
+	_, err = client.Do(req)
+	if !errors.Is(err, ErrBlockedAddress) {
+		t.Fatalf("blocked DNS result error = %v", err)
 	}
 }
 
