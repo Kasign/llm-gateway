@@ -5,7 +5,7 @@
 //  2. 后台 goroutine（runBenchmark）确保上游已 load、流式调用 /v1/chat/completions，边收边更新 job 与 live 视图。
 //  3. GET /api/benchmark/{id} 轮询 job 快照、流事件；完成后附带 request 分析；DELETE 可取消进行中的任务。
 //
-// 任务状态仅保存在进程内存（benchmarkStore），完成超过 benchmarkJobTTL 后 cleanup 删除；与 requests 审计日志通过同一 request_id 关联。
+// Task/Run 元数据持久化到 MariaDB；运行中的 Job 仍保留在内存供实时轮询。请求正文与事件继续由现有 request_logs / payload / stream event 仓储管理。
 package server
 
 import (
@@ -699,7 +699,7 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		} else if res.LoadedAs != "" {
 			llamaName = res.LoadedAs
 		} else {
-			llamaName = s.resolveLlamaModelForBackend(ctx, be, activeUpstream.ModelName, m)
+			llamaName = s.resolveLlamaModelForBackend(ctx, be, target.ModelName, m)
 		}
 	} else {
 		applog.Infof("[benchmark:%s] ensure upstream loaded: %s", job.ID, llamaName)
