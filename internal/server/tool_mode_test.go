@@ -348,3 +348,85 @@ func TestForwardWithToolsFallsBackForOrdinaryMultipleChoiceRequest(t *testing.T)
 		t.Fatalf("ordinary n>1 request did not preserve the existing path: handled=%v err=%v", handled, err)
 	}
 }
+
+
+type toolLifecycleObserver struct {
+	stages []core.Stage
+}
+
+func (o *toolLifecycleObserver) On(_ context.Context, event core.Event) {
+	o.stages = append(o.stages, event.Stage)
+}
+
+func TestToolLoopRunsInsideSinglePipelineLifecycle(t *testing.T) {
+	registry := tools.NewRegistry()
+	definition := tools.Definition{
+		Name: "test.echo",
+		Description: "Echo",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	}
+	if err := registry.Register(definition, toolLoopTestExecutor{}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := toolruntime.NewRuntime(registry, requestToolAuthorizer{}, toolruntime.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerInstance := &toolLoopTestProvider{}
+	providers := provider.NewRegistry()
+	if err := providers.Register("llamacpp", func() provider.Provider { return providerInstance }); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg: &config.Config{Tools: config.ToolsConfig{
+			Enabled: true,
+			AllowedModels: []config.ToolModelAllowlist{{ProviderID: "llamacpp", ModelKey: "stable-key"}},
+			AllowedTools: []string{"test.echo"},
+		}},
+		providers: providers,
+		toolRegistry: registry,
+		toolRuntime: runtime,
+	}
+	observer := &toolLifecycleObserver{}
+	recorder := httptest.NewRecorder()
+	pipeline := &core.Pipeline{
+		Resolve: func(context.Context, core.State) (core.ModelChoice, error) {
+			return core.ModelChoice{ProviderID: "llamacpp", ModelKey: "stable-key", UpstreamID: "active-model"}, nil
+		},
+		Forward: inferenceForwarder{s: s},
+		Observe: observer,
+	}
+	result, err := pipeline.Run(context.Background(), core.Request{
+		ID: "tool-lifecycle-request",
+		Method: http.MethodPost,
+		Path: "/v1/chat/completions",
+		Body: []byte(`{"messages":[{"role":"user","content":"hello"}]}`),
+		Sink: &responseSink{w: recorder},
+	})
+	if err != nil {
+		t.Fatalf("Pipeline.Run() error = %v", err)
+	}
+	if result.Status != http.StatusOK {
+		t.Fatalf("Pipeline.Run() status = %d, want 200", result.Status)
+	}
+	if providerInstance.calls != 2 {
+		t.Fatalf("model rounds = %d, want 2", providerInstance.calls)
+	}
+	var upstreamStarts, finishes int
+	for _, stage := range observer.stages {
+		switch stage {
+		case core.StageUpstreamStart:
+			upstreamStarts++
+		case core.StageFinish:
+			finishes++
+		}
+	}
+	if upstreamStarts != 1 || finishes != 1 {
+		t.Fatalf("Pipeline lifecycle stages: upstream_start=%d finish=%d stages=%v", upstreamStarts, finishes, observer.stages)
+	}
+	if !strings.Contains(recorder.Body.String(), "done") ||
+		strings.Contains(recorder.Body.String(), "tool_calls") ||
+		strings.Contains(recorder.Body.String(), "echo") {
+		t.Fatalf("client received intermediate tool content: %q", recorder.Body.String())
+	}
+}
