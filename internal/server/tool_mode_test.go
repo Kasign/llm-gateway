@@ -392,6 +392,7 @@ func TestToolLoopRunsInsideSinglePipelineLifecycle(t *testing.T) {
 		toolRegistry: registry,
 		toolRuntime: runtime,
 	}
+	s.callBegin("tool-lifecycle-request", &auth.Key{AllowedTools: []string{"test.echo"}})
 	observer := &toolLifecycleObserver{}
 	recorder := httptest.NewRecorder()
 	pipeline := &core.Pipeline{
@@ -486,6 +487,7 @@ func TestToolLoopRunsInsideOnePipelineLifecycle(t *testing.T) {
 		toolRegistry: registry,
 		toolRuntime: runtime,
 	}
+	s.callBegin("pipeline-tool-loop", &auth.Key{AllowedTools: []string{"test.echo"}})
 	observer := &pipelineLifecycleCounter{}
 	pipe := &core.Pipeline{
 		Resolve: func(context.Context, core.State) (core.ModelChoice, error) {
