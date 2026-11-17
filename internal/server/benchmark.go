@@ -906,7 +906,10 @@ func (b *benchRunObserver) On(_ context.Context, ev core.Event) {
 			status = ev.Result.Status
 		}
 		err := ev.Err
-		if b.truncated { err = errBenchmarkResponseTooLarge }
+		if b.truncated || errors.Is(err, errBenchmarkResponseTooLarge) {
+			b.truncated = true
+			err = errBenchmarkResponseTooLarge
+		}
 		if isCancelErr(err) {
 			b.job.finish("cancelled", 499, latency, b.buf, err, b.ttft, b.events, b.reasoning)
 			return

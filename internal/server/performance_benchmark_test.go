@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -234,4 +235,14 @@ func TestMemSinkBoundsBenchmarkResponse(t *testing.T) {
 	n, err := sink.Write(payload)
 	if !errors.Is(err, errBenchmarkResponseTooLarge) { t.Fatalf("Write error = %v", err) }
 	if n != maxBenchmarkResponseBytes || len(sink.Bytes()) != maxBenchmarkResponseBytes { t.Fatalf("captured bytes = %d/%d", n, len(sink.Bytes())) }
+}
+// TestBenchmarkObserverBoundsCapturedResponse 验证观察器不会因超大流式分片无限累积响应。
+func TestBenchmarkObserverBoundsCapturedResponse(t *testing.T) {
+	job := &benchmarkJob{}
+	observer := &benchRunObserver{job: job, started: time.Now()}
+	observer.On(context.Background(), core.Event{Stage: core.StageChunk, Chunk: make([]byte, maxBenchmarkResponseBytes+1)})
+	if len(observer.buf) != maxBenchmarkResponseBytes || !observer.truncated { t.Fatalf("observer capture = %d, truncated=%v", len(observer.buf), observer.truncated) }
+	observer.On(context.Background(), core.Event{Stage: core.StageFinish, Result: &core.Result{Status: http.StatusOK}})
+	snapshot := job.snapshot()
+	if !snapshot.ResponseTruncated || snapshot.ErrorCode != "benchmark_response_too_large" || snapshot.Status != "failed" { t.Fatalf("unexpected truncated result: %+v", snapshot) }
 }
