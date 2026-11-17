@@ -59,7 +59,7 @@ func (c *agentModelsSQLConn) Close() error { return nil }
 func (c *agentModelsSQLConn) Begin() (driver.Tx, error) { return agentModelsSQLTx{}, nil }
 
 func (c *agentModelsSQLConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	columns := []string{"id", "name", "prefix", "key_hash", "status", "rpm", "allowed_models", "expires_at", "created_at", "updated_at", "last_used_at"}
+	columns := []string{"id", "name", "prefix", "key_hash", "status", "rpm", "allowed_models", "allowed_tools", "expires_at", "created_at", "updated_at", "last_used_at"}
 	if !strings.Contains(strings.ToLower(query), "from api_keys where key_hash") || len(args) != 1 {
 		return &agentModelsSQLRows{columns: columns}, nil
 	}
@@ -70,7 +70,7 @@ func (c *agentModelsSQLConn) QueryContext(_ context.Context, query string, args 
 	}
 	values := []driver.Value{
 		int64(key.id), key.name, key.prefix, key.hash, key.status, int64(key.rpm),
-		key.allowedModels, nil, key.createdAt, key.updatedAt, nil,
+		key.allowedModels, "[]", nil, key.createdAt, key.updatedAt, nil,
 	}
 	return &agentModelsSQLRows{columns: columns, values: [][]driver.Value{values}}, nil
 }
