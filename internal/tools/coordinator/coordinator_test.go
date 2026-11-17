@@ -431,3 +431,53 @@ type executorAdapter struct {
 func (a executorAdapter) Execute(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error) {
 	return a.executor.Execute(ctx, "web.search", arguments)
 }
+
+func TestRunDoesNotExecuteToolsWhenToolChoiceIsNone(t *testing.T) {
+	body := strings.TrimSuffix(requestBody, "}") + `,"tool_choice":"none"}`
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(toolCallResponse("call-1", `{"query":"hello"}`)),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	_, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+	if !errors.Is(err, ErrInvalidModelResponse) {
+		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("tool executed despite tool_choice=none: %d calls", len(executor.calls))
+	}
+}
+
+func TestRunRequiresToolCallWhenToolChoiceIsRequired(t *testing.T) {
+	body := strings.TrimSuffix(requestBody, "}") + `,"tool_choice":"required"}`
+	model := &testModel{responses: []ModelResponse{modelResponse(finalResponse)}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	_, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+	if !errors.Is(err, ErrInvalidModelResponse) {
+		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
+
+func TestRunEnforcesNamedToolChoice(t *testing.T) {
+	body := strings.TrimSuffix(requestBody, "}") +
+		`,"tool_choice":{"type":"function","function":{"name":"web.search"}}}`
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(strings.Replace(toolCallResponse("call-1", `{"query":"hello"}`), "web.search", "other.tool", 1)),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	_, err := coordinator.Run(context.Background(), []byte(body), []string{"web.search"})
+	if !errors.Is(err, ErrInvalidModelResponse) {
+		t.Fatalf("Run() error = %v, want ErrInvalidModelResponse", err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
