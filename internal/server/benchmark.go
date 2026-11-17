@@ -96,7 +96,6 @@ func (j *benchmarkJob) clearCancel() {
 	j.mu.Unlock()
 }
 
-// markCancelling 更新运行期快照；持久化状态先由仓储事务成功转换。
 // markCancellingWith 在持有 Job 状态锁时先完成持久化转换，再更新内存状态。
 // 这样自然完成与取消请求按同一把锁排序，避免数据库先进入 cancelling、内存却已终态。
 func (j *benchmarkJob) markCancellingWith(persist func() (bool, error)) (bool, error) {
@@ -573,8 +572,9 @@ func (s *Server) benchmarkStop(w http.ResponseWriter, r *http.Request, id string
 	if s.runs != nil && s.runs.Cancel(id) {
 		stopped = true
 	}
+	finalStatus := job.snapshot().Status
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": "cancelling", "stopped": stopped, "message": "stop signalled"})
+	json.NewEncoder(w).Encode(map[string]interface{}{"job_id": id, "status": finalStatus, "stopped": stopped})
 }
 
 func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string) {
