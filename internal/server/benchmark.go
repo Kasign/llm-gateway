@@ -449,16 +449,29 @@ func benchmarkEnvironmentSnapshot() map[string]interface{} {
 
 // benchmarkConditionMetadata 计算条件指纹。信息不完整时保留部分指纹，但禁止自动视为严格可比较。
 func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 string) (string, string, []string, error) {
-	missing := make([]string, 0, 4)
+	missing := make([]string, 0, 6)
 	modelIdentity, _ := snapshot["model_identity"].(map[string]interface{})
-	if modelIdentity == nil || strings.TrimSpace(fmt.Sprint(modelIdentity["sha256"])) == "" {
+	modelSHA256 := ""
+	if modelIdentity != nil {
+		modelSHA256, _ = modelIdentity["sha256"].(string)
+	}
+	if strings.TrimSpace(modelSHA256) == "" {
 		missing = append(missing, "model_sha256_unknown")
 	}
 	environment, _ := snapshot["environment"].(map[string]interface{})
-	if environment == nil || strings.TrimSpace(fmt.Sprint(environment["vcs_revision"])) == "" {
+	revision, modified := "", ""
+	if environment != nil {
+		revision, _ = environment["vcs_revision"].(string)
+		modified, _ = environment["vcs_modified"].(string)
+	}
+	if strings.TrimSpace(revision) == "" {
 		missing = append(missing, "gateway_revision_unknown")
 	}
-	if strings.TrimSpace(fmt.Sprint(snapshot["backend_version"])) == "" {
+	if strings.EqualFold(strings.TrimSpace(modified), "true") {
+		missing = append(missing, "gateway_build_modified")
+	}
+	backendVersion, _ := snapshot["backend_version"].(string)
+	if strings.TrimSpace(backendVersion) == "" {
 		missing = append(missing, "backend_version_unknown")
 	}
 	hardware, _ := snapshot["hardware"].(map[string]interface{})

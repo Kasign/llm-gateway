@@ -106,6 +106,9 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		Missing []string `json:"condition_missing"`
 	}
 	_ = json.Unmarshal([]byte(task.ConfigJSON), &condition)
+	if condition.Status == "" {
+		condition.Status = "unknown"
+	}
 	snap := benchmarkJobSnapshot{
 		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		ConditionSHA256: condition.SHA256, ConditionStatus: condition.Status, ConditionMissing: condition.Missing,
