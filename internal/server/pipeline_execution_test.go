@@ -2,14 +2,12 @@ package server
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/auth"
-	"github.com/whl/llm-gateway/internal/core"
 )
 
-func TestRunInferencePipelineSharesRunLifecycle(t *testing.T) {
+func TestBeginInferenceRunSharesRunLifecycle(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
 		registerCallCancel bool
@@ -24,37 +22,27 @@ func TestRunInferencePipelineSharesRunLifecycle(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			s.pipe = &core.Pipeline{
-				Resolve: func(runCtx context.Context, st core.State) (core.ModelChoice, error) {
-					cs := s.callGet(st.ID)
-					if cs == nil {
-						t.Fatal("call state must exist while Pipeline.Run is active")
-					}
-					if cs.key != key {
-						t.Fatal("call state must retain the authenticated client key")
-					}
-					cs.mu.Lock()
-					hasCallCancel := cs.cancel != nil
-					cs.mu.Unlock()
-					if hasCallCancel != tc.registerCallCancel {
-						t.Fatalf("call cancel registration = %v, want %v", hasCallCancel, tc.registerCallCancel)
-					}
-					if !s.runs.Cancel(st.ID) {
-						t.Fatal("active run must be cancellable")
-					}
-					if !errors.Is(runCtx.Err(), context.Canceled) {
-						t.Fatalf("run context error = %v, want context.Canceled", runCtx.Err())
-					}
-					return core.ModelChoice{}, runCtx.Err()
-				},
+			cleanup := s.beginInferenceRun(requestID, key, cancel, tc.registerCallCancel)
+			cs := s.callGet(requestID)
+			if cs == nil {
+				t.Fatal("call state must exist while Pipeline.Run is active")
 			}
-
-			_, err := s.runInferencePipeline(ctx, core.Request{
-				ID: requestID, Method: "POST", Path: "/v1/chat/completions",
-			}, key, cancel, tc.registerCallCancel)
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("runInferencePipeline() error = %v, want context.Canceled", err)
+			if cs.key != key {
+				t.Fatal("call state must retain the authenticated client key")
 			}
+			cs.mu.Lock()
+			hasCallCancel := cs.cancel != nil
+			cs.mu.Unlock()
+			if hasCallCancel != tc.registerCallCancel {
+				t.Fatalf("call cancel registration = %v, want %v", hasCallCancel, tc.registerCallCancel)
+			}
+			if !s.runs.Cancel(requestID) {
+				t.Fatal("active run must be cancellable")
+			}
+			if ctx.Err() != context.Canceled {
+				t.Fatalf("run context error = %v, want context.Canceled", ctx.Err())
+			}
+			cleanup()
 			if s.callGet(requestID) != nil {
 				t.Fatal("call state must be removed after Pipeline.Run")
 			}

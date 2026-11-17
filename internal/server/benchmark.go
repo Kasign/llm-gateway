@@ -656,9 +656,11 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		job.finish("failed", 500, time.Since(job.StartedAt).Milliseconds(), nil, errors.New("build request body failed"), nil, 0, 0)
 		return
 	}
+	cleanupRun := s.beginInferenceRun(job.ID, key, cancel, false)
+	defer cleanupRun()
 	obs := &benchRunObserver{job: job, started: job.StartedAt}
 	applog.Infof("[benchmark:%s] calling inference pipeline stream=true max_tokens=%d timeout=%ds body=%d bytes", job.ID, in.MaxTokens, s.cfg.Llama.RequestTimeout, len(body))
-	_, err := s.runInferencePipeline(ctx, core.Request{
+	_, err := s.pipe.Run(ctx, core.Request{
 		ID: job.ID, Method: http.MethodPost, Path: "/v1/chat/completions",
 		Header:       map[string][]string{"Content-Type": {"application/json"}, "Accept": {"text/event-stream"}},
 		Body:         body,
@@ -670,7 +672,7 @@ func (s *Server) runBenchmark(job *benchmarkJob, m *model.Model, upstreamOnly st
 		UserAgent:    "llm-gateway/benchmark",
 		Observe:      obs,
 		Guards:       s.inferenceRequestGuards(key),
-	}, key, cancel, false)
+	})
 	// 取消或超时后 ctx 已失效，用独立的短超时把这次的请求日志刷进库。
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = s.audit.Flush(flushCtx)
