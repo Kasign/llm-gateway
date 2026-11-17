@@ -232,9 +232,12 @@ func TestBenchmarkStoreReservationLimitsActiveTasks(t *testing.T) {
 func TestMemSinkBoundsBenchmarkResponse(t *testing.T) {
 	sink := newMemSink()
 	payload := make([]byte, maxBenchmarkResponseBytes+1)
-	n, err := sink.Write(payload)
-	if !errors.Is(err, errBenchmarkResponseTooLarge) { t.Fatalf("Write error = %v", err) }
-	if n != maxBenchmarkResponseBytes || len(sink.Bytes()) != maxBenchmarkResponseBytes { t.Fatalf("captured bytes = %d/%d", n, len(sink.Bytes())) }
+	if n, err := sink.Write(payload[:maxBenchmarkResponseBytes]); err != nil || n != maxBenchmarkResponseBytes {
+		t.Fatalf("write up to limit = %d, %v", n, err)
+	}
+	n, err := sink.Write(payload[maxBenchmarkResponseBytes:])
+	if !errors.Is(err, errBenchmarkResponseTooLarge) { t.Fatalf("overflow Write error = %v", err) }
+	if n != 0 || len(sink.Bytes()) != maxBenchmarkResponseBytes { t.Fatalf("captured bytes = %d/%d", n, len(sink.Bytes())) }
 	if sink.StatusCode() != http.StatusBadGateway { t.Fatalf("sink status = %d, want 502", sink.StatusCode()) }
 	gatewayStatus, _, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Sink: sink}, Err: err}, "")
 	if gatewayStatus != http.StatusBadGateway || state != "error" || code != "benchmark_response_too_large" { t.Fatalf("audit finish = %d/%s/%s", gatewayStatus, state, code) }

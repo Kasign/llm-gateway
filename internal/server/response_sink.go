@@ -102,8 +102,12 @@ func (m *memSink) Write(p []byte) (int, error) {
 			m.status = http.StatusOK
 		}
 	}
+	if len(p) == 0 { return 0, nil }
 	remaining := maxBenchmarkResponseBytes - len(m.body)
-	if remaining <= 0 { return 0, errBenchmarkResponseTooLarge }
+	if remaining <= 0 {
+		m.status = http.StatusBadGateway
+		return 0, errBenchmarkResponseTooLarge
+	}
 	if len(p) > remaining {
 		m.body = append(m.body, p[:remaining]...)
 		m.status = http.StatusBadGateway
