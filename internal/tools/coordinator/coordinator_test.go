@@ -104,6 +104,9 @@ func TestRunExecutesToolAndReturnsOnlyFinalModelResponse(t *testing.T) {
 	if err := json.Unmarshal(model.requests[0], &firstRequest); err != nil {
 		t.Fatal(err)
 	}
+	if string(firstRequest["parallel_tool_calls"]) != "false" {
+		t.Fatalf("parallel tool calls must be disabled: %s", firstRequest["parallel_tool_calls"])
+	}
 	var sentTools []struct {
 		Function struct {
 			Name string `json:"name"`
