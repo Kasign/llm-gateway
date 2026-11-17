@@ -81,6 +81,7 @@ func (w *bufferedResponseWriter) bodyBytes() []byte {
 
 type bufferedModelCaller struct {
 	requestID   string
+	providerID  string
 	provider    provider.Provider
 	request     *http.Request
 	path        string
@@ -99,7 +100,10 @@ func (c *bufferedModelCaller) Complete(ctx context.Context, requestBody []byte) 
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			providerID := c.provider.ID()
+			providerID := c.providerID
+			if providerID == "" {
+				providerID = "unknown"
+			}
 			applog.Printf("[%s] buffered Provider panic: provider=%s panic_type=%T\n%s", c.requestID, providerID, recovered, debug.Stack())
 			response = coordinator.ModelResponse{}
 			err = errBufferedProviderPanic

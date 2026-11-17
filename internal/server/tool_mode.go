@@ -96,6 +96,7 @@ func (f inferenceForwarder) forwardWithTools(
 
 	modelCaller := &bufferedModelCaller{
 		requestID: st.ID,
+		providerID: s.providerIDForState(st),
 		provider: p,
 		request: req,
 		path: upPath,
