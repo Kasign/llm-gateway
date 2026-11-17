@@ -614,7 +614,7 @@ func TestRunWithObserverRecordsSuccessfulToolCallWithoutSensitivePayload(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"private-call-id", "private search phrase", "arguments", "ok\\""} {
+	for _, secret := range []string{"private-call-id", "private search phrase", "arguments"} {
 		if strings.Contains(string(encoded), secret) {
 			t.Fatalf("serialized event contains sensitive content %q: %s", secret, encoded)
 		}

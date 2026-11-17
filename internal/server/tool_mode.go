@@ -8,6 +8,7 @@ import (
 
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/provider"
+	"github.com/whl/llm-gateway/internal/store"
 	"github.com/whl/llm-gateway/internal/tools/coordinator"
 	"github.com/whl/llm-gateway/internal/tools/modules/searxng"
 	toolruntime "github.com/whl/llm-gateway/internal/tools/runtime"
