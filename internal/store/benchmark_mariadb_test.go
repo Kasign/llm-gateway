@@ -1,0 +1,92 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+)
+
+func TestBenchmarkRepoMariaDB(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("MYSQL_TEST_DSN is required for MariaDB Benchmark repository integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil { t.Fatalf("open MariaDB: %v", err) }
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil { t.Fatalf("ping MariaDB: %v", err) }
+	var databaseName string
+	if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil { t.Fatalf("read database: %v", err) }
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing Benchmark repository test against non-test database %q", databaseName)
+	}
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok { t.Fatal("resolve source file for migration schema") }
+	schema, err := os.ReadFile(filepath.Join(filepath.Dir(sourceFile), "../../migrations/001_init.sql"))
+	if err != nil { t.Fatalf("read migration schema: %v", err) }
+	for _, statement := range strings.Split(string(schema), ";") {
+		statement = strings.TrimSpace(statement)
+		if statement == "" { continue }
+		if _, err := db.ExecContext(ctx, statement); err != nil { t.Fatalf("apply test schema: %v", err) }
+	}
+	repo := NewBenchmarkRepo(db)
+	id := fmt.Sprintf("bench-test-%d", time.Now().UnixNano())
+	now := time.Now()
+	task := BenchmarkTask{
+		TaskID: id, Scenario: "performance", Status: "running", PromptSHA256: strings.Repeat("a", 64),
+		PromptLength: 32, MaxTokens: 256, ConfigJSON: `{"temperature":0.2}`, RunCount: 1, StartedAt: now,
+	}
+	run := BenchmarkRun{RunID: id, TaskID: id, RunNo: 1, RequestID: id, Status: "running", StartedAt: now}
+	if err := repo.CreateTaskAndRun(ctx, task, run); err != nil { t.Fatalf("create task/run: %v", err) }
+	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", id) }()
+	got, err := repo.GetTask(ctx, id)
+	if err != nil { t.Fatalf("get task: %v", err) }
+	if got.TaskID != id || got.Status != "running" || got.PromptLength != 32 || got.ConfigJSON != task.ConfigJSON {
+		t.Fatalf("unexpected task: %+v", got)
+	}
+	runs, err := repo.ListRuns(ctx, id)
+	if err != nil { t.Fatalf("list runs: %v", err) }
+	if len(runs) != 1 || runs[0].RequestID != id || runs[0].RunNo != 1 {
+		t.Fatalf("unexpected runs: %+v", runs)
+	}
+	finished := time.Now()
+	latency := int64(1200)
+	task.Status, task.FinishedAt, task.LatencyMS = "completed", &finished, latency
+	run.Status, run.FinishedAt, run.LatencyMS, run.HTTPStatus = "completed", &finished, latency, 200
+	if err := repo.UpdateTaskAndRun(ctx, task, run); err != nil { t.Fatalf("update task/run: %v", err) }
+	got, err = repo.GetTask(ctx, id)
+	if err != nil || got.Status != "completed" || got.LatencyMS != latency || got.FinishedAt == nil {
+		t.Fatalf("updated task = %+v, err=%v", got, err)
+	}
+	// 单独验证活动任务恢复；创建第二条活动任务后 MarkInterrupted 应同时更新 Task 与 Run。
+	interruptedID := id + "-restart"
+	task2 := BenchmarkTask{TaskID: interruptedID, Scenario: "performance", Status: "running", StartedAt: now}
+	run2 := BenchmarkRun{RunID: interruptedID, TaskID: interruptedID, RunNo: 1, RequestID: interruptedID, Status: "running", StartedAt: now}
+	if err := repo.CreateTaskAndRun(ctx, task2, run2); err != nil { t.Fatalf("create restart task: %v", err) }
+	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", interruptedID) }()
+	if _, err := repo.MarkInterrupted(ctx); err != nil { t.Fatalf("mark interrupted: %v", err) }
+	got2, err := repo.GetTask(ctx, interruptedID)
+	if err != nil || got2.Status != "interrupted" || got2.ErrorCode != "gateway_restarted" {
+		t.Fatalf("interrupted task = %+v, err=%v", got2, err)
+	}
+	runs2, err := repo.ListRuns(ctx, interruptedID)
+	if err != nil || len(runs2) != 1 || runs2[0].Status != "interrupted" {
+		t.Fatalf("interrupted runs = %+v, err=%v", runs2, err)
+	}
+	if _, err := repo.DeleteFinishedBefore(ctx, time.Now().Add(time.Minute), 10); err != nil {
+		t.Fatalf("delete finished tasks: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, interruptedID); err != sql.ErrNoRows {
+		t.Fatalf("deleted task lookup error = %v, want sql.ErrNoRows", err)
+	}
+}

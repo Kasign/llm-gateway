@@ -21,6 +21,8 @@ var requiredTables = []string{
 	"request_tool_call_events",
 	"gateway_settings",
 	"model_prices",
+	"benchmark_tasks",
+	"benchmark_runs",
 }
 
 // Migrate 按分号拆分执行迁移文件，再跑 ensureColumns 做增量结构升级，并校验必需表存在。
@@ -135,6 +137,66 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   updated_at DATETIME(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return fmt.Errorf("schema upgrade failed (gateway_settings): %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS benchmark_tasks (
+  task_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  api_key_id BIGINT UNSIGNED NULL,
+  scenario VARCHAR(32) NOT NULL DEFAULT 'performance',
+  status VARCHAR(16) NOT NULL DEFAULT 'running',
+  provider_id VARCHAR(64) NULL,
+  backend VARCHAR(32) NULL,
+  model_key VARCHAR(128) NULL,
+  model_id VARCHAR(1024) NULL,
+  prompt_sha256 CHAR(64) NULL,
+  prompt_length BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  max_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+  config_json LONGTEXT NULL,
+  run_count INT UNSIGNED NOT NULL DEFAULT 0,
+  started_at DATETIME(6) NOT NULL,
+  finished_at DATETIME(6) NULL,
+  latency_ms BIGINT UNSIGNED NULL,
+  error_code VARCHAR(64) NULL,
+  error_message VARCHAR(512) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_benchmark_tasks_status_started (status, started_at),
+  INDEX idx_benchmark_tasks_key_started (api_key_id, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+  run_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  task_id VARCHAR(64) NOT NULL,
+  run_no INT UNSIGNED NOT NULL,
+  request_id VARCHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'running',
+  provider_id VARCHAR(64) NULL,
+  model_key VARCHAR(128) NULL,
+  model_id VARCHAR(1024) NULL,
+  started_at DATETIME(6) NOT NULL,
+  finished_at DATETIME(6) NULL,
+  latency_ms BIGINT UNSIGNED NULL,
+  model_load_ms BIGINT UNSIGNED NULL,
+  inference_latency_ms BIGINT UNSIGNED NULL,
+  http_status SMALLINT UNSIGNED NULL,
+  response_bytes BIGINT UNSIGNED NULL,
+  input_tokens BIGINT UNSIGNED NULL,
+  output_tokens BIGINT UNSIGNED NULL,
+  total_tokens BIGINT UNSIGNED NULL,
+  ttft_ms BIGINT UNSIGNED NULL,
+  stream_event_count INT UNSIGNED NOT NULL DEFAULT 0,
+  reasoning_chars INT UNSIGNED NOT NULL DEFAULT 0,
+  content_chars INT UNSIGNED NOT NULL DEFAULT 0,
+  error_code VARCHAR(64) NULL,
+  error_message VARCHAR(512) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uk_benchmark_run_task_no (task_id, run_no),
+  UNIQUE KEY uk_benchmark_run_request (request_id),
+  INDEX idx_benchmark_runs_task_status (task_id, status),
+  CONSTRAINT fk_benchmark_runs_task FOREIGN KEY (task_id)
+    REFERENCES benchmark_tasks(task_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`); err != nil {
+		return fmt.Errorf("schema upgrade failed (benchmark_tasks/runs): %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS model_prices (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
