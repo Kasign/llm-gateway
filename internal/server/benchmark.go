@@ -474,6 +474,10 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	if strings.TrimSpace(backendVersion) == "" {
 		missing = append(missing, "backend_version_unknown")
 	}
+	modelLoadState, _ := snapshot["model_load_state_before"].(string)
+	if modelLoadState != "loaded" && modelLoadState != "not_loaded" {
+		missing = append(missing, "model_load_state_unknown")
+	}
 	hardware, _ := snapshot["hardware"].(map[string]interface{})
 	cpuModel := ""
 	if hardware != nil {
@@ -649,6 +653,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
 		"model_identity": modelIdentity,
+		"model_load_state_before": "unknown",
 		"environment": benchmarkEnvironmentSnapshot(),
 		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil, "logical_cpu_count": runtime.NumCPU()},
 		"backend_version": "",
