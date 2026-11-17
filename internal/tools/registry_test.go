@@ -63,6 +63,31 @@ func TestRegistrySortAndConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRegistryConcurrentRegistration(t *testing.T) {
+	r := NewRegistry()
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := r.Register(testDefinition("tool"+strconv.Itoa(i)), testExecutor{}); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs { t.Error(err) }
+	if got := len(r.List()); got != 32 { t.Fatalf("expected 32 registrations, got %d", got) }
+}
+
+func TestRegistryZeroValue(t *testing.T) {
+	var r Registry
+	if err := r.Register(testDefinition("web.search"), testExecutor{}); err != nil { t.Fatal(err) }
+	if _, _, err := r.Lookup("web.search"); err != nil { t.Fatal(err) }
+}
+
 func TestRegistryLimit(t *testing.T) {
 	r := NewRegistry()
 	for i:=0; i<64; i++ {
