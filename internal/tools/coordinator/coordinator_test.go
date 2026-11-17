@@ -579,3 +579,103 @@ func TestRunPreservesNonSuccessProviderResponseReturnedWithError(t *testing.T) {
 		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
 	}
 }
+
+
+func TestRunWithObserverRecordsSuccessfulToolCallWithoutSensitivePayload(t *testing.T) {
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(toolCallResponse("private-call-id", `{"query":"private search phrase"}`)),
+		modelResponse(finalResponse),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+	var events []ToolCallEvent
+
+	_, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
+	if err != nil {
+		t.Fatalf("RunWithObserver() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Seq != 1 || event.Round != 1 || event.ToolName != "web.search" ||
+		event.Status != "succeeded" || event.ErrorCode != "" {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if event.ResultBytes != int64(len(`{"ok":true}`)) {
+		t.Fatalf("result_bytes = %d", event.ResultBytes)
+	}
+	if event.Cause != nil {
+		t.Fatalf("successful event contains error cause: %v", event.Cause)
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"private-call-id", "private search phrase", "arguments", "ok\\""} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("serialized event contains sensitive content %q: %s", secret, encoded)
+		}
+	}
+}
+
+func TestRunWithObserverRecordsRejectedUnknownTool(t *testing.T) {
+	body := strings.Replace(toolCallResponse("call-1", `{"query":"hello"}`), "web.search", "unknown.private.tool", 1)
+	model := &testModel{responses: []ModelResponse{modelResponse(body)}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+	var events []ToolCallEvent
+
+	_, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
+	if !errors.Is(err, ErrUnknownTool) {
+		t.Fatalf("RunWithObserver() error = %v, want ErrUnknownTool", err)
+	}
+	if len(executor.calls) != 0 || len(events) != 1 {
+		t.Fatalf("executor calls=%d events=%d", len(executor.calls), len(events))
+	}
+	if events[0].Seq != 1 || events[0].Round != 1 ||
+		events[0].Status != "rejected" || events[0].ErrorCode != "unknown_tool" {
+		t.Fatalf("unexpected rejection event: %+v", events[0])
+	}
+}
+
+func TestRunWithObserverClassifiesExecutionTimeout(t *testing.T) {
+	model := &testModel{responses: []ModelResponse{modelResponse(toolCallResponse("call-1", `{"query":"hello"}`))}}
+	executor := &failingTestExecutor{err: context.DeadlineExceeded}
+	coordinator := testCoordinatorWithExecutor(t, model, executor)
+	var events []ToolCallEvent
+
+	_, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(event ToolCallEvent) {
+		events = append(events, event)
+	})
+	if !errors.Is(err, ErrToolExecutionFailed) {
+		t.Fatalf("RunWithObserver() error = %v, want ErrToolExecutionFailed", err)
+	}
+	if len(events) != 1 || events[0].Status != "timed_out" ||
+		events[0].ErrorCode != "tool_timeout" || !errors.Is(events[0].Cause, context.DeadlineExceeded) {
+		t.Fatalf("unexpected timeout event: %+v", events)
+	}
+}
+
+func TestRunWithObserverPanicDoesNotChangeToolResult(t *testing.T) {
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(toolCallResponse("call-1", `{"query":"hello"}`)),
+		modelResponse(finalResponse),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	result, err := coordinator.RunWithObserver(context.Background(), []byte(requestBody), []string{"web.search"}, func(ToolCallEvent) {
+		panic("observer must not affect inference")
+	})
+	if err != nil {
+		t.Fatalf("RunWithObserver() error = %v", err)
+	}
+	if result.ToolCalls != 1 || string(result.Response.Body) != finalResponse {
+		t.Fatalf("observer changed inference result: %+v", result)
+	}
+}
