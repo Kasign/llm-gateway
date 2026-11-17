@@ -1172,6 +1172,10 @@ try {
         body: JSON.stringify({
           summary: { request_id: smokeRequestID, status: 'completed', http_status: 200, method: 'POST', request_url: 'https://example.test/v1/chat/completions', api_key: 'Smoke Key', client_name: 'Browser Smoke', provider_id: 'mock-provider', model_requested: 'mock-model' },
           timing: { started_at: '2026-10-28T12:00:00Z', finished_at: '2026-10-28T12:00:01Z', latency_ms: 120, ttft_ms: 15, input_tokens: 5, output_tokens: 7, total_tokens: 12 },
+          tool_calls: [
+            { seq: 1, round: 1, tool_name: 'web.search', status: 'succeeded', duration_ms: 35, result_bytes: 128, created_at: '2026-10-28T12:00:00Z' },
+            { seq: 2, round: 1, tool_name: 'web.search', status: 'failed', duration_ms: 5, result_bytes: 0, error_code: 'tool_execution_failed', created_at: '2026-10-28T12:00:01Z' }
+          ],
           request_params: { model_client: 'mock-model', model_upstream: 'mock-model', stream_label: '非流式' }
         })
       });
@@ -1186,6 +1190,12 @@ try {
   await detailTrigger.click();
   const detailModal = page.locator('#detailModal');
   await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
+  const toolCallSummary = detailModal.locator('summary').filter({ hasText: '工具调用明细 (2)' });
+  check('请求详情展示工具调用审计明细及事件数量', await toolCallSummary.count() === 1);
+  await toolCallSummary.click();
+  check('工具调用明细展示顺序、轮次、工具名与执行状态',
+    await detailModal.getByText(/#1 · 第1轮 · web\\.search · 成功 · 35 ms/).count() === 1 &&
+    await detailModal.getByText(/#2 · 第1轮 · web\\.search · 失败 · 5 ms/).count() === 1);
   await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
   check('请求详情弹窗打开后将焦点移入关闭按钮',
     await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
