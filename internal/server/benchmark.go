@@ -926,6 +926,9 @@ func (b *benchRunObserver) On(ctx context.Context, ev core.Event) {
 		err := ev.Err
 		if isDeadline(ctx, err) {
 			status = http.StatusGatewayTimeout
+			if err == nil {
+				err = context.DeadlineExceeded
+			}
 		}
 		if !isCancelErr(err) && (b.truncated || errors.Is(err, errBenchmarkResponseTooLarge)) {
 			b.truncated = true

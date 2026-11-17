@@ -270,3 +270,17 @@ func TestBenchmarkDeadlineUsesGatewayTimeoutCode(t *testing.T) {
 		t.Fatalf("unexpected timeout result: %+v", snapshot)
 	}
 }
+
+
+// TestBenchmarkObserverMapsDeadlineWithoutProviderError 验证上下文先到期时也记录 gateway_timeout。
+func TestBenchmarkObserverMapsDeadlineWithoutProviderError(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	job := &benchmarkJob{}
+	observer := &benchRunObserver{job: job, started: time.Now()}
+	observer.On(ctx, core.Event{Stage: core.StageFinish, Result: &core.Result{Status: http.StatusOK}})
+	snapshot := job.snapshot()
+	if snapshot.Status != "failed" || snapshot.HTTPStatus != http.StatusGatewayTimeout || snapshot.ErrorCode != "gateway_timeout" {
+		t.Fatalf("unexpected deadline result: %+v", snapshot)
+	}
+}
