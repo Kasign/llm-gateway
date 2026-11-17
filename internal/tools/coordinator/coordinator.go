@@ -260,6 +260,12 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 		if err != nil {
 			return result, fmt.Errorf("%w: encode conversation messages", ErrInvalidRequest)
 		}
+		// tool_choice 的 required / 指定工具只约束客户端发起的首轮模型选择；
+		// 工具结果回传后必须允许模型生成最终答复或继续选择其他已授权工具。
+		if choice.mode == "required" || choice.name != "" {
+			choice = toolChoiceConstraint{mode: "auto"}
+			request["tool_choice"] = json.RawMessage(`"auto"`)
+		}
 	}
 }
 
