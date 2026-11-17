@@ -293,3 +293,58 @@ func TestRunRejectsMoreThanThreeCallsInOneRound(t *testing.T) {
 		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
 	}
 }
+
+func TestRunExecutesMultipleToolCallsSequentially(t *testing.T) {
+	call := func(id, query string) string {
+		return fmt.Sprintf(`{"id":%q,"type":"function","function":{"name":"web.search","arguments":"{\"query\":%q}"}}`, id, query)
+	}
+	body := `{"choices":[{"message":{"role":"assistant","tool_calls":[` +
+		call("first", "alpha") + `,` + call("second", "beta") +
+		`]},"finish_reason":"tool_calls"}]}`
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(body),
+		modelResponse(finalResponse),
+	}}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	result, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ToolCalls != 2 || len(executor.calls) != 2 {
+		t.Fatalf("tool call count = %d, executor calls = %d", result.ToolCalls, len(executor.calls))
+	}
+	if !strings.Contains(executor.calls[0], `"query":"alpha"`) ||
+		!strings.Contains(executor.calls[1], `"query":"beta"`) {
+		t.Fatalf("tools were not executed in model order: %#v", executor.calls)
+	}
+	var nextRequest struct {
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(model.requests[1], &nextRequest); err != nil {
+		t.Fatal(err)
+	}
+	if len(nextRequest.Messages) != 4 || nextRequest.Messages[1].Role != "assistant" ||
+		nextRequest.Messages[2].Role != "tool" || nextRequest.Messages[3].Role != "tool" {
+		t.Fatalf("unexpected multi-tool conversation order: %+v", nextRequest.Messages)
+	}
+}
+
+func TestRunHonorsCanceledRequestContext(t *testing.T) {
+	model := &testModel{}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := coordinator.Run(ctx, []byte(requestBody), []string{"web.search"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if len(model.requests) != 0 || len(executor.calls) != 0 {
+		t.Fatal("canceled request reached model or tool executor")
+	}
+}
