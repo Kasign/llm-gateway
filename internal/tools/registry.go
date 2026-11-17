@@ -42,7 +42,7 @@ func (r *Registry) Register(def Definition, executor Executor) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.items[def.Name]; exists { return fmt.Errorf("%w: %s", ErrDuplicateTool, def.Name) }
-	if len(r.items) >= 64 { return ErrRegistryFull }
+	if len(r.items) >= MaxRegistryTools { return ErrRegistryFull }
 	if r.items == nil { r.items = make(map[string]registration) }
 	r.items[def.Name] = registration{definition: def, executor: executor}
 	return nil
