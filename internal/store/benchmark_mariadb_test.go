@@ -81,7 +81,7 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	latency := int64(1200)
 	task.Status, task.FinishedAt, task.LatencyMS = "completed", &finished, latency
 	run.Status, run.FinishedAt, run.LatencyMS, run.HTTPStatus = "completed", &finished, latency, 200
-	modelLoad, inference := int64(321), int64(876)
+	modelLoad, inference := int64(321), int64(0)
 	run.ModelLoadMS, run.ModelLoadStatus = &modelLoad, "measured"
 	run.InferenceLatencyMS, run.InferenceLatencyStatus = &inference, "measured"
 	run.TTFTStatus = "measured"
@@ -111,7 +111,9 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 		t.Fatalf("interrupted task = %+v, err=%v", got2, err)
 	}
 	runs2, err := repo.ListRuns(ctx, interruptedID)
-	if err != nil || len(runs2) != 1 || runs2[0].Status != "interrupted" {
+	if err != nil || len(runs2) != 1 || runs2[0].Status != "interrupted" ||
+		runs2[0].ModelLoadMS != nil || runs2[0].ModelLoadStatus != "unknown" ||
+		runs2[0].InferenceLatencyMS != nil || runs2[0].InferenceLatencyStatus != "unknown" || runs2[0].TTFTStatus != "unknown" {
 		t.Fatalf("interrupted runs = %+v, err=%v", runs2, err)
 	}
 	if _, err := db.ExecContext(ctx, "DELETE FROM benchmark_tasks WHERE task_id=?", interruptedID); err != nil {

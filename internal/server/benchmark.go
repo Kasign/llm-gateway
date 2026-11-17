@@ -160,6 +160,11 @@ type benchmarkJobSnapshot struct {
 	HTTPStatus     int        `json:"http_status,omitempty"`
 	ResponseBytes  int64      `json:"response_bytes,omitempty"`
 	ResponseTruncated bool `json:"response_truncated,omitempty"`
+	ModelLoadMS *int64 `json:"model_load_ms,omitempty"`
+	ModelLoadStatus string `json:"model_load_status"`
+	InferenceLatencyMS *int64 `json:"inference_latency_ms,omitempty"`
+	InferenceLatencyStatus string `json:"inference_latency_status"`
+	TTFTStatus string `json:"ttft_status"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`

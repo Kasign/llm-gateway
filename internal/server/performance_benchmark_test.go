@@ -345,3 +345,22 @@ func TestBenchmarkMetricAvailabilityStates(t *testing.T) {
 		t.Fatalf("measured zero-duration metric = %+v", got)
 	}
 }
+
+
+// TestBenchmarkObserverTTFTStartsAtRunBoundary 验证 TTFT 从 Run 开始计时，而不是从 Task 创建计时。
+func TestBenchmarkObserverTTFTStartsAtRunBoundary(t *testing.T) {
+	taskStarted := time.Now().Add(-2 * time.Second)
+	runStarted := time.Now().Add(-120 * time.Millisecond)
+	job := &benchmarkJob{StartedAt: taskStarted, Stream: true}
+	observer := &benchRunObserver{job: job, started: runStarted}
+	observer.On(context.Background(), core.Event{
+		Stage: core.StageChunk,
+		Chunk: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"),
+	})
+	if observer.ttft == nil {
+		t.Fatal("TTFT was not captured")
+	}
+	if *observer.ttft < 80 || *observer.ttft > 1000 {
+		t.Fatalf("TTFT = %dms; want roughly elapsed time since Run start", *observer.ttft)
+	}
+}
