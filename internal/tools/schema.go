@@ -137,7 +137,9 @@ func parseJSONNode(dec *json.Decoder, depth, maxDepth int) (*jsonNode, error) {
 
 // ValidateSchema 检查第一版支持的 JSON Schema 子集。
 func ValidateSchema(raw []byte) error {
-	root, err := parseStrictJSON(raw, MaxSchemaBytes, MaxSchemaDepth)
+	// Schema 原文包含 properties 容器和关键字值；JSON 语法树深度上限
+	// 与 Schema 节点深度分开计算，真正的 Schema 深度由 validateSchemaNode 限制。
+	root, err := parseStrictJSON(raw, MaxSchemaBytes, MaxSchemaDepth*3+4)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSchema, err)
 	}
