@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -88,11 +89,27 @@ func TestRegistryZeroValue(t *testing.T) {
 	if _, _, err := r.Lookup("web.search"); err != nil { t.Fatal(err) }
 }
 
+func TestRegistryDefinitionBounds(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(testDefinition(strings.Repeat("a", MaxToolNameBytes+1)), testExecutor{}); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("expected oversized name rejection, got %v", err)
+	}
+	def := testDefinition("web.search")
+	def.Description = strings.Repeat("x", MaxToolDescriptionBytes+1)
+	if err := r.Register(def, testExecutor{}); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("expected oversized description rejection, got %v", err)
+	}
+	def.Description = string([]byte{0xff})
+	if err := r.Register(def, testExecutor{}); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("expected invalid UTF-8 description rejection, got %v", err)
+	}
+}
+
 func TestRegistryLimit(t *testing.T) {
 	r := NewRegistry()
-	for i:=0; i<64; i++ {
+	for i:=0; i<MaxRegistryTools; i++ {
 		name := "tool" + strconv.Itoa(i)
 		if err := r.Register(testDefinition(name), testExecutor{}); err != nil { t.Fatalf("register %s: %v", name, err) }
 	}
-	if err := r.Register(testDefinition("tool64"), testExecutor{}); !errors.Is(err, ErrRegistryFull) { t.Fatalf("expected registry full, got %v", err) }
+	if err := r.Register(testDefinition("tool"+strconv.Itoa(MaxRegistryTools)), testExecutor{}); !errors.Is(err, ErrRegistryFull) { t.Fatalf("expected registry full, got %v", err) }
 }
