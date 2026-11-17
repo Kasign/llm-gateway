@@ -695,6 +695,10 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		applog.Infof("[benchmark:%s] ensure model loaded: model_key=%s llama=%s", job.ID, m.ModelKey, llamaName)
 		if res, err := s.InferenceLoad(ctx, be, "", m.ModelKey, nil); err != nil {
 			applog.Infof("[benchmark:%s] model load failed after %dms: %v", job.ID, time.Since(loadStart).Milliseconds(), err)
+			if isCancelErr(err) || isCancelErr(ctx.Err()) {
+				job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
+				return
+			}
 			if !isLlamaNotFound(err) && !isLlamaAlreadyRunning(err) {
 				job.finish("failed", 502, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
 				return
@@ -708,6 +712,10 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	} else {
 		applog.Infof("[benchmark:%s] ensure upstream loaded: %s", job.ID, llamaName)
 		if res, err := s.InferenceLoad(ctx, be, llamaName, "", nil); err != nil {
+			if isCancelErr(err) || isCancelErr(ctx.Err()) {
+				job.finish("cancelled", 499, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
+				return
+			}
 			if !isLlamaAlreadyRunning(err) && !isLlamaNotFound(err) {
 				job.finish("failed", 502, time.Since(job.StartedAt).Milliseconds(), nil, err, nil, 0, 0)
 				return
