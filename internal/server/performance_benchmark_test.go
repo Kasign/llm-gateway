@@ -239,7 +239,7 @@ func TestMemSinkBoundsBenchmarkResponse(t *testing.T) {
 	if !errors.Is(err, errBenchmarkResponseTooLarge) { t.Fatalf("overflow Write error = %v", err) }
 	if n != 0 || len(sink.Bytes()) != maxBenchmarkResponseBytes { t.Fatalf("captured bytes = %d/%d", n, len(sink.Bytes())) }
 	if sink.StatusCode() != http.StatusBadGateway { t.Fatalf("sink status = %d, want 502", sink.StatusCode()) }
-	gatewayStatus, _, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Sink: sink}, Err: err}, "")
+	gatewayStatus, _, state, code, _ := finishStatus(context.Background(), core.Event{State: core.State{Request: core.Request{Sink: sink}}, Err: err}, "")
 	if gatewayStatus != http.StatusBadGateway || state != "error" || code != "benchmark_response_too_large" { t.Fatalf("audit finish = %d/%s/%s", gatewayStatus, state, code) }
 }
 // TestBenchmarkObserverBoundsCapturedResponse 验证观察器不会因超大流式分片无限累积响应。
