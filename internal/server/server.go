@@ -196,22 +196,31 @@ func (s *Server) ShutdownAudit(ctx context.Context) error {
 // CheckDependencies 启动时探测 Redis 与 LLM 上游是否可达；失败不阻止进程启动但会打日志。
 // 作用：启动时做一次"健康体检"，看看 Redis 和 llama.cpp 能不能连上，连不上就警告但照样启动。
 func (s *Server) CheckDependencies(ctx context.Context) error {
-	if s != nil && s.toolInitErr != nil {
-		applog.Printf("dependency check failed: tool system: %v", s.toolInitErr)
-		return fmt.Errorf("tool system: %w", s.toolInitErr)
+	if s == nil {
+		return fmt.Errorf("server is nil")
 	}
-	// Redis 是请求治理的必需依赖；推理端只检查当前活动 Provider，避免误探测被保留的旧本地客户端。
+	var dependencyErrors []error
+	if s.toolInitErr != nil {
+		applog.Printf("dependency check failed: tool system: %v", s.toolInitErr)
+		dependencyErrors = append(dependencyErrors, fmt.Errorf("tool system: %w", s.toolInitErr))
+	}
+	// Redis 是请求治理的必需依赖；即使工具初始化失败，也继续检查其他依赖。
 	if err := s.limiter.Ping(ctx); err != nil {
 		applog.Printf("dependency check failed: redis: %v", err)
-		return fmt.Errorf("redis: %w", err)
+		dependencyErrors = append(dependencyErrors, fmt.Errorf("redis: %w", err))
 	}
 	backend, providerStatus, err := s.activeProviderStatus(ctx)
 	if err != nil {
 		applog.Printf("dependency check failed: active Provider %s: %v", backend, err)
-		return fmt.Errorf("active Provider %s: %w", backend, err)
+		dependencyErrors = append(dependencyErrors, fmt.Errorf("active Provider %s: %w", backend, err))
+	} else {
+		// 远程 Provider 在启动时只校验配置和 Registry；实际网络连通性在推理请求中验证。
+		applog.Infof("dependency check ok: active Provider %s (%s)", backend, providerStatus)
 	}
-	// 远程 Provider 在启动时只校验配置和 Registry；实际网络连通性在推理请求中验证。
-	applog.Infof("dependency check ok: redis and active Provider %s (%s)", backend, providerStatus)
+	if len(dependencyErrors) > 0 {
+		return errors.Join(dependencyErrors...)
+	}
+	applog.Infof("dependency check ok: Redis and active Provider %s", backend)
 	return nil
 }
 
