@@ -1,0 +1,198 @@
+# 当前任务：TOOL-02 Tool Definition / Registry
+
+> 状态：已完成
+> 更新日期：2026-11-17
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 前置任务：[TOOL-01 现状盘点与协议验证](任务历史/工具能力/TOOL-01-现状盘点与协议验证.md)
+> 任务状态权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 任务目标
+
+建立工具定义和注册的最小领域能力，为后续 Runtime 与 SearXNG Adapter 提供稳定、可校验、可枚举的工具契约。
+
+本任务只负责：
+- 工具 Definition 数据结构。
+- 参数 JSON Schema 子集校验。
+- Registry 注册、查询、枚举和重复项处理。
+- Definition 的不可变性及并发安全。
+- 单元测试和必要的包级文档。
+
+不在本任务实现工具执行、HTTP Adapter、模型多轮调用、管理 API、持久化配置或 Web UI。
+
+## 2. 已确认的产品和协议约束
+
+来自产品技术方案及 TOOL-01 验证：
+
+1. 第一版工具调用只面向非流式 Chat Completions。
+2. 当前 Qwen3.5-4B-IQ4_NL + llama.cpp 样本能够返回标准 finish_reason=tool_calls 和 message.tool_calls；这只是单次能力样本，不是所有模型的能力保证。
+3. 当前 Gateway 仅有协议透传，没有 Gateway 工具执行能力。
+4. 工具定义由服务端注册；客户端传入 tools 不能新增可执行工具，也不能获得授权。
+5. 工具名称使用稳定、可审计标识；工具参数使用 JSON Schema 子集，不支持远程 $ref。
+6. 搜索结果等外部数据是不可信内容，不改变系统策略或工具权限。
+7. 后续请求级 Coordinator 只使用当前请求已解析的 Provider / 活动模型，不允许工具结果触发模型切换。
+8. 现有无工具请求必须保持行为不变。
+
+## 3. 当前仓库初步审计
+
+### 3.1 依赖现状
+
+检查 dev 分支 go.mod：
+
+- 直接依赖：go-sql-driver/mysql、go-redis/v9、yaml.v3。
+- 当前 go.mod 未声明 JSON Schema 校验库。
+- 已决定不引入第三方 JSON Schema 库：第一版只实现明确限定的子集，使用 Go 标准库严格解析和校验，避免引入完整标准及额外依赖。
+
+### 3.2 现有配置校验风格
+
+检查 internal/config/provider_config.go、internal/settings/settings.go、internal/server/admin_providers_http.go：
+
+- 现有配置主要使用结构体解码、字符串规范化、正则校验、范围校验和显式业务校验。
+- Provider 管理请求通过 decodeProviderMutation 限制请求体大小并进行 JSON 解码。
+- validateProviderInput 对字段、范围、映射和 Provider 构造结果进行校验。
+- 尚未发现可直接复用的通用 JSON Schema Registry；当前配置校验不是 JSON Schema 校验器。
+
+### 3.3 现有持久化与管理模式
+
+- Web Provider 配置存放在 gateway_settings JSON 设置项中。
+- Provider API Key 使用 AES-GCM 加密，安全视图不返回明文。
+- 这些模式属于后续管理配置任务参考，本任务不接入数据库，也不复用 Provider 配置结构来承载工具定义。
+
+以上是初步审计结果。继续核对请求解码与校验实现后，确认：
+
+- Provider 管理请求的 `decodeProviderMutation` 使用 `io.LimitReader` 限制 128 KiB，再调用 `json.Unmarshal`；没有严格拒绝重复 JSON 对象键的处理。
+- Provider 配置校验是显式业务校验，不是可复用的通用 Schema 引擎。
+- 当前依赖中没有 JSON Schema 校验库；仓库搜索也未发现可直接复用的 JSON Schema Registry / Validator。
+- 因为本任务只支持一个明确且较小的 Schema 子集，使用 Go 标准库实现严格解析与子集校验，不引入完整 JSON Schema 第三方依赖；支持/拒绝语义已由单元测试固定。
+
+### 3.4 工具系统扩展架构决策
+
+工具系统采用“单一 Tools 功能模块 + 内部独立工具子模块 + Server 组合装配”：
+
+- `internal/tools` 是所有工具能力的唯一顶层归属，包含工具公共契约、Schema、Registry、Runtime、Coordinator，以及具体工具子模块；不在 `internal` 下另建平级的工具业务模块。
+- Tools 内部按职责拆分 Go package：公共核心能力留在 `internal/tools`；执行管理放在 `internal/tools/runtime`；请求级调度放在 `internal/tools/coordinator`；具体工具统一放在 `internal/tools/modules/<tool>`，例如 `internal/tools/modules/searxng`。
+- 每个具体工具子模块有独立实现、配置结构、测试和构造入口；默认不依赖其他具体工具。工具之间确需复用时依赖普通 Service 接口，不通过 Runtime 间接调用。
+- 所有工具在 Gateway 同进程内通过 Go 接口调用，不额外建立 HTTP 服务或独立 go.mod。
+- `internal/server` 是组合根，负责加载配置、构造各工具子模块并在启动时注册；Tools 内部不反向依赖 server。
+- 工具名称是稳定能力标识，不包含 Provider、URL、API Key 或运行配置；配置变化不改变工具名称。
+- 第一版不做动态加载/卸载。注册完成后 Registry 供请求并发读取；重复名称必须报错，不能覆盖。
+- Coordinator 负责请求级模型—工具流程，Runtime 负责单次工具安全执行，Registry 负责定义与执行器查找，Policy 负责授权；四者职责独立。
+- Coordinator 不知道 SearXNG 等具体工具；新增工具原则上只新增一个独立工具子模块和 Server 装配，不修改其他工具或调度核心。
+
+这项架构决策只约束后续实现边界，不在 TOOL-02 提前实现 Coordinator、Runtime、Adapter 或请求流程。
+
+## 4. 设计边界
+
+建议领域包位于 internal/tools，且不依赖 internal/server、internal/store、internal/provider。
+
+第一版 Definition 至少表达：
+- Name：稳定工具标识。
+- Description：供模型理解工具用途的描述。
+- Parameters：JSON Schema 原始定义，使用 json.RawMessage 或等价不可变表示。
+
+Registry 至少支持：
+- 注册一个工具定义及对应 Executor。
+- 按名称查询。
+- 按工具名称排序枚举全部 Definition；权限筛选由后续 Policy / Coordinator 负责。
+- 拒绝空名称、非法名称、重复名称、无效 Schema 和超出资源上限的定义。
+- 注册完成后不允许外部修改内部保存的 Schema 字节。
+- 并发读取安全；注册阶段的并发语义明确，避免 map data race。
+
+本任务不提前实现 Executor 的执行逻辑。若定义需要保留 Executor 接口，应只定义最小接口契约，不实现 Runtime 调度、超时或调用计数。
+
+## 5. JSON Schema 第一版范围与确定语义
+
+第一版只支持以下关键字：
+
+- 类型：`object`、`string`、`integer`、`boolean`、`array`
+- 对象：`properties`、`required`、`additionalProperties`
+- 数组：`items`、`minItems`、`maxItems`
+- 字符串：`minLength`、`maxLength`
+- 通用：`enum`、`description`
+
+确定语义：
+
+1. 根 Schema 必须是 object；每个 object 必须声明 `properties` 和 `additionalProperties: false`，不接受未声明字段。
+2. `required` 可省略；若提供必须是无重复字符串数组，且每个名称都必须存在于 `properties`。
+3. `properties` 的值必须是 Schema 对象；支持递归嵌套 object / array。
+4. array 必须声明 `items`；数组元素按该 Schema 递归校验。
+5. `enum` 必须是非空数组，只允许标量值（string、integer、boolean），元素必须与当前类型一致；不支持 null、对象和数组枚举。integer enum 只接受词法形式为整数且在 int64 范围内的值。
+6. 字符串长度按 Unicode code point 计数；min 不得大于 max。数组长度按元素数量计数。
+7. integer 只接受 JSON 整数，不接受小数、指数形式或超出 int64 范围的值。
+8. 所有未支持关键字（包括 `$ref`、`oneOf`、`anyOf`、`allOf`、`pattern`、数值范围等）一律拒绝，不静默忽略。
+9. Schema 与 Arguments 均使用严格 JSON 解析：拒绝重复对象键、尾随第二个 JSON 值、非法 UTF-8、错误类型和超限输入。
+10. `description` 只允许字符串，可出现在任意 Schema 节点；不参与参数值校验。
+11. 根 Schema 和所有 object Schema 均允许空 `properties`，用于表达无参数工具或空对象；此时 `required` 必须为空或省略。
+12. Schema 与 Arguments 的根节点深度均计为第 1 层；每进入一个子 Schema / 子 JSON 值，深度加 1，达到上限允许，超过上限拒绝。
+
+第一版资源上限：
+
+| 项目 | 上限 |
+|---|---:|
+| 工具名称 | 128 字节 |
+| 工具描述 | 1024 字节 |
+| Schema 原文 | 16 KiB |
+| Registry 工具数量 | 64 |
+| 单个对象 properties 数量 | 64 |
+| Schema 嵌套深度 | 8 |
+| enum 项数 | 128 |
+| Arguments 原文 | 8 KiB |
+| Arguments 嵌套深度 | 16 |
+| 单个数组元素数量 | 128 |
+
+名称采用小写稳定标识格式（允许点号分组，如 `web.search`），不允许空白或运行配置片段。工具名称不因 SearXNG URL、Provider 或凭据变化而变化。
+
+## 6. Definition / Registry 公共 API 决策
+
+- `Definition` 只包含稳定契约：Name、Description、Parameters（JSON Schema 原文）。
+- `Executor` 是工具子模块实现的最小执行接口：`Execute(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error)`；工具子模块不依赖 Coordinator。
+- `Registry.Register` 同时接收 Definition 与 Executor；无效 Definition、nil Executor、重复名称均失败，不能覆盖已有注册。
+- `Registry.Lookup` 按稳定名称解析 Definition 与 Executor；返回的 Definition / Schema 字节必须是副本。
+- `Registry.List` 返回按工具名称排序的 Definition 副本，不暴露内部 map 或可变切片。
+- Registry 使用读写锁保证注册与并发读取安全；产品运行时只在启动装配阶段注册，不提供运行期删除/替换 API。
+- Registry 不接收 Policy 参数，不读取配置，也不决定请求权限。后续 Coordinator / Policy 根据请求权限筛选要暴露给模型的定义；Runtime 执行前仍要重新检查授权。
+
+Schema 校验入口与参数校验入口保持独立：`ValidateSchema(raw []byte) error` 在注册时校验定义，`ValidateArguments(schema, arguments []byte) error` 在执行前校验模型参数。
+
+第一版 Definition / Registry 错误使用本包 sentinel errors，不绑定 Platform Fault；后续 Runtime 再负责将工具执行错误转换为统一请求错误。
+
+## 7. 验收条件
+
+- Definition 与 Registry 的公共 API 简单、稳定，不依赖 server/store/provider。
+- 注册时校验工具名和 Schema；无效定义不会进入 Registry。
+- 重复名称有确定错误，不会覆盖已有工具。
+- Registry 查询和枚举并发安全。
+- 返回的 Definition 不会暴露内部可变字节切片。
+- 参数 Schema 子集的支持与拒绝行为有完整单元测试。
+- 输入大小、定义数量、字段数量和嵌套深度有明确上限，防止恶意或误配置造成资源消耗。
+- 不引入不必要的完整 JSON Schema 能力；若引入第三方库，需记录依赖理由和许可/维护情况。
+- 不修改现有推理主流程，不新增管理 API 或数据库字段。
+
+## 8. 实施结果
+
+1. 已实现 Definition、Executor 契约、严格 JSON 解析、Schema 子集校验与 Registry。
+2. 已覆盖重复键、尾随 JSON、非法 UTF-8、深度/大小限制、类型、required、enum、额外字段、数组/属性/枚举容量、并发注册/读取和 Definition 深拷贝。
+3. 已将 Tools 纳入 CI 竞态检测。
+4. 已完成全量 Go 测试、竞态测试、静态检查、编译、Docker 镜像及本轮 Go CI 验收。
+5. 后续进入 TOOL-03 Runtime 执行边界。
+
+## 9. 最终执行记录
+
+- TOOL-01 已完成，归档见 [TOOL-01 历史记录](任务历史/工具能力/TOOL-01-现状盘点与协议验证.md)。
+- 工具系统采用单一 Tools 功能模块：核心能力位于 `internal/tools`，Runtime / Coordinator 和具体工具分别位于 Tools 内部独立 package；具体工具统一放在 `internal/tools/modules/<tool>`。
+- 新增代码：
+  - `internal/tools/definition.go`：Definition、Clone、Executor。
+  - `internal/tools/schema.go`：严格 JSON 解析、Schema 子集与 Arguments 校验。
+  - `internal/tools/registry.go`：Registry、容量限制、并发访问和 Definition 校验。
+  - `internal/tools/schema_test.go`、`registry_test.go`：边界与并发测试。
+- 核心语义：工具名稳定且不包含 Provider / URL / 凭据；Registry 启动期注册、运行期只读；Registry 不承担权限、配置或调度。
+- 主要代码提交：初始实现 `b5d203510671ec23a986a8e72d4aed627e87456f`；最终边界测试提交 `4598c04d3cd7ad4df47c83d34d8ec03130c25ce6`。中间修正覆盖 Schema 深度、Registry 零值、注册前克隆、UTF-8 描述校验和资源上限。
+- 最终验收分支 HEAD：`4598c04d3cd7ad4df47c83d34d8ec03130c25ce6`。
+- Go CI：<https://github.com/Kasign/llm-gateway/actions/runs/44012948674>，结论 success。
+- 已通过 `go test ./...`、`go test -race`（含 `internal/tools`）、`go vet ./...`、Gateway 编译、Docker 镜像构建、配置/API 契约与前端构建、Gateway 故障注入及稳态负载验收。
+- 独立 Web UI Browser Smoke 工作流因安装 Chromium / Playwright 步骤失败；本任务没有修改 Web UI，该失败不影响本轮 Go CI 的成功结论。
+- 未接入真实 SearXNG、未改推理主流程、未新增 API / 数据库字段；这些均不属于 TOOL-02 范围。
+
+## 10. 验收结论
+
+TOOL-02 的 Definition、Schema 子集和 Registry 验收条件已满足。工具执行、安全 Runtime、Coordinator、具体 SearXNG Adapter 与请求级闭环继续由后续任务完成。
