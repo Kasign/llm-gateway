@@ -15,6 +15,18 @@ type Repo struct{ db *sql.DB }
 // NewRepo 绑定已打开的数据库连接。
 func NewRepo(db *sql.DB) *Repo { return &Repo{db: db} }
 
+// decodeAllowedTools 将旧记录的 NULL/空值和无效 JSON 安全降级为空授权，避免旧 Key 获得工具权限。
+func decodeAllowedTools(raw string) []string {
+	var names []string
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &names)
+	}
+	if names == nil {
+		return []string{}
+	}
+	return names
+}
+
 // Create 新建密钥；返回结构体与仅此次可见的完整明文，请妥善保存。
 func (r *Repo) Create(ctx context.Context, name string, rpm int, allowed []string, expires *time.Time) (Key, string, error) {
 	return r.CreateWithTools(ctx, name, rpm, allowed, nil, expires)
@@ -55,8 +67,7 @@ func (r *Repo) GetByRaw(ctx context.Context, raw string) (*Key, error) {
 	if models != "" {
 		_ = json.Unmarshal([]byte(models), &k.AllowedModels)
 	}
-	if toolsJSON != "" { _ = json.Unmarshal([]byte(toolsJSON), &k.AllowedTools) }
-	if k.AllowedTools == nil { k.AllowedTools = []string{} }
+	k.AllowedTools = decodeAllowedTools(toolsJSON)
 	return &k, nil
 }
 
@@ -78,8 +89,7 @@ func (r *Repo) List(ctx context.Context) ([]Key, error) {
 			return nil, err
 		}
 		if m != "" { _ = json.Unmarshal([]byte(m), &k.AllowedModels) }
-		if toolJSON != "" { _ = json.Unmarshal([]byte(toolJSON), &k.AllowedTools) }
-		if k.AllowedTools == nil { k.AllowedTools = []string{} }
+		k.AllowedTools = decodeAllowedTools(toolJSON)
 		if k.ExpiresAt != nil && time.Now().After(*k.ExpiresAt) {
 			k.Status = "expired"
 		}
