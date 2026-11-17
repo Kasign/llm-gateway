@@ -59,6 +59,7 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	expired1, expired2 := prefix+"-old-1", prefix+"-old-2"
 	running, recent := prefix+"-running", prefix+"-recent"
 	ids := []string{expired1, expired2, running, recent}
+	repo := NewRepo(db)
 	defer func() {
 		for _, table := range []string{"request_tool_call_events", "request_stream_events", "request_payloads", "request_logs"} {
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM "+table+" WHERE request_id LIKE ?", prefix+"%")
@@ -77,9 +78,10 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 		if _, err := db.ExecContext(ctx, "INSERT INTO request_stream_events(request_id,seq,at_ms,kind) VALUES(?,?,?,?)", id, 1, 1, "test"); err != nil {
 			t.Fatalf("insert stream event: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO request_tool_call_events
-			(request_id,seq,round_no,tool_name,status,duration_ms,result_bytes,error_code)
-			VALUES(?,?,?,?,?,?,?,?)`, id, 1, 1, "web.search", "succeeded", 12, 24, nil); err != nil {
+		if err := repo.InsertToolCallEvents(ctx, id, []ToolCallEvent{{
+			Seq: 1, Round: 1, ToolName: "web.search", Status: "succeeded",
+			DurationMS: 12, ResultBytes: 24,
+		}}); err != nil {
 			t.Fatalf("insert tool call event: %v", err)
 		}
 	}
@@ -88,7 +90,6 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	insertLog(running, "running", old)
 	insertLog(recent, "completed", recentTime)
 
-	repo := NewRepo(db)
 	toolEvents, err := repo.ListToolCallEvents(ctx, recent, 9)
 	if err != nil {
 		t.Fatalf("list tool call events: %v", err)
