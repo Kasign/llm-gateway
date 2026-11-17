@@ -356,3 +356,38 @@ func nullablePositiveInt64(value int64) any {
 	if value < 0 { return nil }
 	return value
 }
+
+
+// MarkTaskCancelling 将仍在运行的任务及其当前 Run 原子转换为 cancelling。
+// 已经进入终态的任务不会被取消请求覆盖。
+func (r *BenchmarkRepo) MarkTaskCancelling(ctx context.Context, taskID string) (bool, error) {
+	if err := r.ready(); err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	now := time.Now()
+	res, err := tx.ExecContext(ctx, `UPDATE benchmark_tasks SET status='cancelling',updated_at=?
+		WHERE task_id=? AND status='running'`, now, taskID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE benchmark_runs SET status='cancelling',updated_at=?
+		WHERE task_id=? AND status='running'`, now, taskID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
