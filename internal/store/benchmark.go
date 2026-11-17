@@ -382,9 +382,17 @@ func (r *BenchmarkRepo) MarkTaskCancelling(ctx context.Context, taskID string) (
 	if n == 0 {
 		return false, nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE benchmark_runs SET status='cancelling',updated_at=?
-		WHERE task_id=? AND status='running'`, now, taskID); err != nil {
+	res, err = tx.ExecContext(ctx, `UPDATE benchmark_runs SET status='cancelling',updated_at=?
+		WHERE task_id=? AND status='running'`, now, taskID)
+	if err != nil {
 		return false, err
+	}
+	runCount, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if runCount != 1 {
+		return false, fmt.Errorf("benchmark task %q has %d running runs during cancellation; want exactly one", taskID, runCount)
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err

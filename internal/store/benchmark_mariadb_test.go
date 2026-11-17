@@ -123,7 +123,7 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	raceID := id + "-cancel-finish-race"
 	raceTask := BenchmarkTask{TaskID: raceID, Scenario: "performance", Status: "running", StartedAt: now}
 	raceRun := BenchmarkRun{RunID: raceID, TaskID: raceID, RunNo: 1, RequestID: raceID, Status: "running", StartedAt: now}
-	if err := repo.CreateTaskAndRun(ctx, raceTask, traceRun); err != nil {
+	if err := repo.CreateTaskAndRun(ctx, raceTask, raceRun); err != nil {
 		t.Fatalf("create race task: %v", err)
 	}
 	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", raceID) }()
@@ -137,9 +137,9 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	go func() {
 		<-startRace
 		finished := time.Now()
-		traceTask.Status, traceTask.FinishedAt = "completed", &finished
-		traceRun.Status, traceRun.FinishedAt = "completed", &finished
-		raceErrors <- repo.UpdateTaskAndRun(ctx, traceTask, traceRun)
+		raceTask.Status, raceTask.FinishedAt = "completed", &finished
+		raceRun.Status, raceRun.FinishedAt = "completed", &finished
+		raceErrors <- repo.UpdateTaskAndRun(ctx, raceTask, raceRun)
 	}()
 	close(startRace)
 	for i := 0; i < 2; i++ {
@@ -148,11 +148,11 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 		}
 	}
 	raceGot, err := repo.GetTask(ctx, raceID)
-	if err != nil || traceGot.Status != "completed" {
-		t.Fatalf("race task = %+v, err=%v; want completed", traceGot, err)
+	if err != nil || raceGot.Status != "completed" {
+		t.Fatalf("race task = %+v, err=%v; want completed", raceGot, err)
 	}
 	raceRuns, err := repo.ListRuns(ctx, raceID)
-	if err != nil || len(traceRuns) != 1 || traceRuns[0].Status != "completed" {
-		t.Fatalf("race runs = %+v, err=%v; want completed", traceRuns, err)
+	if err != nil || len(raceRuns) != 1 || raceRuns[0].Status != "completed" {
+		t.Fatalf("race runs = %+v, err=%v; want completed", raceRuns, err)
 	}
 }
