@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/whl/llm-gateway/internal/provider"
 	"github.com/whl/llm-gateway/internal/tools/coordinator"
@@ -79,6 +80,7 @@ func (w *bufferedResponseWriter) bodyBytes() []byte {
 }
 
 type bufferedModelCaller struct {
+	requestID   string
 	provider    provider.Provider
 	request     *http.Request
 	path        string
@@ -96,7 +98,9 @@ func (c *bufferedModelCaller) Complete(ctx context.Context, requestBody []byte) 
 		return coordinator.ModelResponse{}, errors.New("buffered ModelCaller context is nil")
 	}
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			providerID := c.provider.ID()
+			applog.Printf("[%s] buffered Provider panic: provider=%s panic_type=%T\n%s", c.requestID, providerID, recovered, debug.Stack())
 			response = coordinator.ModelResponse{}
 			err = errBufferedProviderPanic
 		}

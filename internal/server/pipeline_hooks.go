@@ -485,6 +485,12 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		inTok, outTok, totTok = meta.InputTokens, meta.OutputTokens, meta.TotalTokens
 		tokenSrc = meta.Source
 		pps = meta.PredictedPerSec
+	} else if !st.Stream && coordinatorUsageSet && len(resp) > 0 {
+		// 多轮 usage 已由 Coordinator 汇总；最终响应仍可提供本地模型 timings，不能覆盖总 Token 数。
+		meta := logutil.TokensFromResponse(resp)
+		if pps == nil {
+			pps = meta.PredictedPerSec
+		}
 	} else if st.Stream && inTok == nil && outTok == nil && totTok == nil && len(resp) > 0 {
 		// 流式边收边解析可能漏掉拆包或 Responses 嵌套 usage，结束再扫一遍累计体。
 		meta := logutil.TokensFromResponse(resp)
