@@ -3,7 +3,7 @@
 > Review 日期：2026-11-16
 > 规划更新：2026-11-17
 > 检查分支：`dev`
-> 规划基线：`4b49ba4826f7ba3b62855b62202dec9c8882b85f`
+> 代码验收基线：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`（后续规划提交为文档变更）
 > 本文中的 CI、Browser Smoke 与生产验收状态分别记录；CI 通过不代表真实 Provider 或生产部署已验收。
 
 ## 2026-11-17：产品能力扩展路线更新
@@ -22,7 +22,7 @@
 
 当前分支已具备本地与远程 Provider 接入、统一推理入口、调用方鉴权、限流与并发治理、流式转发、请求审计和管理台。核心推理主流程收敛在 `internal/core`，Provider 具体转发通过 Registry/适配器接入；不建议为本轮能力扩展重写主流程或大规模拆分 `internal/server`。
 
-现有能力与遗留风险继续按本文后续既有 Review 记录和以下文档管理：
+现有能力与遗留风险按各主题权威文档管理；本文只保留总体结论和入口：
 - 架构与推理流程：`docs/architecture.md`
 - 未关闭问题台账：`docs/known-issues-and-followups.md`
 - 配置来源：`docs/configuration-matrix.md`
@@ -30,6 +30,7 @@
 - 生产验收：`docs/production-acceptance-checklist.md`
 - 真实 Provider 矩阵：`docs/real-provider-e2e-matrix.md`
 - 管理台轮询性能方案：`docs/admin-polling-performance-plan.md`
+- 文档职责与维护规则：`docs/README.md`
 - UI Review：`docs/web-ui-style-interaction-review.md`
 
 ---

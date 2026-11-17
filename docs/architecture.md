@@ -2,7 +2,7 @@
 
 LLM Gateway 是个人使用的模型接入、管理与能力扩展平台：统一接入本地模型和远程模型，并逐步提供受控工具调用、推理性能分析和模型来源管理。它不是通用 Chat UI，也不以让慢速本地模型承载 Codex / Claude Code 等长连接 Coding Agent 为主要目标。
 
-产品能力扩展的统一规划见 [产品能力扩展规划](product-capabilities-roadmap.md)。
+产品能力扩展的统一规划见 [产品能力扩展规划](product-capabilities-roadmap.md)。文档导航与权威范围见 [文档目录](README.md)。
 
 进程入口是 `cmd/gateway/main.go`：读配置、迁移 MariaDB、构造 `server.Server`、监听 HTTP。Redis 或上游暂时不可用时进程仍启动。
 

@@ -1,11 +1,12 @@
-# LLM Gateway 重构实施计划与进度
+# 历史记录：LLM Gateway 重构实施计划与进度
 
+> 文档状态：历史实施记录（归档）。下方的旧基线、旧分支状态、旧配置方案和“待运行”任务均不代表当前状态，也不是当前任务来源。当前架构见 [architecture.md](architecture.md)，当前配置/API 契约见 [api-config-db-contracts.md](api-config-db-contracts.md)，当前问题见 [known-issues-and-followups.md](known-issues-and-followups.md)，新功能任务见 [product-capabilities-roadmap.md](product-capabilities-roadmap.md)。
 > 目标分支：`dev`
 > 更新日期：2026-10-29。以 `dev` 为唯一日常集成分支；不强推、不改写历史、不擅自合并 PR。
 > 最新已通过验证 HEAD：`b4cc0cd1624b871432da6caa716aa28aed50015c`；Go CI [运行 40828500713](https://github.com/Kasign/llm-gateway/actions/runs/40828500713) 全部 5 个 Job 通过，包含 Admin API Key 权限范围的 OpenAPI 与 Go 实现契约检查。
 > 当前配置边界：远程 Provider 唯一维护入口为 Web 管理台，权威配置存于 MariaDB。旧 YAML/环境变量 Provider 预置方式已废弃；下文按日期记录的旧实现与方案仅作历史，不得当成当前功能或待恢复任务。现行配置与 API 契约以 `docs/configuration-matrix.md`、`docs/api-config-db-contracts.md` 为准。
 
-## 当前状态快照（2026-10-29）
+## 历史状态快照（2026-10-29；仅供追溯）
 
 - 远程 Provider 的管理入口已统一为 Web 管理台 + MariaDB；不再从 YAML、主 .env 或额外环境文件注册远程 Provider。Provider Key 以 AES-256-GCM 加密持久化，API 不回显明文或密文。
 - Provider ID 去首尾空白并转小写后唯一；新增时前端对已加载列表中的重复 ID 禁用提交，后端锁内再次检查并返回 `409/provider_id_exists`，不会覆盖已有配置。编辑时不能修改 ID。

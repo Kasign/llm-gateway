@@ -1,8 +1,11 @@
 # LLM Gateway 未关闭问题与后续验收台账
 
-> 更新日期：2026-11-16。此文件是问题统一入口。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
+> 更新日期：2026-11-17。本文只作为已有功能缺陷、可靠性风险和生产验收缺口的台账；新产品能力任务以 [产品能力扩展规划](product-capabilities-roadmap.md) 为准。关闭事项时附 commit、CI 运行与可复查结果；真实供应商和生产部署验收单独标记，不以 Mock/CI 代替。
 
 ## 当前基线
+
+- 当前分支为 `dev`。最近的规划文档提交不改变业务代码；代码 Review 基线仍按本节下列代码提交记录判断。
+- 文档与任务的权威边界见 [文档目录](README.md)。本文件的历史日期追加章节仅用于追溯，不自动代表当前待办。
 
 - 当前代码 Review 基线：`b0cfc3d371f926ad9164bf904cd0bbdda22a2975`（后续提交仅更新验收文档）；最新 Go CI [运行 43870019761](https://github.com/Kasign/llm-gateway/actions/runs/43870019761) 5/5 Job 成功；Browser Smoke [运行 43869433077](https://github.com/Kasign/llm-gateway/actions/runs/43869433077) 165/165 检查通过，静默轮询 HTTP 503 回归通过。
 - 前一轮配置/API 文档统一与防回归门禁提交 `3cf0636316582fff1b3a57ae8bfa5074a23c6a05` 的 Go CI [运行 40821447994](https://github.com/Kasign/llm-gateway/actions/runs/40821447994) 全部 5 个 Job 成功，覆盖 Go 测试/race/vet、配置/API 契约、前端 Bundle、稳态负载与审计持久化、故障注入和 Docker 构建。
@@ -43,7 +46,7 @@
 | GW-E2E-001 | OpenAI-compatible Chat、Responses 与 Anthropic Messages 的 opt-in 真实端点用例存在，但 CI 默认跳过，没有实际调用真实供应商。 | 待授权环境验收 | 在用户控制的安全环境提供 HTTPS BaseURL、Provider 专用 Key 和模型名；确认计费额度后执行短请求；禁止将 Key 写入仓库、日志与 Artifact。 | 记录供应商、模型、端点、日期、状态/协议核验结果与脱敏日志；开发 CI 默认不强制联网。 |
 | GW-E2E-002 | 真实供应商各模型的工具调用、结构化输出、Reasoning、视觉、错误封套、真实限流与余额不足行为并未全部验证。 | 部分依赖供应商 | 按 Provider × API × 能力建立兼容矩阵，只验证有实际需求的组合。 | 每个矩阵单元注明通过、失败、不支持或未测；一家通过不代表所有厂商通过。 |
 | GW-PROV-UI-001 | Web 多 Provider 管理与配置来源统一。 | 远程 Provider 已统一由 Web/MariaDB 管理；前端阻止已知重复 ID，后端再次归一化校验并返回 409，不覆盖旧配置；旧状态字段已从列表和 API 契约移除。提交 `52d58f6` 对应的完整 Go CI 全部通过。 | 后续仅在复现新问题时修复运行时逻辑；旧 YAML/环境变量预置路线不再恢复。 | 用户部署前备份数据库与 `LLM_GATEWAY_PROVIDER_ENCRYPTION_KEY`；真实供应商、公网反代与 1Panel 行为仍需环境验收。 |
-| GW-AGENT-001 | 同一 Agent 内多模型别名映射、Agent 级不同 Key/权限策略和配置热更新尚未实现。 | 待产品需求确认 | 保持 Agent 固定 Provider/默认模型的现有契约；需求明确之前不擅自增加权限与路由复杂性。 | 配置模型、优先级、热更新一致性和多 Agent 隔离均有测试。 |
+| GW-AGENT-001 | Agent 级独立 Key/权限策略与配置热更新尚未实现。 | 暂缓，非当前产品主线 | 保持 Agent 固定 Provider/默认模型的现有契约；不把请求体 model 动态切换、模型别名路由作为当前缺陷或待办。只有明确产品需求后再单独评估 Agent 权限和热更新。 | 未来如获批准，再按独立需求定义配置、权限边界和隔离测试。 |
 | GW-API-001 | OpenAPI 的字段级 Schema 与 Go Handler 语义等价性仍需逐步补齐。 | 高风险门禁已覆盖 Provider mutation/view、创建/删除、统计错误、请求取消、认证、审计/保留 DTO，以及调用方 API Key 列表/创建/修改/删除/启用/禁用/轮换的响应 Schema、状态码和 Handler 分支；整体 OpenAPI 仍为 partial。 | 继续按风险顺序对照 Handler 的请求体、成功/错误状态码、错误封套和稳定 JSON 字段；不一次性猜测或声称全量完成。 | 下一批按路线图覆盖模型下载/运行时、推理参数、Ollama、Benchmark 等字段级契约；全量 Go/OpenAPI 等价性仍分阶段补齐。 |
 
 ## 2026-11-16：下载任务 API 契约收口（进行中）
@@ -76,13 +79,14 @@
 
 ## 当前执行范围
 
-1. Provider 热更新已完成最后一轮静态审查：没有确认正常配置路径可触发的 setter 失败，不增加额外回滚框架或重复测试。
-2. 修复显式零整体超时被代理层提升为一小时的问题，并为实际代理 Context 增加零值/正值回归测试。配置未指定时仍由配置加载逻辑应用既有的一小时默认值。
-3. 密钥脱敏、Provider 超时、取消与 SSE 提交边界已进行静态 Review；前端源码与部署 Bundle 由 Actions 中的构建后差异检查验证。
-4. 代码级验收依新 Head 的完整 GitHub Actions。真实供应商 E2E、公网 OpenResty 与 1Panel 部署验收依赖用户环境，单独记录，不与 Mock CI 混为一谈。
-5. 继续暂缓自动重试/故障转移、Agent 权限体系、全量 OpenAPI 对账及目录迁移；只有确认缺陷或明确产品需求才重新纳入范围。
+- 已有功能缺陷：只以本文件前部 P1/P2 问题表中仍未关闭的条目为准。历史记录中的“进行中”“待运行”不覆盖当前基线。
+- 新产品能力：按 [产品能力扩展规划](product-capabilities-roadmap.md) 的 TOOL / PERF / FREE 任务 ID 推进，第一项为 TOOL-01。
+- 真实供应商和生产环境：分别按 [真实 Provider E2E 矩阵](real-provider-e2e-matrix.md) 与 [生产部署验收清单](production-acceptance-checklist.md) 记录。
+- OpenAPI 全字段对账、自动重试/故障转移和 Agent 权限扩展，除非当前问题表明确列为未关闭并有证据，否则不因历史记录而自动重启。
 
-## 2026-10-23 执行记录：并发上限功能与基线依赖
+## 历史执行记录
+
+以下章节按时间保留当时的实施过程、提交和 CI 证据。它们用于追溯，不是当前待办清单；状态判断必须回到上方当前问题表与最新分支代码。## 2026-10-23 执行记录：并发上限功能与基线依赖
 
 - PR #6（基于旧 `dev` 的第一版）由 Actions #157 暴露编译依赖：旧 Core 没有 `UpstreamStatus` 字段。PR #6 已关闭、未合并；没有删除断言。
 - 当前 PR #7 基于 PR #5 的已通过 Head `ac0549109703ab4257ab43c0da8ef0cd5b5b1232` 堆叠，最终功能 Head `dd54cf576ba4a80e7c5d1f2dd0bb3be95a776b4b` 在 [Actions #158](https://github.com/Kasign/llm-gateway/actions/runs/39943828510) 全量通过。
