@@ -95,7 +95,7 @@ func TestBufferedModelCallerReusesProviderAndCapturesResponse(t *testing.T) {
 
 func TestBufferedModelCallerPreservesUpstreamErrorResponse(t *testing.T) {
 	body := []byte(`{"error":{"message":"rate limited"}}`)
-	upstreamErr := &provider.ProviderError{ProviderID: "test", Kind: provider.ErrorRateLimited, StatusCode: http.StatusTooManyRequests}
+	upstreamErr := &provider.ProviderError{ProviderID: "test", Kind: provider.ErrorRateLimit, StatusCode: http.StatusTooManyRequests}
 	p := &bufferedTestProvider{
 		result: core.Result{Status: http.StatusTooManyRequests, UpstreamStatus: http.StatusTooManyRequests, Body: body},
 		err: upstreamErr,

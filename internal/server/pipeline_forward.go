@@ -64,6 +64,10 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		return core.Result{}, &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_not_configured", Message: err.Error()}
 	}
 
+	if result, toolErr, handled := f.forwardWithTools(ctx, st, p, req, upPath, rw); handled {
+		return result, toolErr
+	}
+
 	var upstreamHeadersMS, firstByteMS *int64
 	res, err := p.Forward(ctx, provider.InferenceCall{
 		Writer:  rw,
