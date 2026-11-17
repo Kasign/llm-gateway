@@ -129,6 +129,10 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 	if err != nil {
 		return result, err
 	}
+	choice, err := parseToolChoice(request["tool_choice"], allowed)
+	if err != nil {
+		return result, err
+	}
 
 	seenCallIDs := make(map[string]struct{})
 	totalToolResultBytes := 0
@@ -173,13 +177,13 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			result.RoundUsage = append(result.RoundUsage, append(json.RawMessage(nil), round.usage...))
 		}
 		if round.finishReason != "tool_calls" {
-			if len(round.calls) != 0 {
+			if len(round.calls) != 0 || choice.mode == "required" || choice.name != "" {
 				return result, ErrInvalidModelResponse
 			}
 			result.Response = cloneModelResponse(modelResponse)
 			return result, nil
 		}
-		if len(round.calls) == 0 {
+		if len(round.calls) == 0 || choice.mode == "none" {
 			return result, ErrInvalidModelResponse
 		}
 		if result.ToolRounds >= MaxToolRounds {
@@ -203,7 +207,7 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 				return result, ErrInvalidModelResponse
 			}
 			roundCallIDs[call.ID] = struct{}{}
-			if call.Type != "function" || call.Function.Name == "" {
+			if call.Type != "function" || call.Function.Name == "" || (choice.name != "" && call.Function.Name != choice.name) {
 				return result, ErrInvalidModelResponse
 			}
 			if _, ok := allowed[call.Function.Name]; !ok {
@@ -257,6 +261,11 @@ func (c *Coordinator) Run(ctx context.Context, requestBody []byte, allowedToolNa
 			return result, fmt.Errorf("%w: encode conversation messages", ErrInvalidRequest)
 		}
 	}
+}
+
+type toolChoiceConstraint struct {
+	mode string
+	name string
 }
 
 type preparedCall struct {
@@ -365,16 +374,21 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 }
 
 func validateToolChoice(raw json.RawMessage, allowed map[string]struct{}) error {
+	_, err := parseToolChoice(raw, allowed)
+	return err
+}
+
+func parseToolChoice(raw json.RawMessage, allowed map[string]struct{}) (toolChoiceConstraint, error) {
 	if len(raw) == 0 {
-		return nil
+		return toolChoiceConstraint{mode: "auto"}, nil
 	}
 	var choice string
 	if json.Unmarshal(raw, &choice) == nil {
 		switch choice {
 		case "auto", "none", "required":
-			return nil
+			return toolChoiceConstraint{mode: choice}, nil
 		default:
-			return ErrUnsupportedRequest
+			return toolChoiceConstraint{}, ErrUnsupportedRequest
 		}
 	}
 	var object struct {
@@ -384,12 +398,12 @@ func validateToolChoice(raw json.RawMessage, allowed map[string]struct{}) error 
 		} `json:"function"`
 	}
 	if json.Unmarshal(raw, &object) != nil || object.Type != "function" || object.Function.Name == "" {
-		return ErrUnsupportedRequest
+		return toolChoiceConstraint{}, ErrUnsupportedRequest
 	}
 	if _, ok := allowed[object.Function.Name]; !ok {
-		return fmt.Errorf("%w: %s", ErrUnknownTool, object.Function.Name)
+		return toolChoiceConstraint{}, fmt.Errorf("%w: %s", ErrUnknownTool, object.Function.Name)
 	}
-	return nil
+	return toolChoiceConstraint{mode: "named", name: object.Function.Name}, nil
 }
 
 func parseToolRound(body []byte) (parsedRound, error) {
