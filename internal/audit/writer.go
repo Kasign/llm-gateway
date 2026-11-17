@@ -33,6 +33,10 @@ type Writer struct {
 	droppedQueueFull           atomic.Uint64
 	writeSucceeded            atomic.Uint64
 	writeFailed               atomic.Uint64
+	toolEventEnqueued         atomic.Uint64
+	toolEventDropped          atomic.Uint64
+	toolEventWriteSucceeded  atomic.Uint64
+	toolEventWriteFailed     atomic.Uint64
 	queueWaitCount             atomic.Uint64
 	queueWaitTotalNS           atomic.Uint64
 	queueWaitMaxNS             atomic.Uint64
@@ -99,9 +103,9 @@ func (w *Writer) enqueueCritical(fn job) {
 	w.enqueueWithPriority(fn, true)
 }
 
-func (w *Writer) enqueueWithPriority(fn job, critical bool) {
+func (w *Writer) enqueueWithPriority(fn job, critical bool) bool {
 	if fn == nil {
-		return
+		return false
 	}
 
 	reason := ""
@@ -123,7 +127,9 @@ func (w *Writer) enqueueWithPriority(fn job, critical bool) {
 
 	if reason != "" {
 		w.recordDrop(reason)
+		return false
 	}
+	return true
 }
 
 func (w *Writer) track(fn job, queuedAt time.Time) job {
@@ -262,6 +268,28 @@ func (w *Writer) InsertStreamEvents(requestID string, events []store.StreamEvent
 	w.enqueue(func(ctx context.Context, r *store.Repo) error {
 		return r.InsertStreamEvents(ctx, requestID, evCopy)
 	})
+}
+
+ // InsertToolCallEvents 批量异步写入工具审计事件，使用普通优先级，不占用请求 Finish 预留容量。
+func (w *Writer) InsertToolCallEvents(requestID string, events []store.ToolCallEvent) {
+	if w == nil || strings.TrimSpace(requestID) == "" || len(events) == 0 {
+		return
+	}
+	evCopy := append([]store.ToolCallEvent(nil), events...)
+	accepted := w.enqueueWithPriority(func(ctx context.Context, r *store.Repo) error {
+		err := r.InsertToolCallEvents(ctx, requestID, evCopy)
+		if err != nil {
+			w.toolEventWriteFailed.Add(uint64(len(evCopy)))
+			return err
+		}
+		w.toolEventWriteSucceeded.Add(uint64(len(evCopy)))
+		return nil
+	}, false)
+	if accepted {
+		w.toolEventEnqueued.Add(uint64(len(evCopy)))
+	} else {
+		w.toolEventDropped.Add(uint64(len(evCopy)))
+	}
 }
 
 // Shutdown 停止接收新任务并关闭队列，worker 会按队列顺序处理已入队任务。

@@ -93,3 +93,47 @@ func TestWriterStatsCountWriteFailuresWithoutExposingErrorText(t *testing.T) {
 		t.Fatalf("write totals success/fail = %d/%d, want 0/1", stats.WriteSucceededTotal, stats.WriteFailedTotal)
 	}
 }
+
+
+func TestToolCallEventMetricsTrackDropsAndWriteFailures(t *testing.T) {
+	w := NewWriter(nil, 4)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	w.enqueueCritical(func(context.Context, *store.Repo) error {
+		close(started)
+		<-release
+		return nil
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not start")
+	}
+	events := []store.ToolCallEvent{
+		{Seq: 1, Round: 1, ToolName: "web.search", Status: "succeeded"},
+		{Seq: 2, Round: 1, ToolName: "web.search", Status: "failed", ErrorCode: "tool_execution_failed"},
+	}
+	w.InsertToolCallEvents("request-1", events)
+	w.enqueue(func(context.Context, *store.Repo) error { return nil })
+	w.enqueue(func(context.Context, *store.Repo) error { return nil })
+	w.InsertToolCallEvents("request-2", []store.ToolCallEvent{
+		{Seq: 1, Round: 1, ToolName: "web.search", Status: "succeeded"},
+	})
+	before := w.Stats()
+	if before.ToolEventEnqueuedTotal != 2 || before.ToolEventDroppedTotal != 1 {
+		t.Fatalf("tool event enqueue/drop = %d/%d, want 2/1", before.ToolEventEnqueuedTotal, before.ToolEventDroppedTotal)
+	}
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if err := w.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	after := w.Stats()
+	if after.ToolEventWriteSucceededTotal != 0 || after.ToolEventWriteFailedTotal != 2 {
+		t.Fatalf("tool event write success/fail = %d/%d, want 0/2", after.ToolEventWriteSucceededTotal, after.ToolEventWriteFailedTotal)
+	}
+}

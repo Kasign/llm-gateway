@@ -18,6 +18,10 @@ type StatsSnapshot struct {
 	DropRate                   float64 `json:"drop_rate"`
 	WriteSucceededTotal        uint64  `json:"write_succeeded_total"`
 	WriteFailedTotal           uint64  `json:"write_failed_total"`
+	ToolEventEnqueuedTotal     uint64  `json:"tool_event_enqueued_total"`
+	ToolEventDroppedTotal      uint64  `json:"tool_event_dropped_total"`
+	ToolEventWriteSucceededTotal uint64 `json:"tool_event_write_succeeded_total"`
+	ToolEventWriteFailedTotal  uint64  `json:"tool_event_write_failed_total"`
 	QueueWaitCount             uint64  `json:"queue_wait_count"`
 	QueueWaitTotalMS           float64 `json:"queue_wait_total_ms"`
 	QueueWaitMaxMS             float64 `json:"queue_wait_max_ms"`
@@ -54,6 +58,10 @@ func (w *Writer) Stats() StatsSnapshot {
 		DropRate:                   dropRate,
 		WriteSucceededTotal:        w.writeSucceeded.Load(),
 		WriteFailedTotal:           w.writeFailed.Load(),
+		ToolEventEnqueuedTotal:     w.toolEventEnqueued.Load(),
+		ToolEventDroppedTotal:      w.toolEventDropped.Load(),
+		ToolEventWriteSucceededTotal: w.toolEventWriteSucceeded.Load(),
+		ToolEventWriteFailedTotal:  w.toolEventWriteFailed.Load(),
 		QueueWaitCount:             w.queueWaitCount.Load(),
 		QueueWaitTotalMS:           float64(w.queueWaitTotalNS.Load()) / float64(time.Millisecond),
 		QueueWaitMaxMS:             float64(w.queueWaitMaxNS.Load()) / float64(time.Millisecond),
