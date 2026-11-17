@@ -369,7 +369,7 @@ func TestRunPreservesUpstreamHTTPErrorResponseAlongsideError(t *testing.T) {
 	if !errors.Is(err, upstreamErr) {
 		t.Fatalf("Run() error = %v, want original upstream error", err)
 	}
-	if result.Response.StatusCode != http.StatusTooManyRequests ||
+	if result.ModelRounds != 1 || result.Response.StatusCode != http.StatusTooManyRequests ||
 		result.Response.UpstreamStatus != http.StatusTooManyRequests ||
 		string(result.Response.Body) != string(body) {
 		t.Fatalf("upstream response was lost: %+v", result.Response)
@@ -390,7 +390,7 @@ func TestRunReturnsPartialCountersWhenToolExecutionFails(t *testing.T) {
 	if !errors.Is(err, ErrToolExecutionFailed) {
 		t.Fatalf("Run() error = %v, want ErrToolExecutionFailed", err)
 	}
-	if result.ModelRounds != 1 || result.ToolRounds != 0 || result.ToolCalls != 0 {
+	if result.ModelRounds != 1 || result.ToolRounds != 1 || result.ToolCalls != 0 {
 		t.Fatalf("partial counters were lost: %+v", result)
 	}
 }
