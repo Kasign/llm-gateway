@@ -55,7 +55,7 @@ func (c *ToolsConfig) Normalize() error {
 		if !providerIDPattern.MatchString(item.ProviderID) {
 			return fmt.Errorf("tools.allowed_models[%d].provider_id is invalid", i)
 		}
-		if item.ModelKey == "" || strings.Contains(item.ModelKey, "\${") || len(item.ModelKey) > 256 || !utf8.ValidString(item.ModelKey) ||
+		if item.ModelKey == "" || strings.Contains(item.ModelKey, "${") || len(item.ModelKey) > 256 || !utf8.ValidString(item.ModelKey) ||
 			strings.ContainsAny(item.ModelKey, "\x00\r\n") {
 			return fmt.Errorf("tools.allowed_models[%d].model_key is invalid", i)
 		}
