@@ -106,6 +106,7 @@ func (m *memSink) Write(p []byte) (int, error) {
 	if remaining <= 0 { return 0, errBenchmarkResponseTooLarge }
 	if len(p) > remaining {
 		m.body = append(m.body, p[:remaining]...)
+		m.status = http.StatusBadGateway
 		return remaining, errBenchmarkResponseTooLarge
 	}
 	m.body = append(m.body, p...)

@@ -35,7 +35,7 @@ const (
 	maxBenchmarkExecutionTime = 30 * time.Minute
 )
 
-var errBenchmarkResponseTooLarge = errors.New("benchmark response exceeded the 8 MiB capture limit")
+var errBenchmarkResponseTooLarge = &core.Error{Status: http.StatusBadGateway, Code: "benchmark_response_too_large", Message: "benchmark response exceeded the 8 MiB capture limit"}
 
 func benchmarkExecutionTimeout(configuredSeconds int) time.Duration {
 	limit := maxBenchmarkExecutionTime
