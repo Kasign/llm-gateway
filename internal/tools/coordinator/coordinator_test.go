@@ -15,6 +15,7 @@ import (
 type testModel struct {
 	responses []ModelResponse
 	requests  [][]byte
+	err       error
 }
 
 func (m *testModel) Complete(_ context.Context, requestBody []byte) (ModelResponse, error) {
@@ -24,7 +25,7 @@ func (m *testModel) Complete(_ context.Context, requestBody []byte) (ModelRespon
 	}
 	response := m.responses[0]
 	m.responses = m.responses[1:]
-	return response, nil
+	return response, m.err
 }
 
 type testExecutor struct {
@@ -347,4 +348,83 @@ func TestRunHonorsCanceledRequestContext(t *testing.T) {
 	if len(model.requests) != 0 || len(executor.calls) != 0 {
 		t.Fatal("canceled request reached model or tool executor")
 	}
+}
+
+func TestRunPreservesUpstreamHTTPErrorResponseAlongsideError(t *testing.T) {
+	upstreamErr := errors.New("provider returned HTTP 429")
+	body := []byte(`{"error":{"message":"rate limited"}}`)
+	model := &testModel{
+		responses: []ModelResponse{{
+			StatusCode: http.StatusTooManyRequests,
+			UpstreamStatus: http.StatusTooManyRequests,
+			Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: body,
+		}},
+		err: upstreamErr,
+	}
+	executor := &testExecutor{}
+	coordinator := testCoordinator(t, model, executor)
+
+	result, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if !errors.Is(err, upstreamErr) {
+		t.Fatalf("Run() error = %v, want original upstream error", err)
+	}
+	if result.Response.StatusCode != http.StatusTooManyRequests ||
+		result.Response.UpstreamStatus != http.StatusTooManyRequests ||
+		string(result.Response.Body) != string(body) {
+		t.Fatalf("upstream response was lost: %+v", result.Response)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+}
+
+func TestRunReturnsPartialCountersWhenToolExecutionFails(t *testing.T) {
+	model := &testModel{responses: []ModelResponse{
+		modelResponse(toolCallResponse("call-1", `{"query":"hello"}`)),
+	}}
+	executor := &failingTestExecutor{err: errors.New("private executor failure")}
+	coordinator := testCoordinatorWithExecutor(t, model, executor)
+
+	result, err := coordinator.Run(context.Background(), []byte(requestBody), []string{"web.search"})
+	if !errors.Is(err, ErrToolExecutionFailed) {
+		t.Fatalf("Run() error = %v, want ErrToolExecutionFailed", err)
+	}
+	if result.ModelRounds != 1 || result.ToolRounds != 0 || result.ToolCalls != 0 {
+		t.Fatalf("partial counters were lost: %+v", result)
+	}
+}
+
+type failingTestExecutor struct {
+	err error
+}
+
+func (e *failingTestExecutor) Execute(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	return nil, e.err
+}
+
+func testCoordinatorWithExecutor(t *testing.T, model *testModel, executor ToolExecutor) *Coordinator {
+	t.Helper()
+	registry := tools.NewRegistry()
+	definition := tools.Definition{
+		Name: "web.search",
+		Description: "Search the web",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1}},"required":["query"],"additionalProperties":false}`),
+	}
+	if err := registry.Register(definition, executorAdapter{executor: executor}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+	coordinator, err := New(registry, executor, model)
+	if err != nil {
+		t.Fatalf("create coordinator: %v", err)
+	}
+	return coordinator
+}
+
+type executorAdapter struct {
+	executor ToolExecutor
+}
+
+func (a executorAdapter) Execute(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error) {
+	return a.executor.Execute(ctx, "web.search", arguments)
 }
