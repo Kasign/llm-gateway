@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"unicode/utf8"
 )
 
 var (
@@ -35,10 +36,10 @@ func NewRegistry() *Registry {
 func (r *Registry) Register(def Definition, executor Executor) error {
 	if r == nil { return fmt.Errorf("%w: registry is nil", ErrInvalidDefinition) }
 	if isNilExecutor(executor) { return ErrNilExecutor }
-	if err := validateDefinition(def); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidDefinition, err)
-	}
 	def = def.Clone()
+	if err := validateDefinition(def); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.items[def.Name]; exists { return fmt.Errorf("%w: %s", ErrDuplicateTool, def.Name) }
@@ -74,6 +75,9 @@ func validateDefinition(def Definition) error {
 	}
 	if len(def.Description) > MaxToolDescriptionBytes {
 		return fmt.Errorf("description exceeds %d bytes", MaxToolDescriptionBytes)
+	}
+	if !utf8.ValidString(def.Description) {
+		return errors.New("description must be valid UTF-8")
 	}
 	if err := ValidateSchema(def.Parameters); err != nil { return err }
 	return nil
