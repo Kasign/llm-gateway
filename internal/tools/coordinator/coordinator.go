@@ -359,6 +359,7 @@ func (c *Coordinator) prepareRequest(body []byte, allowedNames []string) (map[st
 		return nil, nil, nil, ErrCoordinatorUnavailable
 	}
 	request["tools"] = encodedTools
+	request["parallel_tool_calls"] = json.RawMessage("false")
 	request["messages"] = rawMessages
 	return request, messages, allowed, nil
 }
