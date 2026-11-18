@@ -17,16 +17,28 @@ func (s *Server) startRuntimeSnapshotSampling() {
 	s.runtimeSnapshotSamplerWG.Add(1)
 	go func() {
 		defer s.runtimeSnapshotSamplerWG.Done()
-		s.sampleLocalRuntimeSnapshot(ctx)
-		ticker := time.NewTicker(runtimeSnapshotSamplingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.sampleLocalRuntimeSnapshot(ctx)
-			}
-		}
+		runRuntimeSnapshotSampling(ctx, s.sampleLocalRuntimeSnapshot, runtimeSnapshotSamplingInterval)
 	}()
+}
+
+// runRuntimeSnapshotSampling 立即执行首次采样，再按固定周期串行采样。
+// sample 接收生命周期 Context，关闭时可取消正在执行的上游请求。
+func runRuntimeSnapshotSampling(ctx context.Context, sample func(context.Context), interval time.Duration) {
+	if ctx == nil || sample == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = runtimeSnapshotSamplingInterval
+	}
+	sample(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sample(ctx)
+		}
+	}
 }

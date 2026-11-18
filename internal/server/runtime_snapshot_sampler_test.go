@@ -282,3 +282,74 @@ func TestSampleLlamaMetricsTimeoutIsIsolated(t *testing.T) {
 		t.Fatalf("metrics timeout must remain isolated: %#v", got)
 	}
 }
+
+
+func TestRunRuntimeSnapshotSamplingStartsImmediatelyAndDoesNotOverlap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		runRuntimeSnapshotSampling(ctx, func(context.Context) {
+			current := active.Add(1)
+			for previous := maxActive.Load(); current > previous; previous = maxActive.Load() {
+				if maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			calls.Add(1)
+			time.Sleep(12 * time.Millisecond)
+			active.Add(-1)
+		}, 2*time.Millisecond)
+	}()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for calls.Load() < 3 {
+		select {
+		case <-deadline.C:
+			cancel()
+			<-done
+			t.Fatalf("周期采样未按预期执行，calls=%d", calls.Load())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("取消 Context 后采样循环未退出")
+	}
+	if got := maxActive.Load(); got != 1 {
+		t.Fatalf("采样任务发生重叠，最大并发数=%d", got)
+	}
+}
+
+func TestRunRuntimeSnapshotSamplingCancellationInterruptsCurrentSample(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runRuntimeSnapshotSampling(ctx, func(sampleCtx context.Context) {
+			close(started)
+			<-sampleCtx.Done()
+		}, time.Millisecond)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("采样循环未执行首次采样")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("当前采样未响应 Context 取消")
+	}
+}
