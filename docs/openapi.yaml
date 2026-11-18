@@ -2882,6 +2882,8 @@ components:
         prep_ms: { type: integer, format: int64, minimum: 0 }
         model_load_ms: { type: integer, format: int64, minimum: 0 }
         upstream_ms: { type: integer, format: int64, minimum: 0 }
+        provider_queue_wait_ms: { type: integer, format: int64, minimum: 0, description: Provider 并发许可等待耗时；直接获得许可为 0。 }
+        provider_queue_wait_status: { type: string, enum: [none, granted, timeout, cancelled] }
         time_to_upstream_headers_ms: { type: integer, format: int64, minimum: 0 }
         time_to_first_byte_ms: { type: integer, format: int64, minimum: 0 }
         ttft_ms: { type: integer, format: int64, minimum: 0 }
@@ -4012,6 +4014,8 @@ components:
         prep_ms: { type: integer, format: int64, minimum: 0 }
         model_load_ms: { type: integer, format: int64, minimum: 0 }
         upstream_ms: { type: integer, format: int64, minimum: 0 }
+        provider_queue_wait_ms: { type: integer, format: int64, minimum: 0, description: Provider 并发许可等待耗时；直接获得许可为 0。 }
+        provider_queue_wait_status: { type: string, enum: [none, granted, timeout, cancelled] }
         time_to_upstream_headers_ms: { type: integer, format: int64, minimum: 0 }
         time_to_first_byte_ms: { type: integer, format: int64, minimum: 0 }
         ttft_ms: { type: integer, format: int64, minimum: 0 }
@@ -5072,6 +5076,8 @@ components:
         prep_ms: { type: integer, format: int64, minimum: 0 }
         model_load_ms: { type: integer, format: int64, minimum: 0 }
         upstream_ms: { type: integer, format: int64, minimum: 0 }
+        provider_queue_wait_ms: { type: integer, format: int64, minimum: 0, description: Provider 并发许可等待耗时；直接获得许可为 0。 }
+        provider_queue_wait_status: { type: string, enum: [none, granted, timeout, cancelled] }
         time_to_upstream_headers_ms: { type: integer, format: int64, minimum: 0 }
         time_to_first_byte_ms: { type: integer, format: int64, minimum: 0 }
         ttft_ms: { type: integer, format: int64, minimum: 0 }
@@ -6166,6 +6172,8 @@ components:
         prep_ms: { type: integer, format: int64, minimum: 0 }
         model_load_ms: { type: integer, format: int64, minimum: 0 }
         upstream_ms: { type: integer, format: int64, minimum: 0 }
+        provider_queue_wait_ms: { type: integer, format: int64, minimum: 0, description: Provider 并发许可等待耗时；直接获得许可为 0。 }
+        provider_queue_wait_status: { type: string, enum: [none, granted, timeout, cancelled] }
         time_to_upstream_headers_ms: { type: integer, format: int64, minimum: 0 }
         time_to_first_byte_ms: { type: integer, format: int64, minimum: 0 }
         ttft_ms: { type: integer, format: int64, minimum: 0 }
