@@ -368,7 +368,8 @@ func (l timelineSmallSendBufferListener) Accept() (net.Conn, error) {
 	return conn, nil
 }
 
-func TestResponseSinkRecordsRealTCPClientDisconnect(t *testing.T) {\n\tdisconnectTimelineResults := make(chan []requestTimelineEvent, 1)
+func TestResponseSinkRecordsRealTCPClientDisconnect(t *testing.T) {
+	disconnectTimelineResults := make(chan []requestTimelineEvent, 1)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
