@@ -155,6 +155,81 @@ func TestConcurrencyLimiterQueueRejectsGrantAfterDeadline(t *testing.T) {
 	}
 }
 
+func TestConcurrencyLimiterQueueObserverRecordsTimeout(t *testing.T) {
+	limiter, err := NewConcurrencyLimiter(1)
+	if err != nil { t.Fatal(err) }
+	if err := limiter.SetQueueLimit(1); err != nil { t.Fatal(err) }
+	if !limiter.TryAcquire() { t.Fatal("expected initial active request to acquire the slot") }
+
+	observedCh := make(chan ConcurrencyWaitResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- limiter.AcquireWithObserver(context.Background(), 60*time.Millisecond, func(v ConcurrencyWaitResult) {
+			observedCh <- v
+		})
+	}()
+	waitForConcurrencyQueueDepth(t, limiter, 1)
+
+	select {
+	case err := <-errCh:
+		status, code, _ := core.Unpack(err)
+		if status != 503 || code != "provider_queue_timeout" {
+			t.Fatalf("timeout error = %d/%s, want 503/provider_queue_timeout", status, code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued request did not time out")
+	}
+	select {
+	case observed := <-observedCh:
+		if !observed.Waited || observed.Status != "timeout" || observed.WaitMS < 40 {
+			t.Fatalf("timeout observation = %+v, want waited timeout >= 40ms", observed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout observer did not report")
+	}
+	limiter.Release()
+}
+
+func TestConcurrencyLimiterQueueObserverRecordsCancellation(t *testing.T) {
+	limiter, err := NewConcurrencyLimiter(1)
+	if err != nil { t.Fatal(err) }
+	if err := limiter.SetQueueLimit(1); err != nil { t.Fatal(err) }
+	if !limiter.TryAcquire() { t.Fatal("expected initial active request to acquire the slot") }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	observedCh := make(chan ConcurrencyWaitResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- limiter.AcquireWithObserver(ctx, 2*time.Second, func(v ConcurrencyWaitResult) {
+			observedCh <- v
+		})
+	}()
+	waitForConcurrencyQueueDepth(t, limiter, 1)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled waiter error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled waiter did not return")
+	}
+	select {
+	case observed := <-observedCh:
+		if !observed.Waited || observed.Status != "cancelled" || observed.WaitMS < 0 {
+			t.Fatalf("cancellation observation = %+v, want waited cancelled", observed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation observer did not report")
+	}
+	if got := limiter.QueueDepth(); got != 0 {
+		t.Fatalf("queue depth after cancellation = %d, want 0", got)
+	}
+	limiter.Release()
+}
+
+
 func TestConcurrencyLimiterQueueObserverRecordsDirectAndGrantedWait(t *testing.T) {
 	limiter, err := NewConcurrencyLimiter(1)
 	if err != nil { t.Fatal(err) }
