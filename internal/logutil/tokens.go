@@ -167,7 +167,6 @@ type TokenHarvest struct {
 	PromptMS         *float64
 	PredictedMS      *float64
 	PromptPerSecond  *float64
-	PredictedPerSecond *float64
 	TokenSource      string
 	SpeedSource      string
 	Source           string // 兼容旧值："usage" | "llama_timings"
