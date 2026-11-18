@@ -1,0 +1,155 @@
+# 当前任务：PERF-05 完整 Request Timeline
+
+> 状态：已完成（2026-11-18）
+> 更新日期：2026-11-18
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 当前代码验收基线：78c5df249c768a802a770b77da3bd0040bb3319e
+> 前序任务：[PERF-04 本地运行时快照](任务历史/本地模型性能分析/PERF-04-本地运行时快照.md)
+> 总体方案：[本地模型全链路性能分析方案](本地模型全链路性能分析方案.md)
+> 任务规划权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 目标
+
+建立统一、可解释的 Gateway 请求时间线，让一次请求的主要阶段以同一个请求起点、单调时钟偏移量和明确状态表达。时间线是 PERF-06/07/09 的 Gateway 侧证据基础。
+
+只记录阶段时间点和必要的阶段结果，不保存 Prompt、Response、Reasoning、工具参数或工具结果正文；不改变普通 /v1 请求的认证、解析、Pipeline 顺序、Provider 选择、流式响应、错误处理和取消时序。
+
+## 2. 当前代码中的真实时间锚点
+
+已审查 pipeline_http.go、pipeline_execution.go、pipeline_forward.go、pipeline_hooks.go、pipeline.go、request_trace.go、request_analysis.go。
+
+| 现有锚点/字段 | 当前来源 | 当前实际含义与限制 |
+|---|---|---|
+| 请求起点 | serveInference 入口的 start := time.Now()，传入 core.Request.Started | Handler 开始处理请求，不等于网卡/HTTP Server 收到首字节 |
+| 鉴权/Key RPM | serveInference 中独立记录 started/finished | 实际执行时记录起止偏移；方法错误或鉴权前拒绝时标记 not_reached |
+| Body Read | readLimitedRequestBody 前后 | 记录真实读取区间；超限/读取错误仍保留读取完成时间，后续阶段 not_reached |
+| PreparedAt | Core Pipeline 在 Resolver/Mutator 后写入 | 旧 prep_ms 包含模型解析和请求改写 |
+| ReadyAt | 请求级与全局 Guard 完成后写入 | 旧 model_load_ms 实际是 PreparedAt→ReadyAt，可能包含 ACL、Provider RPM Guard 和模型就绪等工作，不是纯模型加载 |
+| WarmAt | WarmStart 完成后写入 | 已有事件锚点，但未进入统一分析结构 |
+| UpstreamStart | 调用 Forwarder 前写入 | Provider admission queue 在 Forward 内发生，因此 upstream_ms 包含队列等待 |
+| Provider Queue Wait | Provider OnQueueWait 回调 | 已独立记录真实 admission 等待值和状态 |
+| Upstream Headers / First Byte | Provider 回调，以 time.Since(st.Started) 计算 | 是从请求起点到事件的偏移，不是从 UpstreamStart 开始的阶段耗时 |
+| TTFT / First Content | requestTrace 以 Started 为起点记录 | 仅流式可可靠采集；TTFT 表示首个 reasoning/content delta |
+| Stream Chunk | Pipeline Observer / requestTrace | 记录流式事件；不等同于客户端写回完成 |
+| Response Write | responseSink 底层 Write 返回值 | 首次/末次成功正文写入与错误/短写分别记录；不代表客户端确认接收 |
+| Finish | Core Pipeline `StageFinish` Observer 事件 | Pipeline 在成功、失败、取消或 panic 收尾时统一发出；不是 HTTP Handler 返回或客户端确认收到全部字节 |
+
+## 3.1 Timeline 事件字典（PERF-05.1）
+
+所有事件以 `serveInference` 的 Handler 入口为统一起点，记录 `offset_ms`（相对起点的毫秒偏移）；事件时间由进程内单调时钟计算。事件本身只保存名称、偏移、状态和必要的稳定错误码，不保存任何请求/响应正文。
+
+| 事件名 | 采集位置 | 语义 | 适用/缺失规则 |
+|---|---|---|---|
+| `request_received` | `serveInference` 入口 | Handler 开始执行 | 所有进入 Handler 的请求；不代表网络层首字节 |
+| `auth_started` / `auth_finished` | `authenticateOutcome` 前后 | Key 鉴权执行区间 | 方法错误在鉴权前结束，标记 not_reached |
+| `client_rpm_started` / `client_rpm_finished` | `allowClientKeyRequest` 前后 | 客户端 Key RPM 检查区间 | 鉴权拒绝时 not_reached；依赖错误保留失败状态 |
+| `body_read_started` / `body_read_finished` | `readLimitedRequestBody` 前后 | 请求体读取区间 | 鉴权/限流拒绝时 not_reached；超限/读取错误保留失败状态 |
+| `pipeline_started` | Core Pipeline `StageParsed` 事件 | 主 Pipeline 已进入解析阶段 | Handler 门外拒绝或解析前失败时 not_reached |
+| `prepared` | Core Pipeline 写入 `PreparedAt` | Resolver/Mutator 完成 | 复用现有锚点，不改变 prep_ms |
+| `ready` | Core Pipeline 写入 `ReadyAt` | 请求级及全局 Guard 完成 | 复用现有锚点；不是纯模型加载完成 |
+| `warm_finished` | WarmStart 完成回调 | 模型预热完成 | 未执行/不支持时 not_applicable 或 not_reached |
+| `upstream_started` | Core Pipeline 现有 UpstreamStart | Forwarder 开始 | 复用现有锚点 |
+| `provider_queue_wait` | Provider `OnQueueWait` | Admission 实际等待值及结果状态 | 沿用现有 WaitMS/Status；不把排队虚构为 dispatch |
+| `upstream_dispatched` | Provider `OnUpstreamDispatch` | Admission 成功后即将发起上游 HTTP | 未获得许可时 not_reached |
+| `upstream_headers` | Provider `OnHeaders` | 上游 HTTP 响应头已取得 | 非流式/流式都可发生；不代表客户端写回 |
+| `upstream_first_byte` | Provider `OnFirstByte` | 首次读取到上游响应体字节 | 流式与非流式均在底层 Reader 首次返回正文数据时记录；不等同于首个 SSE 内容或客户端首写 |
+| `stream_first_any` / `stream_first_reasoning` / `stream_first_content` | 现有 requestTrace/SSE Observer | 首个对应事件/正文 | 非流式为 not_applicable；复用已有事件，不二次解析 |
+| `gateway_first_write` / `gateway_last_write` | `responseSink` 写回边界 | Gateway 首次/最后一次成功写入客户端 ResponseWriter | 仅记录写入调用结果；不代表客户端确认接收；HEAD 与无正文状态不记录成功正文写入 |
+| `gateway_write_failed` | `responseSink.Write` 返回错误或短写 | Gateway 正文写回失败 | 只记录失败发生时间，不保存底层错误文本；HEAD 与无正文状态不适用 |
+| `pipeline_finished` | Pipeline Observer `onFinish` | Core Pipeline 收尾 | 与 HTTP Handler 返回、最后写回分开 |
+| `handler_exit_started` | `serveInference` defer | Handler 进入最终收尾阶段，随后持久化 Timeline | 正常请求写入完整 RequestAnalysis；早期拒绝写入 timeline_only 记录，不生成阶段耗时和吞吐数据 |
+
+### 阶段计算与包含关系
+
+- `auth`、`client_rpm`、`body_read` 等区间只由各自 start/finish 事件配对计算；不从相邻事件相减。
+- `provider_queue_wait` 是 `upstream_started` 与 `upstream_dispatched` 之间的 Provider admission 子阶段。现有回调只返回真实等待值和状态；若未来需要精确起止事件，必须由 limiter 提供真实时间锚点，不能用回调到达时刻反推。
+- `upstream_headers`、`upstream_first_byte`、`stream_first_content` 是独立里程碑，不是阶段时长。
+- `gateway_first_write` 与 `gateway_last_write` 记录 Gateway 写入调用，不测客户端网络接收时间。
+- `pipeline_finished` 与 `handler_exit_started` 不合并；Handler 可能在 Pipeline 返回后还写错误响应，也可能响应已提交而后发生错误。
+- 对事件字段使用 `measured`、`not_applicable`、`not_reached`、`unknown`；事件实际发生在 0ms 时仍是 `measured`，不能以数值零判断缺失。
+
+## 3. 时间语义设计约束
+
+1. 时间线统一以 Handler 入口时间作为 request_start，明确它不是网络层到达时间。
+2. 进程内计时使用 time.Time 的单调时钟语义；持久化只保存相对起点的毫秒偏移，不跨进程比较绝对单调时间。
+3. 新时间线事件有稳定名称、偏移量、状态和适用范围；真实的 0ms 是有效值，不能与缺失混淆。
+4. 状态至少区分 measured、not_applicable、not_reached、unknown；取消/错误时未执行阶段标记 not_reached，不伪造 0。
+5. 只有起止锚点都存在且顺序合法时才计算阶段 duration；不从相邻阶段或旧聚合字段反推。
+6. 既有 prep_ms、model_load_ms、upstream_ms、TTFT 和 Provider Queue Wait 保持原有兼容语义；新 Timeline 不能静默改变旧指标定义。
+7. Provider queue wait 是 UpstreamStart 之后、真实上游 dispatch 之前的子阶段；不得与上游 HTTP/模型耗时重复相加。
+8. Upstream Headers、First Byte、First Content 和 Response Write 是不同事件；非流式请求没有流式 TTFT 时标记 not_applicable 或 unknown，不能推断。
+9. 流式保活不是上游首字节/首内容；Gateway keepalive 不得触发 TTFT。
+10. Pipeline Finish、Gateway response write complete、HTTP Handler 收尾阶段是不同生命周期边界，不得与 Pipeline Finish 或 Gateway 最后一次写回合并。
+
+## 4. 实现进度
+
+- PERF-05.1～05.4：事件字典、状态语义、Handler/Core/Provider/ResponseSink 埋点、RequestAnalysis 持久化、timeline_only 早期拒绝记录、OpenAPI 与管理台展示已实现。
+- `timeline_only=true` 仅包含 Timeline，不序列化 `phases_ms`、`throughput`，避免未执行阶段被误读为零值。
+- `pipeline_finished` 由 Core Pipeline 的 `StageFinish` 事件统一记录，取消、上游错误和其他终态都走同一事件边界；使用首次记录避免多 Observer 重复。
+- 已增加 Core Pipeline 取消/上游连接失败回归，以及 early-reject Browser Smoke 的 timeline_only 展示断言。
+- `responseSink` 现记录 `gateway_write_failed`，覆盖底层 Write 返回错误或短写；短写且 n>0 时同时保留已写部分的成功边界与失败边界，不记录错误正文。
+- `TestResponseSinkRecordsPartialWriteAsSuccessAndFailure` 覆盖底层返回短写且无 error；`TestRequestTimelineRecordsStreamInterruptionAfterHeaders` 覆盖响应头提交、首块成功、后续写入失败，并断言 `pipeline_finished`。
+- Browser Smoke `44264973582`（代码 SHA `c54c9a1`）成功；此前 `f369e92` 的失败是测试顺序导致初始焦点断言超时，调整顺序后已通过。
+- 代码与文档验收证据已推进到当前 HEAD：Go CI `44272814927`（`eee8af3`）五个 Job 全部成功；Browser Smoke `44272719713`（`78c5df2`，包含历史 JSON 兼容测试对应代码）成功。
+- `f369e92` 的 Browser Smoke 曾因测试步骤先操作时间线折叠面板、干扰弹窗初始焦点断言而失败；随后调整测试顺序，`c5c156e` 已通过。
+- 普通响应正文写回失败标记 `not_reached`；HEAD/1xx/204/205/304 等无正文场景标记 `not_applicable`；HEAD 的底层 Write 成功返回不作为真实正文写入。
+- 响应头后流中断已增加 Pipeline + ResponseSink 组合回归；真实 TCP 断连专项已通过：测试启动真实 TCP `net/http` 服务端和客户端，客户端读到首段正文后关闭连接，服务端等待请求上下文取消并持续写入，验证 `ResponseSink` 最终观测到真实写入错误。该测试验证 ResponseSink/HTTP 网络边界，不等价于完整 Gateway `/v1` 端到端断连验收。
+
+## 5. 计划阶段
+
+- PERF-05.1：确定 Timeline 事件字典、状态枚举、字段来源、包含关系和 OpenAPI 结构。
+- PERF-05.2：补齐 Handler 入口、鉴权、Key RPM、Body Read、Pipeline 阶段事件；只增加观测回调，不改变现有阶段顺序。
+- PERF-05.3：补齐 Provider admission/dispatch、headers、first byte、first content 与 response write 事件；复用现有回调，避免重复解析流数据。
+- PERF-05.4：将有界 Timeline 写入现有 RequestAnalysis/请求详情；评估是否复用现有 stream events，不新增重复明细表。
+- PERF-05.5：单测、race、取消/失败路径、非流式/流式、工具调用、权限拒绝、限流、Browser Smoke 和完整 CI。
+- PERF-05.6：归档验收证据并切换 PERF-06。
+
+## 6. 关键验收用例
+
+1. 正常非流式请求：请求入口、鉴权、Body Read、Pipeline、dispatch、headers/response write/finish 等可测事件。
+2. 正常流式请求：区分 first byte、first event、first content、last upstream chunk、last Gateway write。
+3. 鉴权拒绝：只记录实际发生阶段，Pipeline 与上游阶段为 not_reached。
+4. RPM 限流/限流依赖故障：拒绝点准确，Body Read 和 Pipeline 不得伪造已发生。
+5. Body 超限/非法 JSON：记录 Body Read/解析失败，后续阶段 not_reached。
+6. Provider queue wait、timeout、cancel：等待时间和状态准确，未 dispatch 时不能生成 upstream headers/first byte。
+7. 上游连接失败、429/503、响应头后流中断：保留阶段失败边界，不混淆 Gateway 状态与 upstream HTTP 状态。
+8. 客户端取消：不改变取消登记与传播时序，不因观测阻塞响应收尾。
+9. 工具调用：标记 Coordinator/工具子阶段时不保存工具 arguments、搜索词和结果正文。
+10. 历史 RequestAnalysis JSON：缺失 Timeline 时继续兼容，显示 unknown 而非 0。
+
+## 7. 不做
+
+- 不改普通 /v1 认证、请求解析、Pipeline 阶段顺序、Provider 选择、流式写回或取消时序。
+- 不在 Timeline 中保存 Prompt/Response/Reasoning 或工具正文。
+- 不在每个请求热路径额外探测 llama.cpp。
+- 不将进程级指标、后台 RuntimeSnapshot 冒充请求级事件。
+- 不改变现有旧字段的时间语义；如发现旧字段命名误导，先兼容新增字段并记录迁移方案。
+
+## 7. 当前实现进度
+
+| 子任务 | 状态 | 已完成内容 / 未完成项 |
+|---|---|---|
+| PERF-05.1 事件字典与契约 | 基本完成 | 事件字典、状态枚举、包含关系和 OpenAPI Timeline Event Schema 已落地；最终验收前复核事件适用规则 |
+| PERF-05.2 Handler/Core 埋点 | 已实现第一版 | Handler 入口、鉴权、Key RPM、Body Read；复用 Core Parsed/Prepared/Ready/WarmStart/UpstreamStart 锚点；退出收尾时补充未到达状态 |
+| PERF-05.3 Provider/ResponseSink 埋点 | 已实现并补齐关键边界 | Queue Wait、Dispatch、Headers、非流式/流式 First Byte、流式首事件、Gateway 首写/末写/失败；真实 Provider HTTP 502 与真实 TCP 断连专项已有回归 |
+| PERF-05.4 持久化与详情展示 | 已实现第一版 | 正常请求写入 RequestAnalysis；早期拒绝写入 timeline_only 最小记录；拒绝响应复用 ResponseSink 记录实际写回；管理端只展示时间线，不显示虚构的阶段指标 |
+| PERF-05.5 回归验收 | 接近完成 | Core StageFinish 取消/上游连接失败、部分写入、响应头后流中断、真实 Provider HTTP 502、真实 TCP 客户端断连均有专项回归；历史无 Timeline 的 RequestAnalysis 兼容断言补齐；当前 HEAD `eee8af3` 的 Go CI 五个 Job 全部成功，Browser Smoke `78c5df2` 成功（其后仅文档提交）。剩余为最终代码审查和文档归档 |
+| PERF-05.6 归档与切换 | 未开始 | PERF-05 全部验收通过后归档，再进入 PERF-06 |
+
+### 当前实现边界
+
+- handler_exit_started 表示 Handler 进入最终收尾阶段，不宣称客户端已收到全部字节，也不冒充函数返回后的外部观测点。
+- 所有进入 serveInference 的请求均通过 Handler defer 持久化 Timeline。已进入 Pipeline 的请求写入完整 RequestAnalysis；鉴权、RPM、Body Read 等早期拒绝写入 `timeline_only=true` 的最小记录，不创建虚假的 phases_ms/throughput。拒绝响应也通过同一个 responseSink 记录 Gateway 实际写回。Core `StageFinish` 统一覆盖成功/失败/取消/panic 的 Pipeline 收尾事件。
+- 缺失的上游阶段按真实路径标记 not_reached；非流式请求的流式事件标记 not_applicable。队列等待回调缺失时保持 unknown，不补造 0ms。
+- `responseBodyNotApplicable` 不以 `HeaderWritten` 判断正文是否适用；已提交响应头但普通正文写回失败时仍是 `not_reached`，HEAD/1xx/204/205/304 才是 `not_applicable`。
+
+## 8. 最终验收与归档
+
+- 最终代码验收基线：`78c5df249c768a802a770b77da3bd0040bb3319e`，包含历史 RequestAnalysis JSON 兼容测试。
+- Go CI：`44272814927`（代码未变的后续文档基线 `eee8af3`），五个 Job 全部成功；后续文档提交 `fd5adeb` 的 Go CI `44274684013` 成功。
+- Browser Smoke：`44272719713`（`78c5df2`）成功。`78c5df2` 之后仅有文档变更，未改变代码。
+- 最终审查：Timeline 固定事件集合与 OpenAPI 枚举、管理台中文事件映射逐项一致；状态枚举 measured/not_applicable/not_reached/unknown 与 UI 显示一致；Core `StageFinish` 在统一 defer 中覆盖成功、错误、取消与 panic；未发现需要改变普通 `/v1` 主流程的理由。
+- 真实 Provider HTTP 502、真实 TCP 客户端断连的 ResponseSink/HTTP 网络边界、响应头后流中断、部分写入、历史无 Timeline JSON 兼容均有专项回归。TCP 专项不宣称完整 Gateway `/v1` 端到端部署验收。
+- 本任务只完成代码与自动化验收；真实部署验收不在本任务中宣称通过，按整体计划后续统一回归。
+- PERF-05 已封版，下一任务为 PERF-06 llama.cpp Server Metrics。
