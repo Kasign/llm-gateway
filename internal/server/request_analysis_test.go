@@ -70,6 +70,9 @@ func TestDecodeRequestAnalysisKeepsLegacySourceWithoutGuessingSpeedSource(t *tes
 	if a.Throughput.TokenSource != "llama_timings" {
 		t.Fatalf("legacy token source not retained: %+v", a.Throughput)
 	}
+	if len(a.Timeline) != 0 {
+		t.Fatalf("legacy RequestAnalysis without timeline must remain readable without fabricating events: %+v", a.Timeline)
+	}
 	if a.Throughput.SpeedSource != "" {
 		t.Fatalf("legacy mixed source must not be guessed as speed source: %+v", a.Throughput)
 	}
