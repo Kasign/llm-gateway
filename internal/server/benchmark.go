@@ -1144,7 +1144,6 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		Started:      inferenceStart,
 		ClientName:   "benchmark",
 		UserAgent:    "llm-gateway/benchmark",
-		Stream:       stream,
 		Observe:      obs,
 		Guards:       s.inferenceRequestGuards(key),
 	})

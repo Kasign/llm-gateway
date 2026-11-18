@@ -3012,6 +3012,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -3048,6 +3049,8 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance] }
+        model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
         model_key: { type: string }
         llama_model: { type: string }
@@ -3103,6 +3106,11 @@ components:
           items:
             $ref: "#/components/schemas/StreamEvent"
           nullable: true
+        tool_call_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         request_id: { type: string }
         request_log: { type: string }
         payload_persisted: { type: boolean, description: "完整请求/响应正文是否已按 logging.store_payload 持久化" }
@@ -4079,6 +4087,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -4115,6 +4124,8 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance] }
+        model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
         llama_model: { type: string }
@@ -4160,6 +4171,11 @@ components:
           items:
             $ref: "#/components/schemas/StreamEvent"
           nullable: true
+        tool_call_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         request_id: { type: string }
         request_log: { type: string }
         analysis:
@@ -5101,6 +5117,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -5137,6 +5154,8 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance] }
+        model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
         llama_model: { type: string }
@@ -5182,6 +5201,11 @@ components:
           items:
             $ref: "#/components/schemas/StreamEvent"
           nullable: true
+        tool_call_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         request_id: { type: string }
         request_log: { type: string }
         analysis:
@@ -6157,6 +6181,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -6193,6 +6218,8 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
+        scenario: { type: string, enum: [performance, tool_performance] }
+        model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
         llama_model: { type: string }
@@ -6238,6 +6265,11 @@ components:
           items:
             $ref: "#/components/schemas/StreamEvent"
           nullable: true
+        tool_call_events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         request_id: { type: string }
         request_log: { type: string }
         analysis:
