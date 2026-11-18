@@ -1888,20 +1888,51 @@ function benchTextsFromJob(j){
   }
   return {content,reasoning};
 }
+const BENCH_CONDITION_MISSING_LABELS={
+  model_sha256_unknown:'模型文件 SHA-256',
+  gateway_revision_unknown:'Gateway 构建版本',
+  gateway_build_modified:'Gateway 构建包含未提交修改',
+  gateway_build_cleanliness_unknown:'Gateway 工作区状态',
+  backend_version_unknown:'Backend 版本',
+  model_load_state_unknown:'测试前模型加载状态',
+  hardware_model_unknown:'CPU 型号',
+  hardware_memory_unknown:'物理内存容量'
+};
+function renderBenchCondition(j){
+  const status=j.condition_status||'unknown';
+  const labels={complete:'完整',partial:'部分',unknown:'未知'};
+  const missing=Array.isArray(j.condition_missing)?j.condition_missing:[];
+  const detail=status==='partial'
+    ?'缺失维度：'+(missing.map(x=>BENCH_CONDITION_MISSING_LABELS[x]||x).join('、')||'未提供')
+    :status==='unknown'
+      ?'历史任务未保存条件快照，无法判断是否可比较。'
+      :'条件信息完整；仍需结合具体指标判断测试结果。';
+  const fingerprint=typeof j.condition_sha256==='string'?j.condition_sha256:'';
+  return '<section class="bench-condition"><h3 style="margin:0 0 6px;font-size:13px">测试条件：'+esc(labels[status]||labels.unknown)+'</h3>'+
+    '<p class="req-note" style="margin:0">'+esc(detail)+'</p>'+
+    (fingerprint?'<p class="req-note mono" style="margin:4px 0 0">条件指纹：'+esc(fingerprint.slice(0,16))+'</p>':'')+
+    '</section>';
+}
 function renderBenchAnalysis(wrap){
   const box=$('benchAnalysis');if(!box)return;
   const a=wrap.analysis;
-  if(!a||!a.phases_ms){box.style.display='none';box.innerHTML='';return}
-  const p=a.phases_ms,tp=a.throughput||{};
+  const hasPhases=Boolean(a&&a.phases_ms);
+  const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
+  if(!hasPhases&&!conditionHTML){box.style.display='none';box.innerHTML='';return}
   box.style.display='block';
-  box.innerHTML='<h3 style="margin:0 0 10px;font-size:14px">请求分析</h3><dl>'+
-    [['总耗时',p.total_ms!=null?p.total_ms+' ms':null],['Gateway 准备',p.prep_ms+' ms'],['模型加载',p.model_load_ms+' ms'],['上游推理',p.upstream_ms+' ms'],
-    ['首 token',p.ttft_ms!=null?p.ttft_ms+' ms':null],['首条正文',p.ttft_content_ms!=null?p.ttft_content_ms+' ms':null],
-    ['思考阶段',p.thinking_ms!=null?p.thinking_ms+' ms':null],['正文生成',p.content_generation_ms!=null?p.content_generation_ms+' ms':null],
-    ['输出速度',tp.output_tokens_per_sec!=null?tp.output_tokens_per_sec.toFixed(2)+' tok/s':null],
-    ].filter(x=>x[1]!=null).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')+'</dl>'+
-    (a.summary?.length?`<ul class="req-hints" style="margin:10px 0 0">${a.summary.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>`:'')+
-    (tp.note?`<p class="req-note">${esc(tp.note)}</p>`:'');
+  let html=conditionHTML;
+  if(hasPhases){
+    const p=a.phases_ms,tp=a.throughput||{};
+    html+='<h3 style="margin:12px 0 10px;font-size:14px">请求分析</h3><dl>'+
+      [['总耗时',p.total_ms!=null?p.total_ms+' ms':null],['Gateway 准备',p.prep_ms+' ms'],['模型加载',p.model_load_ms+' ms'],['上游推理',p.upstream_ms+' ms'],
+      ['首 token',p.ttft_ms!=null?p.ttft_ms+' ms':null],['首条正文',p.ttft_content_ms!=null?p.ttft_content_ms+' ms':null],
+      ['思考阶段',p.thinking_ms!=null?p.thinking_ms+' ms':null],['正文生成',p.content_generation_ms!=null?p.content_generation_ms+' ms':null],
+      ['输出速度',tp.output_tokens_per_sec!=null?tp.output_tokens_per_sec.toFixed(2)+' tok/s':null],
+      ].filter(x=>x[1]!=null).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join('')+'</dl>'+
+      (a.summary?.length?'<ul class="req-hints" style="margin:10px 0 0">'+a.summary.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+
+      (tp.note?'<p class="req-note">'+esc(tp.note)+'</p>':'');
+  }
+  box.innerHTML=html;
 }
 function renderBenchStreamEvents(evs){
   const fold=$('benchEventsFold'),tbl=$('benchEventsTable'),cnt=$('benchEventsCount');

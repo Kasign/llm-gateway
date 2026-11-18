@@ -854,6 +854,12 @@ try {
     appBundle.includes('details:not([open]) > summary') &&
     appBundle.includes('detailTrigger = document.activeElement') &&
     appBundle.includes('event.key === "Escape"'));
+  check('性能测试结果展示条件快照完整性、缺失维度与指纹，兼容旧任务未知状态',
+    mainSource.includes('function renderBenchCondition(j)') &&
+    mainSource.includes('model_load_state_unknown') &&
+    mainSource.includes('condition_missing') &&
+    appBundle.includes('function renderBenchCondition(j)') &&
+    appBundle.includes('condition_sha256'));
   check('性能测试参数抽屉具备焦点进入、Escape 关闭、焦点循环和返回触发按钮',
     indexHtml.includes('id="benchParamsDrawer" class="drawer-root" aria-hidden="true" hidden') &&
     mainSource.includes('function benchDrawerFocusable(root)') &&

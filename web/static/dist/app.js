@@ -2547,18 +2547,40 @@
     }
     return { content, reasoning };
   }
-  function renderBenchAnalysis(wrap) {
-    const box = $("benchAnalysis");
-    if (!box) return;
-    const a = wrap.analysis;
-    if (!a || !a.phases_ms) {
-      box.style.display = "none";
-      box.innerHTML = "";
-      return;
-    }
+  var BENCH_CONDITION_MISSING_LABELS = {
+  model_sha256_unknown: "\u6A21\u578B\u6587\u4EF6 SHA-256",
+  gateway_revision_unknown: "Gateway \u6784\u5EFA\u7248\u672C",
+  gateway_build_modified: "Gateway \u6784\u5EFA\u5305\u542B\u672A\u63D0\u4EA4\u4FEE\u6539",
+  gateway_build_cleanliness_unknown: "Gateway \u5DE5\u4F5C\u533A\u72B6\u6001",
+  backend_version_unknown: "Backend \u7248\u672C",
+  model_load_state_unknown: "\u6D4B\u8BD5\u524D\u6A21\u578B\u52A0\u8F7D\u72B6\u6001",
+  hardware_model_unknown: "CPU \u578B\u53F7",
+  hardware_memory_unknown: "\u7269\u7406\u5185\u5B58\u5BB9\u91CF"
+};
+function renderBenchCondition(j) {
+  const status = j.condition_status || "unknown";
+  const labels = { complete: "\u5B8C\u6574", partial: "\u90E8\u5206", unknown: "\u672A\u77E5" };
+  const missing = Array.isArray(j.condition_missing) ? j.condition_missing : [];
+  const detail = status === "partial" ? "\u7F3A\u5931\u7EF4\u5EA6\uFF1A" + (missing.map((x) => BENCH_CONDITION_MISSING_LABELS[x] || x).join("\u3001") || "\u672A\u63D0\u4F9B") : status === "unknown" ? "\u5386\u53F2\u4EFB\u52A1\u672A\u4FDD\u5B58\u6761\u4EF6\u5FEB\u7167\uFF0C\u65E0\u6CD5\u5224\u65AD\u662F\u5426\u53EF\u6BD4\u8F83\u3002" : "\u6761\u4EF6\u4FE1\u606F\u5B8C\u6574\uFF1B\u4ECD\u9700\u7ED3\u5408\u5177\u4F53\u6307\u6807\u5224\u65AD\u6D4B\u8BD5\u7ED3\u679C\u3002";
+  const fingerprint = typeof j.condition_sha256 === "string" ? j.condition_sha256 : "";
+  return '<section class="bench-condition"><h3 style="margin:0 0 6px;font-size:13px">\u6D4B\u8BD5\u6761\u4EF6\uFF1A' + esc(labels[status] || labels.unknown) + "</h3>" + '<p class="req-note" style="margin:0">' + esc(detail) + "</p>" + (fingerprint ? '<p class="req-note mono" style="margin:4px 0 0">\u6761\u4EF6\u6307\u7EB9\uFF1A' + esc(fingerprint.slice(0, 16)) + "</p>" : "") + "</section>";
+}
+function renderBenchAnalysis(wrap) {
+  const box = $("benchAnalysis");
+  if (!box) return;
+  const a = wrap.analysis;
+  const hasPhases = Boolean(a && a.phases_ms);
+  const conditionHTML = renderBenchCondition(benchJobPayload(wrap));
+  if (!hasPhases && !conditionHTML) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  box.style.display = "block";
+  let html = conditionHTML;
+  if (hasPhases) {
     const p = a.phases_ms, tp = a.throughput || {};
-    box.style.display = "block";
-    box.innerHTML = '<h3 style="margin:0 0 10px;font-size:14px">\u8BF7\u6C42\u5206\u6790</h3><dl>' + [
+    html += '<h3 style="margin:12px 0 10px;font-size:14px">\u8BF7\u6C42\u5206\u6790</h3><dl>' + [
       ["\u603B\u8017\u65F6", p.total_ms != null ? p.total_ms + " ms" : null],
       ["Gateway \u51C6\u5907", p.prep_ms + " ms"],
       ["\u6A21\u578B\u52A0\u8F7D", p.model_load_ms + " ms"],
@@ -2570,7 +2592,9 @@
       ["\u8F93\u51FA\u901F\u5EA6", tp.output_tokens_per_sec != null ? tp.output_tokens_per_sec.toFixed(2) + " tok/s" : null]
     ].filter((x) => x[1] != null).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") + "</dl>" + (a.summary?.length ? `<ul class="req-hints" style="margin:10px 0 0">${a.summary.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "") + (tp.note ? `<p class="req-note">${esc(tp.note)}</p>` : "");
   }
-  function renderBenchStreamEvents(evs) {
+  box.innerHTML = html;
+}
+function renderBenchStreamEvents(evs) {
     const fold = $("benchEventsFold"), tbl = $("benchEventsTable"), cnt = $("benchEventsCount");
     if (!fold || !tbl) return;
     if (!evs?.length) {
