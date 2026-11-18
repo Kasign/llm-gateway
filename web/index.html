@@ -502,12 +502,50 @@
             <summary>请求入参</summary>
             <div class="fold-body"><pre id="benchReqPreview" class="bench-out">—</pre></div>
           </details>
-          <details class="bench-fold">
-            <summary>原始 SSE / JSON 响应</summary>
-            <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
+          <details class="bench-fold" id="benchToolPerformanceConfig">
+            <summary>工具调用性能测试（web.search）</summary>
+            <p class="small muted">该场景属于 Benchmark 任务，使用非流式请求，强制 web.search，并单独统计模型决策、工具执行与最终生成耗时。需要客户端 Key 同时具备当前模型访问权限和 web.search 权限。</p>
+            <div class="field">
+              <label for="benchToolPrompt">工具性能测试提示词</label>
+              <textarea id="benchToolPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果说明版本号和发布日期。必须实际调用搜索工具。</textarea>
+            </div>
+            <div class="bench-actions">
+              <button type="button" class="btn primary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance')">开始工具调用性能测试</button>
+            </div>
           </details>
         </div>
         </div>
+
+      <div class="card" id="benchHistoryCard">
+        <div class="card-head">
+          <div><h2>Benchmark 历史任务</h2><p>只显示任务摘要和条件可比性，不保存或展示客户端 Key、Prompt 正文。</p></div>
+          <button type="button" class="btn sm" id="benchHistoryRefreshBtn">刷新</button>
+        </div>
+        <div class="bench-actions">
+          <label class="small" for="benchHistoryScenario">场景</label>
+          <select id="benchHistoryScenario">
+            <option value="">全部场景</option>
+            <option value="performance">普通性能</option>
+            <option value="tool_performance">工具调用性能</option>
+          </select>
+          <label class="small" for="benchHistoryStatus">状态</label>
+          <select id="benchHistoryStatus">
+            <option value="">全部状态</option>
+            <option value="running">运行中</option>
+            <option value="cancelling">停止中</option>
+            <option value="completed">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+            <option value="interrupted">中断</option>
+          </select>
+        </div>
+        <div id="benchHistoryList" aria-live="polite"><div class="empty-state">正在加载历史任务…</div></div>
+        <div class="bench-actions" style="justify-content:flex-end;align-items:center">
+          <span id="benchHistoryPage" class="small muted">—</span>
+          <button type="button" class="btn sm" id="benchHistoryPrev" disabled>上一页</button>
+          <button type="button" class="btn sm" id="benchHistoryNext" disabled>下一页</button>
+        </div>
+      </div>
 
       <!-- 工具调用模式 -->
       <div id="modelTestTools" hidden>

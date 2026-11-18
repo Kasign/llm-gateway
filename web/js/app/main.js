@@ -39,7 +39,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
-  if(b.dataset.tab==='model-test')loadBenchPanel().catch(()=>{});
+  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});loadBenchHistory().catch(()=>{});}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference'&&globalThis.InferenceParams)globalThis.InferenceParams.load().catch(()=>{});
@@ -1732,15 +1732,18 @@ function applyBenchParams(p){
   }
   if($('benchStop'))$('benchStop').value=(m.stop&&m.stop.length)?m.stop.join('\n'):'';
 }
-function benchPayloadForApi(target){
+function benchPayloadForApi(target,scenario='performance',promptOverride=''){
   const upstream=typeof target==='string'?target:(target?.upstream||'');
   const gatewayKey=(typeof target==='string'?'':(target?.gatewayKey||'')).trim();
   const p=collectBenchParams();
+  if(typeof promptOverride==='string'&&promptOverride.trim())p.prompt=promptOverride.trim();
   // 有网关 model_key 时优先用它（小写业务键）；否则 fallback 到上游 loaded 的 model_id。
   // 发往 llama 的 chat body 里 "model" 仍是上游注册名，见 updateBenchReqPreview。
   const body=gatewayKey
     ?{model_key:gatewayKey,prompt:p.prompt,max_tokens:p.max_tokens}
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
+  if(scenario==='tool_performance')body.scenario='tool_performance';
+  if(scenario==='tool_performance')body.tool_choice={type:'function',function:{name:'web.search'}};
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
@@ -1754,10 +1757,68 @@ function benchPayloadForApi(target){
   return body;
 }
 function setBenchRunning(running){
-  const run=$('benchRunBtn'),stop=$('benchStopBtn');
+  const run=$('benchRunBtn'),toolRun=$('benchToolRunBtn'),stop=$('benchStopBtn');
   if(run)run.disabled=!!running;
+  if(toolRun)toolRun.disabled=!!running;
   if(stop)stop.disabled=!running;
 }
+
+
+let benchHistoryOffset=0;
+const BENCH_HISTORY_PAGE_SIZE=20;
+
+async function loadBenchHistory(){
+  const list=$('benchHistoryList');
+  if(!list)return;
+  list.innerHTML='<div class="empty-state">正在加载历史任务…</div>';
+  const query=new URLSearchParams({limit:String(BENCH_HISTORY_PAGE_SIZE),offset:String(benchHistoryOffset)});
+  const scenario=$('benchHistoryScenario')?.value||'';
+  const status=$('benchHistoryStatus')?.value||'';
+  if(scenario)query.set('scenario',scenario);
+  if(status)query.set('status',status);
+  try{
+    const result=await api('/api/benchmark?'+query.toString());
+    const items=Array.isArray(result.items)?result.items:[];
+    const total=Number(result.total)||0;
+    if(!items.length){
+      list.innerHTML=emptyState('暂无符合条件的 Benchmark 任务');
+    }else{
+      list.innerHTML=wrapTable('<tr><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
+        items.map(item=>{
+          const scenarioLabel=item.scenario==='tool_performance'?'工具调用性能':'普通性能';
+          const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
+          const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms>0?item.latency_ms+' ms':'—');
+          const model=item.model_id||item.model_key||item.backend||'—';
+          return '<tr><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'">查看</button></td></tr>';
+        }).join(''));
+    }
+    const page=$('benchHistoryPage');
+    if(page)page.textContent=total?((benchHistoryOffset+1)+'–'+Math.min(benchHistoryOffset+items.length,total)+' / '+total):'0 条';
+    const prev=$('benchHistoryPrev'),next=$('benchHistoryNext');
+    if(prev)prev.disabled=benchHistoryOffset<=0;
+    if(next)next.disabled=benchHistoryOffset+items.length>=total;
+  }catch(error){
+    list.innerHTML='<div class="msg err">'+esc(error.message||'历史任务加载失败')+'</div>';
+    const page=$('benchHistoryPage');if(page)page.textContent='加载失败';
+    $('benchHistoryPrev')&&($('benchHistoryPrev').disabled=true);
+    $('benchHistoryNext')&&($('benchHistoryNext').disabled=true);
+  }
+}
+
+async function openBenchmarkHistory(jobId){
+  if(!jobId)return;
+  try{
+    const result=await api('/api/benchmark/'+encodeURIComponent(jobId));
+    writeBenchStore({jobId});
+    renderBenchResult(result);
+    $('benchAnswer')?.scrollIntoView({block:'nearest',behavior:'smooth'});
+  }catch(error){
+    const answer=$('benchAnswer');
+    if(answer){answer.className='bench-answer err';answer.textContent=error.message||'历史任务详情加载失败';}
+  }
+}
+
+
 let benchDrawerTrigger = null;
 function benchDrawerFocusable(root){
   const panel=root?.querySelector('.drawer-panel');
@@ -1844,13 +1905,14 @@ async function loadBenchPanel(opts={}){
   }
 }
 
-function updateBenchReqPreview(upstreamModel){
+function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverride=''){
   const p=collectBenchParams();
+  if(promptOverride.trim())p.prompt=promptOverride.trim();
   // 预览的是网关 → llama.cpp 的 /v1/chat/completions 体；"model" 必须是上游注册名（常与 GGUF 文件名同大小写），不是 model_key。
   const body={
     model:upstreamModel||'（当前上游）',
     messages:[{role:'user',content:p.prompt}],
-    stream:true,
+    stream:scenario!=='tool_performance',
     max_tokens:p.max_tokens,
   };
   if(p.temperature!=null)body.temperature=p.temperature;
@@ -1918,9 +1980,27 @@ function renderBenchAnalysis(wrap){
   const a=wrap.analysis;
   const hasPhases=Boolean(a&&a.phases_ms);
   const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
+  const toolMetrics=wrap.tool_metrics||null;
+  const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
+  let toolHTML='';
+  if(toolMetrics){
+    const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='not_applicable'?'不适用':'未知');
+    const rows=[
+      ['模型决策',metricValue(toolMetrics.model_decision_ms,toolMetrics.model_decision_status)],
+      ['工具执行合计',metricValue(toolMetrics.tool_execution_total_ms,toolMetrics.tool_execution_status)],
+      ['模型最终生成',metricValue(toolMetrics.model_final_generation_ms,toolMetrics.model_final_generation_status)],
+      ['模型轮数',toolMetrics.model_rounds??0],['工具轮数',toolMetrics.tool_rounds??0],['工具调用数',toolMetrics.tool_calls??0],
+    ];
+    toolHTML='<h3 style="margin:12px 0 8px;font-size:14px">工具调用阶段指标</h3><dl>'+
+      rows.map(([label,value])=>'<dt>'+esc(label)+'</dt><dd>'+esc(String(value))+'</dd>').join('')+'</dl>';
+    if(toolEvents.length){
+      toolHTML+='<h3 style="margin:12px 0 8px;font-size:14px">工具事件（脱敏摘要）</h3>'+wrapTable('<tr><th>#</th><th>轮次</th><th>工具</th><th>状态</th><th>耗时</th><th>结果字节</th><th>错误码</th></tr>'+
+        toolEvents.map(event=>'<tr><td>'+esc(String(event.seq??''))+'</td><td>'+esc(String(event.round??''))+'</td><td>'+esc(event.tool_name||'—')+'</td><td>'+esc(event.status||'—')+'</td><td>'+esc(String(event.duration_ms??'—'))+' ms</td><td>'+esc(String(event.result_bytes??'—'))+'</td><td>'+esc(event.error_code||'—')+'</td></tr>').join(''));
+    }
+  }
   if(!hasPhases&&!conditionHTML){box.style.display='none';box.innerHTML='';return}
   box.style.display='block';
-  let html=conditionHTML;
+  let html=conditionHTML+toolHTML;
   if(hasPhases){
     const p=a.phases_ms,tp=a.throughput||{};
     html+='<h3 style="margin:12px 0 10px;font-size:14px">请求分析</h3><dl>'+
@@ -2023,6 +2103,7 @@ async function pollBenchmarkJob(jobId,t0,token){
     renderBenchResult(wrap);
     writeBenchStore({jobId});
     persistBenchParams();
+    loadBenchHistory().catch(()=>{});
     return wrap;
   }
 }
@@ -2042,6 +2123,7 @@ async function resumeBenchmarkSession(){
       await pollBenchmarkJob(st.jobId,t0,token);
     }else{
       renderBenchResult(wrap);
+      loadBenchHistory().catch(()=>{});
     }
   }catch{
     writeBenchStore({jobId:null});
@@ -2064,7 +2146,9 @@ async function stopBenchmark(){
   }
 }
 
-async function runBenchmark(){
+async function runBenchmark(scenario='performance'){
+  const promptOverride=scenario==='tool_performance'?($('benchToolPrompt')?.value||'').trim():'';
+  if(scenario==='tool_performance'&&!promptOverride){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
   const clientKey=($('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const answer=$('benchAnswer');
@@ -2087,8 +2171,8 @@ async function runBenchmark(){
     if(!upstream){
       throw new Error('当前 API 推理后端无已加载模型，请先在「模型管理」加载');
     }
-    updateBenchReqPreview(upstream);
-    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget))});
+    updateBenchReqPreview(upstream,scenario,promptOverride);
+    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget,scenario,promptOverride))});
     if(token!==benchPollToken)return;
     const jobId=start.job_id,t0=Date.now();
     writeBenchStore({jobId});
@@ -2102,6 +2186,16 @@ async function runBenchmark(){
     if(token===benchPollToken)setBenchRunning(false);
   }
 }
+
+$('benchHistoryRefreshBtn')?.addEventListener('click',()=>loadBenchHistory());
+$('benchHistoryScenario')?.addEventListener('change',()=>{benchHistoryOffset=0;loadBenchHistory().catch(()=>{});});
+$('benchHistoryStatus')?.addEventListener('change',()=>{benchHistoryOffset=0;loadBenchHistory().catch(()=>{});});
+$('benchHistoryPrev')?.addEventListener('click',()=>{benchHistoryOffset=Math.max(0,benchHistoryOffset-BENCH_HISTORY_PAGE_SIZE);loadBenchHistory().catch(()=>{});});
+$('benchHistoryNext')?.addEventListener('click',()=>{benchHistoryOffset+=BENCH_HISTORY_PAGE_SIZE;loadBenchHistory().catch(()=>{});});
+$('benchHistoryList')?.addEventListener('click',event=>{
+  const button=event.target.closest('[data-bench-history-id]');
+  if(button)openBenchmarkHistory(button.dataset.benchHistoryId);
+});
 
 exposeGlobals({
   $, esc, getKey, api, fmtSize, fmtDate, slug, statusLabel, statusPill, emptyState, wrapTable,

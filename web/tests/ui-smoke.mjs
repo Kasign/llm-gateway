@@ -218,6 +218,13 @@ try {
   await page.locator('#modelTestModePerformance').click();
   check('性能测试模式切换后只显示性能测试面板',
     await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
+  check('工具调用性能场景与历史任务区域已提供',
+    await page.locator('#benchToolPrompt').count() === 1 &&
+    await page.locator('#benchToolRunBtn').count() === 1 &&
+    await page.locator('#benchHistoryList').count() === 1);
+  await page.locator('#benchToolRunBtn').click();
+  check('工具性能测试缺少客户端 Key 时在本地拒绝',
+    (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
   await page.locator('#benchRunBtn').click();
   check('性能测试缺少客户端 Key 时在本地拒绝',
     (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
