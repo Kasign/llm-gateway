@@ -77,6 +77,59 @@ func (t *requestTimeline) record(name string, at time.Time) {
 	})
 }
 
+
+func (t *requestTimeline) recordFirst(name string, at time.Time) {
+	if t == nil || at.IsZero() {
+		return
+	}
+	if _, ok := requestTimelineEventNames[name]; !ok {
+		return
+	}
+	offset := at.Sub(t.start).Milliseconds()
+	if offset < 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, event := range t.events {
+		if event.Name == name {
+			return
+		}
+	}
+	if len(t.events) >= requestTimelineMaxEvents {
+		return
+	}
+	value := offset
+	t.events = append(t.events, requestTimelineEvent{Name: name, OffsetMS: &value, Status: timelineStatusMeasured})
+}
+
+func (t *requestTimeline) recordLatest(name string, at time.Time) {
+	if t == nil || at.IsZero() {
+		return
+	}
+	if _, ok := requestTimelineEventNames[name]; !ok {
+		return
+	}
+	offset := at.Sub(t.start).Milliseconds()
+	if offset < 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	value := offset
+	for i := range t.events {
+		if t.events[i].Name == name {
+			t.events[i].OffsetMS = &value
+			t.events[i].Status = timelineStatusMeasured
+			return
+		}
+	}
+	if len(t.events) >= requestTimelineMaxEvents {
+		return
+	}
+	t.events = append(t.events, requestTimelineEvent{Name: name, OffsetMS: &value, Status: timelineStatusMeasured})
+}
+
 func (t *requestTimeline) recordNow(name string) {
 	t.record(name, time.Now())
 }

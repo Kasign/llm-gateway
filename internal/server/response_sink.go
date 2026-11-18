@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"sync"
+	"time"
 )
 
 // responseSink 同时满足 net/http 与 core.ResponseSink。
@@ -42,8 +43,8 @@ func (s *responseSink) Write(p []byte) (int, error) {
 	// 持锁写完一整块。保活 goroutine 和上游转发会并发写同一连接，不能在解锁后再写。
 	n, err := s.w.Write(p)
 	if n > 0 && s.timeline != nil {
-		s.timeline.recordNow("gateway_first_write")
-		s.timeline.recordNow("gateway_last_write")
+		s.timeline.recordFirst("gateway_first_write", time.Now())
+		s.timeline.recordLatest("gateway_last_write", time.Now())
 	}
 	return n, err
 }
