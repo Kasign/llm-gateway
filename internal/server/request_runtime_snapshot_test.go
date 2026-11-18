@@ -17,3 +17,18 @@ func TestLatestRequestRuntimeSnapshotPartialWithoutCPU(t *testing.T) {
  got:=s.latestRequestRuntimeSnapshot(); if got==nil||got.Status!="partial"{t.Fatalf("unexpected: %#v",got)}
  if got.LoadedModelCount!=1||got.LoadedRAMBytes!=128{t.Fatalf("unexpected model snapshot: %#v",got)}
 }
+
+
+func TestLatestRequestRuntimeSnapshotSumsLoadedModelMemoryFallback(t *testing.T) {
+ s := &Server{}
+ snap := &llama.RuntimeSnapshot{Backend:"ollama", Loaded: []llama.CatalogItem{
+  {ID:"a", Loaded:true, RAMBytes:128, VRAMBytes:64},
+  {ID:"b", Loaded:true, RAMBytes:256, VRAMBytes:32},
+  {ID:"not-loaded", Loaded:false, RAMBytes:999, VRAMBytes:999},
+ }}
+ s.setRuntimeSnapshotSample(snap,"complete","upstream_runtime")
+ got := s.latestRequestRuntimeSnapshot()
+ if got == nil || got.LoadedRAMBytes != 384 || got.LoadedVRAMBytes != 96 {
+  t.Fatalf("expected loaded memory sums RAM=384 VRAM=96, got %#v", got)
+ }
+}
