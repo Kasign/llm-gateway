@@ -12,7 +12,7 @@ import (
 func TestSampleLlamaMetricsStoresDynamicSnapshot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/metrics" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
+			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("# TYPE runtime_new_metric gauge\nruntime_new_metric 0.5\n"))
@@ -54,5 +54,44 @@ func TestRuntimeSnapshotSampleCopiesMetricsLabels(t *testing.T) {
 	again := s.runtimeSnapshotSampleLatest()
 	if again.Metrics.Samples[0].Labels["model"] != "m" {
 		t.Fatal("metrics snapshot must be isolated from caller mutation")
+	}
+}
+
+
+func TestRuntimeSnapshotSampleLatestReturnsCopy(t *testing.T) {
+	s := &Server{}
+	snap := &llama.RuntimeSnapshot{
+		Backend:    "ollama",
+		ActiveModel: "m:latest",
+		Loaded:     []llama.CatalogItem{{ID: "m:latest", Loaded: true, RAMBytes: 10}},
+		Catalog:    []llama.CatalogItem{{ID: "m:latest", DiskBytes: 20}},
+	}
+	s.setRuntimeSnapshotSample(snap, "complete", "upstream_runtime")
+
+	got := s.runtimeSnapshotSampleLatest()
+	if got == nil || got.Snapshot == nil {
+		t.Fatal("expected runtime snapshot")
+	}
+	if got.Status != "complete" || got.Source != "upstream_runtime" || got.Snapshot.Backend != "ollama" {
+		t.Fatalf("unexpected sample: %#v", got)
+	}
+	if got.SampledAt.IsZero() || time.Since(got.SampledAt) < 0 {
+		t.Fatalf("invalid sample timestamp: %v", got.SampledAt)
+	}
+
+	got.Snapshot.Loaded[0].RAMBytes = 999
+	got.Snapshot.Catalog[0].DiskBytes = 999
+	again := s.runtimeSnapshotSampleLatest()
+	if again.Snapshot.Loaded[0].RAMBytes != 10 || again.Snapshot.Catalog[0].DiskBytes != 20 {
+		t.Fatal("latest snapshot must be isolated from caller mutation")
+	}
+}
+
+func TestRuntimeSnapshotSampleUnavailable(t *testing.T) {
+	s := &Server{}
+	s.setRuntimeSnapshotSample(nil, "unavailable", "upstream_runtime")
+	got := s.runtimeSnapshotSampleLatest()
+	if got == nil || got.Snapshot != nil || got.Status != "unavailable" {
+		t.Fatalf("unexpected unavailable sample: %#v", got)
 	}
 }
