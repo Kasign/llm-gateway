@@ -154,3 +154,35 @@ func TestConcurrencyLimiterQueueRejectsGrantAfterDeadline(t *testing.T) {
 		t.Fatalf("queue timeout counter = %d, want 1", got)
 	}
 }
+
+func TestConcurrencyLimiterQueueObserverRecordsDirectAndGrantedWait(t *testing.T) {
+	limiter, err := NewConcurrencyLimiter(1)
+	if err != nil { t.Fatal(err) }
+	if err := limiter.SetQueueLimit(1); err != nil { t.Fatal(err) }
+
+	var direct ConcurrencyWaitResult
+	if err := limiter.AcquireWithObserver(context.Background(), time.Second, func(v ConcurrencyWaitResult) { direct = v }); err != nil { t.Fatal(err) }
+	if direct.Waited || direct.WaitMS != 0 || direct.Status != "none" {
+		t.Fatalf("direct admission = %+v, want zero wait/none", direct)
+	}
+
+	waitDone := make(chan ConcurrencyWaitResult, 1)
+	release := make(chan struct{})
+	go func() {
+		var observed ConcurrencyWaitResult
+		err := limiter.AcquireWithObserver(context.Background(), 2*time.Second, func(v ConcurrencyWaitResult) { observed = v })
+		if err == nil { waitDone <- observed; <-release; limiter.Release(); return }
+		waitDone <- observed
+	}()
+	waitForConcurrencyQueueDepth(t, limiter, 1)
+	limiter.Release()
+	select {
+	case observed := <-waitDone:
+		if !observed.Waited || observed.Status != "granted" || observed.WaitMS < 0 {
+			t.Fatalf("queued admission = %+v", observed)
+		}
+	case <-time.After(2*time.Second):
+		t.Fatal("queued observer did not return")
+	}
+	close(release)
+}
