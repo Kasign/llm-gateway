@@ -561,10 +561,7 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 //
 // # 写入 job.ModelKey 的 modelKey 变量
 //
-//  1. 默认取请求里的 in.ModelKey（显式指定 model_key 时即此值）；
-//  2. 若为空且解析得到 m *model.Model，则回填 m.ModelKey（例如只传 model_id 但反查到了 DB 行）；
-//  3. 若 m 为 nil 且从未传 model_key，job.ModelKey 可能为空字符串，但 runBenchmark 仍可用 upstreamOnly 调用上游。
-
+// benchmarkTaskListQuery 是历史任务列表的筛选与分页参数。
 type benchmarkTaskListQuery struct {
 	Scenario string
 	Status   string
@@ -663,6 +660,11 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// benchmarkAPI 启动 Benchmark 任务；历史查询通过同一路径的 GET 分支处理。
+//
+//  1. 默认取请求里的 in.ModelKey（显式指定 model_key 时即此值）；
+//  2. 若为空且解析得到 m *model.Model，则回填 m.ModelKey（例如只传 model_id 但反查到了 DB 行）；
+//  3. 若 m 为 nil 且从未传 model_key，job.ModelKey 可能为空字符串，但 runBenchmark 仍可用 upstreamOnly 调用上游。
 func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return

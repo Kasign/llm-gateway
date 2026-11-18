@@ -1980,7 +1980,7 @@ function renderBenchAnalysis(wrap){
   const a=wrap.analysis;
   const hasPhases=Boolean(a&&a.phases_ms);
   const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
-  const toolMetrics=wrap.tool_metrics||null;
+  const toolMetrics=benchJobPayload(wrap).scenario==='tool_performance'?(wrap.tool_metrics||null):null;
   const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
   let toolHTML='';
   if(toolMetrics){

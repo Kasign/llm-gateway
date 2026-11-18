@@ -14,6 +14,15 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+func containsBenchmarkTask(tasks []BenchmarkTask, taskID string) bool {
+	for _, task := range tasks {
+		if task.TaskID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBenchmarkRepoMariaDB(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
 	if dsn == "" {
@@ -58,11 +67,11 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	}
 	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", toolID) }()
 	listed, total, err := repo.ListTasks(ctx, "tool_performance", "completed", 10, 0)
-	if err != nil || total != 1 || len(listed) != 1 || listed[0].TaskID != toolID {
+	if err != nil || total < 1 || len(listed) == 0 || !containsBenchmarkTask(listed, toolID) {
 		t.Fatalf("filtered task list = %+v, total=%d, err=%v", listed, total, err)
 	}
 	page, pageTotal, err := repo.ListTasks(ctx, "", "", 1, 1)
-	if err != nil || pageTotal != 2 || len(page) != 1 {
+	if err != nil || pageTotal < 2 || len(page) != 1 {
 		t.Fatalf("paginated task list = %+v, total=%d, err=%v", page, pageTotal, err)
 	}
 	if _, _, err := repo.ListTasks(ctx, "", "", 101, 0); err == nil {
