@@ -1242,6 +1242,46 @@ paths:
           $ref: "#/components/responses/AdminError"
         "405":
           $ref: "#/components/responses/AdminError"
+  /api/benchmark/compare:
+    get:
+      operationId: getApiBenchmarkCompare
+      tags: [Admin]
+      summary: 比较两个 Benchmark 历史任务
+      description: 仅当两个任务均已完成、场景相同、条件快照均完整且条件指纹一致时返回严格可比结果。指标差值由服务端计算，方向为 right_minus_left；未测指标保持 null/unknown。
+      security:
+        - AdminSessionBearer: []
+      parameters:
+        - name: left
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: right
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "200":
+          description: 比较判定和服务端计算的指标差值；不可比任务返回 reasons 且不提供 delta
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [comparable, reasons, left, right, deltas, delta_direction]
+                properties:
+                  comparable: { type: boolean }
+                  reasons: { type: array, items: { type: string, enum: [task_not_completed, scenario_mismatch, condition_incomplete, condition_mismatch] } }
+                  left: { type: object, additionalProperties: true }
+                  right: { type: object, additionalProperties: true }
+                  deltas: { type: object, additionalProperties: true }
+                  delta_direction: { type: string, const: right_minus_left }
+        "400":
+          $ref: "#/components/responses/AdminError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminError"
+        "503":
+          $ref: "#/components/responses/AdminError"
   /api/benchmark/{job_id}:
     parameters:
       - name: job_id

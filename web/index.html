@@ -543,6 +543,11 @@
             <option value="interrupted">中断</option>
           </select>
         </div>
+        <div class="bench-actions" style="justify-content:flex-end">
+          <button type="button" class="btn sm" id="benchHistoryCompareBtn" disabled>比较所选两项</button>
+          <span id="benchHistorySelection" class="small muted">选择两条已完成任务进行比较</span>
+        </div>
+        <div id="benchCompareResult" class="bench-analysis" hidden></div>
         <div id="benchHistoryList" aria-live="polite"><div class="empty-state">正在加载历史任务…</div></div>
         <div class="bench-actions" style="justify-content:flex-end;align-items:center">
           <span id="benchHistoryPage" class="small muted">—</span>
