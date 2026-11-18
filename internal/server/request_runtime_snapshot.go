@@ -2,8 +2,6 @@ package server
 
 import (
 	"time"
-
-	"github.com/whl/llm-gateway/internal/llama"
 )
 
 const runtimeSnapshotMaxAge = 15 * time.Second
@@ -50,4 +48,3 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	return out
 }
 
-var _ = (*llama.RuntimeSnapshot)(nil)
