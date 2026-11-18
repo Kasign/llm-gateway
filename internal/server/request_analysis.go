@@ -174,7 +174,7 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	}
 
 	summary := summarizeAnalysis(ph, tp, in.Stream)
-	return RequestAnalysis{Phases: ph, Throughput: tp, RuntimeSnapshot: in.RuntimeSnapshot, Summary: summary}
+	return RequestAnalysis{Phases: ph, Throughput: tp, RuntimeSnapshot: in.RuntimeSnapshot, Timeline: in.Timeline, Summary: summary}
 }
 
 func tokensPerSec(out *int64, windowMS int64) *float64 {

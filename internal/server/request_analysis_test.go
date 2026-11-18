@@ -88,3 +88,21 @@ func TestEncodeRequestAnalysisOmitsUnknownTimings(t *testing.T) {
 		t.Fatalf("unknown sources must stay empty: %+v", decoded.Throughput)
 	}
 }
+
+func TestBuildRequestAnalysisPreservesTimelineAndUnknownOffsets(t *testing.T) {
+	zero := int64(0)
+	events := []requestTimelineEvent{
+		{Name: "request_received", OffsetMS: &zero, Status: timelineStatusMeasured},
+		{Name: "body_read_finished", Status: timelineStatusNotReached},
+	}
+	out := buildRequestAnalysis(analysisInput{TotalMS: 10, Timeline: events})
+	if len(out.Timeline) != 2 {
+		t.Fatalf("timeline events were not preserved: %+v", out.Timeline)
+	}
+	if out.Timeline[0].OffsetMS == nil || *out.Timeline[0].OffsetMS != 0 {
+		t.Fatalf("measured zero offset was lost: %+v", out.Timeline[0])
+	}
+	if out.Timeline[1].OffsetMS != nil || out.Timeline[1].Status != timelineStatusNotReached {
+		t.Fatalf("unknown event time was fabricated: %+v", out.Timeline[1])
+	}
+}
