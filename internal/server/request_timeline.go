@@ -42,7 +42,7 @@ var requestTimelineEventNames = map[string]struct{}{
 	"upstream_started": {}, "provider_queue_wait": {}, "upstream_dispatched": {},
 	"upstream_headers": {}, "upstream_first_byte": {},
 	"stream_first_any": {}, "stream_first_reasoning": {}, "stream_first_content": {},
-	"gateway_first_write": {}, "gateway_last_write": {},
+	"gateway_first_write": {}, "gateway_last_write": {}, "gateway_write_failed": {},
 	"pipeline_finished": {}, "handler_exit_started": {},
 }
 

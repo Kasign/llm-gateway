@@ -152,8 +152,10 @@ func TestResponseSinkDoesNotRecordFailedBodyWrite(t *testing.T) {
 	if _, err := sink.Write([]byte("unwritten")); err == nil {
 		t.Fatal("expected write failure")
 	}
-	if events := timeline.snapshot(); len(events) != 0 {
-		t.Fatalf("failed write must not be recorded as successful: %+v", events)
+	events := timeline.snapshot()
+	if len(events) != 1 || events[0].Name != "gateway_write_failed" ||
+		events[0].Status != timelineStatusMeasured || events[0].OffsetMS == nil {
+		t.Fatalf("failed write must be recorded as a failure, not a successful write: %+v", events)
 	}
 }
 

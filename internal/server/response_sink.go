@@ -46,9 +46,15 @@ func (s *responseSink) Write(p []byte) (int, error) {
 	}
 	// 持锁写完一整块。保活 goroutine 和上游转发会并发写同一连接，不能在解锁后再写。
 	n, err := s.w.Write(p)
-	if n > 0 && s.timeline != nil && s.method != http.MethodHead {
-		s.timeline.recordFirst("gateway_first_write", time.Now())
-		s.timeline.recordLatest("gateway_last_write", time.Now())
+	bodyApplicable := !responseBodyNotApplicable(s.method, s.status)
+	if s.timeline != nil && bodyApplicable {
+		if n > 0 {
+			s.timeline.recordFirst("gateway_first_write", time.Now())
+			s.timeline.recordLatest("gateway_last_write", time.Now())
+		}
+		if err != nil || n < len(p) {
+			s.timeline.recordFirst("gateway_write_failed", time.Now())
+		}
 	}
 	return n, err
 }
