@@ -1242,6 +1242,9 @@ try {
   const detailModal = page.locator('#detailModal');
   await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
   check('请求详情使用 Mock 详情接口响应', mockDetailRequestCount === 1, mockDetailRequestCount);
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
+  check('请求详情弹窗打开后将焦点移入关闭按钮',
+    await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
   const timelineSummary = detailModal.locator('summary').filter({ hasText: '请求时间线 (3)' });
   check('timeline_only 早期请求详情展示时间线入口', await timelineSummary.count() === 1);
   if (await timelineSummary.count()) {
@@ -1252,9 +1255,6 @@ try {
     check('timeline_only 不显示虚构的阶段耗时', 
       await detailModal.getByText('请求分析', { exact: true }).count() === 0);
   }
-  await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
-  check('请求详情弹窗打开后将焦点移入关闭按钮',
-    await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
   const toolCallSummary = detailModal.locator('summary').filter({ hasText: '工具调用明细 (2)' });
   check('请求详情展示工具调用审计明细及事件数量', await toolCallSummary.count() === 1);
   await toolCallSummary.click();
