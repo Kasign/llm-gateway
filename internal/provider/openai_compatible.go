@@ -52,7 +52,14 @@ type concurrencyWaiter struct {
 	ready     chan struct{}
 	granted   bool
 	grantedAt time.Time
+	waitStarted time.Time
 }
+type ConcurrencyWaitResult struct {
+	Waited  bool
+	WaitMS  int64
+	Status  string
+}
+type ConcurrencyWaitObserver func(ConcurrencyWaitResult)
 
 // ConcurrencyLimiter 跨同一 Provider 的运行时实例共享并发预算与等待队列。
 type ConcurrencyLimiter struct {
@@ -220,6 +227,9 @@ func providerQueueWaitTimeoutError() error {
 
 // Acquire 获取 Provider 并发许可；关闭队列时立即拒绝，启用后使用有界 FIFO 等待。
 func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Duration) error {
+	return l.AcquireWithObserver(ctx, waitTimeout, nil)
+}
+func (l *ConcurrencyLimiter) AcquireWithObserver(ctx context.Context, waitTimeout time.Duration, observer ConcurrencyWaitObserver) error {
 	if ctx == nil { ctx = context.Background() }
 	if err := ctx.Err(); err != nil { return err }
 	if l == nil {
@@ -229,6 +239,7 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 	if l.active < l.limit && len(l.waiters) == 0 {
 		l.active++
 		l.mu.Unlock()
+		if observer != nil { observer(ConcurrencyWaitResult{Status: "none"}) }
 		return nil
 	}
 	if l.queueLimit <= 0 {
@@ -246,7 +257,7 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 	}
 	// Deadline 在等待项入队时确定；即使等待 goroutine 调度延迟，也不能在超时后接受新许可。
 	waitDeadline := time.Now().Add(waitTimeout)
-	waiter := &concurrencyWaiter{ready: make(chan struct{})}
+	waiter := &concurrencyWaiter{ready: make(chan struct{}), waitStarted: time.Now()}
 	l.waiters = append(l.waiters, waiter)
 	l.mu.Unlock()
 
@@ -258,6 +269,7 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 		if err := ctx.Err(); err != nil {
 			l.releaseGrantedWaiterLocked(waiter)
 			l.mu.Unlock()
+			if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "cancelled"}) }
 			return err
 		}
 		if !waiter.grantedAt.Before(waitDeadline) {
@@ -265,9 +277,12 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 			l.queueTimeouts++
 			l.rejected++
 			l.mu.Unlock()
+			if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "timeout"}) }
 			return providerQueueWaitTimeoutError()
 		}
+		waitMS := waiter.grantedAt.Sub(waiter.waitStarted).Milliseconds()
 		l.mu.Unlock()
+		if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: waitMS, Status: "granted"}) }
 		return nil
 	case <-waitCtx.Done():
 		l.mu.Lock()
@@ -275,17 +290,21 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 			if err := ctx.Err(); err != nil {
 				l.releaseGrantedWaiterLocked(waiter)
 				l.mu.Unlock()
+				if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "cancelled"}) }
 				return err
 			}
 			// 定时器和许可同时就绪时，以真实发放许可的时刻判定是否超时。
 			if waiter.grantedAt.Before(waitDeadline) {
+				waitMS := waiter.grantedAt.Sub(waiter.waitStarted).Milliseconds()
 				l.mu.Unlock()
+				if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: waitMS, Status: "granted"}) }
 				return nil
 			}
 			l.releaseGrantedWaiterLocked(waiter)
 			l.queueTimeouts++
 			l.rejected++
 			l.mu.Unlock()
+			if observer != nil { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "timeout"}) }
 			return providerQueueWaitTimeoutError()
 		}
 		removed := l.removeWaiterLocked(waiter)
@@ -295,8 +314,10 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context, waitTimeout time.Durat
 		}
 		l.mu.Unlock()
 		if err := ctx.Err(); err != nil {
+			if observer != nil && removed { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "cancelled"}) }
 			return err
 		}
+		if observer != nil && removed { observer(ConcurrencyWaitResult{Waited: true, WaitMS: time.Since(waiter.waitStarted).Milliseconds(), Status: "timeout"}) }
 		return providerQueueWaitTimeoutError()
 	}
 }
@@ -540,7 +561,7 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 			req.Header.Set("X-API-Key", p.apiKey)
 		}
 	}
-	if err := p.acquireRequestSlot(ctx); err != nil {
+	if err := p.acquireRequestSlotWithObserver(ctx, call.OnQueueWait); err != nil {
 		// 已取消/超时的请求沿用原错误语义；只有资源已满时才是 503 过载。
 		if ctx.Err() != nil {
 			return core.Result{UpstreamStatus: 0}, err
@@ -570,11 +591,14 @@ func (p *OpenAICompatibleProvider) Forward(ctx context.Context, call InferenceCa
 
 // acquireRequestSlot 使用共享 Provider 许可器；关闭队列时立即拒绝，启用后按 FIFO 等待。
 func (p *OpenAICompatibleProvider) acquireRequestSlot(ctx context.Context) error {
+	return p.acquireRequestSlotWithObserver(ctx, nil)
+}
+func (p *OpenAICompatibleProvider) acquireRequestSlotWithObserver(ctx context.Context, observer ConcurrencyWaitObserver) error {
 	if err := ctx.Err(); err != nil { return err }
 	if p == nil || p.requestLimiter == nil {
 		return &core.Error{Status: http.StatusServiceUnavailable, Code: "provider_concurrency_limit", Message: "upstream provider concurrency limit reached"}
 	}
-	return p.requestLimiter.Acquire(ctx, p.queueWaitTimeout)
+	return p.requestLimiter.AcquireWithObserver(ctx, p.queueWaitTimeout, observer)
 }
 
 // releaseRequestSlot 在整个 JSON/SSE 响应读取完成或失败后释放共享许可。

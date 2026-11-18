@@ -100,6 +100,8 @@ type Result struct {
 	TTFT             *int64 // 首个实际输出（reasoning/content），不是 role 元数据或首字节。
 	FirstByteMS      *int64
 	UpstreamHeadersMS *int64
+	ProviderQueueWaitMS *int64
+	ProviderQueueWaitStatus string
 	Err              error
 }
 

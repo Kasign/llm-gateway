@@ -68,7 +68,8 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		return result, toolErr
 	}
 
-	var upstreamHeadersMS, firstByteMS *int64
+	var upstreamHeadersMS, firstByteMS, providerQueueWaitMS *int64
+	var providerQueueWaitStatus string
 	res, err := p.Forward(ctx, provider.InferenceCall{
 		Writer:  rw,
 		Request: req,
@@ -77,6 +78,13 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		ModelID: st.Model.UpstreamID,
 		Stream:  st.Stream,
 		OnChunk: onChunk,
+		OnQueueWait: func(m provider.ConcurrencyWaitResult) {
+			if m.Waited {
+				v := m.WaitMS
+				providerQueueWaitMS = &v
+				providerQueueWaitStatus = m.Status
+			}
+		},
 		OnUpstreamDispatch: func() {
 			f.s.markProviderTokenBudgetDispatched(st.ID)
 		},
@@ -103,6 +111,8 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		res.FirstByteMS = firstByteMS
 		res.UpstreamHeadersMS = upstreamHeadersMS
 	}
+	res.ProviderQueueWaitMS = providerQueueWaitMS
+	res.ProviderQueueWaitStatus = providerQueueWaitStatus
 	if isCancelErr(err) || isCancelErr(ctx.Err()) {
 		if res.Status < 400 {
 			res.Status = 499
