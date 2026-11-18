@@ -79,3 +79,58 @@ func (s *Server) invalidateUpstreamRuntimeSnapshotCache() {
 	s.runtimeSnapCache = nil
 	s.runtimeSnapMu.Unlock()
 }
+
+
+// sampleLocalRuntimeSnapshot 在后台采集本地 Provider 的运行时状态，不影响推理请求。
+func (s *Server) sampleLocalRuntimeSnapshot(ctx context.Context) {
+	if s == nil { return }
+	s.upstreamMu.RLock()
+	upstream := s.upstream
+	client := s.llama
+	s.upstreamMu.RUnlock()
+	backend := strings.ToLower(strings.TrimSpace(upstream.Backend))
+	if client == nil || (backend != "ollama" && backend != "llama.cpp" && backend != "llamacpp") {
+		s.setRuntimeSnapshotSample(nil, "unavailable", "local_provider")
+		return
+	}
+	var snap *llama.RuntimeSnapshot
+	var err error
+	if backend == "ollama" {
+		snap, err = s.upstreamRuntimeSnapshotInMemory(ctx, backend, client, "")
+	} else {
+		snap, err = s.upstreamRuntimeSnapshot(ctx, backend, client, "")
+	}
+	if err != nil || snap == nil {
+		s.setRuntimeSnapshotSample(nil, "unavailable", "upstream_runtime")
+		return
+	}
+	s.setRuntimeSnapshotSample(snap, "complete", "upstream_runtime")
+}
+
+func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, source string) {
+	s.runtimeSnapshotSampleMu.Lock()
+	defer s.runtimeSnapshotSampleMu.Unlock()
+	var copySnap *llama.RuntimeSnapshot
+	if snap != nil {
+		v := *snap
+		v.Loaded = append([]llama.CatalogItem(nil), snap.Loaded...)
+		v.Catalog = append([]llama.CatalogItem(nil), snap.Catalog...)
+		copySnap = &v
+	}
+	s.runtimeSnapshotSample = &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: time.Now()}
+}
+
+func (s *Server) runtimeSnapshotSampleLatest() *runtimeSnapshotSample {
+	if s == nil { return nil }
+	s.runtimeSnapshotSampleMu.RLock()
+	defer s.runtimeSnapshotSampleMu.RUnlock()
+	if s.runtimeSnapshotSample == nil { return nil }
+	out := *s.runtimeSnapshotSample
+	if s.runtimeSnapshotSample.Snapshot != nil {
+		v := *s.runtimeSnapshotSample.Snapshot
+		v.Loaded = append([]llama.CatalogItem(nil), v.Loaded...)
+		v.Catalog = append([]llama.CatalogItem(nil), v.Catalog...)
+		out.Snapshot = &v
+	}
+	return &out
+}

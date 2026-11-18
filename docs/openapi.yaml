@@ -2870,9 +2870,27 @@ components:
           $ref: "#/components/schemas/RequestPhaseMS"
         throughput:
           $ref: "#/components/schemas/RequestThroughput"
+        runtime_snapshot:
+          $ref: "#/components/schemas/RequestRuntimeSnapshot"
         summary:
           type: array
           items: { type: string }
+      additionalProperties: false
+    RequestRuntimeSnapshot:
+      type: object
+      description: 请求关联的最近本地运行时快照；不是请求瞬时硬件状态，必须结合 sampled_at 与 age_ms 判断新鲜度。
+      required: [status]
+      properties:
+        backend: { type: string }
+        active_model: { type: string }
+        loaded_model_count: { type: integer, minimum: 0 }
+        loaded_ram_bytes: { type: integer, format: int64, minimum: 0 }
+        loaded_vram_bytes: { type: integer, format: int64, minimum: 0 }
+        host_cpu_percent: { type: number, minimum: 0 }
+        status: { type: string, enum: [complete, partial, unavailable] }
+        source: { type: string }
+        sampled_at: { type: string, format: date-time }
+        age_ms: { type: integer, format: int64, minimum: 0 }
       additionalProperties: false
     RequestPhaseMS:
       type: object
