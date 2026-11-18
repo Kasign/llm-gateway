@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildRequestAnalysisSeparatesTokenAndSpeedSources(t *testing.T) {
