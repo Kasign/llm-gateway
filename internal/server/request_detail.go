@@ -35,9 +35,17 @@ func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePay
 	}
 	if a, err := decodeRequestAnalysis(analysisRaw); err == nil && a != nil {
 		out["analysis"] = a
-		if src := strings.TrimSpace(a.Throughput.Source); src != "" {
+		src := strings.TrimSpace(a.Throughput.TokenSource)
+		if src == "" {
+			src = strings.TrimSpace(a.Throughput.Source)
+		}
+		if src != "" {
 			timing["token_source"] = src
 			timing["token_source_label"] = tokenSourceLabel(src)
+		}
+		if speedSrc := strings.TrimSpace(a.Throughput.SpeedSource); speedSrc != "" {
+			timing["speed_source"] = speedSrc
+			timing["speed_source_label"] = speedSourceLabel(speedSrc)
 		}
 	} else if rebuilt := rebuildAnalysisFromLog(l, streamEvents); rebuilt != nil {
 		out["analysis"] = rebuilt
@@ -361,4 +369,17 @@ func upstreamErrorMessage(status int, body []byte, err error) string {
 		msg += ": " + sample
 	}
 	return msg
+}
+
+
+// speedSourceLabel 只描述速度数值的测量来源，不复用 Token 计数来源。
+func speedSourceLabel(source string) string {
+	switch source {
+	case "llama_timings":
+		return "llama.cpp Decode 实测"
+	case "gateway_window":
+		return "Gateway 生成窗口派生"
+	default:
+		return "未知"
+	}
 }

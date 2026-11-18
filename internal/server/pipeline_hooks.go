@@ -511,8 +511,12 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		// 流式边收边解析可能漏掉拆包或 Responses 嵌套 usage，结束再扫一遍累计体。
 		meta := logutil.TokensFromResponse(resp)
 		inTok, outTok, totTok = meta.InputTokens, meta.OutputTokens, meta.TotalTokens
-		tokenSrc = meta.Source
+		tokenSrc = meta.TokenSource
+		speedSrc = meta.SpeedSource
 		pps = meta.PredictedPerSec
+		predictedPerSecond = meta.PredictedPerSecond
+		promptN, predictedN = meta.PromptN, meta.PredictedN
+		promptMS, predictedMS, promptPerSecond = meta.PromptMS, meta.PredictedMS, meta.PromptPerSecond
 	}
 	if trace != nil {
 		timings = trace.streamTimings()
