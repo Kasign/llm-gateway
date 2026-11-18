@@ -123,7 +123,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, requestTimelineContextKey{}, timeline)
 	cleanupRun := s.beginInferenceRun(id, key, cancel, true)
 	defer cleanupRun()
-	sink := &responseSink{w: w}
+	sink := &responseSink{w: w, timeline: timeline}
 	routeProviderID, routeDefaultModel := "", ""
 	if route, routed := agentRouteFromContext(r.Context()); routed {
 		routeProviderID, routeDefaultModel = route.ProviderID, route.DefaultModel

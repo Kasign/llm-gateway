@@ -12,6 +12,7 @@ type responseSink struct {
 	mu     sync.Mutex
 	wrote  bool
 	status int
+	timeline *requestTimeline
 }
 
 func (s *responseSink) Header() http.Header { return s.w.Header() }
@@ -39,7 +40,12 @@ func (s *responseSink) Write(p []byte) (int, error) {
 		s.status = http.StatusOK
 	}
 	// 持锁写完一整块。保活 goroutine 和上游转发会并发写同一连接，不能在解锁后再写。
-	return s.w.Write(p)
+	n, err := s.w.Write(p)
+	if n > 0 && s.timeline != nil {
+		s.timeline.recordNow("gateway_first_write")
+		s.timeline.recordNow("gateway_last_write")
+	}
+	return n, err
 }
 
 func (s *responseSink) Flush() {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/whl/llm-gateway/internal/core"
@@ -114,6 +115,11 @@ func (t *requestTimeline) snapshot() []requestTimelineEvent {
 			out[i].OffsetMS = &value
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].OffsetMS == nil { return false }
+		if out[j].OffsetMS == nil { return true }
+		return *out[i].OffsetMS < *out[j].OffsetMS
+	})
 	return out
 }
 
@@ -143,7 +149,5 @@ func (t *requestTimeline) On(_ context.Context, ev core.Event) {
 		t.record("warm_finished", ev.State.WarmAt)
 	case core.StageUpstreamStart:
 		t.record("upstream_started", ev.State.UpstreamStart)
-	case core.StageFinish:
-		t.recordNow("pipeline_finished")
 	}
 }

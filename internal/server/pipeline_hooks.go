@@ -420,6 +420,8 @@ func (o inferenceObserver) onChunk(st core.State, chunk []byte) {
 // Touch / MarkUsed 只在成功后执行，失败的调用不算「使用过」。
 func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	st := ev.State
+	timeline := requestTimelineFromContext(ctx)
+	if timeline != nil { timeline.recordNow("pipeline_finished") }
 	cancelAccepted := o.s.markCallFinishing(st.ID)
 	if o.s.runs != nil && o.s.runs.MarkFinishing(st.ID) {
 		cancelAccepted = true
@@ -523,6 +525,11 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	}
 	if trace != nil {
 		timings = trace.streamTimings()
+		if timeline != nil {
+			if timings.FirstAnyMS != nil { timeline.record("stream_first_any", st.Started.Add(time.Duration(*timings.FirstAnyMS)*time.Millisecond)) }
+			if timings.FirstReasoningMS != nil { timeline.record("stream_first_reasoning", st.Started.Add(time.Duration(*timings.FirstReasoningMS)*time.Millisecond)) }
+			if timings.FirstContentMS != nil { timeline.record("stream_first_content", st.Started.Add(time.Duration(*timings.FirstContentMS)*time.Millisecond)) }
+		}
 		if timings.FirstAnyMS != nil {
 			ttft = timings.FirstAnyMS
 		}
