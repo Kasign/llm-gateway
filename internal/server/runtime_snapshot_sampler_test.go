@@ -31,7 +31,7 @@ func TestSampleLlamaMetricsStoresDynamicSnapshot(t *testing.T) {
 	if got.Metrics.Samples[0].Name != "runtime_new_metric" || got.Metrics.Samples[0].Type != llama.MetricTypeGauge {
 		t.Fatalf("unexpected metric: %#v", got.Metrics.Samples[0])
 	}
-	if got.Metrics.ProcessStartTimeUnix == nil || *got.Metrics.ProcessStartTimeUnix != 1700000000 || got.Metrics.ModelScope != "model-a" {
+	if got.Metrics.ProcessInstanceID == nil || *got.Metrics.ProcessInstanceID != "256533562943" || got.Metrics.ModelScope != "model-a" {
 		t.Fatalf("process identity or model scope was not retained: %#v", got.Metrics)
 	}
 }
@@ -94,15 +94,15 @@ func TestRuntimeSnapshotSampleLatestReturnsCopy(t *testing.T) {
 
 func TestSetRuntimeSnapshotSamplePreservesPreviousMetricsForDelta(t *testing.T) {
 	s := &Server{}
-	processStart := int64(1700000000)
+	processStart := "256533562943"
 	s.setRuntimeMetricsSample(&llama.MetricsSnapshot{
-		ProcessStartTimeUnix: &processStart,
+		ProcessInstanceID: &processStart,
 		ModelScope: "model-a",
 		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "10"}},
 	}, "complete", "")
 	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
 	got := s.runtimeSnapshotSampleLatest()
-	if got.Metrics == nil || got.Metrics.ProcessStartTimeUnix == nil || *got.Metrics.ProcessStartTimeUnix != processStart {
+	if got.Metrics == nil || got.Metrics.ProcessInstanceID == nil || *got.Metrics.ProcessInstanceID != processStart {
 		t.Fatalf("runtime snapshot update must preserve the previous metrics sample: %#v", got)
 	}
 }
@@ -183,14 +183,14 @@ func TestSampleLlamaMetricsDoesNotMapInvalidModelToNeedsModel(t *testing.T) {
 func TestApplyCounterDeltasRequiresComparableProcessAndScope(t *testing.T) {
 	start := time.Now().Add(-5 * time.Second).UTC()
 	end := time.Now().UTC()
-	processA, processB := int64(1700000000), int64(1700000100)
+	processA, processB := "256533562943", "256533562944"
 	previous := &llama.MetricsSnapshot{
-		SampledAt: start, ProcessStartTimeUnix: &processA, ModelScope: "model-a",
+		SampledAt: start, ProcessInstanceID: &processA, ModelScope: "model-a",
 		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "100", Labels: map[string]string{"route": "/v1"}}},
 	}
-	makeCurrent := func(value string, process *int64, scope string) *llama.MetricsSnapshot {
+	makeCurrent := func(value string, process *string, scope string) *llama.MetricsSnapshot {
 		return &llama.MetricsSnapshot{
-			SampledAt: end, ProcessStartTimeUnix: process, ModelScope: scope,
+			SampledAt: end, ProcessInstanceID: process, ModelScope: scope,
 			Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: value, Labels: map[string]string{"route": "/v1"}}},
 		}
 	}

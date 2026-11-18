@@ -138,7 +138,7 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 	defer cancel()
 
 	sampledAt := time.Now().UTC()
-	statusCode, body, processStartTimeUnix, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
+	statusCode, body, processInstanceID, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
 	if err != nil {
 		status := "unavailable"
 		code := "request_failed"
@@ -179,7 +179,7 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 		s.setRuntimeMetricsSampleForTarget(nil, "invalid_response", "metrics_parse_failed", client.BaseURL())
 		return
 	}
-	snapshot.ProcessStartTimeUnix = processStartTimeUnix
+	snapshot.ProcessInstanceID = processInstanceID
 	snapshot.ModelScope = strings.TrimSpace(modelID)
 	s.setRuntimeMetricsSampleForTarget(snapshot, "complete", "", client.BaseURL())
 }
@@ -264,11 +264,11 @@ func applyCounterDeltas(current, previous *llama.MetricsSnapshot, previousTarget
 			sample.DeltaReason = "model_scope_changed"
 			continue
 		}
-		if previous.ProcessStartTimeUnix == nil || current.ProcessStartTimeUnix == nil {
+		if previous.ProcessInstanceID == nil || current.ProcessInstanceID == nil {
 			sample.DeltaReason = "process_identity_unavailable"
 			continue
 		}
-		if *previous.ProcessStartTimeUnix != *current.ProcessStartTimeUnix {
+		if *previous.ProcessInstanceID != *current.ProcessInstanceID {
 			sample.DeltaReason = "process_restarted"
 			continue
 		}
@@ -368,8 +368,8 @@ func (s *Server) runtimeMetricsOverview() map[string]interface{} {
 	out["sampled_at"] = sampledAt.UTC().Format(time.RFC3339Nano)
 	out["age_ms"] = age.Milliseconds()
 	if sample.Metrics != nil {
-		if sample.Metrics.ProcessStartTimeUnix != nil {
-			out["process_start_time_unix"] = *sample.Metrics.ProcessStartTimeUnix
+		if sample.Metrics.ProcessInstanceID != nil {
+			out["process_instance_id"] = *sample.Metrics.ProcessInstanceID
 		}
 		if sample.Metrics.ModelScope != "" {
 			out["model_scope"] = sample.Metrics.ModelScope
@@ -393,13 +393,13 @@ func cloneMetricsSnapshot(snapshot *llama.MetricsSnapshot) *llama.MetricsSnapsho
 	}
 	out := &llama.MetricsSnapshot{
 		SampledAt: snapshot.SampledAt,
-		ProcessStartTimeUnix: snapshot.ProcessStartTimeUnix,
+		ProcessInstanceID: snapshot.ProcessInstanceID,
 		ModelScope: snapshot.ModelScope,
 		Samples: make([]llama.MetricSample, len(snapshot.Samples)),
 	}
-	if snapshot.ProcessStartTimeUnix != nil {
-		processStart := *snapshot.ProcessStartTimeUnix
-		out.ProcessStartTimeUnix = &processStart
+	if snapshot.ProcessInstanceID != nil {
+		processStart := *snapshot.ProcessInstanceID
+		out.ProcessInstanceID = &processStart
 	}
 	for i, sample := range snapshot.Samples {
 		out.Samples[i] = sample

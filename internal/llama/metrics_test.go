@@ -49,7 +49,7 @@ func TestFetchMetricsUsesConfiguredAuthAndModel(t *testing.T) {
 	var gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotAuth = r.URL.RequestURI(), r.Header.Get("Authorization")
-		w.Header().Set("Process-Start-Time-Unix", "1700000000")
+		w.Header().Set("Process-Start-Time-Unix", "256533562943")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("metric 1\n"))
 	}))
@@ -60,15 +60,15 @@ func TestFetchMetricsUsesConfiguredAuthAndModel(t *testing.T) {
 	if status != http.StatusOK || gotPath != "/metrics?model=model+A" || gotAuth != "Bearer upstream-secret" || string(body) != "metric 1\n" {
 		t.Fatalf("status=%d path=%q auth=%q body=%q", status, gotPath, gotAuth, body)
 	}
-	if processStart == nil || *processStart != 1700000000 {
-		t.Fatalf("process start time header was not captured: %v", processStart)
+	if processStart == nil || *processStart != "256533562943" {
+		t.Fatalf("process instance header was not captured: %v", processStart)
 	}
 }
 
-func TestParseProcessStartTimeUnixRejectsMissingOrInvalidHeader(t *testing.T) {
+func TestParseProcessInstanceIDRejectsMissingOrInvalidHeader(t *testing.T) {
 	for _, raw := range []string{"", "unknown", "0", "-1"} {
-		if got := parseProcessStartTimeUnix(raw); got != nil {
-			t.Fatalf("header %q should not produce a process identity: %v", raw, *got)
+		if got := parseProcessInstanceID(raw); got != nil {
+			t.Fatalf("header %q should not produce a process instance ID: %v", raw, *got)
 		}
 	}
 }

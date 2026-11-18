@@ -48,13 +48,13 @@ type MetricSample struct {
 
 type MetricsSnapshot struct {
 	SampledAt            time.Time      `json:"sampled_at"`
-	ProcessStartTimeUnix *int64         `json:"process_start_time_unix,omitempty"`
+	ProcessInstanceID     *string        `json:"process_instance_id,omitempty"`
 	ModelScope           string         `json:"model_scope,omitempty"`
 	Samples              []MetricSample `json:"samples"`
 }
 
 // FetchMetrics 读取 /metrics。调用方必须设置独立短超时；响应体有硬上限。
-func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int64) (int, []byte, *int64, error) {
+func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int64) (int, []byte, *string, error) {
 	if c == nil || c.IsOllama() {
 		return 0, nil, nil, errors.New("llama.cpp metrics is unavailable for this backend")
 	}
@@ -65,7 +65,7 @@ func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int6
 	if modelID = strings.TrimSpace(modelID); modelID != "" {
 		path += "?model=" + url.QueryEscape(modelID)
 	}
-	return c.getBoundedWithProcessStart(ctx, path, maxBytes)
+	return c.getBoundedWithProcessIdentity(ctx, path, maxBytes)
 }
 
 // FetchSlots 读取 /slots，但调用方不得将其加入默认轮询，除非已验证目标版本的 idle-sleep 行为。
@@ -80,11 +80,11 @@ func (c *Client) FetchSlots(ctx context.Context, maxBytes int64) (int, []byte, e
 }
 
 func (c *Client) getBounded(ctx context.Context, path string, maxBytes int64) (int, []byte, error) {
-	status, body, _, err := c.getBoundedWithProcessStart(ctx, path, maxBytes)
+	status, body, _, err := c.getBoundedWithProcessIdentity(ctx, path, maxBytes)
 	return status, body, err
 }
 
-func (c *Client) getBoundedWithProcessStart(ctx context.Context, path string, maxBytes int64) (int, []byte, *int64, error) {
+func (c *Client) getBoundedWithProcessIdentity(ctx context.Context, path string, maxBytes int64) (int, []byte, *string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return 0, nil, nil, err
@@ -95,20 +95,23 @@ func (c *Client) getBoundedWithProcessStart(ctx context.Context, path string, ma
 		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
-	processStart := parseProcessStartTimeUnix(resp.Header.Get("Process-Start-Time-Unix"))
+	processInstanceID := parseProcessInstanceID(resp.Header.Get("Process-Start-Time-Unix"))
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
-		return resp.StatusCode, nil, processStart, err
+		return resp.StatusCode, nil, processInstanceID, err
 	}
 	if int64(len(body)) > maxBytes {
-		return resp.StatusCode, nil, processStart, ErrMetricsResponseTooLarge
+		return resp.StatusCode, nil, processInstanceID, ErrMetricsResponseTooLarge
 	}
-	return resp.StatusCode, body, processStart, nil
+	return resp.StatusCode, body, processInstanceID, nil
 }
 
-func parseProcessStartTimeUnix(raw string) *int64 {
-	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil || value <= 0 {
+// parseProcessInstanceID validates the numeric header but preserves it as an opaque string.
+// llama.cpp currently fills Process-Start-Time-Unix from ggml_time_us(), not Unix time.
+func parseProcessInstanceID(raw string) *string {
+	value := strings.TrimSpace(raw)
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
 		return nil
 	}
 	return &value
