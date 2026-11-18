@@ -124,4 +124,7 @@ func TestTimelineOnlyAnalysisDoesNotInventPhaseMetrics(t *testing.T) {
 	if len(decoded.Summary) != 0 || decoded.Throughput.OutputTokensPerSec != nil {
 		t.Fatalf("timeline-only record must not invent analysis metrics: %+v", decoded)
 	}
+	if strings.Contains(encodeRequestAnalysis(a), "phases_ms") || strings.Contains(encodeRequestAnalysis(a), "throughput") {
+		t.Fatalf("timeline-only JSON must omit unavailable phase metrics: %s", encodeRequestAnalysis(a))
+	}
 }

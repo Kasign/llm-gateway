@@ -20,6 +20,18 @@ type RequestAnalysis struct {
 	Summary          []string            `json:"summary,omitempty"`
 }
 
+// MarshalJSON 对 timeline_only 记录省略阶段指标，避免把未执行阶段序列化成零值。
+func (a RequestAnalysis) MarshalJSON() ([]byte, error) {
+	type full RequestAnalysis
+	if !a.TimelineOnly {
+		return json.Marshal(full(a))
+	}
+	return json.Marshal(struct {
+		TimelineOnly bool                    `json:"timeline_only"`
+		Timeline     []requestTimelineEvent `json:"timeline,omitempty"`
+	}{TimelineOnly: true, Timeline: a.Timeline})
+}
+
 type RequestRuntimeSnapshot struct {
 	Backend            string   `json:"backend,omitempty"`
 	ActiveModel        string   `json:"active_model,omitempty"`
