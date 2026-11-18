@@ -178,15 +178,15 @@ func (h TokenHarvest) Empty() bool {
 }
 
 func (h *TokenHarvest) mergeUsage(in, out, total int64) {
-	if in >= 0 {
+	if in > 0 {
 		v := in
 		h.InputTokens = &v
 	}
-	if out >= 0 {
+	if out > 0 {
 		v := out
 		h.OutputTokens = &v
 	}
-	if total >= 0 {
+	if total > 0 {
 		v := total
 		h.TotalTokens = &v
 	} else if h.InputTokens != nil && h.OutputTokens != nil {

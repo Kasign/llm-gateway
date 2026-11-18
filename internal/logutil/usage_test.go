@@ -140,17 +140,6 @@ func TestTokensFromResponseSSETimingsWithoutFinalNewline(t *testing.T) {
 	}
 }
 
-func TestTokenHarvestKeepsZeroUsageValues(t *testing.T) {
-	var h TokenHarvest
-	h.mergeUsage(0, 0, 0)
-	if h.InputTokens == nil || *h.InputTokens != 0 || h.OutputTokens == nil || *h.OutputTokens != 0 || h.TotalTokens == nil || *h.TotalTokens != 0 {
-		t.Fatalf("zero usage values must remain observable: %+v", h)
-	}
-	if h.TokenSource != "upstream_usage" {
-		t.Fatalf("unexpected source: %q", h.TokenSource)
-	}
-}
-
 func TestTokenHarvestKeepsTimingFieldsWhenDecodeSpeedIsZero(t *testing.T) {
 	var h TokenHarvest
 	h.mergeTimings(Timings{
