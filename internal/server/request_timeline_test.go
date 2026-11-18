@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/provider"
 )
 
 func TestRequestTimelineRecordsMonotonicOffsetsAndCopiesSnapshot(t *testing.T) {
@@ -252,6 +254,66 @@ func (interruptedStreamForwarder) Forward(_ context.Context, st core.State, _ co
 		return core.Result{}, err
 	}
 	return core.Result{}, nil
+}
+
+
+func TestInferenceForwarderRecordsRealProviderHTTPErrorHeaders(t *testing.T) {
+	const privateBody = "upstream-private-diagnostic"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"` + privateBody + `"}`))
+	}))
+	defer upstream.Close()
+
+	remote, err := provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{
+		ID: "timeline-provider", BaseURL: upstream.URL + "/v1",
+		AllowInsecureHTTP: true, AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := provider.NewRegistry()
+	if err := registry.Register("timeline-provider", func() provider.Provider { return remote }); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	timeline := newRequestTimeline(start)
+	ctx := context.WithValue(context.Background(), requestTimelineContextKey{}, timeline)
+	recorder := httptest.NewRecorder()
+	sink := &responseSink{w: recorder, method: http.MethodPost, timeline: timeline}
+	forwarder := inferenceForwarder{s: &Server{providers: registry}}
+	result, forwardErr := forwarder.Forward(ctx, core.State{
+		Request: core.Request{
+			ID: "timeline-provider-http-error", Method: http.MethodPost,
+			Path: "/v1/chat/completions", Body: []byte("{}"), Started: start, Sink: sink,
+		},
+		Model: core.ModelChoice{ProviderID: "timeline-provider", UpstreamID: "upstream-model"},
+	}, nil)
+	if forwardErr == nil {
+		t.Fatal("expected Provider HTTP error")
+	}
+	if result.Status != http.StatusBadGateway || result.UpstreamStatus != http.StatusBadGateway {
+		t.Fatalf("forward result = %+v", result)
+	}
+	events := make(map[string]requestTimelineEvent)
+	for _, event := range timeline.snapshot() {
+		events[event.Name] = event
+	}
+	headers, ok := events["upstream_headers"]
+	if !ok || headers.Status != timelineStatusMeasured || headers.OffsetMS == nil {
+		t.Fatalf("real upstream response headers were not recorded: %+v", timeline.snapshot())
+	}
+	if firstByte, ok := events["upstream_first_byte"]; !ok || firstByte.Status != timelineStatusNotReached {
+		t.Fatalf("non-streaming error must not invent an upstream first-byte event: %+v", timeline.snapshot())
+	}
+	if !timeline.has("gateway_first_write") || !timeline.has("gateway_last_write") {
+		t.Fatalf("sanitized provider error response was not recorded as a gateway write: %+v", timeline.snapshot())
+	}
+	if strings.Contains(recorder.Body.String(), privateBody) {
+		t.Fatalf("upstream error body leaked to caller: %q", recorder.Body.String())
+	}
 }
 
 func TestRequestTimelineRecordsStreamInterruptionAfterHeaders(t *testing.T) {
