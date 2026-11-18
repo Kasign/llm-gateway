@@ -110,6 +110,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 			"auth_started", "auth_finished",
 			"client_rpm_started", "client_rpm_finished",
 			"body_read_started", "body_read_finished",
+			"warm_finished", "pipeline_finished",
 		} {
 			timeline.markIfMissing(name, timelineStatusNotReached)
 		}
@@ -118,8 +119,10 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 				timeline.markIfMissing("stream_first_any", timelineStatusNotApplicable)
 				timeline.markIfMissing("stream_first_reasoning", timelineStatusNotApplicable)
 				timeline.markIfMissing("stream_first_content", timelineStatusNotApplicable)
-			} else if !timeline.has("stream_first_any") {
+			} else {
 				timeline.markIfMissing("stream_first_any", timelineStatusNotReached)
+				timeline.markIfMissing("stream_first_reasoning", timelineStatusNotReached)
+				timeline.markIfMissing("stream_first_content", timelineStatusNotReached)
 			}
 			timeline.recordNow("handler_exit_started")
 			analysis.Timeline = timeline.snapshot()
