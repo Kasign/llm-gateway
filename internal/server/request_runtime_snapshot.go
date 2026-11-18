@@ -33,7 +33,11 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	if sample.Snapshot != nil {
 		out.Backend = sample.Snapshot.Backend
 		out.ActiveModel = sample.Snapshot.ActiveModel
-		out.LoadedModelCount = len(sample.Snapshot.Loaded)
+		for _, item := range sample.Snapshot.Loaded {
+			if item.Loaded {
+				out.LoadedModelCount++
+			}
+		}
 		out.LoadedRAMBytes = sample.Snapshot.LoadedRAM
 		out.LoadedVRAMBytes = sample.Snapshot.LoadedVRAM
 		// 部分 Provider/测试夹具可能只填充 Loaded 条目；汇总值缺失时从已加载条目回退。
