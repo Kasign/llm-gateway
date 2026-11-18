@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
   inference_latency_ms BIGINT UNSIGNED NULL,
   inference_latency_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
   ttft_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
+  model_round_durations_json LONGTEXT NULL,
   http_status SMALLINT UNSIGNED NULL,
   response_bytes BIGINT UNSIGNED NULL,
   input_tokens BIGINT UNSIGNED NULL,

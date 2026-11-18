@@ -85,10 +85,11 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	run.ModelLoadMS, run.ModelLoadStatus = &modelLoad, "measured"
 	run.InferenceLatencyMS, run.InferenceLatencyStatus = &inference, "measured"
 	run.TTFTStatus = "measured"
+	run.ModelRoundDurationsJSON = "[12,34]"
 	if err := repo.UpdateTaskAndRun(ctx, task, run); err != nil { t.Fatalf("update task/run: %v", err) }
 	runs, err = repo.ListRuns(ctx, id)
 	if err != nil || len(runs) != 1 || runs[0].ModelLoadMS == nil || *runs[0].ModelLoadMS != modelLoad || runs[0].ModelLoadStatus != "measured" ||
-		runs[0].InferenceLatencyMS == nil || *runs[0].InferenceLatencyMS != inference || runs[0].InferenceLatencyStatus != "measured" || runs[0].TTFTStatus != "measured" {
+		runs[0].InferenceLatencyMS == nil || *runs[0].InferenceLatencyMS != inference || runs[0].InferenceLatencyStatus != "measured" || runs[0].TTFTStatus != "measured" || runs[0].ModelRoundDurationsJSON != "[12,34]" {
 		t.Fatalf("persisted timing metrics = %+v, err=%v", runs, err)
 	}
 	got, err = repo.GetTask(ctx, id)
