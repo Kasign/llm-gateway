@@ -205,6 +205,47 @@ try {
     Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) &&
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
+  await page.route('**/api/benchmark**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/benchmark' && route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        total: 1,
+        items: [{
+          job_id: 'benchmark-history-smoke-1',
+          scenario: 'performance',
+          model_id: 'smoke-model',
+          status: 'completed',
+          started_at: '2026-11-18T10:00:00Z',
+          latency_ms: 1250,
+          condition_status: 'complete'
+        }]
+      }) });
+      return;
+    }
+    if (url.pathname === '/api/benchmark/benchmark-history-smoke-1' && route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        job: {
+          job_id: 'benchmark-history-smoke-1',
+          scenario: 'performance',
+          model_id: 'smoke-model',
+          status: 'completed',
+          started_at: '2026-11-18T10:00:00Z',
+          finished_at: '2026-11-18T10:00:01Z',
+          latency_ms: 1250,
+          input_tokens: 12,
+          output_tokens: 34,
+          content_text: '历史任务详情正文',
+          condition_status: 'complete',
+          condition_missing: []
+        },
+        analysis: { phases_ms: { total_ms: 1250, upstream_ms: 1100 }, throughput: { output_tokens_per_sec: 27.2 } },
+        stream_events: []
+      }) });
+      return;
+    }
+    await route.continue();
+  });
+
   await clickTab(page, 'model-test', '模型测试');
   const modelTestKey = page.locator('#modelTestApiKey');
   check('模型测试共用密码输入框接收客户端服务密钥',
@@ -224,6 +265,14 @@ try {
   check('性能测试模式显示唯一的 Benchmark 历史任务区域',
     await page.locator('#benchHistoryCard').isVisible() &&
     await page.locator('#benchHistoryDetail').count() === 1);
+  await page.locator('#benchHistoryList [data-bench-history-id="benchmark-history-smoke-1"]').click();
+  await page.locator('#benchHistoryDetail').waitFor({ state: 'visible', timeout: 5000 });
+  check('点击历史任务详情后在历史区域展示任务内容',
+    (await page.locator('#benchHistoryDetail').textContent()).includes('历史任务详情正文') &&
+    (await page.locator('#benchHistoryDetail').textContent()).includes('smoke-model'));
+  check('查看历史详情不会覆盖当前性能测试输出',
+    !(await page.locator('#benchAnswer').textContent()).includes('历史任务详情正文'));
+
 
   check('工具调用性能场景与历史任务区域已提供',
     await page.locator('#benchToolPrompt').count() === 1 &&
