@@ -518,7 +518,6 @@
             <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
           </details>
         </div>
-        </div>
 
       <div class="card" id="benchHistoryCard">
         <div class="card-head">
@@ -549,12 +548,14 @@
         </div>
         <div id="benchCompareResult" class="bench-analysis" hidden></div>
         <div id="benchHistoryList" aria-live="polite"><div class="empty-state">正在加载历史任务…</div></div>
+        <section id="benchHistoryDetail" class="bench-history-detail" aria-live="polite" hidden></section>
         <div class="bench-actions" style="justify-content:flex-end;align-items:center">
           <span id="benchHistoryPage" class="small muted">—</span>
           <button type="button" class="btn sm" id="benchHistoryPrev" disabled>上一页</button>
           <button type="button" class="btn sm" id="benchHistoryNext" disabled>下一页</button>
         </div>
       </div>
+        </div>
 
       <!-- 工具调用模式 -->
       <div id="modelTestTools" hidden>
