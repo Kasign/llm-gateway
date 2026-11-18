@@ -1,6 +1,9 @@
 package server
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -89,5 +92,62 @@ func TestRequestTimelineMarkIfMissingDoesNotDuplicateMeasuredEvents(t *testing.T
 	}
 	if events[0].Status != timelineStatusMeasured || events[1].Status != timelineStatusNotReached {
 		t.Fatalf("measured event was overwritten: %+v", events)
+	}
+}
+
+type failedTimelineResponseWriter struct {
+	header http.Header
+}
+
+func (w *failedTimelineResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failedTimelineResponseWriter) WriteHeader(int) {}
+
+func (w *failedTimelineResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func TestResponseSinkRecordsFirstAndLastSuccessfulWrites(t *testing.T) {
+	start := time.Now()
+	timeline := newRequestTimeline(start)
+	recorder := httptest.NewRecorder()
+	sink := &responseSink{w: recorder, timeline: timeline}
+
+	sink.WriteHeader(http.StatusOK)
+	if _, err := sink.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Write([]byte("last")); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Body.String() != "firstlast" {
+		t.Fatalf("unexpected response body: %q", recorder.Body.String())
+	}
+	events := timeline.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("expected first and last write events, got %+v", events)
+	}
+	if events[0].Name != "gateway_first_write" || events[1].Name != "gateway_last_write" {
+		t.Fatalf("unexpected write event order: %+v", events)
+	}
+	if events[0].OffsetMS == nil || events[1].OffsetMS == nil ||
+		*events[1].OffsetMS < *events[0].OffsetMS {
+		t.Fatalf("write events must contain ordered measured offsets: %+v", events)
+	}
+}
+
+func TestResponseSinkDoesNotRecordFailedBodyWrite(t *testing.T) {
+	timeline := newRequestTimeline(time.Now())
+	sink := &responseSink{w: &failedTimelineResponseWriter{}, timeline: timeline}
+	if _, err := sink.Write([]byte("unwritten")); err == nil {
+		t.Fatal("expected write failure")
+	}
+	if events := timeline.snapshot(); len(events) != 0 {
+		t.Fatalf("failed write must not be recorded as successful: %+v", events)
 	}
 }
