@@ -9,3 +9,12 @@ func (s *Server) persistRequestAnalysis(ctx context.Context, requestID string, i
 	a := buildRequestAnalysis(in)
 	s.audit.SaveRequestAnalysis(requestID, encodeRequestAnalysis(a))
 }
+
+// persistRequestTimeline 保存未进入分析阶段的请求时间线，不生成空的阶段耗时或吞吐数据。
+func (s *Server) persistRequestTimeline(requestID string, events []requestTimelineEvent) {
+	if s == nil || s.audit == nil || len(events) == 0 {
+		return
+	}
+	a := RequestAnalysis{TimelineOnly: true, Timeline: events}
+	s.audit.SaveRequestAnalysis(requestID, encodeRequestAnalysis(a))
+}

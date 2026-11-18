@@ -68,7 +68,8 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	timeline := newRequestTimeline(start)
 	timeline.record("request_received", start)
-	var sink *responseSink
+	sink := &responseSink{w: w, timeline: timeline}
+	w = sink
 	id := requestID(r.Context())
 	defer func() {
 		if !timeline.has("pipeline_started") {
@@ -105,6 +106,13 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 				timeline.markIfMissing("gateway_last_write", timelineStatusNotReached)
 			}
 		}
+		for _, name := range []string{
+			"auth_started", "auth_finished",
+			"client_rpm_started", "client_rpm_finished",
+			"body_read_started", "body_read_finished",
+		} {
+			timeline.markIfMissing(name, timelineStatusNotReached)
+		}
 		if analysis, ok := timeline.analysisSnapshot(); ok {
 			if !analysis.Stream {
 				timeline.markIfMissing("stream_first_any", timelineStatusNotApplicable)
@@ -117,7 +125,11 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 			analysis.Timeline = timeline.snapshot()
 			s.persistRequestAnalysis(context.Background(), id, analysis)
 		} else {
+			timeline.markIfMissing("stream_first_any", timelineStatusUnknown)
+			timeline.markIfMissing("stream_first_reasoning", timelineStatusUnknown)
+			timeline.markIfMissing("stream_first_content", timelineStatusUnknown)
 			timeline.recordNow("handler_exit_started")
+			s.persistRequestTimeline(id, timeline.snapshot())
 		}
 	}()
 	if r.Method != http.MethodPost {
@@ -174,7 +186,6 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, requestTimelineContextKey{}, timeline)
 	cleanupRun := s.beginInferenceRun(id, key, cancel, true)
 	defer cleanupRun()
-	sink = &responseSink{w: w, timeline: timeline}
 	routeProviderID, routeDefaultModel := "", ""
 	if route, routed := agentRouteFromContext(r.Context()); routed {
 		routeProviderID, routeDefaultModel = route.ProviderID, route.DefaultModel

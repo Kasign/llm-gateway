@@ -106,3 +106,21 @@ func TestBuildRequestAnalysisPreservesTimelineAndUnknownOffsets(t *testing.T) {
 		t.Fatalf("unknown event time was fabricated: %+v", out.Timeline[1])
 	}
 }
+
+func TestTimelineOnlyAnalysisDoesNotInventPhaseMetrics(t *testing.T) {
+	start := time.Now()
+	timeline := newRequestTimeline(start)
+	timeline.record("request_received", start)
+	timeline.markIfMissing("pipeline_started", timelineStatusNotReached)
+	a := RequestAnalysis{TimelineOnly: true, Timeline: timeline.snapshot()}
+	decoded, err := decodeRequestAnalysis(encodeRequestAnalysis(a))
+	if err != nil {
+		t.Fatalf("decode timeline-only analysis: %v", err)
+	}
+	if !decoded.TimelineOnly || len(decoded.Timeline) != 2 {
+		t.Fatalf("timeline-only metadata lost: %+v", decoded)
+	}
+	if len(decoded.Summary) != 0 || decoded.Throughput.OutputTokensPerSec != nil {
+		t.Fatalf("timeline-only record must not invent analysis metrics: %+v", decoded)
+	}
+}

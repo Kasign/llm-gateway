@@ -405,7 +405,7 @@ function detailSections(j) {
       ['请求/响应大小', Number(s.request_kb || 0).toFixed(1) + ' KB / ' + Number(s.response_kb || 0).toFixed(1) + ' KB'],
     ])}${j.token_note ? `<p class="req-note">${esc(j.token_note)}</p>` : ''}</section>`,
   );
-  if (j.analysis) {
+  if (j.analysis && !j.analysis.timeline_only) {
     const ph = j.analysis.phases_ms || {};
     const tp = j.analysis.throughput || {};
     let block = `<section class="req-section"><h3>请求分析</h3>${reqKv([

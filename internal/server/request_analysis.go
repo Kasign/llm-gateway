@@ -15,6 +15,7 @@ type RequestAnalysis struct {
 	Phases           RequestPhaseMS      `json:"phases_ms"`
 	Throughput       RequestThroughput   `json:"throughput"`
 	RuntimeSnapshot  *RequestRuntimeSnapshot `json:"runtime_snapshot,omitempty"`
+	TimelineOnly     bool                  `json:"timeline_only,omitempty"`
 	Timeline         []requestTimelineEvent `json:"timeline,omitempty"`
 	Summary          []string            `json:"summary,omitempty"`
 }
