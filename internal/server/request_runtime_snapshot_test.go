@@ -32,3 +32,20 @@ func TestLatestRequestRuntimeSnapshotSumsLoadedModelMemoryFallback(t *testing.T)
   t.Fatalf("expected loaded memory sums RAM=384 VRAM=96, got %#v", got)
  }
 }
+
+
+func TestRuntimeSnapshotSampleUsesDefensiveCopies(t *testing.T) {
+ s := &Server{}
+ original := &llama.RuntimeSnapshot{Backend:"ollama", Loaded: []llama.CatalogItem{{ID:"model-a", Loaded:true, RAMBytes:128}}}
+ s.setRuntimeSnapshotSample(original,"complete","upstream_runtime")
+ original.Loaded[0].RAMBytes = 999
+ first := s.runtimeSnapshotSampleLatest()
+ if first == nil || first.Snapshot.Loaded[0].RAMBytes != 128 {
+  t.Fatalf("stored snapshot aliased caller memory: %#v", first)
+ }
+ first.Snapshot.Loaded[0].RAMBytes = 777
+ second := s.runtimeSnapshotSampleLatest()
+ if second == nil || second.Snapshot.Loaded[0].RAMBytes != 128 {
+  t.Fatalf("returned snapshot aliased internal memory: %#v", second)
+ }
+}
