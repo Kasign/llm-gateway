@@ -28,7 +28,7 @@ func TestLatestRequestRuntimeSnapshotSumsLoadedModelMemoryFallback(t *testing.T)
  }}
  s.setRuntimeSnapshotSample(snap,"complete","upstream_runtime")
  got := s.latestRequestRuntimeSnapshot()
- if got == nil || got.LoadedRAMBytes != 384 || got.LoadedVRAMBytes != 96 {
+ if got == nil || got.LoadedModelCount != 2 || got.LoadedRAMBytes != 384 || got.LoadedVRAMBytes != 96 {
   t.Fatalf("expected loaded memory sums RAM=384 VRAM=96, got %#v", got)
  }
 }
