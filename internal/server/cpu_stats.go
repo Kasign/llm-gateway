@@ -90,3 +90,14 @@ func readProcStatJiffies() (total, idle uint64, ok bool) {
 	}
 	return 0, 0, false
 }
+
+
+func (s *Server) cpuSnapshotPercent() (float64, bool) {
+	if s == nil { return 0, false }
+	s.cpuSampleMu.Lock()
+	defer s.cpuSampleMu.Unlock()
+	if s.cpuProcLastSample.IsZero() || time.Since(s.cpuProcLastSample) > 15*time.Second {
+		return 0, false
+	}
+	return s.cpuCachedPercent, true
+}

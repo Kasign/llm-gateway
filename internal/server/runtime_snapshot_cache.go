@@ -14,6 +14,13 @@ const (
 	upstreamRuntimeInMemoryCacheTTL = 30 * time.Second
 )
 
+type runtimeSnapshotSample struct {
+	Snapshot  *llama.RuntimeSnapshot
+	Status    string
+	Source    string
+	SampledAt time.Time
+}
+
 type upstreamRuntimeSnapEntry struct {
 	at   time.Time
 	snap *llama.RuntimeSnapshot
