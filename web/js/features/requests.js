@@ -436,6 +436,23 @@ function detailSections(j) {
       ['Decode 耗时', tp.llama_timings?.predicted_ms != null ? tp.llama_timings.predicted_ms + ' ms' : null],
       ['Decode 速度（原始 timings）', tp.llama_timings?.predicted_per_second != null ? tp.llama_timings.predicted_per_second.toFixed(2) + ' token/s' : null],
     ])}`;
+    const runtime = j.analysis.runtime_snapshot || null;
+    if (runtime) {
+      const runtimeRows = [
+        ['本地运行时状态', runtime.status || 'unknown'],
+        ['Backend', runtime.backend || null],
+        ['活动模型', runtime.active_model || null],
+        ['已加载模型数', runtime.loaded_model_count ?? null],
+        ['模型 RAM', runtime.loaded_ram_bytes != null ? (runtime.loaded_ram_bytes / 1073741824).toFixed(2) + ' GiB' : null],
+        ['模型 VRAM', runtime.loaded_vram_bytes != null ? (runtime.loaded_vram_bytes / 1073741824).toFixed(2) + ' GiB' : null],
+        ['主机 CPU', runtime.host_cpu_percent != null ? runtime.host_cpu_percent.toFixed(1) + '%' : null],
+        ['采样时间', runtime.sampled_at || null],
+        ['采样年龄', runtime.age_ms != null ? runtime.age_ms + ' ms' : null],
+        ['快照来源', runtime.source || null],
+      ];
+      block += `<h4>请求附近的运行时快照</h4>${reqKv(runtimeRows)}`;
+      block += '<p class="req-note">运行时数据来自后台采样，不代表请求瞬时值；状态和采样年龄用于判断数据是否可用。</p>';
+    }
     if (j.analysis_note) block += `<p class="req-note">${esc(j.analysis_note)}</p>`;
     if (tp.note) block += `<p class="req-note">${esc(tp.note)}</p>`;
     if ((j.analysis.summary || []).length) {
