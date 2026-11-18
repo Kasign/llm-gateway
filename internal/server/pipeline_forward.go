@@ -79,11 +79,9 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		Stream:  st.Stream,
 		OnChunk: onChunk,
 		OnQueueWait: func(m provider.ConcurrencyWaitResult) {
-			if m.Waited {
-				v := m.WaitMS
-				providerQueueWaitMS = &v
-				providerQueueWaitStatus = m.Status
-			}
+			v := m.WaitMS
+			providerQueueWaitMS = &v
+			providerQueueWaitStatus = m.Status
 		},
 		OnUpstreamDispatch: func() {
 			f.s.markProviderTokenBudgetDispatched(st.ID)

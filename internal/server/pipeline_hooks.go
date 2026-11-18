@@ -544,6 +544,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,
+		ProviderQueueWaitMS: ev.Result.ProviderQueueWaitMS, ProviderQueueWaitStatus: ev.Result.ProviderQueueWaitStatus,
 		TimeToFirstByteMS: firstByteMS, TimeToUpstreamHeadersMS: upstreamHeadersMS,
 		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, SpeedSource: speedSrc, PredictedPerSec: pps,
 		ModelTimings: requestModelTimings(promptN, predictedN, promptMS, predictedMS, promptPerSecond, predictedPerSecond),

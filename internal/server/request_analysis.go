@@ -58,6 +58,8 @@ type analysisInput struct {
 	PrepMS                  int64
 	ModelLoadMS             int64
 	UpstreamMS              int64
+	ProviderQueueWaitMS *int64
+	ProviderQueueWaitStatus string
 	Stream                  bool
 	TTFTMS                  *int64
 	TimeToFirstByteMS       *int64
