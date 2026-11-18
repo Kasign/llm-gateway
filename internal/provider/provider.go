@@ -163,6 +163,7 @@ type InferenceCall struct {
 	OnHeaders    func(http.Header, int)
 	// OnUpstreamDispatch marks the point where Provider admission succeeded and the outbound HTTP request is about to start.
 	OnUpstreamDispatch func()
+	OnQueueWait func(ConcurrencyWaitResult)
 	ClientWriter func([]byte) error
 	OnFirstByte  func()
 }
