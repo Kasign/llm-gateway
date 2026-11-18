@@ -212,12 +212,19 @@ try {
   await page.locator('#modelTestModeTools').click();
   check('工具测试模式切换后只显示工具测试面板',
     await page.locator('#modelTestTools').isVisible() && !(await page.locator('#modelTestPerformance').isVisible()));
+  check('工具测试模式不显示 Benchmark 历史任务',
+    !(await page.locator('#benchHistoryCard').isVisible()));
+
   await page.locator('#toolTestRunBtn').click();
   check('工具测试缺少客户端 Key 时在本地拒绝且不发起请求',
     (await page.locator('#toolTestStatus').textContent()).includes('请先输入'));
   await page.locator('#modelTestModePerformance').click();
   check('性能测试模式切换后只显示性能测试面板',
     await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
+  check('性能测试模式显示唯一的 Benchmark 历史任务区域',
+    await page.locator('#benchHistoryCard').isVisible() &&
+    await page.locator('#benchHistoryDetail').count() === 1);
+
   check('工具调用性能场景与历史任务区域已提供',
     await page.locator('#benchToolPrompt').count() === 1 &&
     await page.locator('#benchToolRunBtn').count() === 1 &&
