@@ -884,13 +884,14 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), id, 9)
 	}
 	snap := job.snapshot()
+	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents)
 	payloadPersisted := false
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" && snap.Status != "cancelling" {
 		_, payloadErr := s.logs.GetPayload(r.Context(), snap.RequestID)
 		payloadPersisted = payloadErr == nil
 	}
 	out := map[string]interface{}{
-		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "request_id": snap.RequestID,
+		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "tool_metrics": toolMetrics, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
 	}
 	if snap.Status != "running" && snap.Status != "cancelling" {
