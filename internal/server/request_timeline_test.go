@@ -62,3 +62,17 @@ func TestRequestTimelineConcurrentRecordingIsBounded(t *testing.T) {
 		t.Fatalf("concurrent event bound not enforced: %d", got)
 	}
 }
+
+func TestRequestTimelineDefersAnalysisSnapshotUntilHandlerExit(t *testing.T) {
+	timeline := newRequestTimeline(time.Now())
+	timeline.recordNow("request_received")
+	timeline.setAnalysis(analysisInput{TotalMS: 15})
+	if _, ok := timeline.analysisSnapshot(); !ok {
+		t.Fatal("analysis snapshot was not retained")
+	}
+	timeline.recordNow("handler_returned")
+	events := timeline.snapshot()
+	if len(events) != 2 || events[1].Name != "handler_returned" {
+		t.Fatalf("handler exit event missing or unordered: %+v", events)
+	}
+}

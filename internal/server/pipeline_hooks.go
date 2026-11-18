@@ -551,15 +551,19 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	}
 	o.s.audit.FinishRequest(logItem)
 	o.s.finishProviderTokenBudget(st.ID, tokenSrc, inTok, outTok, totTok)
-	o.s.persistRequestAnalysis(context.Background(), st.ID, analysisInput{
+	analysis := analysisInput{
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,
 		ProviderQueueWaitMS: ev.Result.ProviderQueueWaitMS, ProviderQueueWaitStatus: ev.Result.ProviderQueueWaitStatus,
 		TimeToFirstByteMS: firstByteMS, TimeToUpstreamHeadersMS: upstreamHeadersMS,
 		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, SpeedSource: speedSrc, PredictedPerSec: pps,
 		ModelTimings: requestModelTimings(promptN, predictedN, promptMS, predictedMS, promptPerSecond, predictedPerSecond),
-		Timeline: func() []requestTimelineEvent { if timeline := requestTimelineFromContext(ctx); timeline != nil { return timeline.snapshot() }; return nil }(),
-	})
+	}
+	if timeline != nil {
+		timeline.setAnalysis(analysis)
+	} else {
+		o.s.persistRequestAnalysis(context.Background(), st.ID, analysis)
+	}
 	if o.s.cfg.Logging.StorePayload && (len(st.Body) > 0 || len(resp) > 0) {
 		o.s.audit.SavePayload(st.ID, st.Body, resp)
 	}

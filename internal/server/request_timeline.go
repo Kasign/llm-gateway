@@ -31,6 +31,7 @@ type requestTimeline struct {
 	mu     sync.Mutex
 	start  time.Time
 	events []requestTimelineEvent
+	analysis *analysisInput
 }
 
 var requestTimelineEventNames = map[string]struct{}{
@@ -152,6 +153,33 @@ func (t *requestTimeline) mark(name, status string) {
 		return
 	}
 	t.events = append(t.events, requestTimelineEvent{Name: name, Status: status})
+}
+
+func (t *requestTimeline) setAnalysis(in analysisInput) {
+	if t == nil { return }
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	copy := in
+	t.analysis = &copy
+}
+
+func (t *requestTimeline) analysisSnapshot() (analysisInput, bool) {
+	if t == nil { return analysisInput{}, false }
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.analysis == nil { return analysisInput{}, false }
+	out := *t.analysis
+	return out, true
+}
+
+func (t *requestTimeline) has(name string) bool {
+	if t == nil { return false }
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, event := range t.events {
+		if event.Name == name && event.Status == timelineStatusMeasured { return true }
+	}
+	return false
 }
 
 func (t *requestTimeline) snapshot() []requestTimelineEvent {

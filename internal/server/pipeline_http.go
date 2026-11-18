@@ -69,6 +69,13 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	timeline := newRequestTimeline(start)
 	timeline.record("request_received", start)
 	id := requestID(r.Context())
+	defer func() {
+		timeline.recordNow("handler_returned")
+		if analysis, ok := timeline.analysisSnapshot(); ok {
+			analysis.Timeline = timeline.snapshot()
+			s.persistRequestAnalysis(context.Background(), id, analysis)
+		}
+	}()
 	if r.Method != http.MethodPost {
 		s.rejectInference(w, r, id, start, nil, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
 		return
@@ -137,7 +144,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	// 已经写过响应头（保活或上游数据）时不能再补 JSON 错误，否则会和流内容混在一起。
 	if err != nil && !sink.HeaderWritten() {
 		status, ecode, msg := core.Unpack(err)
-		writeInferenceError(w, r.URL.Path, status, ecode, msg)
+		writeInferenceError(sink, r.URL.Path, status, ecode, msg)
 	}
 }
 
