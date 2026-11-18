@@ -38,6 +38,9 @@ func (j *benchmarkJob) persistenceRecords() (store.BenchmarkTask, store.Benchmar
 	run.InferenceLatencyMS = j.InferenceLatencyMS
 	run.InferenceLatencyStatus = j.InferenceLatencyStatus
 	run.TTFTStatus = j.TTFTStatus
+	if len(j.ModelRoundDurationsMS) > 0 {
+		if encoded, err := json.Marshal(j.ModelRoundDurationsMS); err == nil { run.ModelRoundDurationsJSON = string(encoded) }
+	}
 	run.HTTPStatus = j.HTTPStatus
 	run.ResponseBytes = j.ResponseBytes
 	if j.InputTokens > 0 { v := j.InputTokens; run.InputTokens = &v }
@@ -102,7 +105,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	run := runs[len(runs)-1]
 	conditionSHA256, conditionStatus, conditionMissing := benchmarkConditionFromConfigJSON(task.ConfigJSON)
 	snap := benchmarkJobSnapshot{
-		ID: task.TaskID, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
+		ID: task.TaskID, Scenario: task.Scenario, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: conditionMissing,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
@@ -114,13 +117,17 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		Error: task.ErrorMessage, ErrorCode: task.ErrorCode, RequestID: run.RequestID, Stream: true,
 		TTFTMS: run.TTFTMS, StreamEvents: run.StreamEvents, ReasoningChars: run.ReasoningChars,
 		ContentChars: run.ContentChars,
+		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
+		Stream: task.Scenario != "tool_performance",
 	}
 	events := []store.StreamEvent{}
+	toolEvents := []store.ToolCallEvent{}
 	if s.logs != nil {
 		events, _ = s.logs.ListStreamEvents(r.Context(), run.RequestID, 2000)
+		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
 	}
 	out := map[string]interface{}{
-		"job": snap, "stream_events": events, "request_id": snap.RequestID,
+		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": false,
 	}
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil {

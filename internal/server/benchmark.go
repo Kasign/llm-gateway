@@ -56,6 +56,7 @@ func benchmarkExecutionTimeout(configuredSeconds int) time.Duration {
 type benchmarkJob struct {
 	mu             sync.RWMutex
 	ID             string     `json:"job_id"`
+	Scenario       string     `json:"scenario"`
 	Status         string     `json:"status"`
 	ModelKey       string     `json:"model_key"`
 	LlamaModel     string     `json:"llama_model"`
@@ -75,6 +76,7 @@ type benchmarkJob struct {
 	ConditionSHA256 string `json:"condition_sha256,omitempty"`
 	ConditionStatus string `json:"condition_status"`
 	ConditionMissing []string `json:"condition_missing,omitempty"`
+	ModelRoundDurationsMS []int64 `json:"model_round_durations_ms,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -155,6 +157,7 @@ func (j *benchmarkJob) requestStop() bool {
 // 不能把 benchmarkJob 按值返回或复制：其中的 sync.RWMutex 复制后会破坏并发语义。
 type benchmarkJobSnapshot struct {
 	ID             string     `json:"job_id"`
+	Scenario       string     `json:"scenario"`
 	Status         string     `json:"status"`
 	ModelKey       string     `json:"model_key"`
 	LlamaModel     string     `json:"llama_model"`
@@ -174,6 +177,7 @@ type benchmarkJobSnapshot struct {
 	ConditionSHA256 string `json:"condition_sha256,omitempty"`
 	ConditionStatus string `json:"condition_status"`
 	ConditionMissing []string `json:"condition_missing,omitempty"`
+	ModelRoundDurationsMS []int64 `json:"model_round_durations_ms,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
 	TotalTokens    int64      `json:"total_tokens,omitempty"`
@@ -196,13 +200,14 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	out := benchmarkJobSnapshot{
-		ID: j.ID, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
+		ID: j.ID, Scenario: j.Scenario, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
 		PromptLen: j.PromptLen, MaxTokens: j.MaxTokens, StartedAt: j.StartedAt,
 		FinishedAt: j.FinishedAt, LatencyMS: j.LatencyMS, HTTPStatus: j.HTTPStatus,
 		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated,
 		ModelLoadMS: j.ModelLoadMS, ModelLoadStatus: j.ModelLoadStatus,
 		InferenceLatencyMS: j.InferenceLatencyMS, InferenceLatencyStatus: j.InferenceLatencyStatus, TTFTStatus: j.TTFTStatus,
 		ConditionSHA256: j.ConditionSHA256, ConditionStatus: j.ConditionStatus, ConditionMissing: append([]string(nil), j.ConditionMissing...),
+		ModelRoundDurationsMS: append([]int64(nil), j.ModelRoundDurationsMS...),
 		InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
@@ -226,6 +231,14 @@ func (j *benchmarkJob) setInferenceLatencyMetric(value *int64, status string) {
 	defer j.mu.Unlock()
 	j.InferenceLatencyMS = value
 	j.InferenceLatencyStatus = status
+}
+
+// recordModelRoundDuration 仅记录工具 Benchmark 中每次非流式模型调用的墙钟耗时。
+func (j *benchmarkJob) recordModelRoundDuration(duration time.Duration) {
+	if j == nil || duration < 0 { return }
+	j.mu.Lock()
+	j.ModelRoundDurationsMS = append(j.ModelRoundDurationsMS, duration.Milliseconds())
+	j.mu.Unlock()
 }
 
 func (j *benchmarkJob) updateStreamText(content, reasoning string) {
@@ -578,6 +591,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		ModelKey         string   `json:"model_key"`
 		ModelID          string   `json:"model_id"`
 		Model            string   `json:"model"`
+		Scenario         string   `json:"scenario"`
 		Prompt           string   `json:"prompt"`
 		MaxTokens        int      `json:"max_tokens"`
 		UseActive        bool     `json:"use_active"`
@@ -602,6 +616,12 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.ModelKey = strings.TrimSpace(in.ModelKey)
+	scenario := strings.TrimSpace(in.Scenario)
+	if scenario == "" { scenario = "performance" }
+	if scenario != "performance" && scenario != "tool_performance" {
+		jsonError(w, http.StatusBadRequest, "benchmark_scenario_unsupported", "unsupported benchmark scenario")
+		return
+	}
 	modelID := strings.TrimSpace(in.ModelID)
 	if modelID == "" {
 		modelID = strings.TrimSpace(in.Model)
@@ -632,7 +652,11 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.Prompt == "" {
-		in.Prompt = "Write a small, correct Objective-C function and explain it in one paragraph."
+		if scenario == "tool_performance" {
+			in.Prompt = "请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果说明版本号和发布日期。必须实际调用搜索工具。"
+		} else {
+			in.Prompt = "Write a small, correct Objective-C function and explain it in one paragraph."
+		}
 	}
 	if in.MaxTokens <= 0 || in.MaxTokens > 8192 {
 		in.MaxTokens = 4000
@@ -653,6 +677,32 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if taskModelID == "" {
 		taskModelID = activeUpstream.ModelName
 	}
+	if scenario == "tool_performance" {
+		if s.cfg == nil || !s.cfg.Tools.Enabled || s.toolInitErr != nil || s.toolRegistry == nil || s.toolRuntime == nil {
+			jsonError(w, http.StatusServiceUnavailable, "tool_system_unavailable", "tool system is unavailable")
+			return
+		}
+		configured := false
+		for _, name := range s.cfg.Tools.AllowedTools { if name == "web.search" { configured = true; break } }
+		if !configured {
+			jsonError(w, http.StatusServiceUnavailable, "tool_not_configured", "web.search is not enabled for this Gateway")
+			return
+		}
+		granted := false
+		for _, name := range key.AllowedTools { if name == "web.search" { granted = true; break } }
+		if !granted {
+			jsonError(w, http.StatusForbidden, "tool_not_allowed", "this API key is not authorized to use web.search")
+			return
+		}
+		if !modelAllowedForKey(key, target.Backend, modelKey, taskModelID) {
+			jsonError(w, http.StatusForbidden, "tool_model_not_allowed", "tool calling is not enabled for the active model")
+			return
+		}
+		if _, _, err := s.toolRegistry.Lookup("web.search"); err != nil {
+			jsonError(w, http.StatusServiceUnavailable, "tool_not_configured", "web.search is unavailable")
+			return
+		}
+	}
 	promptHash := sha256.Sum256([]byte(in.Prompt))
 	promptSHA256 := hex.EncodeToString(promptHash[:])
 	modelIdentity := map[string]interface{}{
@@ -669,7 +719,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	configSnapshot := map[string]interface{}{
 		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey,
-		"model_id": taskModelID, "max_tokens": in.MaxTokens, "stream": true,
+		"model_id": taskModelID, "scenario": scenario, "max_tokens": in.MaxTokens, "stream": scenario != "tool_performance",
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
@@ -703,7 +753,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	keyID := key.ID
 	taskRecord := store.BenchmarkTask{
-		TaskID: jobID, APIKeyID: &keyID, Scenario: "performance", Status: "running",
+		TaskID: jobID, APIKeyID: &keyID, Scenario: scenario, Status: "running",
 		ProviderID: target.Backend, Backend: target.Backend, ModelKey: modelKey, ModelID: taskModelID,
 		PromptSHA256: promptSHA256, PromptLength: int64(len(in.Prompt)),
 		MaxTokens: in.MaxTokens, ConfigJSON: string(configJSON), RunCount: 1, StartedAt: now,
@@ -713,7 +763,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		ProviderID: target.Backend, ModelKey: modelKey, ModelID: taskModelID, StartedAt: now,
 	}
 	job := &benchmarkJob{
-		ID: jobID, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: true,
+		ID: jobID, Scenario: scenario, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: scenario != "tool_performance",
 		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown",
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: append([]string(nil), conditionMissing...),
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
@@ -891,7 +941,24 @@ func setBenchInt64(obj map[string]interface{}, key string, v *int64) {
 	}
 }
 
-// buildBenchmarkChatBody 构造流式 chat/completions 请求体，并经 sanitizeForLlama 合并 system、补 stream_options。
+// buildBenchmarkToolChatBody 构造强制工具调用的非流式请求；工具定义由服务端 Registry 覆盖。
+func buildBenchmarkToolChatBody(llamaName string, in benchRunInput) []byte {
+	obj := map[string]interface{}{
+		"model": llamaName, "messages": []map[string]string{{"role": "user", "content": in.Prompt}},
+		"stream": false, "tools": []interface{}{}, "tool_choice": "required",
+	}
+	if in.MaxTokens > 0 { obj["max_tokens"] = in.MaxTokens }
+	setBenchFloat(obj, "temperature", in.Temperature); setBenchFloat(obj, "top_p", in.TopP)
+	setBenchInt(obj, "top_k", in.TopK); setBenchFloat(obj, "min_p", in.MinP)
+	setBenchFloat(obj, "frequency_penalty", in.FrequencyPenalty); setBenchFloat(obj, "presence_penalty", in.PresencePenalty)
+	setBenchFloat(obj, "repeat_penalty", in.RepeatPenalty); setBenchInt64(obj, "seed", in.Seed)
+	if in.EnableThinking != nil { obj["enable_thinking"] = *in.EnableThinking }
+	if len(in.Stop) > 0 { obj["stop"] = in.Stop }
+	raw, err := json.Marshal(obj); if err != nil { return nil }
+	return sanitizeForLlama("/v1/chat/completions", raw)
+}
+
+// buildBenchmarkChatBody 构造原有流式性能测试请求体；普通性能场景保持既有协议。
 func buildBenchmarkChatBody(llamaName string, in benchRunInput) []byte {
 	obj := map[string]interface{}{
 		"model": llamaName,
@@ -1048,6 +1115,7 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	applog.Debugf("[benchmark:%s] model ready in %dms resolved=%s", job.ID, time.Since(loadStart).Milliseconds(), llamaName)
 
 	body := buildBenchmarkChatBody(llamaName, in)
+	if job.Scenario == "tool_performance" { body = buildBenchmarkToolChatBody(llamaName, in) }
 	if len(body) == 0 {
 		job.finish("failed", 500, time.Since(job.StartedAt).Milliseconds(), nil, errors.New("build request body failed"), nil, 0, 0)
 		return
@@ -1056,10 +1124,14 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	defer cleanupRun()
 	inferenceStart := time.Now()
 	obs := &benchRunObserver{job: job, started: inferenceStart}
-	applog.Infof("[benchmark:%s] calling inference pipeline stream=true max_tokens=%d timeout=%ds body=%d bytes", job.ID, in.MaxTokens, s.cfg.Llama.RequestTimeout, len(body))
+	stream := job.Scenario != "tool_performance"
+	if !stream { ctx = withBenchmarkToolMetrics(ctx, job) }
+	accept := "application/json"
+	if stream { accept = "text/event-stream" }
+	applog.Infof("[benchmark:%s] calling inference pipeline stream=%v max_tokens=%d timeout=%ds body=%d bytes", job.ID, stream, in.MaxTokens, s.cfg.Llama.RequestTimeout, len(body))
 	_, err := s.pipe.Run(ctx, core.Request{
 		ID: job.ID, Method: http.MethodPost, Path: "/v1/chat/completions",
-		Header:       map[string][]string{"Content-Type": {"application/json"}, "Accept": {"text/event-stream"}},
+		Header:       map[string][]string{"Content-Type": {"application/json"}, "Accept": {accept}},
 		Body:         body,
 		ServiceModel:       llamaName,
 		ServiceProviderID: be,
@@ -1067,6 +1139,7 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 		Started:      inferenceStart,
 		ClientName:   "benchmark",
 		UserAgent:    "llm-gateway/benchmark",
+		Stream:       stream,
 		Observe:      obs,
 		Guards:       s.inferenceRequestGuards(key),
 	})
@@ -1136,6 +1209,13 @@ func (b *benchRunObserver) On(ctx context.Context, ev core.Event) {
 			return
 		}
 		b.finished = time.Now()
+		if !b.job.Stream && ev.Result != nil && len(ev.Result.Body) > 0 {
+			remaining := maxBenchmarkResponseBytes - len(b.buf)
+			if remaining <= 0 || len(ev.Result.Body) > remaining {
+				if remaining > 0 { b.buf = append(b.buf, ev.Result.Body[:remaining]...) }
+				b.truncated = true
+			} else { b.buf = append(b.buf, ev.Result.Body...) }
+		}
 		latency := time.Since(b.started).Milliseconds()
 		status := 502
 		if ev.Result != nil && ev.Result.Status != 0 {

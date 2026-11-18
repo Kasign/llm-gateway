@@ -116,6 +116,7 @@ func (f inferenceForwarder) forwardWithTools(
 	}
 
 	modelCaller := &bufferedModelCaller{
+		onRoundComplete: benchmarkToolRoundObserver(ctx),
 		requestID: st.ID,
 		providerID: s.providerIDForState(st),
 		provider: p,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 	"runtime/debug"
 
 	"github.com/whl/llm-gateway/internal/applog"
@@ -81,6 +82,7 @@ func (w *bufferedResponseWriter) bodyBytes() []byte {
 }
 
 type bufferedModelCaller struct {
+	onRoundComplete func(time.Duration)
 	requestID   string
 	providerID  string
 	provider    provider.Provider
@@ -93,6 +95,10 @@ type bufferedModelCaller struct {
 }
 
 func (c *bufferedModelCaller) Complete(ctx context.Context, requestBody []byte) (response coordinator.ModelResponse, err error) {
+	if c != nil && c.onRoundComplete != nil {
+		started := time.Now()
+		defer func() { func() { defer func() { _ = recover() }(); c.onRoundComplete(time.Since(started)) }() }()
+	}
 	if c == nil || c.provider == nil || c.request == nil || len(requestBody) == 0 {
 		return coordinator.ModelResponse{}, errors.New("buffered ModelCaller is unavailable")
 	}
