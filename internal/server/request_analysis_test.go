@@ -1,0 +1,90 @@
+package server
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestBuildRequestAnalysisSeparatesTokenAndSpeedSources(t *testing.T) {
+	out := int64(24)
+	promptN, predictedN := int64(100), int64(24)
+	promptMS, predictedMS, promptPPS, predictedPPS := 125.5, 80.25, 796.8, 300.0
+	a := buildRequestAnalysis(analysisInput{
+		OutputTokens: &out, TokenSource: "upstream_usage", SpeedSource: "llama_timings",
+		PredictedPerSec: &predictedPPS,
+		ModelTimings: &RequestModelTimings{
+			PromptN: &promptN, PredictedN: &predictedN, PromptMS: &promptMS,
+			PredictedMS: &predictedMS, PromptPerSecond: &promptPPS, PredictedPerSecond: &predictedPPS,
+		},
+	})
+	if a.Throughput.TokenSource != "upstream_usage" || a.Throughput.SpeedSource != "llama_timings" {
+		t.Fatalf("sources were conflated: %+v", a.Throughput)
+	}
+	if a.Throughput.OutputTokensPerSec == nil || *a.Throughput.OutputTokensPerSec != predictedPPS {
+		t.Fatalf("Decode speed missing: %+v", a.Throughput)
+	}
+	if a.Throughput.GenerationWindowMS != 0 {
+		t.Fatalf("llama Decode speed must not claim a Gateway window: %+v", a.Throughput)
+	}
+	if a.Throughput.ModelTimings == nil || a.Throughput.ModelTimings.PromptMS == nil ||
+		*a.Throughput.ModelTimings.PromptMS != promptMS || a.Throughput.ModelTimings.PredictedMS == nil ||
+		*a.Throughput.ModelTimings.PredictedMS != predictedMS {
+		t.Fatalf("raw model timings were not retained: %+v", a.Throughput.ModelTimings)
+	}
+}
+
+func TestBuildRequestAnalysisDoesNotUseNonStreamUpstreamAsDecodeWindow(t *testing.T) {
+	out := int64(50)
+	a := buildRequestAnalysis(analysisInput{
+		TotalMS: 5000, UpstreamMS: 4000, OutputTokens: &out, TokenSource: "upstream_usage",
+	})
+	if a.Throughput.OutputTokensPerSec != nil || a.Throughput.GenerationWindowMS != 0 {
+		t.Fatalf("upstream_ms must not be treated as a Decode window: %+v", a.Throughput)
+	}
+	if a.Throughput.SpeedSource != "" {
+		t.Fatalf("unknown speed source must remain unknown: %+v", a.Throughput)
+	}
+}
+
+func TestBuildRequestAnalysisDerivesSpeedOnlyFromStreamContentWindow(t *testing.T) {
+	out := int64(50)
+	first, last := int64(100), int64(2100)
+	a := buildRequestAnalysis(analysisInput{
+		TotalMS: 3000, UpstreamMS: 2900, Stream: true, OutputTokens: &out,
+		TokenSource: "upstream_usage",
+		StreamTiming: streamTimings{FirstContentMS: &first, LastEventMS: last},
+	})
+	if a.Throughput.SpeedSource != "gateway_window" || a.Throughput.GenerationWindowMS != 2000 ||
+		a.Throughput.OutputTokensPerSec == nil || *a.Throughput.OutputTokensPerSec != 25 {
+		t.Fatalf("stream window derivation incorrect: %+v", a.Throughput)
+	}
+}
+
+func TestDecodeRequestAnalysisKeepsLegacySourceWithoutGuessingSpeedSource(t *testing.T) {
+	a, err := decodeRequestAnalysis(`{"throughput":{"source":"llama_timings","output_tokens_per_sec":42}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Throughput.TokenSource != "llama_timings" {
+		t.Fatalf("legacy token source not retained: %+v", a.Throughput)
+	}
+	if a.Throughput.SpeedSource != "" {
+		t.Fatalf("legacy mixed source must not be guessed as speed source: %+v", a.Throughput)
+	}
+}
+
+func TestEncodeRequestAnalysisOmitsUnknownTimings(t *testing.T) {
+	a := buildRequestAnalysis(analysisInput{TotalMS: 10})
+	raw := encodeRequestAnalysis(a)
+	if strings.Contains(raw, `"llama_timings":{}`) {
+		t.Fatalf("empty timings object should be omitted: %s", raw)
+	}
+	var decoded RequestAnalysis
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Throughput.TokenSource != "" || decoded.Throughput.SpeedSource != "" {
+		t.Fatalf("unknown sources must stay empty: %+v", decoded.Throughput)
+	}
+}
