@@ -678,6 +678,44 @@ func TestOpenAICompatibleProviderDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
+
+func TestOpenAICompatibleProviderReportsHeadersForUpstreamHTTPError(t *testing.T) {
+	const privateBody = "upstream-private-diagnostic"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":"`+privateBody+`"}`)
+	}))
+	defer server.Close()
+
+	p := testRemoteProvider(t, server, OpenAICompatibleConfig{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	headerCalls, firstByteCalls := 0, 0
+	result, err := p.Forward(context.Background(), InferenceCall{
+		Writer: recorder, Request: request, Path: "/v1/chat/completions", Body: []byte("{}"),
+		OnHeaders: func(header http.Header, status int) {
+			headerCalls++
+			if status != http.StatusBadGateway || header.Get("Content-Type") != "application/json" {
+				t.Errorf("unexpected upstream headers/status: %v / %d", header, status)
+			}
+		},
+		OnFirstByte: func() { firstByteCalls++ },
+	})
+	if err == nil {
+		t.Fatal("expected upstream HTTP error")
+	}
+	if result.Status != http.StatusBadGateway || result.UpstreamStatus != http.StatusBadGateway {
+		t.Fatalf("upstream error result = %+v", result)
+	}
+	if headerCalls != 1 || firstByteCalls != 0 {
+		t.Fatalf("header/first-byte callbacks = %d/%d, want 1/0", headerCalls, firstByteCalls)
+	}
+	if strings.Contains(recorder.Body.String(), privateBody) {
+		t.Fatalf("sanitized provider error leaked upstream body: %q", recorder.Body.String())
+	}
+}
+
 func TestOpenAICompatibleProviderStreamsAndReportsCallbacks(t *testing.T) {
 	const streamBody = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
