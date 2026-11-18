@@ -38,16 +38,19 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 		out.LoadedVRAMBytes = sample.Snapshot.LoadedVRAM
 		// 部分 Provider/测试夹具可能只填充 Loaded 条目；汇总值缺失时从已加载条目回退。
 		if out.LoadedRAMBytes == 0 || out.LoadedVRAMBytes == 0 {
+			var loadedRAM, loadedVRAM int64
 			for _, item := range sample.Snapshot.Loaded {
 				if !item.Loaded {
 					continue
 				}
-				if out.LoadedRAMBytes == 0 {
-					out.LoadedRAMBytes += item.RAMBytes
-				}
-				if out.LoadedVRAMBytes == 0 {
-					out.LoadedVRAMBytes += item.VRAMBytes
-				}
+				loadedRAM += item.RAMBytes
+				loadedVRAM += item.VRAMBytes
+			}
+			if out.LoadedRAMBytes == 0 {
+				out.LoadedRAMBytes = loadedRAM
+			}
+			if out.LoadedVRAMBytes == 0 {
+				out.LoadedVRAMBytes = loadedVRAM
 			}
 		}
 	}
