@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"bufio"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -149,5 +151,38 @@ func TestResponseSinkDoesNotRecordFailedBodyWrite(t *testing.T) {
 	}
 	if events := timeline.snapshot(); len(events) != 0 {
 		t.Fatalf("failed write must not be recorded as successful: %+v", events)
+	}
+}
+
+
+type hijackTimelineResponseWriter struct {
+	header http.Header
+	conn net.Conn
+}
+
+func (w *hijackTimelineResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *hijackTimelineResponseWriter) WriteHeader(int) {}
+func (w *hijackTimelineResponseWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (w *hijackTimelineResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, bufio.NewReadWriter(bufio.NewReader(w.conn), bufio.NewWriter(w.conn)), nil
+}
+
+func TestResponseSinkUnwrapPreservesResponseControllerCapabilities(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+	underlying := &hijackTimelineResponseWriter{conn: serverConn}
+	sink := &responseSink{w: underlying}
+	conn, rw, err := http.NewResponseController(sink).Hijack()
+	if err != nil {
+		t.Fatalf("ResponseController.Hijack() failed through responseSink: %v", err)
+	}
+	if conn != serverConn || rw == nil {
+		t.Fatalf("unexpected hijack result: conn=%v rw=%v", conn, rw)
 	}
 }

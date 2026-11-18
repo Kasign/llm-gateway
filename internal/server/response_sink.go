@@ -18,6 +18,9 @@ type responseSink struct {
 
 func (s *responseSink) Header() http.Header { return s.w.Header() }
 
+// Unwrap 保留 ResponseController 对底层 ResponseWriter 能力（如 Hijack）的访问。
+func (s *responseSink) Unwrap() http.ResponseWriter { return s.w }
+
 func (s *responseSink) SetHeader(key, value string) {
 	s.w.Header().Set(key, value)
 }
