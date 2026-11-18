@@ -664,6 +664,37 @@ function runtimeOverviewMeta(j,activeItem){
   }
   return '';
 }
+function renderServerMetricsPanel(snapshot){
+  if(!snapshot)return '';
+  const status=String(snapshot.status||'unavailable');
+  const labels={
+    complete:'采集正常',skipped:'未采集',unsupported:'端点未启用',
+    needs_model:'需要模型标识',unavailable:'暂不可用',timeout:'采样超时',
+    cancelled:'采样已取消',invalid_response:'响应格式异常',stale:'数据已过期'
+  };
+  const samples=Array.isArray(snapshot.samples)?snapshot.samples:[];
+  const age=Number(snapshot.age_ms);
+  const ageText=Number.isFinite(age)&&age>=0?' · '+Math.round(age/1000)+' 秒前':'';
+  const sampled=snapshot.sampled_at?new Date(snapshot.sampled_at).toLocaleString():'';
+  const reason=String(snapshot.reason_code||'').trim();
+  const rows=samples.map(item=>{
+    const name=String(item?.name||'未知指标');
+    const type=String(item?.type||'unknown');
+    const valueText=String(item?.value??'—');
+    const labelText=item?.labels&&Object.keys(item.labels).length?JSON.stringify(item.labels):'—';
+    return '<tr><td title="'+esc(String(item?.help||''))+'"><code>'+esc(name)+'</code></td>'+
+      '<td>'+esc(type)+'</td><td class="tabular-nums">'+esc(valueText)+'</td>'+
+      '<td><code class="runtime-server-metric-labels">'+esc(labelText)+'</code></td></tr>';
+  }).join('');
+  const table=samples.length
+    ?'<div class="runtime-server-metrics-table"><table><thead><tr><th>指标</th><th>类型</th><th>值</th><th>标签</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    :'<p class="runtime-server-metrics-empty">当前没有可用指标</p>';
+  return '<section class="runtime-server-metrics"><div class="runtime-server-metrics-head">'+
+    '<strong>llama.cpp Server Metrics</strong><span class="pill '+(status==='complete'?'pill-loaded':'pill-warn')+'">'+esc(labels[status]||status)+'</span>'+
+    '<span class="runtime-server-metrics-meta">'+esc(samples.length+' 项指标'+ageText+(sampled?' · '+sampled:''))+'</span></div>'+
+    (reason?'<p class="runtime-server-metrics-reason">诊断状态：<code>'+esc(reason)+'</code></p>':'')+
+    '<details><summary>查看动态发现的指标</summary>'+table+'</details></section>';
+}
 function renderRuntimeOverview(){
   const el=$('runtimeOverviewSummary');
   if(!el)return;
@@ -709,6 +740,7 @@ function renderRuntimeOverview(){
     const routeHint=configured&&modelHub._idMatch(configured,displayName)?'':'<p class="runtime-hero-desc">Gateway 默认目标：<code>'+esc(configured||'未配置')+'</code></p>';
     el.innerHTML='<div class="runtime-hero runtime-hero-live'+(metrics.length?'':' runtime-hero-live-compact')+'"><div class="runtime-hero-main"><div class="runtime-hero-badges"><span class="pill pill-loaded">'+stateLabel+'</span><span class="pill pill-backend">'+esc(backendLabel)+'</span></div><span class="runtime-model-pill" title="'+esc(displayName)+'">'+esc(displayName)+'</span>'+routeHint+'</div>'+metricsHtml+'</div>';
   }
+  el.insertAdjacentHTML('beforeend',renderServerMetricsPanel(j.server_metrics));
   if(noteEl){
     const notices=[];
     if(j.hot_unload_supported===false)notices.push(j.unload_note||'当前 llama.cpp 不支持热加载/卸载其它模型');

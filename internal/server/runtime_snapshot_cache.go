@@ -25,6 +25,7 @@ type runtimeSnapshotSample struct {
 	MetricsStatus    string
 	MetricsError     string
 	MetricsSampledAt time.Time
+	MetricsTarget     string
 }
 
 type upstreamRuntimeSnapEntry struct {
@@ -147,28 +148,28 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 		case errors.Is(err, llama.ErrMetricsResponseTooLarge):
 			status, code = "invalid_response", "response_too_large"
 		}
-		s.setRuntimeMetricsSample(nil, status, code)
+		s.setRuntimeMetricsSampleForTarget(nil, status, code, client.BaseURL())
 		return
 	}
 	if statusCode < 200 || statusCode >= 300 {
 		switch statusCode {
 		case 501:
-			s.setRuntimeMetricsSample(nil, "unsupported", "endpoint_disabled_or_unsupported")
+			s.setRuntimeMetricsSampleForTarget(nil, "unsupported", "endpoint_disabled_or_unsupported", client.BaseURL())
 		case 400:
-			s.setRuntimeMetricsSample(nil, "needs_model", "router_model_required_or_invalid")
+			s.setRuntimeMetricsSampleForTarget(nil, "needs_model", "router_model_required_or_invalid", client.BaseURL())
 		case 401, 403:
-			s.setRuntimeMetricsSample(nil, "unavailable", "upstream_auth_failed")
+			s.setRuntimeMetricsSampleForTarget(nil, "unavailable", "upstream_auth_failed", client.BaseURL())
 		default:
-			s.setRuntimeMetricsSample(nil, "unavailable", "upstream_http_error")
+			s.setRuntimeMetricsSampleForTarget(nil, "unavailable", "upstream_http_error", client.BaseURL())
 		}
 		return
 	}
 	snapshot, err := llama.ParsePrometheusMetrics(body, sampledAt)
 	if err != nil {
-		s.setRuntimeMetricsSample(nil, "invalid_response", "metrics_parse_failed")
+		s.setRuntimeMetricsSampleForTarget(nil, "invalid_response", "metrics_parse_failed", client.BaseURL())
 		return
 	}
-	s.setRuntimeMetricsSample(snapshot, "complete", "")
+	s.setRuntimeMetricsSampleForTarget(snapshot, "complete", "", client.BaseURL())
 }
 
 func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, source string) {
@@ -185,6 +186,10 @@ func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, s
 }
 
 func (s *Server) setRuntimeMetricsSample(snapshot *llama.MetricsSnapshot, status, errCode string) {
+	s.setRuntimeMetricsSampleForTarget(snapshot, status, errCode, "")
+}
+
+func (s *Server) setRuntimeMetricsSampleForTarget(snapshot *llama.MetricsSnapshot, status, errCode, target string) {
 	if s == nil {
 		return
 	}
@@ -197,6 +202,67 @@ func (s *Server) setRuntimeMetricsSample(snapshot *llama.MetricsSnapshot, status
 	s.runtimeSnapshotSample.MetricsStatus = status
 	s.runtimeSnapshotSample.MetricsError = errCode
 	s.runtimeSnapshotSample.MetricsSampledAt = time.Now()
+	s.runtimeSnapshotSample.MetricsTarget = target
+}
+
+func (s *Server) runtimeMetricsOverview() map[string]interface{} {
+	out := map[string]interface{}{
+		"status": "unavailable",
+		"reason_code": "not_sampled",
+		"samples": []llama.MetricSample{},
+	}
+	if s == nil {
+		return out
+	}
+	sample := s.runtimeSnapshotSampleLatest()
+	if sample == nil {
+		return out
+	}
+	activeTarget := ""
+	if s.cfg != nil {
+		activeTarget = strings.TrimSpace(s.baseURLForBackend("llamacpp"))
+	}
+	if sample.MetricsTarget != "" && activeTarget != "" && sample.MetricsTarget != activeTarget {
+		out["reason_code"] = "upstream_changed"
+		return out
+	}
+	status := strings.TrimSpace(sample.MetricsStatus)
+	if status == "" {
+		status = "unavailable"
+	}
+	sampledAt := sample.MetricsSampledAt
+	if sample.Metrics != nil && !sample.Metrics.SampledAt.IsZero() {
+		sampledAt = sample.Metrics.SampledAt
+	}
+	if sampledAt.IsZero() {
+		out["status"] = status
+		if sample.MetricsError != "" {
+			out["reason_code"] = sample.MetricsError
+		}
+		return out
+	}
+	age := time.Since(sampledAt)
+	if age < 0 {
+		age = 0
+	}
+	sourceStatus := status
+	if age > runtimeSnapshotMaxAge {
+		status = "stale"
+	}
+	out["status"] = status
+	out["source"] = "llama_cpp_server_metrics"
+	out["sampled_at"] = sampledAt.UTC().Format(time.RFC3339Nano)
+	out["age_ms"] = age.Milliseconds()
+	if status == "stale" {
+		out["source_status"] = sourceStatus
+	}
+	if sample.MetricsError != "" {
+		out["reason_code"] = sample.MetricsError
+	}
+	if sample.Metrics != nil {
+		out["samples"] = sample.Metrics.Samples
+	}
+	return out
 }
 
 func cloneMetricsSnapshot(snapshot *llama.MetricsSnapshot) *llama.MetricsSnapshot {

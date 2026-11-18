@@ -15,7 +15,7 @@ func TestParsePrometheusMetricsDiscoversUnknownMetrics(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if len(got.Samples) != 3 { t.Fatalf("samples=%d", len(got.Samples)) }
 	first := got.Samples[0]
-	if first.Name != "llamacpp:tokens_predicted_total" || first.Type != MetricTypeCounter || first.Value != 42 || first.Help != "generated tokens" {
+	if first.Name != "llamacpp:tokens_predicted_total" || first.Type != MetricTypeCounter || first.Value != "42" || first.Help != "generated tokens" {
 		t.Fatalf("unexpected first sample: %#v", first)
 	}
 	if first.Labels["model"] != "qwen,3" || first.Labels["note"] != "a value" || first.Labels["slot"] != "1" { t.Fatalf("labels: %#v", first.Labels) }
@@ -69,4 +69,16 @@ func TestFetchMetricsEnforcesResponseLimit(t *testing.T) {
 	client := New(srv.URL, 0, "llamacpp", "")
 	_, _, err := client.FetchMetrics(context.Background(), "", 4)
 	if err != ErrMetricsResponseTooLarge { t.Fatalf("error=%v", err) }
+}
+
+
+func TestParsePrometheusMetricsPreservesSpecialAndLargeValues(t *testing.T) {
+	body := []byte("large_counter 900719925474099312345\nspecial_metric NaN\n")
+	got, err := ParsePrometheusMetrics(body, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Samples[0].Value != "900719925474099312345" || got.Samples[1].Value != "NaN" {
+		t.Fatalf("values were not preserved exactly: %#v", got.Samples)
+	}
 }

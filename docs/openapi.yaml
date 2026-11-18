@@ -3097,6 +3097,36 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/AuditMetrics"
+    ServerMetricSample:
+      type: object
+      required: [name, type, value]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [counter, gauge, histogram, summary, untyped, unknown] }
+        help: { type: string }
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        value: { type: string, description: Prometheus 原始数值文本，避免大整数精度损失并保留 NaN/Inf。 }
+        timestamp_ms: { type: integer, format: int64 }
+      additionalProperties: false
+    ServerMetricsSnapshot:
+      type: object
+      description: llama.cpp /metrics 最近一次后台采样；进程级证据，不代表单请求数据。
+      required: [status, samples]
+      properties:
+        status: { type: string, enum: [complete, skipped, unsupported, needs_model, unavailable, timeout, cancelled, invalid_response, stale] }
+        reason_code: { type: string }
+        source_status: { type: string }
+        source: { type: string }
+        sampled_at: { type: string, format: date-time }
+        age_ms: { type: integer, format: int64, minimum: 0 }
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServerMetricSample"
+      additionalProperties: false
     RuntimeSnapshot:
       type: object
       description: 活动后端运行时快照。远程 Provider 不支持本地加载/卸载时，loaded/catalog 为空数组。
@@ -3127,6 +3157,8 @@ components:
         upstream_warning: { type: string }
         catalog_warning: { type: string }
         unload_note: { type: string }
+        server_metrics:
+          $ref: "#/components/schemas/ServerMetricsSnapshot"
       additionalProperties: false
     RuntimeModelRequest:
       type: object

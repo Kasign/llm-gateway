@@ -672,6 +672,23 @@ td.tabular-nums{font-variant-numeric:tabular-nums;white-space:nowrap}
 .runtime-hero-title{margin:0 0 6px;font-size:15px;font-weight:650;color:var(--text)}
 .runtime-hero-desc{margin:0;font-size:13px;color:var(--text-2);line-height:1.5}
 .runtime-hero-desc strong{font-weight:600;color:var(--text)}
+.runtime-server-metrics{
+  margin-top:10px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;
+  background:var(--surface-2);min-width:0;
+}
+.runtime-server-metrics-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.runtime-server-metrics-head strong{font-size:13px;color:var(--text)}
+.runtime-server-metrics-meta{font-size:11px;color:var(--text-2);margin-left:auto}
+.runtime-server-metrics-reason{margin:8px 0 0;font-size:11px;color:var(--text-2)}
+.runtime-server-metrics details{margin-top:8px}
+.runtime-server-metrics summary{cursor:pointer;font-size:12px;color:var(--text-2)}
+.runtime-server-metrics-table{overflow:auto;max-width:100%;margin-top:8px}
+.runtime-server-metrics-table table{width:100%;border-collapse:collapse;font-size:11px}
+.runtime-server-metrics-table th,.runtime-server-metrics-table td{padding:7px 9px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+.runtime-server-metrics-table th{color:var(--text-2);font-weight:600;white-space:nowrap}
+.runtime-server-metrics-table code{font-size:11px;overflow-wrap:anywhere}
+.runtime-server-metric-labels{display:inline-block;max-width:360px;white-space:normal;overflow-wrap:anywhere}
+.runtime-server-metrics-empty{margin:8px 0 0;font-size:12px;color:var(--text-2)}
 .runtime-overview-foot{margin-top:8px;padding-top:0;border-top:none;font-size:12px;line-height:1.5}
 @media(max-width:720px){
   .runtime-hero-live{flex-direction:column}

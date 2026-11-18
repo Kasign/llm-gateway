@@ -87,6 +87,9 @@ func (s *Server) runtimeAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 502, "runtime_error", err.Error())
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(s.effectiveUpstream().Backend), "llamacpp") {
+		snap["server_metrics"] = s.runtimeMetricsOverview()
+	}
 	json.NewEncoder(w).Encode(snap)
 }
 

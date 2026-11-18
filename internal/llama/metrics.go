@@ -16,7 +16,8 @@ import (
 
 const DefaultMetricsResponseLimit int64 = 4 << 20
 
-var ErrMetricsResponseTooLarge = errors.New("llama.cpp metrics response exceeds size limit")
+var ErrObservationResponseTooLarge = errors.New("llama.cpp observation response exceeds size limit")
+var ErrMetricsResponseTooLarge = ErrObservationResponseTooLarge
 
 type MetricType string
 
@@ -35,7 +36,7 @@ type MetricSample struct {
 	Type      MetricType        `json:"type"`
 	Help      string            `json:"help,omitempty"`
 	Labels    map[string]string `json:"labels,omitempty"`
-	Value     float64           `json:"value"`
+	Value     string            `json:"value"`
 	Timestamp *int64            `json:"timestamp_ms,omitempty"`
 }
 
@@ -65,7 +66,7 @@ func (c *Client) FetchSlots(ctx context.Context, maxBytes int64) (int, []byte, e
 		return 0, nil, errors.New("llama.cpp slots is unavailable for this backend")
 	}
 	if maxBytes <= 0 {
-		maxBytes = 2 << 20
+		maxBytes = DefaultSlotsResponseLimit
 	}
 	return c.getBounded(ctx, "/slots", maxBytes)
 }
@@ -196,11 +197,10 @@ func parsePrometheusSample(line string) (MetricSample, error) {
 	if out.Name == "" {
 		return out, errors.New("empty metric name")
 	}
-	value, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
+	if _, err := strconv.ParseFloat(fields[0], 64); err != nil {
 		return out, fmt.Errorf("invalid sample value: %w", err)
 	}
-	out.Value = value
+	out.Value = fields[0]
 	if len(fields) == 2 {
 		ts, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {

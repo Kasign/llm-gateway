@@ -96,3 +96,33 @@ func TestRuntimeSnapshotSampleUnavailable(t *testing.T) {
 		t.Fatalf("unexpected unavailable sample: %#v", got)
 	}
 }
+
+
+func TestRuntimeMetricsOverviewReturnsDynamicSamples(t *testing.T) {
+	s := &Server{}
+	s.setRuntimeMetricsSample(&llama.MetricsSnapshot{
+		SampledAt: time.Now().UTC(),
+		Samples: []llama.MetricSample{{Name: "new_metric", Type: llama.MetricTypeUntyped, Value: "3.5"}},
+	}, "complete", "")
+	got := s.runtimeMetricsOverview()
+	if got["status"] != "complete" {
+		t.Fatalf("status=%v", got["status"])
+	}
+	samples, ok := got["samples"].([]llama.MetricSample)
+	if !ok || len(samples) != 1 || samples[0].Name != "new_metric" {
+		t.Fatalf("samples=%#v", got["samples"])
+	}
+}
+
+func TestRuntimeMetricsOverviewMarksOldSamplesStale(t *testing.T) {
+	s := &Server{}
+	s.runtimeSnapshotSample = &runtimeSnapshotSample{
+		MetricsStatus: "complete",
+		MetricsSampledAt: time.Now().Add(-time.Minute),
+		Metrics: &llama.MetricsSnapshot{Samples: []llama.MetricSample{{Name: "old_metric", Value: "1"}}},
+	}
+	got := s.runtimeMetricsOverview()
+	if got["status"] != "stale" || got["source_status"] != "complete" {
+		t.Fatalf("unexpected stale status: %#v", got)
+	}
+}
