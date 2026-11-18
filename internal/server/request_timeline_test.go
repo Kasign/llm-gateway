@@ -11,7 +11,7 @@ func TestRequestTimelineRecordsMonotonicOffsetsAndCopiesSnapshot(t *testing.T) {
 	timeline := newRequestTimeline(start)
 	timeline.record("request_received", start)
 	timeline.record("auth_started", start.Add(12*time.Millisecond))
-	timeline.mark("body_read_finished", timelineStatusNotReached)
+	timeline.markIfMissing("body_read_finished", timelineStatusNotReached)
 	first := timeline.snapshot()
 	if len(first) != 3 {
 		t.Fatalf("unexpected event count: %d", len(first))
@@ -36,7 +36,7 @@ func TestRequestTimelineRejectsUnknownAndOutOfRangeEvents(t *testing.T) {
 	timeline := newRequestTimeline(start)
 	timeline.record("made_up_event", start.Add(time.Second))
 	timeline.record("auth_started", start.Add(-time.Second))
-	timeline.mark("ready", timelineStatusMeasured)
+	timeline.markIfMissing("ready", timelineStatusMeasured)
 	for i := 0; i < requestTimelineMaxEvents+5; i++ {
 		timeline.recordNow("pipeline_started")
 	}
@@ -70,9 +70,9 @@ func TestRequestTimelineDefersAnalysisSnapshotUntilHandlerExit(t *testing.T) {
 	if _, ok := timeline.analysisSnapshot(); !ok {
 		t.Fatal("analysis snapshot was not retained")
 	}
-	timeline.recordNow("handler_returned")
+	timeline.recordNow("handler_exit_started")
 	events := timeline.snapshot()
-	if len(events) != 2 || events[1].Name != "handler_returned" {
+	if len(events) != 2 || events[1].Name != "handler_exit_started" {
 		t.Fatalf("handler exit event missing or unordered: %+v", events)
 	}
 }
