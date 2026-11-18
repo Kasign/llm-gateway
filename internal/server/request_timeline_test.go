@@ -1,8 +1,8 @@
 package server
 
 import (
-	"errors"
 	"bufio"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
