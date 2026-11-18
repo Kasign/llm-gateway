@@ -114,7 +114,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		InferenceLatencyMS: run.InferenceLatencyMS, InferenceLatencyStatus: run.InferenceLatencyStatus, TTFTStatus: run.TTFTStatus,
 		InputTokens: valueOrZero(run.InputTokens),
 		OutputTokens: valueOrZero(run.OutputTokens), TotalTokens: valueOrZero(run.TotalTokens),
-		Error: task.ErrorMessage, ErrorCode: task.ErrorCode, RequestID: run.RequestID, Stream: true,
+		Error: task.ErrorMessage, ErrorCode: task.ErrorCode, RequestID: run.RequestID,
 		TTFTMS: run.TTFTMS, StreamEvents: run.StreamEvents, ReasoningChars: run.ReasoningChars,
 		ContentChars: run.ContentChars,
 		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),

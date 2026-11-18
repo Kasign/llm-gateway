@@ -875,7 +875,12 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		s.benchmarkGetFromStore(w, r, id)
 		return
 	}
-	events, _ := s.logs.ListStreamEvents(r.Context(), id, 2000)
+	events := []store.StreamEvent{}
+	toolEvents := []store.ToolCallEvent{}
+	if s.logs != nil {
+		events, _ = s.logs.ListStreamEvents(r.Context(), id, 2000)
+		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), id, 9)
+	}
 	snap := job.snapshot()
 	payloadPersisted := false
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" && snap.Status != "cancelling" {
@@ -883,7 +888,7 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		payloadPersisted = payloadErr == nil
 	}
 	out := map[string]interface{}{
-		"job": snap, "stream_events": events, "request_id": snap.RequestID,
+		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
 	}
 	if snap.Status != "running" && snap.Status != "cancelling" {

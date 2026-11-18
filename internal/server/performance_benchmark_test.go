@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -451,4 +452,30 @@ func TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness(t *testing.T) {
 		if item == "gateway_build_cleanliness_unknown" { found = true }
 	}
 	if !found { t.Fatalf("missing build cleanliness marker: %v", missing) }
+}
+
+
+// TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent 验证工具性能场景构造非流式强制工具调用请求。
+func TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent(t *testing.T) {
+	body := string(buildBenchmarkToolChatBody("active-model", benchRunInput{Prompt: "请搜索资料", MaxTokens: 256}))
+	for _, want := range []string{`"stream":false`, `"tool_choice":"required"`, `"tools":[]`, `"model":"active-model"`, `"max_tokens":256`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("tool benchmark body missing %s: %s", want, body)
+		}
+	}
+	ordinary := string(buildBenchmarkChatBody("active-model", benchRunInput{Prompt: "普通请求"}))
+	if !strings.Contains(ordinary, `"stream":true`) {
+		t.Fatalf("ordinary benchmark request lost streaming behavior: %s", ordinary)
+	}
+}
+
+// TestBenchmarkRecordsModelRoundDurations 验证模型轮次耗时按调用顺序保留，包含合法的 0ms 测量值。
+func TestBenchmarkRecordsModelRoundDurations(t *testing.T) {
+	job := &benchmarkJob{}
+	job.recordModelRoundDuration(0)
+	job.recordModelRoundDuration(125 * time.Millisecond)
+	got := job.snapshot().ModelRoundDurationsMS
+	if len(got) != 2 || got[0] != 0 || got[1] != 125 {
+		t.Fatalf("model round durations = %v, want [0 125]", got)
+	}
 }
