@@ -4,9 +4,9 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/whl/llm-gateway/internal/core"
-	"time"
 )
 
 const (
@@ -135,7 +135,7 @@ func (t *requestTimeline) recordNow(name string) {
 	t.record(name, time.Now())
 }
 
-func (t *requestTimeline) mark(name, status string) {
+func (t *requestTimeline) markIfMissing(name, status string) {
 	if t == nil {
 		return
 	}
@@ -149,6 +149,11 @@ func (t *requestTimeline) mark(name, status string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	for _, event := range t.events {
+		if event.Name == name {
+			return
+		}
+	}
 	if len(t.events) >= requestTimelineMaxEvents {
 		return
 	}

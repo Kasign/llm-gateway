@@ -76,3 +76,18 @@ func TestRequestTimelineDefersAnalysisSnapshotUntilHandlerExit(t *testing.T) {
 		t.Fatalf("handler exit event missing or unordered: %+v", events)
 	}
 }
+
+func TestRequestTimelineMarkIfMissingDoesNotDuplicateMeasuredEvents(t *testing.T) {
+	start := time.Now()
+	timeline := newRequestTimeline(start)
+	timeline.recordFirst("upstream_headers", start.Add(time.Millisecond))
+	timeline.markIfMissing("upstream_headers", timelineStatusNotReached)
+	timeline.markIfMissing("upstream_first_byte", timelineStatusNotReached)
+	events := timeline.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("unexpected duplicate status event: %+v", events)
+	}
+	if events[0].Status != timelineStatusMeasured || events[1].Status != timelineStatusNotReached {
+		t.Fatalf("measured event was overwritten: %+v", events)
+	}
+}

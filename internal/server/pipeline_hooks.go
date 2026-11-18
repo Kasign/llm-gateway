@@ -526,9 +526,9 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	if trace != nil {
 		timings = trace.streamTimings()
 		if timeline != nil {
-			if timings.FirstAnyMS != nil { timeline.record("stream_first_any", st.Started.Add(time.Duration(*timings.FirstAnyMS)*time.Millisecond)) }
-			if timings.FirstReasoningMS != nil { timeline.record("stream_first_reasoning", st.Started.Add(time.Duration(*timings.FirstReasoningMS)*time.Millisecond)) }
-			if timings.FirstContentMS != nil { timeline.record("stream_first_content", st.Started.Add(time.Duration(*timings.FirstContentMS)*time.Millisecond)) }
+			if timings.FirstAnyMS != nil { timeline.recordFirst("stream_first_any", st.Started.Add(time.Duration(*timings.FirstAnyMS)*time.Millisecond)) }
+			if timings.FirstReasoningMS != nil { timeline.recordFirst("stream_first_reasoning", st.Started.Add(time.Duration(*timings.FirstReasoningMS)*time.Millisecond)) }
+			if timings.FirstContentMS != nil { timeline.recordFirst("stream_first_content", st.Started.Add(time.Duration(*timings.FirstContentMS)*time.Millisecond)) }
 		}
 		if timings.FirstAnyMS != nil {
 			ttft = timings.FirstAnyMS
