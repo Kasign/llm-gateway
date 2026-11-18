@@ -1764,6 +1764,7 @@ function setBenchRunning(running){
 
 
 let benchHistoryOffset=0;
+let benchHistorySelected=new Set();
 const BENCH_HISTORY_PAGE_SIZE=20;
 
 async function loadBenchHistory(){
@@ -1782,13 +1783,13 @@ async function loadBenchHistory(){
     if(!items.length){
       list.innerHTML=emptyState('暂无符合条件的 Benchmark 任务');
     }else{
-      list.innerHTML=wrapTable('<tr><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
+      list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
         items.map(item=>{
           const scenarioLabel=item.scenario==='tool_performance'?'工具调用性能':'普通性能';
           const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms>0?item.latency_ms+' ms':'—');
           const model=item.model_id||item.model_key||item.backend||'—';
-          return '<tr><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'">查看</button></td></tr>';
+          return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'">查看</button></td></tr>';
         }).join(''));
     }
     const page=$('benchHistoryPage');
@@ -1796,11 +1797,59 @@ async function loadBenchHistory(){
     const prev=$('benchHistoryPrev'),next=$('benchHistoryNext');
     if(prev)prev.disabled=benchHistoryOffset<=0;
     if(next)next.disabled=benchHistoryOffset+items.length>=total;
+    updateBenchmarkCompareSelection();
   }catch(error){
     list.innerHTML='<div class="msg err">'+esc(error.message||'历史任务加载失败')+'</div>';
     const page=$('benchHistoryPage');if(page)page.textContent='加载失败';
     $('benchHistoryPrev')&&($('benchHistoryPrev').disabled=true);
     $('benchHistoryNext')&&($('benchHistoryNext').disabled=true);
+  }
+}
+
+
+function updateBenchmarkCompareSelection(){
+  const button=$('benchHistoryCompareBtn');
+  const label=$('benchHistorySelection');
+  if(button)button.disabled=benchHistorySelected.size!==2;
+  if(label)label.textContent=benchHistorySelected.size+' / 2 项已选择；仅完成且条件完整一致的任务可严格比较';
+}
+
+async function openBenchmarkComparison(){
+  if(benchHistorySelected.size!==2)return;
+  const [left,right]=[...benchHistorySelected];
+  const box=$('benchCompareResult');
+  if(!box)return;
+  box.hidden=false;
+  box.style.display='block';
+  box.innerHTML='<p class="muted">正在比较…</p>';
+  try{
+    const query=new URLSearchParams({left,right});
+    const result=await api('/api/benchmark/compare?'+query.toString());
+    const reasonLabels={
+      task_not_completed:'两个任务都必须已完成',
+      scenario_mismatch:'测试场景不同',
+      condition_incomplete:'至少一个任务的测试条件不完整',
+      condition_mismatch:'测试条件指纹不同',
+    };
+    let body='<h3 style="margin:0 0 8px;font-size:14px">'+(result.comparable?'严格可比':'不可严格比较')+'</h3>';
+    if(!result.comparable){
+      body+='<ul class="req-hints">'+(result.reasons||[]).map(reason=>'<li>'+esc(reasonLabels[reason]||reason)+'</li>').join('')+'</ul>';
+    }else{
+      const labels={
+        latency_ms:'任务总耗时',inference_latency_ms:'Pipeline 耗时',model_load_ms:'模型加载/就绪',
+        ttft_ms:'TTFT',input_tokens:'输入 Token',output_tokens:'输出 Token',total_tokens:'总 Token',
+        model_decision_ms:'模型决策',tool_execution_total_ms:'工具执行合计',model_final_generation_ms:'模型最终生成',
+      };
+      const rows=Object.entries(result.deltas||{}).map(([key,value])=>{
+        const fmt=v=>v==null?'未知':String(v);
+        return '<tr><td>'+esc(labels[key]||key)+'</td><td>'+fmt(value.left)+'</td><td>'+fmt(value.right)+'</td><td>'+fmt(value.right_minus_left)+'</td></tr>';
+      }).join('');
+      body+='<p class="req-note">差值方向：右侧任务 − 左侧任务；未测指标保持未知。</p>'+
+        wrapTable('<tr><th>指标</th><th>左侧</th><th>右侧</th><th>差值</th></tr>'+rows);
+    }
+    box.innerHTML=body;
+  }catch(error){
+    box.innerHTML='<p class="err">'+esc(error.message||'比较失败')+'</p>';
   }
 }
 
@@ -2187,6 +2236,19 @@ async function runBenchmark(scenario='performance'){
   }
 }
 
+$('benchHistoryCompareBtn')?.addEventListener('click',()=>openBenchmarkComparison());
+$('benchHistoryList')?.addEventListener('change',event=>{
+  const input=event.target.closest('[data-bench-compare-id]');
+  if(!input)return;
+  const id=input.dataset.benchCompareId;
+  if(input.checked){
+    if(benchHistorySelected.size>=2){input.checked=false;return;}
+    benchHistorySelected.add(id);
+  }else{
+    benchHistorySelected.delete(id);
+  }
+  updateBenchmarkCompareSelection();
+});
 $('benchHistoryRefreshBtn')?.addEventListener('click',()=>loadBenchHistory());
 $('benchHistoryScenario')?.addEventListener('change',()=>{benchHistoryOffset=0;loadBenchHistory().catch(()=>{});});
 $('benchHistoryStatus')?.addEventListener('change',()=>{benchHistoryOffset=0;loadBenchHistory().catch(()=>{});});

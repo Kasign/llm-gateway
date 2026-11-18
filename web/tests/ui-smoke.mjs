@@ -221,7 +221,9 @@ try {
   check('工具调用性能场景与历史任务区域已提供',
     await page.locator('#benchToolPrompt').count() === 1 &&
     await page.locator('#benchToolRunBtn').count() === 1 &&
-    await page.locator('#benchHistoryList').count() === 1);
+    await page.locator('#benchHistoryList').count() === 1 &&
+    await page.locator('#benchHistoryCompareBtn').count() === 1 &&
+    await page.locator('#benchCompareResult').count() === 1);
   await page.locator('#benchToolRunBtn').click();
   check('工具性能测试缺少客户端 Key 时在本地拒绝',
     (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
