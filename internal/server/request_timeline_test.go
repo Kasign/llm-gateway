@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/whl/llm-gateway/internal/core"
 )
 
 func TestRequestTimelineRecordsMonotonicOffsetsAndCopiesSnapshot(t *testing.T) {
@@ -184,5 +187,57 @@ func TestResponseSinkUnwrapPreservesResponseControllerCapabilities(t *testing.T)
 	}
 	if conn != serverConn || rw == nil {
 		t.Fatalf("unexpected hijack result: conn=%v rw=%v", conn, rw)
+	}
+}
+
+
+type timelineTestForwarder struct {
+	err error
+}
+
+func (f timelineTestForwarder) Forward(context.Context, core.State, core.ChunkFunc) (core.Result, error) {
+	return core.Result{}, f.err
+}
+
+func TestRequestTimelineRecordsPipelineFinishOnFailureAndCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "client_cancelled", err: context.Canceled},
+		{name: "upstream_connection_failed", err: errors.New("upstream dial failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			timeline := newRequestTimeline(start)
+			ctx := context.WithValue(context.Background(), requestTimelineContextKey{}, timeline)
+			if errors.Is(tc.err, context.Canceled) {
+				cancelCtx, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelCtx
+			}
+			pipe := &core.Pipeline{
+				Resolve: func(context.Context, core.State) (core.ModelChoice, error) {
+					return core.ModelChoice{ProviderID: "test", UpstreamID: "test-model"}, nil
+				},
+				Forward:  timelineTestForwarder{err: tc.err},
+				Observe: inferenceObserver{},
+			}
+			_, _ = pipe.Run(ctx, core.Request{
+				ID: "timeline-" + tc.name, Method: http.MethodPost, Path: "/v1/chat/completions",
+				Body: []byte(`{"model":"test-model","messages":[]}`), Started: start,
+			})
+			var finish *requestTimelineEvent
+			for _, event := range timeline.snapshot() {
+				if event.Name == "pipeline_finished" {
+					copy := event
+					finish = &copy
+					break
+				}
+			}
+			if finish == nil || finish.Status != timelineStatusMeasured || finish.OffsetMS == nil {
+				t.Fatalf("Pipeline Finish must be measured for %s: %+v", tc.name, timeline.snapshot())
+			}
+		})
 	}
 }

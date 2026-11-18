@@ -263,5 +263,7 @@ func (t *requestTimeline) On(_ context.Context, ev core.Event) {
 		t.recordFirst("warm_finished", ev.State.WarmAt)
 	case core.StageUpstreamStart:
 		t.recordFirst("upstream_started", ev.State.UpstreamStart)
+	case core.StageFinish:
+		t.recordNow("pipeline_finished")
 	}
 }
