@@ -737,6 +737,24 @@ func copyRemoteResponseHeaders(dst, src http.Header, rawPath string) {
 	}
 }
 
+// firstByteReadObserver 在底层 Reader 首次返回正文数据时触发回调，不等待整个响应体读取完成。
+type firstByteReadObserver struct {
+	reader io.Reader
+	onFirstByte func()
+	called bool
+}
+
+func (r *firstByteReadObserver) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && !r.called {
+		r.called = true
+		if r.onFirstByte != nil {
+			r.onFirstByte()
+		}
+	}
+	return n, err
+}
+
 // forwardJSON 限制非流式响应体大小；HTTP 非 2xx 的上游 JSON 错误体仍按兼容协议返回。
 func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call InferenceCall, req *http.Request) (core.Result, error) {
 	req.Header.Set("Accept", "application/json")
@@ -754,7 +772,7 @@ func (p *OpenAICompatibleProvider) forwardJSON(ctx context.Context, call Inferen
 	if isRedirectStatus(resp.StatusCode) {
 		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode}, NewHTTPError(p.id, resp.StatusCode, errors.New("provider redirects are disabled"))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, p.maxResponseBytes+1))
+	body, err := io.ReadAll(&firstByteReadObserver{reader: io.LimitReader(resp.Body, p.maxResponseBytes+1), onFirstByte: call.OnFirstByte})
 	if err != nil {
 		return core.Result{Status: resp.StatusCode, UpstreamStatus: resp.StatusCode}, p.transportError(ctx, err)
 	}

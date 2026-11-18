@@ -708,8 +708,8 @@ func TestOpenAICompatibleProviderReportsHeadersForUpstreamHTTPError(t *testing.T
 	if result.Status != http.StatusBadGateway || result.UpstreamStatus != http.StatusBadGateway {
 		t.Fatalf("upstream error result = %+v", result)
 	}
-	if headerCalls != 1 || firstByteCalls != 0 {
-		t.Fatalf("header/first-byte callbacks = %d/%d, want 1/0", headerCalls, firstByteCalls)
+	if headerCalls != 1 || firstByteCalls != 1 {
+		t.Fatalf("header/first-byte callbacks = %d/%d, want 1/1", headerCalls, firstByteCalls)
 	}
 	if strings.Contains(recorder.Body.String(), privateBody) {
 		t.Fatalf("sanitized provider error leaked upstream body: %q", recorder.Body.String())

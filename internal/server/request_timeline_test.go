@@ -305,8 +305,8 @@ func TestInferenceForwarderRecordsRealProviderHTTPErrorHeaders(t *testing.T) {
 	if !ok || headers.Status != timelineStatusMeasured || headers.OffsetMS == nil {
 		t.Fatalf("real upstream response headers were not recorded: %+v", timeline.snapshot())
 	}
-	if firstByte, ok := events["upstream_first_byte"]; !ok || firstByte.Status != timelineStatusNotReached {
-		t.Fatalf("non-streaming error must not invent an upstream first-byte event: %+v", timeline.snapshot())
+	if firstByte, ok := events["upstream_first_byte"]; !ok || firstByte.Status != timelineStatusMeasured || firstByte.OffsetMS == nil {
+		t.Fatalf("first upstream response-body byte was not measured: %+v", timeline.snapshot())
 	}
 	if !timeline.has("gateway_first_write") || !timeline.has("gateway_last_write") {
 		t.Fatalf("sanitized provider error response was not recorded as a gateway write: %+v", timeline.snapshot())
