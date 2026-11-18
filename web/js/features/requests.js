@@ -419,12 +419,20 @@ function detailSections(j) {
       ['Prefill→首 token', ph.prefill_until_first_ms != null ? ph.prefill_until_first_ms + ' ms' : null],
       ['思考阶段', ph.thinking_ms != null ? ph.thinking_ms + ' ms' : null],
       ['正文生成阶段', ph.content_generation_ms != null ? ph.content_generation_ms + ' ms' : null],
+      ['Token 数来源', tp.token_source === 'upstream_usage' ? '上游 usage' : tp.token_source === 'llama_timings' ? 'llama.cpp timings' : (tp.token_source || '未知')],
+      ['速度来源', tp.speed_source_label || (tp.speed_source === 'llama_timings' ? 'llama.cpp Decode 实测' : tp.speed_source === 'gateway_window' ? 'Gateway 生成窗口派生' : '未知')],
       [
         '输出速度',
         tp.output_tokens_per_sec != null
-          ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s (' + tp.generation_window_ms + ' ms 窗口)'
+          ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s' + (Number(tp.generation_window_ms) > 0 ? ' (' + tp.generation_window_ms + ' ms Gateway 窗口)' : '（Decode 实测，无匹配 Gateway 窗口）')
           : null,
       ],
+      ['Prompt Eval Token', tp.llama_timings?.prompt_n ?? null],
+      ['Prompt Eval 耗时', tp.llama_timings?.prompt_ms != null ? tp.llama_timings.prompt_ms + ' ms' : null],
+      ['Prompt Eval 速度', tp.llama_timings?.prompt_per_second != null ? tp.llama_timings.prompt_per_second.toFixed(2) + ' token/s' : null],
+      ['Decode Token', tp.llama_timings?.predicted_n ?? null],
+      ['Decode 耗时', tp.llama_timings?.predicted_ms != null ? tp.llama_timings.predicted_ms + ' ms' : null],
+      ['Decode 速度（原始 timings）', tp.llama_timings?.predicted_per_second != null ? tp.llama_timings.predicted_per_second.toFixed(2) + ' token/s' : null],
     ])}`;
     if (j.analysis_note) block += `<p class="req-note">${esc(j.analysis_note)}</p>`;
     if (tp.note) block += `<p class="req-note">${esc(tp.note)}</p>`;
