@@ -94,6 +94,8 @@ type Server struct {
 	adminState       *adminStateSnap                     // 管理后台快照（登录状态、配置概览等，缓存减少 DB 查询）
 	runtimeSnapMu    sync.Mutex                          // 运行时快照锁
 	runtimeSnapCache map[string]upstreamRuntimeSnapEntry // 上游运行时缓存（模型加载状态、显存占用等）
+	runtimeSnapshotSampleMu sync.RWMutex
+	runtimeSnapshotSample    *runtimeSnapshotSample
 	systemHostMu     sync.Mutex                          // 系统主机信息锁
 	systemHostCache  *systemHostStats                    // 系统主机信息缓存（CPU 核数、内存大小、磁盘空间等）
 	// —— 管理页面 HTML 缓存 ——
