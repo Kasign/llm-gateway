@@ -126,3 +126,39 @@ func TestRuntimeMetricsOverviewMarksOldSamplesStale(t *testing.T) {
 		t.Fatalf("unexpected stale status: %#v", got)
 	}
 }
+
+
+func TestSampleLlamaMetricsMapsRouterModelRequirement(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" || r.URL.Query().Get("model") != "missing-model" {
+			t.Errorf("unexpected request: %s", r.URL.RequestURI())
+		}
+		http.Error(w, "model name is missing from the request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	s := &Server{}
+	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
+	s.sampleLlamaMetrics(context.Background(), llama.New(srv.URL, 0, "llamacpp", ""), "missing-model")
+	got := s.runtimeSnapshotSampleLatest()
+	if got.Status != "complete" || got.MetricsStatus != "needs_model" || got.MetricsError != "router_model_required_or_invalid" {
+		t.Fatalf("unexpected metrics capability state: %#v", got)
+	}
+}
+
+func TestSampleLlamaMetricsTimeoutIsIsolated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	s := &Server{}
+	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	s.sampleLlamaMetrics(ctx, llama.New(srv.URL, 0, "llamacpp", ""), "")
+	got := s.runtimeSnapshotSampleLatest()
+	if got.Status != "complete" || got.MetricsStatus != "timeout" || got.MetricsError != "sampling_timeout" {
+		t.Fatalf("metrics timeout must remain isolated: %#v", got)
+	}
+}

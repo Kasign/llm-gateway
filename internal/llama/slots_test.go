@@ -1,7 +1,10 @@
 package llama
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -34,5 +37,41 @@ func TestParseSlotsKeepsOnlyAllowlistedFields(t *testing.T) {
 func TestParseSlotsRejectsMalformedPayload(t *testing.T) {
 	if _, err := ParseSlots([]byte(`{"not":"an array"}`), time.Now()); err == nil {
 		t.Fatal("expected array decoding error")
+	}
+}
+
+
+func TestFetchSlotsUsesConfiguredAuth(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"id":1,"is_processing":false}]`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, 0, "llamacpp", "upstream-secret")
+	status, body, err := client.FetchSlots(context.Background(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || gotPath != "/slots" || gotAuth != "Bearer upstream-secret" {
+		t.Fatalf("status=%d path=%q auth=%q", status, gotPath, gotAuth)
+	}
+	if _, err := ParseSlots(body, time.Now()); err != nil {
+		t.Fatalf("response should be parseable: %v", err)
+	}
+}
+
+func TestFetchSlotsEnforcesResponseLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("12345"))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, 0, "llamacpp", "")
+	_, _, err := client.FetchSlots(context.Background(), 4)
+	if err != ErrObservationResponseTooLarge {
+		t.Fatalf("error=%v", err)
 	}
 }
