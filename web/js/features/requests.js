@@ -424,7 +424,7 @@ function detailSections(j) {
       [
         '输出速度',
         tp.output_tokens_per_sec != null
-          ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s' + (Number(tp.generation_window_ms) > 0 ? ' (' + tp.generation_window_ms + ' ms Gateway 窗口)' : '（Decode 实测，无匹配 Gateway 窗口）')
+          ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s' + (tp.speed_source === 'gateway_window' && Number(tp.generation_window_ms) > 0 ? ' (' + tp.generation_window_ms + ' ms Gateway 窗口)' : tp.speed_source === 'llama_timings' ? '（llama.cpp Decode 实测）' : '（速度来源未知）')
           : null,
       ],
       ['Prompt Eval Token', tp.llama_timings?.prompt_n ?? null],
