@@ -1218,6 +1218,7 @@ try {
             timeline: [
               { name: 'request_received', offset_ms: 0, status: 'measured' },
               { name: 'auth_started', offset_ms: 2, status: 'measured' },
+              { name: 'gateway_write_failed', offset_ms: 3, status: 'measured' },
               { name: 'pipeline_started', offset_ms: null, status: 'not_reached' }
             ]
           },
@@ -1245,13 +1246,14 @@ try {
   await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
   check('请求详情弹窗打开后将焦点移入关闭按钮',
     await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
-  const timelineSummary = detailModal.locator('summary').filter({ hasText: '请求时间线 (3)' });
+  const timelineSummary = detailModal.locator('summary').filter({ hasText: '请求时间线 (4)' });
   check('timeline_only 早期请求详情展示时间线入口', await timelineSummary.count() === 1);
   if (await timelineSummary.count()) {
     await timelineSummary.click();
     check('时间线显示真实零毫秒、已测量和未到达状态', 
       await detailModal.getByText('0 ms · 已测量', { exact: false }).count() >= 1 &&
       await detailModal.getByText('— · 未到达', { exact: false }).count() >= 1);
+    check('时间线展示 Gateway 正文写回失败事件', await detailModal.getByText('Gateway 正文写回失败', { exact: false }).count() === 1);
     check('timeline_only 不显示虚构的阶段耗时', 
       await detailModal.getByText('请求分析', { exact: true }).count() === 0);
   }

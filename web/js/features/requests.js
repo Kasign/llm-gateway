@@ -485,6 +485,7 @@ function detailSections(j) {
       stream_first_content: '收到首个 content',
       gateway_first_write: 'Gateway 首次写回正文',
       gateway_last_write: 'Gateway 最后一次写回正文',
+      gateway_write_failed: 'Gateway 正文写回失败',
       pipeline_finished: 'Pipeline 收尾完成',
       handler_exit_started: 'HTTP Handler 收尾开始',
     };
