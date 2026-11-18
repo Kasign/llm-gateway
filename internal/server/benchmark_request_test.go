@@ -61,17 +61,17 @@ func TestBenchmarkComparisonReasonsRequireMatchingCompleteConditions(t *testing.
 	}
 	right = left
 	right.ConditionStatus = "partial"
-	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "condition_incomplete") {
+	if reasons := benchmarkComparisonReasons(left, right); !containsBenchmarkComparisonReason(reasons, "condition_incomplete") {
 		t.Fatalf("partial conditions must not compare, got %v", reasons)
 	}
 	right = left
 	right.ConditionSHA256 = "different"
-	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "condition_mismatch") {
+	if reasons := benchmarkComparisonReasons(left, right); !containsBenchmarkComparisonReason(reasons, "condition_mismatch") {
 		t.Fatalf("different condition fingerprints must not compare, got %v", reasons)
 	}
 	right = left
 	right.Status = "failed"
-	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "task_not_completed") {
+	if reasons := benchmarkComparisonReasons(left, right); !containsBenchmarkComparisonReason(reasons, "task_not_completed") {
 		t.Fatalf("failed tasks must not compare, got %v", reasons)
 	}
 }

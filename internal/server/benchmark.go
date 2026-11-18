@@ -10,8 +10,8 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -664,25 +664,25 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 
 // benchmarkComparisonSide 是参与历史比较的任务与指标快照。
 type benchmarkComparisonSide struct {
-	TaskID string `json:"job_id"`
-	Scenario string `json:"scenario"`
-	Status string `json:"status"`
-	Backend string `json:"backend"`
-	ModelID string `json:"model_id"`
-	StartedAt time.Time `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	LatencyMS int64 `json:"latency_ms"`
-	ConditionSHA256 string `json:"condition_sha256"`
-	ConditionStatus string `json:"condition_status"`
-	ConditionMissing []string `json:"condition_missing"`
-	Metrics map[string]*int64 `json:"metrics"`
+	TaskID           string           `json:"job_id"`
+	Scenario         string           `json:"scenario"`
+	Status           string           `json:"status"`
+	Backend          string           `json:"backend"`
+	ModelID          string           `json:"model_id"`
+	StartedAt        time.Time        `json:"started_at"`
+	FinishedAt       *time.Time       `json:"finished_at"`
+	LatencyMS        int64            `json:"latency_ms"`
+	ConditionSHA256  string           `json:"condition_sha256"`
+	ConditionStatus  string           `json:"condition_status"`
+	ConditionMissing []string         `json:"condition_missing"`
+	Metrics          map[string]*int64 `json:"metrics"`
 }
 
 type benchmarkComparisonMetric struct {
-	Left *int64 `json:"left"`
-	Right *int64 `json:"right"`
+	Left           *int64 `json:"left"`
+	Right          *int64 `json:"right"`
 	RightMinusLeft *int64 `json:"right_minus_left"`
-	Status string `json:"status"`
+	Status         string `json:"status"`
 }
 
 func benchmarkComparisonReasons(left, right benchmarkComparisonSide) []string {
