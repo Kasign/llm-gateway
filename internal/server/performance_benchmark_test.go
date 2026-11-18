@@ -458,7 +458,7 @@ func TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness(t *testing.T) {
 // TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent 验证工具性能场景构造非流式强制工具调用请求。
 func TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent(t *testing.T) {
 	body := string(buildBenchmarkToolChatBody("active-model", benchRunInput{Prompt: "请搜索资料", MaxTokens: 256}))
-	for _, want := range []string{`"stream":false`, `"tool_choice":"required"`, `"tools":[]`, `"model":"active-model"`, `"max_tokens":256`} {
+	for _, want := range []string{`"stream":false`, `"tool_choice"`, `"web.search"`, `"tools":[]`, `"model":"active-model"`, `"max_tokens":256`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("tool benchmark body missing %s: %s", want, body)
 		}

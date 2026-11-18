@@ -717,8 +717,10 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		modelIdentity["quantization"] = m.Quantization
 		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
 	}
+	toolNames := []string{}
+	if scenario == "tool_performance" { toolNames = []string{"web.search"} }
 	configSnapshot := map[string]interface{}{
-		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey,
+		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey, "tool_names": toolNames,
 		"model_id": taskModelID, "scenario": scenario, "max_tokens": in.MaxTokens, "stream": scenario != "tool_performance",
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
@@ -950,7 +952,7 @@ func setBenchInt64(obj map[string]interface{}, key string, v *int64) {
 func buildBenchmarkToolChatBody(llamaName string, in benchRunInput) []byte {
 	obj := map[string]interface{}{
 		"model": llamaName, "messages": []map[string]string{{"role": "user", "content": in.Prompt}},
-		"stream": false, "tools": []interface{}{}, "tool_choice": "required",
+		"stream": false, "tools": []interface{}{}, "tool_choice": map[string]interface{}{"type": "function", "function": map[string]string{"name": "web.search"}},
 	}
 	if in.MaxTokens > 0 { obj["max_tokens"] = in.MaxTokens }
 	setBenchFloat(obj, "temperature", in.Temperature); setBenchFloat(obj, "top_p", in.TopP)
