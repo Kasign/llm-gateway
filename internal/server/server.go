@@ -324,6 +324,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/gguf/delete", s.deleteDiskGGUFAPI)      // 删除共享磁盘中未登记的 GGUF 模型
 
 	// —— 管理 API：基准测试 ——
+	mux.HandleFunc("/api/benchmark/compare", s.benchmarkCompareAPI) // 比较两个历史任务
 	mux.HandleFunc("/api/benchmark/", s.benchmarkStatusAPI) // 查看基准测试进度/结果
 	mux.HandleFunc("/api/benchmark", s.benchmarkAPI)        // 启动基准测试
 

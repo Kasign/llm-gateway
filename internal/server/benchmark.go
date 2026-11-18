@@ -10,6 +10,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -665,6 +666,171 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 //  1. 默认取请求里的 in.ModelKey（显式指定 model_key 时即此值）；
 //  2. 若为空且解析得到 m *model.Model，则回填 m.ModelKey（例如只传 model_id 但反查到了 DB 行）；
 //  3. 若 m 为 nil 且从未传 model_key，job.ModelKey 可能为空字符串，但 runBenchmark 仍可用 upstreamOnly 调用上游。
+
+type benchmarkComparisonSide struct {
+	TaskID string `json:"job_id"`
+	Scenario string `json:"scenario"`
+	Status string `json:"status"`
+	Backend string `json:"backend"`
+	ModelID string `json:"model_id"`
+	StartedAt time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	LatencyMS int64 `json:"latency_ms"`
+	ConditionSHA256 string `json:"condition_sha256"`
+	ConditionStatus string `json:"condition_status"`
+	ConditionMissing []string `json:"condition_missing"`
+	Metrics map[string]*int64 `json:"metrics"`
+}
+
+type benchmarkComparisonMetric struct {
+	Left *int64 `json:"left"`
+	Right *int64 `json:"right"`
+	RightMinusLeft *int64 `json:"right_minus_left"`
+	Status string `json:"status"`
+}
+
+func benchmarkComparisonReasons(left, right benchmarkComparisonSide) []string {
+	reasons := make([]string, 0, 4)
+	if left.Status != "completed" || right.Status != "completed" {
+		reasons = append(reasons, "task_not_completed")
+	}
+	if left.Scenario != right.Scenario {
+		reasons = append(reasons, "scenario_mismatch")
+	}
+	if left.ConditionStatus != "complete" || right.ConditionStatus != "complete" {
+		reasons = append(reasons, "condition_incomplete")
+	}
+	if left.ConditionSHA256 == "" || right.ConditionSHA256 == "" || left.ConditionSHA256 != right.ConditionSHA256 {
+		reasons = append(reasons, "condition_mismatch")
+	}
+	return reasons
+}
+
+func (s *Server) benchmarkComparisonSide(r *http.Request, taskID string) (benchmarkComparisonSide, error) {
+	task, err := s.benchmarkRepo.GetTask(r.Context(), taskID)
+	if err != nil {
+		return benchmarkComparisonSide{}, err
+	}
+	runs, err := s.benchmarkRepo.ListRuns(r.Context(), taskID)
+	if err != nil {
+		return benchmarkComparisonSide{}, err
+	}
+	if len(runs) == 0 {
+		return benchmarkComparisonSide{}, errors.New("benchmark task has no run")
+	}
+	run := runs[len(runs)-1]
+	conditionSHA256, conditionStatus, conditionMissing := benchmarkConditionFromConfigJSON(task.ConfigJSON)
+	snapshot := benchmarkJobSnapshot{
+		Scenario: task.Scenario,
+		Status: task.Status,
+		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
+	}
+	toolEvents := []store.ToolCallEvent{}
+	if s.logs != nil {
+		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
+	}
+	toolMetrics := buildBenchmarkToolMetrics(snapshot, toolEvents)
+	metrics := map[string]*int64{
+		"latency_ms": nil,
+		"inference_latency_ms": nil,
+		"model_load_ms": nil,
+		"ttft_ms": nil,
+		"input_tokens": run.InputTokens,
+		"output_tokens": run.OutputTokens,
+		"total_tokens": run.TotalTokens,
+		"model_decision_ms": toolMetrics.ModelDecisionMS,
+		"tool_execution_total_ms": toolMetrics.ToolExecutionTotalMS,
+		"model_final_generation_ms": toolMetrics.ModelFinalGenerationMS,
+	}
+	if task.FinishedAt != nil {
+		value := task.LatencyMS
+		metrics["latency_ms"] = &value
+	}
+	if run.InferenceLatencyStatus == "measured" {
+		metrics["inference_latency_ms"] = run.InferenceLatencyMS
+	}
+	if run.ModelLoadStatus == "measured" {
+		metrics["model_load_ms"] = run.ModelLoadMS
+	}
+	if run.TTFTStatus == "measured" {
+		metrics["ttft_ms"] = run.TTFTMS
+	}
+	return benchmarkComparisonSide{
+		TaskID: task.TaskID, Scenario: task.Scenario, Status: task.Status, Backend: task.Backend,
+		ModelID: run.ModelID, StartedAt: task.StartedAt, FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS,
+		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: conditionMissing,
+		Metrics: metrics,
+	}, nil
+}
+
+// benchmarkCompareAPI 由服务端判定两个历史任务是否严格可比，并计算已测指标差值。
+func (s *Server) benchmarkCompareAPI(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		jsonError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	leftID := strings.TrimSpace(r.URL.Query().Get("left"))
+	rightID := strings.TrimSpace(r.URL.Query().Get("right"))
+	if leftID == "" || rightID == "" || leftID == rightID || len(leftID) > 64 || len(rightID) > 64 {
+		jsonError(w, http.StatusBadRequest, "invalid_request", "two distinct benchmark task IDs are required")
+		return
+	}
+	if s.benchmarkRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "benchmark task storage is unavailable")
+		return
+	}
+	left, err := s.benchmarkComparisonSide(r, leftID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "not_found", "benchmark task not found")
+		} else {
+			jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to load benchmark comparison data")
+		}
+		return
+	}
+	right, err := s.benchmarkComparisonSide(r, rightID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "not_found", "benchmark task not found")
+		} else {
+			jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to load benchmark comparison data")
+		}
+		return
+	}
+	reasons := benchmarkComparisonReasons(left, right)
+	comparable := len(reasons) == 0
+	deltas := map[string]benchmarkComparisonMetric{}
+	if comparable {
+		keys := []string{"latency_ms", "inference_latency_ms", "model_load_ms", "ttft_ms", "input_tokens", "output_tokens", "total_tokens"}
+		if left.Scenario == "tool_performance" {
+			keys = append(keys, "model_decision_ms", "tool_execution_total_ms", "model_final_generation_ms")
+		}
+		for _, key := range keys {
+			lv, rv := left.Metrics[key], right.Metrics[key]
+			entry := benchmarkComparisonMetric{Left: lv, Right: rv, Status: "unknown"}
+			if lv != nil && rv != nil {
+				delta := *rv - *lv
+				entry.RightMinusLeft = &delta
+				entry.Status = "measured"
+			}
+			deltas[key] = entry
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"comparable": comparable,
+		"reasons": reasons,
+		"left": left,
+		"right": right,
+		"deltas": deltas,
+		"delta_direction": "right_minus_left",
+	})
+}
+
 func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return

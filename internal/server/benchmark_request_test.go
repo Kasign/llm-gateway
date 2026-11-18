@@ -48,3 +48,39 @@ func TestParseBenchmarkTaskListQuery(t *testing.T) {
 		if _, err := parseBenchmarkTaskListQuery(httptest.NewRequest(http.MethodGet, target, nil)); err == nil { t.Errorf("parseBenchmarkTaskListQuery(%q) must reject invalid query", target) }
 	}
 }
+
+func TestBenchmarkComparisonReasonsRequireMatchingCompleteConditions(t *testing.T) {
+	left := benchmarkComparisonSide{Scenario: "tool_performance", Status: "completed", ConditionStatus: "complete", ConditionSHA256: "same"}
+	right := left
+	if reasons := benchmarkComparisonReasons(left, right); len(reasons) != 0 {
+		t.Fatalf("matching completed tasks should be comparable, got %v", reasons)
+	}
+	right.Scenario = "performance"
+	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "scenario_mismatch") {
+		t.Fatalf("different scenarios must not compare, got %v", reasons)
+	}
+	right = left
+	right.ConditionStatus = "partial"
+	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "condition_incomplete") {
+		t.Fatalf("partial conditions must not compare, got %v", reasons)
+	}
+	right = left
+	right.ConditionSHA256 = "different"
+	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "condition_mismatch") {
+		t.Fatalf("different condition fingerprints must not compare, got %v", reasons)
+	}
+	right = left
+	right.Status = "failed"
+	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "task_not_completed") {
+		t.Fatalf("failed tasks must not compare, got %v", reasons)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
