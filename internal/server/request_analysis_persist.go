@@ -5,6 +5,7 @@ import "context"
 
 // persistRequestAnalysis 在请求收尾阶段写入分析 JSON，失败只打日志不影响响应。
 func (s *Server) persistRequestAnalysis(ctx context.Context, requestID string, in analysisInput) {
+	in.RuntimeSnapshot = s.latestRequestRuntimeSnapshot()
 	a := buildRequestAnalysis(in)
 	s.audit.SaveRequestAnalysis(requestID, encodeRequestAnalysis(a))
 }

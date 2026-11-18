@@ -12,9 +12,23 @@ import (
 
 // RequestAnalysis 写入 request_logs.analysis_json，概括一次调用的阶段耗时与生成速度。
 type RequestAnalysis struct {
-	Phases     RequestPhaseMS    `json:"phases_ms"`
-	Throughput RequestThroughput `json:"throughput"`
-	Summary    []string          `json:"summary,omitempty"`
+	Phases           RequestPhaseMS      `json:"phases_ms"`
+	Throughput       RequestThroughput   `json:"throughput"`
+	RuntimeSnapshot  *RequestRuntimeSnapshot `json:"runtime_snapshot,omitempty"`
+	Summary          []string            `json:"summary,omitempty"`
+}
+
+type RequestRuntimeSnapshot struct {
+	Backend            string   `json:"backend,omitempty"`
+	ActiveModel        string   `json:"active_model,omitempty"`
+	LoadedModelCount   int      `json:"loaded_model_count,omitempty"`
+	LoadedRAMBytes     int64    `json:"loaded_ram_bytes,omitempty"`
+	LoadedVRAMBytes    int64    `json:"loaded_vram_bytes,omitempty"`
+	HostCPUPercent     *float64 `json:"host_cpu_percent,omitempty"`
+	Status             string   `json:"status"`
+	Source             string   `json:"source,omitempty"`
+	SampledAt          string   `json:"sampled_at,omitempty"`
+	AgeMS              int64    `json:"age_ms,omitempty"`
 }
 
 type RequestPhaseMS struct {
@@ -73,6 +87,7 @@ type analysisInput struct {
 	SpeedSource             string
 	PredictedPerSec         *float64
 	ModelTimings            *RequestModelTimings
+	RuntimeSnapshot         *RequestRuntimeSnapshot
 }
 
 type streamTimings struct {
@@ -157,7 +172,7 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	}
 
 	summary := summarizeAnalysis(ph, tp, in.Stream)
-	return RequestAnalysis{Phases: ph, Throughput: tp, Summary: summary}
+	return RequestAnalysis{Phases: ph, Throughput: tp, RuntimeSnapshot: in.RuntimeSnapshot, Summary: summary}
 }
 
 func tokensPerSec(out *int64, windowMS int64) *float64 {
