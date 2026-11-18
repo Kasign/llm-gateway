@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -348,6 +349,103 @@ func TestRequestTimelineRecordsStreamInterruptionAfterHeaders(t *testing.T) {
 	}
 	if writer.writes != 2 {
 		t.Fatalf("unexpected underlying write count: %d", writer.writes)
+	}
+}
+
+
+type timelineSmallSendBufferListener struct {
+	net.Listener
+}
+
+func (l timelineSmallSendBufferListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetWriteBuffer(4096)
+	}
+	return conn, nil
+}
+
+func TestResponseSinkRecordsRealTCPClientDisconnect(t *testing.T) {\n\tdisconnectTimelineResults := make(chan []requestTimelineEvent, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timeline := newRequestTimeline(time.Now())
+		sink := &responseSink{w: w, method: r.Method, timeline: timeline}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "67108864")
+		sink.WriteHeader(http.StatusOK)
+		if _, writeErr := sink.Write([]byte("ready")); writeErr != nil {
+			t.Errorf("initial response write failed: %v", writeErr)
+			return
+		}
+		sink.Flush()
+
+		<-r.Context().Done()
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < 64; i++ {
+			n, writeErr := sink.Write(chunk)
+			if writeErr != nil || n != len(chunk) {
+				break
+			}
+		}
+		events := timeline.snapshot()
+		disconnectTimelineResults <- events
+	})}
+	defer server.Close()
+	go func() { _ = server.Serve(timelineSmallSendBufferListener{Listener: listener}) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		conn.Close()
+		t.Fatalf("read response status: %v", err)
+	}
+	if !strings.Contains(statusLine, "200") {
+		conn.Close()
+		t.Fatalf("unexpected response status: %q", statusLine)
+	}
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			conn.Close()
+			t.Fatalf("read response headers: %v", readErr)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	if _, err := io.ReadFull(reader, make([]byte, len("ready"))); err != nil {
+		conn.Close()
+		t.Fatalf("read initial response body: %v", err)
+	}
+	_ = conn.Close()
+
+	select {
+	case events := <-disconnectTimelineResults:
+		gotFailure := false
+		for _, event := range events {
+			if event.Name == "gateway_write_failed" && event.Status == timelineStatusMeasured && event.OffsetMS != nil {
+				gotFailure = true
+			}
+		}
+		if !gotFailure {
+			t.Fatalf("real TCP disconnect did not surface as a failed ResponseWriter write: %+v", events)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for server-side TCP disconnect handling")
 	}
 }
 
