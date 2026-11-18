@@ -1,6 +1,7 @@
 package llama
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,7 +54,7 @@ func TestFetchMetricsUsesConfiguredAuthAndModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := New(srv.URL, 0, "llamacpp", "upstream-secret")
-	status, body, err := client.FetchMetrics(t.Context(), "model A", 1024)
+	status, body, err := client.FetchMetrics(context.Background(), "model A", 1024)
 	if err != nil { t.Fatal(err) }
 	if status != http.StatusOK || gotPath != "/metrics?model=model+A" || gotAuth != "Bearer upstream-secret" || string(body) != "metric 1\n" {
 		t.Fatalf("status=%d path=%q auth=%q body=%q", status, gotPath, gotAuth, body)
@@ -66,6 +67,6 @@ func TestFetchMetricsEnforcesResponseLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := New(srv.URL, 0, "llamacpp", "")
-	_, _, err := client.FetchMetrics(t.Context(), "", 4)
+	_, _, err := client.FetchMetrics(context.Background(), "", 4)
 	if err != ErrMetricsResponseTooLarge { t.Fatalf("error=%v", err) }
 }
