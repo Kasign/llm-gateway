@@ -370,7 +370,7 @@ func TestBenchmarkObserverTTFTStartsAtRunBoundary(t *testing.T) {
 func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *testing.T) {
 	snapshot := map[string]interface{}{
 		"model_identity": map[string]interface{}{"sha256": "abc123"},
-		"environment": map[string]interface{}{"vcs_revision": "deadbeef"},
+		"environment": map[string]interface{}{"vcs_revision": "deadbeef", "vcs_modified": "false"},
 		"backend_version": "1.2.3",
 		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
@@ -389,6 +389,14 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 	if err != nil || changed == first {
 		t.Fatalf("changed generation parameters retained fingerprint %q, err=%v", changed, err)
 	}
+	snapshot["max_tokens"] = 256
+	snapshot["model_key"] = "renamed-internal-alias"
+	identity := snapshot["model_identity"].(map[string]interface{})
+	identity["model_key"] = "renamed-internal-alias"
+	renamed, _, _, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || renamed != first {
+		t.Fatalf("internal model key alias changed condition fingerprint: %q != %q, err=%v", renamed, first, err)
+	}
 
 	partial := map[string]interface{}{
 		"model_identity": map[string]interface{}{"sha256": ""},
@@ -397,7 +405,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil},
 	}
 	_, status, missing, err = benchmarkConditionMetadata(partial, "prompt-hash")
-	if err != nil || status != "partial" || len(missing) != 6 {
+	if err != nil || status != "partial" || len(missing) != 7 {
 		t.Fatalf("partial condition metadata = %q/%v, err=%v", status, missing, err)
 	}
 }
@@ -422,4 +430,25 @@ func TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords(t *test
 	if hash != "" || status != "unknown" || len(missing) != 0 {
 		t.Fatalf("legacy condition metadata = %q/%q/%v", hash, status, missing)
 	}
+}
+
+
+// TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness 验证构建 revision 存在但工作区状态未知时仍不可严格比较。
+func TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness(t *testing.T) {
+	snapshot := map[string]interface{}{
+		"model_identity": map[string]interface{}{"sha256": "abc123"},
+		"environment": map[string]interface{}{"vcs_revision": "deadbeef"},
+		"backend_version": "1.2.3",
+		"model_load_state_before": "loaded",
+		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
+	}
+	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || status != "partial" {
+		t.Fatalf("unknown build cleanliness status = %q, err=%v", status, err)
+	}
+	found := false
+	for _, item := range missing {
+		if item == "gateway_build_cleanliness_unknown" { found = true }
+	}
+	if !found { t.Fatalf("missing build cleanliness marker: %v", missing) }
 }

@@ -467,8 +467,13 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	if strings.TrimSpace(revision) == "" {
 		missing = append(missing, "gateway_revision_unknown")
 	}
-	if strings.EqualFold(strings.TrimSpace(modified), "true") {
+	switch strings.ToLower(strings.TrimSpace(modified)) {
+	case "true":
 		missing = append(missing, "gateway_build_modified")
+	case "false":
+		// 已明确记录构建工作区干净。
+	default:
+		missing = append(missing, "gateway_build_cleanliness_unknown")
 	}
 	backendVersion, _ := snapshot["backend_version"].(string)
 	if strings.TrimSpace(backendVersion) == "" {
@@ -494,7 +499,23 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	if len(missing) > 0 {
 		status = "partial"
 	}
-	payload, err := json.Marshal(map[string]interface{}{"prompt_sha256": promptSHA256, "snapshot": snapshot})
+	// model_key 是网关内部可变别名，不影响模型执行条件；保留在历史配置中，但不纳入比较指纹。
+	fingerprintSnapshot := make(map[string]interface{}, len(snapshot))
+	for key, value := range snapshot {
+		if key != "model_key" {
+			fingerprintSnapshot[key] = value
+		}
+	}
+	if identity, ok := fingerprintSnapshot["model_identity"].(map[string]interface{}); ok {
+		stableIdentity := make(map[string]interface{}, len(identity))
+		for key, value := range identity {
+			if key != "model_key" {
+				stableIdentity[key] = value
+			}
+		}
+		fingerprintSnapshot["model_identity"] = stableIdentity
+	}
+	payload, err := json.Marshal(map[string]interface{}{"prompt_sha256": promptSHA256, "snapshot": fingerprintSnapshot})
 	if err != nil {
 		return "", "unknown", missing, err
 	}
