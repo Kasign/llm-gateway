@@ -267,3 +267,16 @@ func streamTimingsFromEvents(events []store.StreamEvent) streamTimings {
 	}
 	return st
 }
+
+
+// requestModelTimings 只在至少存在一个有效上游 timings 字段时生成快照。
+func requestModelTimings(promptN, predictedN *int64, promptMS, predictedMS, promptPerSecond, predictedPerSecond *float64) *RequestModelTimings {
+	if promptN == nil && predictedN == nil && promptMS == nil && predictedMS == nil &&
+		promptPerSecond == nil && predictedPerSecond == nil {
+		return nil
+	}
+	return &RequestModelTimings{
+		PromptN: promptN, PredictedN: predictedN, PromptMS: promptMS, PredictedMS: predictedMS,
+		PromptPerSecond: promptPerSecond, PredictedPerSecond: predictedPerSecond,
+	}
+}

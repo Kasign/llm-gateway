@@ -444,8 +444,9 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	var firstByteMS, upstreamHeadersMS *int64
 	var timings streamTimings
 	var inTok, outTok, totTok *int64
-	var tokenSrc string
-	var pps *float64
+	var tokenSrc, speedSrc string
+	var pps, predictedPerSecond, promptMS, predictedMS, promptPerSecond *float64
+	var promptN, predictedN *int64
 	var resp []byte
 	var respBytes int64
 	var trace *requestTrace
@@ -475,22 +476,37 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		// 最后半行可能没有换行，先拼完再取计数。
 		logutil.FlushStreamTokenCarry(&cs.tokens, &cs.tokenCarry)
 		inTok, outTok, totTok = cs.tokens.InputTokens, cs.tokens.OutputTokens, cs.tokens.TotalTokens
-		tokenSrc = cs.tokens.Source
+		tokenSrc = cs.tokens.TokenSource
+		speedSrc = cs.tokens.SpeedSource
 		pps = cs.tokens.PredictedPerSec
+		predictedPerSecond = cs.tokens.PredictedPerSecond
+		promptN, predictedN = cs.tokens.PromptN, cs.tokens.PredictedN
+		promptMS, predictedMS, promptPerSecond = cs.tokens.PromptMS, cs.tokens.PredictedMS, cs.tokens.PromptPerSecond
 		coordinatorUsageSet = cs.coordinatorUsageSet
 		cs.mu.Unlock()
 	}
 	if !st.Stream && len(resp) > 0 && !coordinatorUsageSet {
 		meta := logutil.TokensFromResponse(resp)
 		inTok, outTok, totTok = meta.InputTokens, meta.OutputTokens, meta.TotalTokens
-		tokenSrc = meta.Source
+		tokenSrc = meta.TokenSource
+		speedSrc = meta.SpeedSource
 		pps = meta.PredictedPerSec
+		predictedPerSecond = meta.PredictedPerSecond
+		promptN, predictedN = meta.PromptN, meta.PredictedN
+		promptMS, predictedMS, promptPerSecond = meta.PromptMS, meta.PredictedMS, meta.PromptPerSecond
 	} else if !st.Stream && coordinatorUsageSet && len(resp) > 0 {
 		// 多轮 usage 已由 Coordinator 汇总；最终响应仍可提供本地模型 timings，不能覆盖总 Token 数。
 		meta := logutil.TokensFromResponse(resp)
 		if pps == nil {
 			pps = meta.PredictedPerSec
 		}
+		if predictedPerSecond == nil { predictedPerSecond = meta.PredictedPerSecond }
+		if promptN == nil { promptN = meta.PromptN }
+		if predictedN == nil { predictedN = meta.PredictedN }
+		if promptMS == nil { promptMS = meta.PromptMS }
+		if predictedMS == nil { predictedMS = meta.PredictedMS }
+		if promptPerSecond == nil { promptPerSecond = meta.PromptPerSecond }
+		if speedSrc == "" { speedSrc = meta.SpeedSource }
 	} else if st.Stream && inTok == nil && outTok == nil && totTok == nil && len(resp) > 0 {
 		// 流式边收边解析可能漏掉拆包或 Responses 嵌套 usage，结束再扫一遍累计体。
 		meta := logutil.TokensFromResponse(resp)
@@ -525,7 +541,8 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		TotalMS: totalMS, PrepMS: prepMS, ModelLoadMS: loadMS, UpstreamMS: upstreamMS,
 		Stream: st.Stream, TTFTMS: ttft, StreamTiming: timings,
 		TimeToFirstByteMS: firstByteMS, TimeToUpstreamHeadersMS: upstreamHeadersMS,
-		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, PredictedPerSec: pps,
+		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, SpeedSource: speedSrc, PredictedPerSec: pps,
+		ModelTimings: requestModelTimings(promptN, predictedN, promptMS, predictedMS, promptPerSecond, predictedPerSecond),
 	})
 	if o.s.cfg.Logging.StorePayload && (len(st.Body) > 0 || len(resp) > 0) {
 		o.s.audit.SavePayload(st.ID, st.Body, resp)

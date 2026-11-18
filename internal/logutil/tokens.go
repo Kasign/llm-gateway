@@ -161,6 +161,7 @@ type TokenHarvest struct {
 	OutputTokens     *int64
 	TotalTokens      *int64
 	PredictedPerSec  *float64
+	PredictedPerSecond *float64
 	PromptN          *int64
 	PredictedN       *int64
 	PromptMS         *float64
@@ -231,9 +232,16 @@ func (h *TokenHarvest) mergeTimings(t Timings) {
 		h.TokenSource = "llama_timings"
 		h.Source = "llama_timings"
 	}
-	if pps := timingsPredictedPerSec(t); pps != nil {
-		h.PredictedPerSec = pps
-		h.SpeedSource = "llama_timings"
+	if t.PredictedPerSecondPresent {
+		v := t.PredictedPerSecond
+		h.PredictedPerSecond = &v
+		if v > 0 {
+			h.PredictedPerSec = timingsPredictedPerSec(t)
+			h.SpeedSource = "llama_timings"
+		} else {
+			h.PredictedPerSec = nil
+			h.SpeedSource = ""
+		}
 	}
 }
 
