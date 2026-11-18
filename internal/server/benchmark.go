@@ -620,6 +620,10 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]interface{}, 0, len(tasks))
 	for _, task := range tasks {
+		var latency any
+		if task.LatencyMeasured {
+			latency = task.LatencyMS
+		}
 		item := map[string]interface{}{
 			"job_id":       task.TaskID,
 			"scenario":     task.Scenario,
@@ -631,7 +635,7 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 			"run_count":    task.RunCount,
 			"started_at":   task.StartedAt,
 			"finished_at":  task.FinishedAt,
-			"latency_ms":   task.LatencyMS,
+			"latency_ms":   latency,
 			"error_code":   task.ErrorCode,
 			"created_at":   task.CreatedAt,
 			"updated_at":   task.UpdatedAt,
@@ -738,7 +742,7 @@ func (s *Server) benchmarkComparisonSide(r *http.Request, taskID string) (benchm
 		"tool_execution_total_ms": toolMetrics.ToolExecutionTotalMS,
 		"model_final_generation_ms": toolMetrics.ModelFinalGenerationMS,
 	}
-	if task.FinishedAt != nil {
+	if task.LatencyMeasured {
 		value := task.LatencyMS
 		metrics["latency_ms"] = &value
 	}

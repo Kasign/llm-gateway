@@ -26,6 +26,7 @@ type BenchmarkTask struct {
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 	LatencyMS    int64
+	LatencyMeasured bool
 	ErrorCode    string
 	ErrorMessage string
 	CreatedAt    time.Time
@@ -231,6 +232,7 @@ func (r *BenchmarkRepo) GetTask(ctx context.Context, taskID string) (*BenchmarkT
 	}
 	if latency.Valid {
 		task.LatencyMS = latency.Int64
+		task.LatencyMeasured = true
 	}
 	return &task, nil
 }
@@ -330,6 +332,7 @@ func (r *BenchmarkRepo) ListTasks(ctx context.Context, scenario, status string, 
 		}
 		if latencyValue.Valid {
 			task.LatencyMS = latencyValue.Int64
+			task.LatencyMeasured = true
 		}
 		out = append(out, task)
 	}

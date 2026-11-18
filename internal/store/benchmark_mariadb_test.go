@@ -60,7 +60,8 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", id) }()
 
 	toolID := id + "-tool"
-	toolTask := BenchmarkTask{TaskID: toolID, Scenario: "tool_performance", Status: "completed", ConfigJSON: `{"condition_status":"partial","condition_missing":["backend_version"]}`, RunCount: 1, StartedAt: now}
+	zeroFinished := now.Add(time.Second)
+	toolTask := BenchmarkTask{TaskID: toolID, Scenario: "tool_performance", Status: "completed", ConfigJSON: `{"condition_status":"partial","condition_missing":["backend_version"]}`, RunCount: 1, StartedAt: now, FinishedAt: &zeroFinished, LatencyMS: 0}
 	toolRun := BenchmarkRun{RunID: toolID, TaskID: toolID, RunNo: 1, RequestID: toolID, Status: "completed", StartedAt: now}
 	if err := repo.CreateTaskAndRun(ctx, toolTask, toolRun); err != nil {
 		t.Fatalf("create tool task/run: %v", err)
@@ -69,6 +70,11 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	listed, total, err := repo.ListTasks(ctx, "tool_performance", "completed", 10, 0)
 	if err != nil || total < 1 || len(listed) == 0 || !containsBenchmarkTask(listed, toolID) {
 		t.Fatalf("filtered task list = %+v, total=%d, err=%v", listed, total, err)
+	}
+	for _, listedTask := range listed {
+		if listedTask.TaskID == toolID && (!listedTask.LatencyMeasured || listedTask.LatencyMS != 0) {
+			t.Fatalf("zero latency must remain a measured value: %+v", listedTask)
+		}
 	}
 	page, pageTotal, err := repo.ListTasks(ctx, "", "", 1, 1)
 	if err != nil || pageTotal < 2 || len(page) != 1 {
