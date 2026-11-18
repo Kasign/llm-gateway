@@ -2864,8 +2864,10 @@ components:
     RequestAnalysis:
       type: object
       description: 从请求阶段日志或流式事件计算出的分析数据。
-      required: [phases_ms, throughput]
       properties:
+        timeline_only:
+          type: boolean
+          description: true 表示该请求未进入分析阶段，仅持久化时间线；此时 phases_ms 与 throughput 不提供。
         phases_ms:
           $ref: "#/components/schemas/RequestPhaseMS"
         throughput:
