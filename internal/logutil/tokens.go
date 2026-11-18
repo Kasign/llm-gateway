@@ -4,33 +4,82 @@ package logutil
 import (
 	"encoding/json"
 	"math"
+	"strconv"
 	"strings"
 )
 
 // Timings 为 llama.cpp chat/completions 响应中的 timings 对象。
+// Present 字段用于区分合法的 0 与字段缺失；它们不参与 JSON 序列化。
 type Timings struct {
-	PromptN            int64   `json:"prompt_n"`
-	PredictedN         int64   `json:"predicted_n"`
-	PredictedPerSecond float64 `json:"predicted_per_second"`
-	PromptMS           float64 `json:"prompt_ms"`
-	PredictedMS        float64 `json:"predicted_ms"`
-	PromptPerSecond    float64 `json:"prompt_per_second"`
+	PromptN                  int64   `json:"prompt_n"`
+	PredictedN               int64   `json:"predicted_n"`
+	PredictedPerSecond       float64 `json:"predicted_per_second"`
+	PromptMS                 float64 `json:"prompt_ms"`
+	PredictedMS              float64 `json:"predicted_ms"`
+	PromptPerSecond          float64 `json:"prompt_per_second"`
+	PromptNPresent           bool    `json:"-"`
+	PredictedNPresent        bool    `json:"-"`
+	PromptMSPresent          bool    `json:"-"`
+	PredictedMSPresent       bool    `json:"-"`
+	PromptPerSecondPresent   bool    `json:"-"`
+	PredictedPerSecondPresent bool   `json:"-"`
 }
 
 func parseTimingsJSON(raw string) (Timings, bool) {
 	if raw == "" || raw == "[DONE]" {
 		return Timings{}, false
 	}
-	var v struct {
-		Timings *Timings `json:"timings"`
+	var envelope struct {
+		Timings json.RawMessage `json:"timings"`
 	}
-	if json.Unmarshal([]byte(raw), &v) != nil || v.Timings == nil {
+	if json.Unmarshal([]byte(raw), &envelope) != nil || len(envelope.Timings) == 0 || string(envelope.Timings) == "null" {
 		return Timings{}, false
 	}
-	if v.Timings.PromptN == 0 && v.Timings.PredictedN == 0 && v.Timings.PredictedPerSecond == 0 {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(envelope.Timings, &fields) != nil || fields == nil {
 		return Timings{}, false
 	}
-	return *v.Timings, true
+
+	var t Timings
+	t.PromptN, t.PromptNPresent = parseTimingsInt(fields["prompt_n"])
+	t.PredictedN, t.PredictedNPresent = parseTimingsInt(fields["predicted_n"])
+	t.PromptMS, t.PromptMSPresent = parseTimingsFloat(fields["prompt_ms"])
+	t.PredictedMS, t.PredictedMSPresent = parseTimingsFloat(fields["predicted_ms"])
+	t.PromptPerSecond, t.PromptPerSecondPresent = parseTimingsFloat(fields["prompt_per_second"])
+	t.PredictedPerSecond, t.PredictedPerSecondPresent = parseTimingsFloat(fields["predicted_per_second"])
+	valid := t.PromptNPresent || t.PredictedNPresent || t.PromptMSPresent || t.PredictedMSPresent ||
+		t.PromptPerSecondPresent || t.PredictedPerSecondPresent
+	return t, valid
+}
+
+func parseTimingsInt(raw json.RawMessage) (int64, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var n json.Number
+	if json.Unmarshal(raw, &n) != nil {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(n.String(), 10, 64)
+	if err != nil || v < 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+func parseTimingsFloat(raw json.RawMessage) (float64, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var n json.Number
+	if json.Unmarshal(raw, &n) != nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(n.String(), 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, false
+	}
+	return v, true
 }
 
 // ParseTimingsChunk 扫描一块 SSE 文本中的 data 行，解析 llama.cpp timings（末包常见）。
@@ -70,7 +119,7 @@ func TimingsTokenCounts(t Timings) (in, out, total int64) {
 }
 
 func timingsPredictedPerSec(t Timings) *float64 {
-	if t.PredictedPerSecond <= 0 {
+	if !t.PredictedPerSecondPresent || t.PredictedPerSecond <= 0 {
 		return nil
 	}
 	v := math.Round(t.PredictedPerSecond*100) / 100
@@ -79,26 +128,50 @@ func timingsPredictedPerSec(t Timings) *float64 {
 
 // ParseTimingsBody 解析非流式 JSON body 顶层的 timings。
 func ParseTimingsBody(body []byte) (*int64, *int64, *int64, *float64) {
-	var v struct {
-		Timings *Timings `json:"timings"`
-	}
-	if json.Unmarshal(body, &v) != nil || v.Timings == nil {
+	t, ok := parseTimingsJSON(string(body))
+	if !ok {
 		return nil, nil, nil, nil
 	}
-	in, out, total := TimingsTokenCounts(*v.Timings)
-	return &in, &out, &total, timingsPredictedPerSec(*v.Timings)
+	var in, out, total *int64
+	if t.PromptNPresent {
+		v := t.PromptN
+		in = &v
+	}
+	if t.PredictedNPresent {
+		v := t.PredictedN
+		out = &v
+	}
+	if in != nil || out != nil {
+		v := int64(0)
+		if in != nil {
+			v += *in
+		}
+		if out != nil {
+			v += *out
+		}
+		total = &v
+	}
+	return in, out, total, timingsPredictedPerSec(t)
 }
 
-// TokenHarvest 汇总一次响应中的 token 与 llama decode 速度（usage 优先于 timings）。
+// TokenHarvest 同时保留 Token 计数来源、速度来源和 llama.cpp 原始 timings。
+// Source 为兼容旧调用方保留，后续展示应优先使用 TokenSource / SpeedSource。
 type TokenHarvest struct {
-	InputTokens     *int64
-	OutputTokens    *int64
-	TotalTokens     *int64
-	PredictedPerSec *float64
-	Source          string // "usage" | "llama_timings"
+	InputTokens      *int64
+	OutputTokens     *int64
+	TotalTokens      *int64
+	PredictedPerSec  *float64
+	PromptN          *int64
+	PredictedN       *int64
+	PromptMS         *float64
+	PredictedMS      *float64
+	PromptPerSecond  *float64
+	TokenSource      string
+	SpeedSource      string
+	Source           string // 兼容旧值："usage" | "llama_timings"
 }
 
-// Empty 表示还没有从 usage 或 timings 读到任何计数。
+// Empty 表示还没有从 usage 或 timings 读到任何 Token 计数。
 func (h TokenHarvest) Empty() bool {
 	return h.InputTokens == nil && h.OutputTokens == nil && h.TotalTokens == nil
 }
@@ -119,28 +192,48 @@ func (h *TokenHarvest) mergeUsage(in, out, total int64) {
 		v := *h.InputTokens + *h.OutputTokens
 		h.TotalTokens = &v
 	}
+	h.TokenSource = "upstream_usage"
 	h.Source = "usage"
 }
 
 func (h *TokenHarvest) mergeTimings(t Timings) {
-	in, out, total := TimingsTokenCounts(t)
-	if h.InputTokens == nil && in > 0 {
-		v := in
-		h.InputTokens = &v
+	if t.PromptNPresent {
+		v := t.PromptN
+		h.PromptN = &v
+		if h.InputTokens == nil && h.TokenSource != "upstream_usage" {
+			h.InputTokens = &v
+		}
 	}
-	if h.OutputTokens == nil && out > 0 {
-		v := out
-		h.OutputTokens = &v
+	if t.PredictedNPresent {
+		v := t.PredictedN
+		h.PredictedN = &v
+		if h.OutputTokens == nil && h.TokenSource != "upstream_usage" {
+			h.OutputTokens = &v
+		}
 	}
-	if h.TotalTokens == nil && total > 0 {
-		v := total
-		h.TotalTokens = &v
+	if t.PromptMSPresent {
+		v := t.PromptMS
+		h.PromptMS = &v
 	}
-	if h.Source != "usage" && (in > 0 || out > 0) {
+	if t.PredictedMSPresent {
+		v := t.PredictedMS
+		h.PredictedMS = &v
+	}
+	if t.PromptPerSecondPresent {
+		v := t.PromptPerSecond
+		h.PromptPerSecond = &v
+	}
+	if h.TokenSource != "upstream_usage" && (t.PromptNPresent || t.PredictedNPresent) {
+		if h.PromptN != nil && h.PredictedN != nil {
+			v := *h.PromptN + *h.PredictedN
+			h.TotalTokens = &v
+		}
+		h.TokenSource = "llama_timings"
 		h.Source = "llama_timings"
 	}
 	if pps := timingsPredictedPerSec(t); pps != nil {
 		h.PredictedPerSec = pps
+		h.SpeedSource = "llama_timings"
 	}
 }
 
@@ -187,7 +280,7 @@ func FlushStreamTokenCarry(h *TokenHarvest, carry *string) {
 	applyStreamDataTokens(h, raw)
 }
 
-// TokensFromResponse 扫描完整响应（SSE 或 JSON）得到 token 统计。
+// TokensFromResponse 扫描完整响应（SSE 或 JSON）得到 Token 统计与 timings。
 func TokensFromResponse(body []byte) TokenHarvest {
 	var h TokenHarvest
 	if len(body) == 0 {
@@ -203,7 +296,7 @@ func TokensFromResponse(body []byte) TokenHarvest {
 	}
 	in, out, total := ParseUsageBody(body)
 	if in != nil || out != nil || total != nil {
-		var i, o, t int64
+		var i, o, n int64
 		if in != nil {
 			i = *in
 		}
@@ -211,18 +304,12 @@ func TokensFromResponse(body []byte) TokenHarvest {
 			o = *out
 		}
 		if total != nil {
-			t = *total
+			n = *total
 		}
-		h.mergeUsage(i, o, t)
-		return h
+		h.mergeUsage(i, o, n)
 	}
-	in2, out2, total2, pps := ParseTimingsBody(body)
-	if in2 != nil || out2 != nil {
-		h.InputTokens = in2
-		h.OutputTokens = out2
-		h.TotalTokens = total2
-		h.PredictedPerSec = pps
-		h.Source = "llama_timings"
+	if t, ok := parseTimingsJSON(string(body)); ok {
+		h.mergeTimings(t)
 	}
 	return h
 }
