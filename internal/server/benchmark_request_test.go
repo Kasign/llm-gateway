@@ -56,7 +56,7 @@ func TestBenchmarkComparisonReasonsRequireMatchingCompleteConditions(t *testing.
 		t.Fatalf("matching completed tasks should be comparable, got %v", reasons)
 	}
 	right.Scenario = "performance"
-	if reasons := benchmarkComparisonReasons(left, right); !containsString(reasons, "scenario_mismatch") {
+	if reasons := benchmarkComparisonReasons(left, right); !containsBenchmarkComparisonReason(reasons, "scenario_mismatch") {
 		t.Fatalf("different scenarios must not compare, got %v", reasons)
 	}
 	right = left
@@ -76,7 +76,7 @@ func TestBenchmarkComparisonReasonsRequireMatchingCompleteConditions(t *testing.
 	}
 }
 
-func containsString(values []string, target string) bool {
+func containsBenchmarkComparisonReason(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
 			return true

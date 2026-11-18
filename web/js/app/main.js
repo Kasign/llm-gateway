@@ -1834,6 +1834,8 @@ async function openBenchmarkComparison(){
     let body='<h3 style="margin:0 0 8px;font-size:14px">'+(result.comparable?'严格可比':'不可严格比较')+'</h3>';
     if(!result.comparable){
       body+='<ul class="req-hints">'+(result.reasons||[]).map(reason=>'<li>'+esc(reasonLabels[reason]||reason)+'</li>').join('')+'</ul>';
+      const missing=[...(result.left?.condition_missing||[]),...(result.right?.condition_missing||[])];
+      if(missing.length)body+='<p class="req-note">条件缺失维度：'+esc([...new Set(missing)].join('、'))+'</p>';
     }else{
       const labels={
         latency_ms:'任务总耗时',inference_latency_ms:'Pipeline 耗时',model_load_ms:'模型加载/就绪',
