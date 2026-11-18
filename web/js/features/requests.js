@@ -450,8 +450,8 @@ function detailSections(j) {
         ['采样年龄', runtime.age_ms != null ? runtime.age_ms + ' ms' : null],
         ['快照来源', runtime.source || null],
       ];
-      block += `<h4>请求附近的运行时快照</h4>${reqKv(runtimeRows)}`;
-      block += '<p class="req-note">运行时数据来自后台采样，不代表请求瞬时值；状态和采样年龄用于判断数据是否可用。</p>';
+      block += `<h4>请求结束时最近的运行时快照</h4>${reqKv(runtimeRows)}`;
+      block += '<p class="req-note">运行时数据来自后台低频采样，取请求结束时最近的一份快照；它不保证采样发生在本次请求执行区间内，也不代表请求瞬时硬件状态。状态和采样年龄用于判断数据是否可用。</p>';
     }
     if (j.analysis_note) block += `<p class="req-note">${esc(j.analysis_note)}</p>`;
     if (tp.note) block += `<p class="req-note">${esc(tp.note)}</p>`;

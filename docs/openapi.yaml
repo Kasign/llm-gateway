@@ -2878,7 +2878,7 @@ components:
       additionalProperties: false
     RequestRuntimeSnapshot:
       type: object
-      description: 请求关联的最近本地运行时快照；不是请求瞬时硬件状态，必须结合 sampled_at 与 age_ms 判断新鲜度。
+      description: 请求分析收尾时最近的一份本地运行时快照；采样不保证落在本次请求执行区间内，也不是请求瞬时硬件状态，必须结合 sampled_at 与 age_ms 判断新鲜度。
       required: [status]
       properties:
         backend: { type: string }
