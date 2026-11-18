@@ -1896,15 +1896,49 @@ async function openBenchmarkComparison(){
   }
 }
 
+function renderBenchmarkHistoryDetail(wrap){
+  const box=$('benchHistoryDetail');
+  if(!box)return;
+  const job=benchJobPayload(wrap);
+  const {content,reasoning}=benchTextsFromJob(job);
+  const metrics=[
+    ['状态',statusLabel(job.status)],
+    ['场景',job.scenario==='tool_performance'?'工具调用性能':'普通性能'],
+    ['模型',job.model_id||job.model_key||job.backend||'—'],
+    ['总耗时',job.latency_ms!=null?job.latency_ms+' ms':'未知'],
+    ['TTFT',job.ttft_ms!=null?job.ttft_ms+' ms':'未知'],
+    ['输入 Token',job.input_tokens??'未知'],
+    ['输出 Token',job.output_tokens??'未知'],
+    ['输出速度',wrap.analysis?.throughput?.output_tokens_per_sec!=null?wrap.analysis.throughput.output_tokens_per_sec.toFixed(2)+' tok/s':'未知'],
+    ['开始时间',job.started_at?fmtDate(job.started_at):'—'],
+    ['结束时间',job.finished_at?fmtDate(job.finished_at):'—'],
+  ];
+  let html='<div class="card-head"><div><h3>Benchmark 任务详情</h3><p class="small muted">任务 ID：<code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
+  html+='<dl class="bench-history-detail-grid">'+metrics.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>';
+  html+=renderBenchCondition(job);
+  if(wrap.analysis?.phases_ms){
+    const phases=wrap.analysis.phases_ms;
+    html+='<h4>阶段耗时</h4><dl class="bench-history-detail-grid">'+Object.entries(phases).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v==null?'未知':String(v)+' ms')+'</dd>').join('')+'</dl>';
+  }
+  if(content)html+='<h4>正文 content</h4><pre class="bench-out">'+esc(content)+'</pre>';
+  if(reasoning)html+='<h4>思考 reasoning</h4><pre class="bench-out">'+esc(reasoning)+'</pre>';
+  if(job.error)html+='<p class="msg err">'+esc(job.error)+'</p>';
+  if(Array.isArray(wrap.tool_call_events)&&wrap.tool_call_events.length){
+    html+='<h4>工具事件（脱敏摘要）</h4>'+wrapTable('<tr><th>#</th><th>工具</th><th>状态</th><th>耗时</th><th>错误码</th></tr>'+wrap.tool_call_events.map(event=>'<tr><td>'+esc(String(event.seq??''))+'</td><td>'+esc(event.tool_name||'—')+'</td><td>'+esc(event.status||'—')+'</td><td>'+esc(String(event.duration_ms??'—'))+' ms</td><td>'+esc(event.error_code||'—')+'</td></tr>').join(''));
+  }
+  box.innerHTML=html;
+  box.hidden=false;
+  box.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
 async function openBenchmarkHistory(jobId){
   if(!jobId)return;
+  const box=$('benchHistoryDetail');
+  if(box){box.hidden=false;box.innerHTML='<p class="muted">正在加载任务详情…</p>';}
   try{
     const result=await api('/api/benchmark/'+encodeURIComponent(jobId));
-    renderBenchResult(result);
-    $('benchAnswer')?.scrollIntoView({block:'nearest',behavior:'smooth'});
+    renderBenchmarkHistoryDetail(result);
   }catch(error){
-    const answer=$('benchAnswer');
-    if(answer){answer.className='bench-answer err';answer.textContent=error.message||'历史任务详情加载失败';}
+    if(box){box.hidden=false;box.innerHTML='<div class="msg err">'+esc(error.message||'历史任务详情加载失败')+'</div>';}
   }
 }
 
@@ -2299,6 +2333,9 @@ $('benchHistoryNext')?.addEventListener('click',()=>{benchHistoryOffset+=BENCH_H
 $('benchHistoryList')?.addEventListener('click',event=>{
   const button=event.target.closest('[data-bench-history-id]');
   if(button)openBenchmarkHistory(button.dataset.benchHistoryId);
+});
+$('benchHistoryDetail')?.addEventListener('click',event=>{
+  if(event.target.closest('[data-bench-history-detail-close]'))$('benchHistoryDetail').hidden=true;
 });
 
 exposeGlobals({
