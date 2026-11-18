@@ -241,3 +241,30 @@ func TestRequestTimelineRecordsPipelineFinishOnFailureAndCancellation(t *testing
 		})
 	}
 }
+
+
+func TestResponseBodyWriteMissingStatusUsesHTTPBodySemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		status int
+		want   string
+	}{
+		{name: "normal_response_header_committed_but_write_failed", method: http.MethodPost, status: http.StatusOK, want: timelineStatusNotReached},
+		{name: "head_response", method: http.MethodHead, status: http.StatusMethodNotAllowed, want: timelineStatusNotApplicable},
+		{name: "no_content", method: http.MethodPost, status: http.StatusNoContent, want: timelineStatusNotApplicable},
+		{name: "reset_content", method: http.MethodPost, status: http.StatusResetContent, want: timelineStatusNotApplicable},
+		{name: "not_modified", method: http.MethodPost, status: http.StatusNotModified, want: timelineStatusNotApplicable},
+		{name: "informational", method: http.MethodPost, status: http.StatusContinue, want: timelineStatusNotApplicable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := timelineStatusNotReached
+			if responseBodyNotApplicable(tc.method, tc.status) {
+				got = timelineStatusNotApplicable
+			}
+			if got != tc.want {
+				t.Fatalf("missing response body write status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

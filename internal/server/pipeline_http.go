@@ -61,6 +61,18 @@ func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code
 	jsonError(w, status, code, message)
 }
 
+// responseBodyNotApplicable 只把协议明确禁止/省略响应体的场景标记为不适用。
+ // 已提交响应头不代表 body 写回成功；普通响应未成功写入时必须标记 not_reached。
+func responseBodyNotApplicable(method string, status int) bool {
+	if method == http.MethodHead {
+		return true
+	}
+	return status >= 100 && status < 200 ||
+		status == http.StatusNoContent ||
+		status == http.StatusResetContent ||
+		status == http.StatusNotModified
+}
+
 // serveInference 是 /v1 推理的门外：鉴权、限流、读 body，然后进入固化的 Run。
 // 鉴权和限流不属于主流程，放在读 body 之前，非法请求不消耗内存也不进 Run。
 // 门外拒绝的请求仍写一条请求日志（rejectInference），方便在调用记录里排查。
@@ -98,13 +110,12 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if sink != nil && !timeline.has("gateway_first_write") {
-			if sink.HeaderWritten() {
-				timeline.markIfMissing("gateway_first_write", timelineStatusNotApplicable)
-				timeline.markIfMissing("gateway_last_write", timelineStatusNotApplicable)
-			} else {
-				timeline.markIfMissing("gateway_first_write", timelineStatusNotReached)
-				timeline.markIfMissing("gateway_last_write", timelineStatusNotReached)
+			status := timelineStatusNotReached
+			if responseBodyNotApplicable(r.Method, sink.StatusCode()) {
+				status = timelineStatusNotApplicable
 			}
+			timeline.markIfMissing("gateway_first_write", status)
+			timeline.markIfMissing("gateway_last_write", status)
 		}
 		for _, name := range []string{
 			"auth_started", "auth_finished",
