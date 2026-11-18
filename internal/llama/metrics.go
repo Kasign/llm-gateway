@@ -32,23 +32,31 @@ const (
 
 // MetricSample 保留上游原始名称、类型、帮助文本、标签和值，不猜测未知指标语义。
 type MetricSample struct {
-	Name      string            `json:"name"`
-	Type      MetricType        `json:"type"`
-	Help      string            `json:"help,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	Value     string            `json:"value"`
-	Timestamp *int64            `json:"timestamp_ms,omitempty"`
+	Name        string            `json:"name"`
+	Type        MetricType        `json:"type"`
+	Help        string            `json:"help,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Value       string            `json:"value"`
+	Timestamp   *int64            `json:"timestamp_ms,omitempty"`
+	DeltaStatus string            `json:"delta_status,omitempty"`
+	DeltaReason string            `json:"delta_reason,omitempty"`
+	DeltaValue  string            `json:"delta_value,omitempty"`
+	WindowStart string            `json:"window_start,omitempty"`
+	WindowEnd   string            `json:"window_end,omitempty"`
+	WindowMS    int64             `json:"window_ms,omitempty"`
 }
 
 type MetricsSnapshot struct {
-	SampledAt time.Time      `json:"sampled_at"`
-	Samples   []MetricSample `json:"samples"`
+	SampledAt            time.Time      `json:"sampled_at"`
+	ProcessStartTimeUnix *int64         `json:"process_start_time_unix,omitempty"`
+	ModelScope           string         `json:"model_scope,omitempty"`
+	Samples              []MetricSample `json:"samples"`
 }
 
 // FetchMetrics 读取 /metrics。调用方必须设置独立短超时；响应体有硬上限。
-func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int64) (int, []byte, error) {
+func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int64) (int, []byte, *int64, error) {
 	if c == nil || c.IsOllama() {
-		return 0, nil, errors.New("llama.cpp metrics is unavailable for this backend")
+		return 0, nil, nil, errors.New("llama.cpp metrics is unavailable for this backend")
 	}
 	if maxBytes <= 0 {
 		maxBytes = DefaultMetricsResponseLimit
@@ -57,7 +65,7 @@ func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int6
 	if modelID = strings.TrimSpace(modelID); modelID != "" {
 		path += "?model=" + url.QueryEscape(modelID)
 	}
-	return c.getBounded(ctx, path, maxBytes)
+	return c.getBoundedWithProcessStart(ctx, path, maxBytes)
 }
 
 // FetchSlots 读取 /slots，但调用方不得将其加入默认轮询，除非已验证目标版本的 idle-sleep 行为。
@@ -72,24 +80,38 @@ func (c *Client) FetchSlots(ctx context.Context, maxBytes int64) (int, []byte, e
 }
 
 func (c *Client) getBounded(ctx context.Context, path string, maxBytes int64) (int, []byte, error) {
+	status, body, _, err := c.getBoundedWithProcessStart(ctx, path, maxBytes)
+	return status, body, err
+}
+
+func (c *Client) getBoundedWithProcessStart(ctx context.Context, path string, maxBytes int64) (int, []byte, *int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	c.setAuth(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
+	processStart := parseProcessStartTimeUnix(resp.Header.Get("Process-Start-Time-Unix"))
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, processStart, err
 	}
 	if int64(len(body)) > maxBytes {
-		return resp.StatusCode, nil, ErrMetricsResponseTooLarge
+		return resp.StatusCode, nil, processStart, ErrMetricsResponseTooLarge
 	}
-	return resp.StatusCode, body, nil
+	return resp.StatusCode, body, processStart, nil
+}
+
+func parseProcessStartTimeUnix(raw string) *int64 {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value <= 0 {
+		return nil
+	}
+	return &value
 }
 
 // ParsePrometheusMetrics 动态解析 Prometheus text exposition format。

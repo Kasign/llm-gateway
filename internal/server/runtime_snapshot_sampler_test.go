@@ -15,6 +15,7 @@ func TestSampleLlamaMetricsStoresDynamicSnapshot(t *testing.T) {
 		if r.URL.Path != "/metrics" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
+		w.Header().Set("Process-Start-Time-Unix", "1700000000")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("# TYPE runtime_new_metric gauge\nruntime_new_metric 0.5\n"))
 	}))
@@ -22,13 +23,16 @@ func TestSampleLlamaMetricsStoresDynamicSnapshot(t *testing.T) {
 
 	s := &Server{}
 	client := llama.New(srv.URL, 0, "llamacpp", "")
-	s.sampleLlamaMetrics(context.Background(), client, "")
+	s.sampleLlamaMetrics(context.Background(), client, "model-a")
 	got := s.runtimeSnapshotSampleLatest()
 	if got == nil || got.MetricsStatus != "complete" || got.Metrics == nil || len(got.Metrics.Samples) != 1 {
 		t.Fatalf("unexpected metrics sample: %#v", got)
 	}
 	if got.Metrics.Samples[0].Name != "runtime_new_metric" || got.Metrics.Samples[0].Type != llama.MetricTypeGauge {
 		t.Fatalf("unexpected metric: %#v", got.Metrics.Samples[0])
+	}
+	if got.Metrics.ProcessStartTimeUnix == nil || *got.Metrics.ProcessStartTimeUnix != 1700000000 || got.Metrics.ModelScope != "model-a" {
+		t.Fatalf("process identity or model scope was not retained: %#v", got.Metrics)
 	}
 }
 
@@ -88,6 +92,21 @@ func TestRuntimeSnapshotSampleLatestReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestSetRuntimeSnapshotSamplePreservesPreviousMetricsForDelta(t *testing.T) {
+	s := &Server{}
+	processStart := int64(1700000000)
+	s.setRuntimeMetricsSample(&llama.MetricsSnapshot{
+		ProcessStartTimeUnix: &processStart,
+		ModelScope: "model-a",
+		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "10"}},
+	}, "complete", "")
+	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
+	got := s.runtimeSnapshotSampleLatest()
+	if got.Metrics == nil || got.Metrics.ProcessStartTimeUnix == nil || *got.Metrics.ProcessStartTimeUnix != processStart {
+		t.Fatalf("runtime snapshot update must preserve the previous metrics sample: %#v", got)
+	}
+}
+
 func TestRuntimeSnapshotSampleUnavailable(t *testing.T) {
 	s := &Server{}
 	s.setRuntimeSnapshotSample(nil, "unavailable", "upstream_runtime")
@@ -130,7 +149,7 @@ func TestRuntimeMetricsOverviewMarksOldSamplesStale(t *testing.T) {
 
 func TestSampleLlamaMetricsMapsRouterModelRequirement(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/metrics" || r.URL.Query().Get("model") != "missing-model" {
+		if r.URL.Path != "/metrics" || r.URL.Query().Get("model") != "" {
 			t.Errorf("unexpected request: %s", r.URL.RequestURI())
 		}
 		http.Error(w, "model name is missing from the request", http.StatusBadRequest)
@@ -139,10 +158,72 @@ func TestSampleLlamaMetricsMapsRouterModelRequirement(t *testing.T) {
 
 	s := &Server{}
 	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
-	s.sampleLlamaMetrics(context.Background(), llama.New(srv.URL, 0, "llamacpp", ""), "missing-model")
+	s.sampleLlamaMetrics(context.Background(), llama.New(srv.URL, 0, "llamacpp", ""), "")
 	got := s.runtimeSnapshotSampleLatest()
-	if got.Status != "complete" || got.MetricsStatus != "needs_model" || got.MetricsError != "router_model_required_or_invalid" {
+	if got.Status != "complete" || got.MetricsStatus != "needs_model" || got.MetricsError != "router_model_required" {
 		t.Fatalf("unexpected metrics capability state: %#v", got)
+	}
+}
+
+func TestSampleLlamaMetricsDoesNotMapInvalidModelToNeedsModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid model name", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	s := &Server{}
+	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
+	s.sampleLlamaMetrics(context.Background(), llama.New(srv.URL, 0, "llamacpp", ""), "bad-model")
+	got := s.runtimeSnapshotSampleLatest()
+	if got.MetricsStatus != "invalid_response" || got.MetricsError != "upstream_bad_request" {
+		t.Fatalf("invalid model must not be reported as missing model: %#v", got)
+	}
+}
+
+func TestApplyCounterDeltasRequiresComparableProcessAndScope(t *testing.T) {
+	start := time.Now().Add(-5 * time.Second).UTC()
+	end := time.Now().UTC()
+	processA, processB := int64(1700000000), int64(1700000100)
+	previous := &llama.MetricsSnapshot{
+		SampledAt: start, ProcessStartTimeUnix: &processA, ModelScope: "model-a",
+		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "100", Labels: map[string]string{"route": "/v1"}}},
+	}
+	makeCurrent := func(value string, process *int64, scope string) *llama.MetricsSnapshot {
+		return &llama.MetricsSnapshot{
+			SampledAt: end, ProcessStartTimeUnix: process, ModelScope: scope,
+			Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: value, Labels: map[string]string{"route": "/v1"}}},
+		}
+	}
+
+	current := makeCurrent("135", &processA, "model-a")
+	applyCounterDeltas(current, previous, "http://llama", "http://llama")
+	got := current.Samples[0]
+	if got.DeltaStatus != "comparable" || got.DeltaValue != "35" || got.WindowMS <= 0 || got.WindowStart == "" || got.WindowEnd == "" {
+		t.Fatalf("expected comparable counter window: %#v", got)
+	}
+
+	restarted := makeCurrent("140", &processB, "model-a")
+	applyCounterDeltas(restarted, previous, "http://llama", "http://llama")
+	if restarted.Samples[0].DeltaReason != "process_restarted" {
+		t.Fatalf("process identity change must invalidate delta: %#v", restarted.Samples[0])
+	}
+
+	unknownIdentity := makeCurrent("140", nil, "model-a")
+	applyCounterDeltas(unknownIdentity, previous, "http://llama", "http://llama")
+	if unknownIdentity.Samples[0].DeltaReason != "process_identity_unavailable" {
+		t.Fatalf("missing process identity must invalidate delta: %#v", unknownIdentity.Samples[0])
+	}
+
+	reset := makeCurrent("90", &processA, "model-a")
+	applyCounterDeltas(reset, previous, "http://llama", "http://llama")
+	if reset.Samples[0].DeltaReason != "counter_reset" {
+		t.Fatalf("counter reset must invalidate delta: %#v", reset.Samples[0])
+	}
+
+	scopeChanged := makeCurrent("140", &processA, "model-b")
+	applyCounterDeltas(scopeChanged, previous, "http://llama", "http://llama")
+	if scopeChanged.Samples[0].DeltaReason != "model_scope_changed" {
+		t.Fatalf("model scope change must invalidate delta: %#v", scopeChanged.Samples[0])
 	}
 }
 

@@ -49,15 +49,27 @@ func TestFetchMetricsUsesConfiguredAuthAndModel(t *testing.T) {
 	var gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotAuth = r.URL.RequestURI(), r.Header.Get("Authorization")
+		w.Header().Set("Process-Start-Time-Unix", "1700000000")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("metric 1\n"))
 	}))
 	defer srv.Close()
 	client := New(srv.URL, 0, "llamacpp", "upstream-secret")
-	status, body, err := client.FetchMetrics(context.Background(), "model A", 1024)
+	status, body, processStart, err := client.FetchMetrics(context.Background(), "model A", 1024)
 	if err != nil { t.Fatal(err) }
 	if status != http.StatusOK || gotPath != "/metrics?model=model+A" || gotAuth != "Bearer upstream-secret" || string(body) != "metric 1\n" {
 		t.Fatalf("status=%d path=%q auth=%q body=%q", status, gotPath, gotAuth, body)
+	}
+	if processStart == nil || *processStart != 1700000000 {
+		t.Fatalf("process start time header was not captured: %v", processStart)
+	}
+}
+
+func TestParseProcessStartTimeUnixRejectsMissingOrInvalidHeader(t *testing.T) {
+	for _, raw := range []string{"", "unknown", "0", "-1"} {
+		if got := parseProcessStartTimeUnix(raw); got != nil {
+			t.Fatalf("header %q should not produce a process identity: %v", raw, *got)
+		}
 	}
 }
 
@@ -67,7 +79,7 @@ func TestFetchMetricsEnforcesResponseLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := New(srv.URL, 0, "llamacpp", "")
-	_, _, err := client.FetchMetrics(context.Background(), "", 4)
+	_, _, _, err := client.FetchMetrics(context.Background(), "", 4)
 	if err != ErrMetricsResponseTooLarge { t.Fatalf("error=%v", err) }
 }
 

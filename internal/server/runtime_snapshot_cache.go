@@ -3,7 +3,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+		"math/big"
 	"strings"
 	"time"
 
@@ -136,7 +138,7 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 	defer cancel()
 
 	sampledAt := time.Now().UTC()
-	statusCode, body, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
+	statusCode, body, processStartTimeUnix, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
 	if err != nil {
 		status := "unavailable"
 		code := "request_failed"
@@ -156,7 +158,15 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 		case 501:
 			s.setRuntimeMetricsSampleForTarget(nil, "unsupported", "endpoint_disabled_or_unsupported", client.BaseURL())
 		case 400:
-			s.setRuntimeMetricsSampleForTarget(nil, "needs_model", "router_model_required_or_invalid", client.BaseURL())
+			message := strings.ToLower(strings.TrimSpace(string(body)))
+			missingModel := strings.TrimSpace(modelID) == "" &&
+				strings.Contains(message, "model") &&
+				(strings.Contains(message, "missing") || strings.Contains(message, "required"))
+			if missingModel {
+				s.setRuntimeMetricsSampleForTarget(nil, "needs_model", "router_model_required", client.BaseURL())
+			} else {
+				s.setRuntimeMetricsSampleForTarget(nil, "invalid_response", "upstream_bad_request", client.BaseURL())
+			}
 		case 401, 403:
 			s.setRuntimeMetricsSampleForTarget(nil, "unavailable", "upstream_auth_failed", client.BaseURL())
 		default:
@@ -169,6 +179,8 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 		s.setRuntimeMetricsSampleForTarget(nil, "invalid_response", "metrics_parse_failed", client.BaseURL())
 		return
 	}
+	snapshot.ProcessStartTimeUnix = processStartTimeUnix
+	snapshot.ModelScope = strings.TrimSpace(modelID)
 	s.setRuntimeMetricsSampleForTarget(snapshot, "complete", "", client.BaseURL())
 }
 
@@ -182,7 +194,17 @@ func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, s
 		v.Catalog = append([]llama.CatalogItem(nil), snap.Catalog...)
 		copySnap = &v
 	}
-	s.runtimeSnapshotSample = &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: time.Now()}
+	// RuntimeSnapshot 每轮先更新；保留上一轮 Metrics，供紧接着的 Metrics 采样计算窗口增量。
+	previous := s.runtimeSnapshotSample
+	next := &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: time.Now()}
+	if previous != nil {
+		next.Metrics = previous.Metrics
+		next.MetricsStatus = previous.MetricsStatus
+		next.MetricsError = previous.MetricsError
+		next.MetricsSampledAt = previous.MetricsSampledAt
+		next.MetricsTarget = previous.MetricsTarget
+	}
+	s.runtimeSnapshotSample = next
 }
 
 func (s *Server) setRuntimeMetricsSample(snapshot *llama.MetricsSnapshot, status, errCode string) {
@@ -198,11 +220,103 @@ func (s *Server) setRuntimeMetricsSampleForTarget(snapshot *llama.MetricsSnapsho
 	if s.runtimeSnapshotSample == nil {
 		s.runtimeSnapshotSample = &runtimeSnapshotSample{Status: "unavailable", Source: "runtime_sampler", SampledAt: time.Now()}
 	}
+	previous := s.runtimeSnapshotSample.Metrics
+	previousTarget := s.runtimeSnapshotSample.MetricsTarget
+	if snapshot != nil {
+		if s.runtimeSnapshotSample.MetricsStatus == "complete" {
+			applyCounterDeltas(snapshot, previous, previousTarget, target)
+		} else {
+			applyCounterDeltas(snapshot, nil, "", target)
+		}
+	}
 	s.runtimeSnapshotSample.Metrics = cloneMetricsSnapshot(snapshot)
 	s.runtimeSnapshotSample.MetricsStatus = status
 	s.runtimeSnapshotSample.MetricsError = errCode
 	s.runtimeSnapshotSample.MetricsSampledAt = time.Now()
 	s.runtimeSnapshotSample.MetricsTarget = target
+}
+
+func applyCounterDeltas(current, previous *llama.MetricsSnapshot, previousTarget, currentTarget string) {
+	if current == nil {
+		return
+	}
+	previousSeries := make(map[string]llama.MetricSample)
+	if previous != nil {
+		for _, sample := range previous.Samples {
+			previousSeries[metricSeriesKey(sample)] = sample
+		}
+	}
+	for i := range current.Samples {
+		sample := &current.Samples[i]
+		if sample.Type != llama.MetricTypeCounter {
+			continue
+		}
+		sample.DeltaStatus = "not_comparable"
+		sample.DeltaReason = "no_previous_sample"
+		if previous == nil {
+			continue
+		}
+		if previousTarget == "" || currentTarget == "" || previousTarget != currentTarget {
+			sample.DeltaReason = "upstream_changed"
+			continue
+		}
+		if previous.ModelScope != current.ModelScope {
+			sample.DeltaReason = "model_scope_changed"
+			continue
+		}
+		if previous.ProcessStartTimeUnix == nil || current.ProcessStartTimeUnix == nil {
+			sample.DeltaReason = "process_identity_unavailable"
+			continue
+		}
+		if *previous.ProcessStartTimeUnix != *current.ProcessStartTimeUnix {
+			sample.DeltaReason = "process_restarted"
+			continue
+		}
+		start, end := previous.SampledAt, current.SampledAt
+		if start.IsZero() || end.IsZero() || !end.After(start) {
+			sample.DeltaReason = "invalid_sampling_window"
+			continue
+		}
+		window := end.Sub(start)
+		if window > 3*runtimeSnapshotSamplingInterval {
+			sample.DeltaReason = "sampling_gap"
+			continue
+		}
+		old, ok := previousSeries[metricSeriesKey(*sample)]
+		if !ok {
+			sample.DeltaReason = "series_missing"
+			continue
+		}
+		if old.Type != llama.MetricTypeCounter {
+			sample.DeltaReason = "metric_type_changed"
+			continue
+		}
+		oldValue, oldOK := new(big.Rat).SetString(old.Value)
+		newValue, newOK := new(big.Rat).SetString(sample.Value)
+		if !oldOK || !newOK || oldValue.Sign() < 0 || newValue.Sign() < 0 {
+			sample.DeltaReason = "invalid_counter_value"
+			continue
+		}
+		if newValue.Cmp(oldValue) < 0 {
+			sample.DeltaReason = "counter_reset"
+			continue
+		}
+		delta := new(big.Rat).Sub(newValue, oldValue)
+		sample.DeltaStatus = "comparable"
+		sample.DeltaReason = ""
+		sample.DeltaValue = strings.TrimRight(strings.TrimRight(delta.FloatString(18), "0"), ".")
+		if sample.DeltaValue == "" {
+			sample.DeltaValue = "0"
+		}
+		sample.WindowStart = start.UTC().Format(time.RFC3339Nano)
+		sample.WindowEnd = end.UTC().Format(time.RFC3339Nano)
+		sample.WindowMS = window.Milliseconds()
+	}
+}
+
+func metricSeriesKey(sample llama.MetricSample) string {
+	labels, _ := json.Marshal(sample.Labels)
+	return sample.Name + "\x00" + string(labels)
 }
 
 func (s *Server) runtimeMetricsOverview() map[string]interface{} {
@@ -253,6 +367,14 @@ func (s *Server) runtimeMetricsOverview() map[string]interface{} {
 	out["source"] = "llama_cpp_server_metrics"
 	out["sampled_at"] = sampledAt.UTC().Format(time.RFC3339Nano)
 	out["age_ms"] = age.Milliseconds()
+	if sample.Metrics != nil {
+		if sample.Metrics.ProcessStartTimeUnix != nil {
+			out["process_start_time_unix"] = *sample.Metrics.ProcessStartTimeUnix
+		}
+		if sample.Metrics.ModelScope != "" {
+			out["model_scope"] = sample.Metrics.ModelScope
+		}
+	}
 	if status == "stale" {
 		out["source_status"] = sourceStatus
 	}
@@ -269,7 +391,16 @@ func cloneMetricsSnapshot(snapshot *llama.MetricsSnapshot) *llama.MetricsSnapsho
 	if snapshot == nil {
 		return nil
 	}
-	out := &llama.MetricsSnapshot{SampledAt: snapshot.SampledAt, Samples: make([]llama.MetricSample, len(snapshot.Samples))}
+	out := &llama.MetricsSnapshot{
+		SampledAt: snapshot.SampledAt,
+		ProcessStartTimeUnix: snapshot.ProcessStartTimeUnix,
+		ModelScope: snapshot.ModelScope,
+		Samples: make([]llama.MetricSample, len(snapshot.Samples)),
+	}
+	if snapshot.ProcessStartTimeUnix != nil {
+		processStart := *snapshot.ProcessStartTimeUnix
+		out.ProcessStartTimeUnix = &processStart
+	}
 	for i, sample := range snapshot.Samples {
 		out.Samples[i] = sample
 		if sample.Labels != nil {
