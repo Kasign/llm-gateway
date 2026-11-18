@@ -2,17 +2,65 @@ package server
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
 // runtimeSamplingInterval 控制请求侧可复用运行时快照的刷新频率。
-// 采样发生在后台，不进入 /v1 请求关键路径。
 const runtimeSamplingInterval = 5 * time.Second
 
-// startRuntimeSampling 启动低频运行时采样器。
-// 第一阶段只负责 CPU：CPU 首次采样需要时间窗口，因此绝不能由请求路径触发。
-func (s *Server) startRuntimeSampling() {
+// runtimeCPUSampler 用于测试和生产代码复用同一生命周期逻辑。
+type runtimeCPUSampler struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+func newRuntimeCPUSampler(ctx context.Context, sample func()) *runtimeCPUSampler {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	child, cancel := context.WithCancel(ctx)
+	s := &runtimeCPUSampler{ctx: child, cancel: cancel}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		sample()
+		ticker := time.NewTicker(runtimeSamplingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-child.Done():
+				return
+			case <-ticker.C:
+				sample()
+			}
+		}
+	}()
+	return s
+}
+
+func (s *runtimeCPUSampler) stop(ctx context.Context) error {
 	if s == nil {
+		return nil
+	}
+	s.cancel()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// startRuntimeSampling 启动低频运行时 CPU 采样器。
+func (s *Server) startRuntimeSampling() {
+	if s == nil || s.cpuSamplerCancel != nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -34,44 +82,36 @@ func (s *Server) startRuntimeSampling() {
 	}()
 }
 
-// sampleCPU 更新主机 CPU 快照。
-// 首次采样仍使用现有 200ms 差值窗口，但该等待发生在后台采样器。
+// sampleCPU 更新主机 CPU 快照；等待窗口永远发生在后台。
 func (s *Server) sampleCPU() {
 	if s == nil {
 		return
 	}
-
 	total, idle, ok := readProcStatJiffies()
 	if !ok {
 		return
 	}
-
 	s.cpuSampleMu.Lock()
 	if s.cpuProcLastSample.IsZero() {
 		s.cpuLastTotalJiffies = total
 		s.cpuLastIdleJiffies = idle
 		s.cpuProcLastSample = time.Now()
 		s.cpuSampleMu.Unlock()
-
 		time.Sleep(200 * time.Millisecond)
-
 		total2, idle2, ok2 := readProcStatJiffies()
 		s.cpuSampleMu.Lock()
-		defer s.cpuSampleMu.Unlock()
-		if !ok2 || total2 <= total {
-			return
+		if ok2 && total2 > total {
+			td := total2 - total
+			if td > 0 {
+				s.cpuCachedPercent = clampCPUPercent(100 * float64(td-(idle2-idle)) / float64(td))
+			}
+			s.cpuLastTotalJiffies = total2
+			s.cpuLastIdleJiffies = idle2
+			s.cpuProcLastSample = time.Now()
 		}
-		totalDelta := total2 - total
-		idleDelta := idle2 - idle
-		if totalDelta > 0 {
-			s.cpuCachedPercent = clampCPUPercent(100 * float64(totalDelta-idleDelta) / float64(totalDelta))
-		}
-		s.cpuLastTotalJiffies = total2
-		s.cpuLastIdleJiffies = idle2
-		s.cpuProcLastSample = time.Now()
+		s.cpuSampleMu.Unlock()
 		return
 	}
-
 	totalDelta := total - s.cpuLastTotalJiffies
 	idleDelta := idle - s.cpuLastIdleJiffies
 	s.cpuLastTotalJiffies = total
