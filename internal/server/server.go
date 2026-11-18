@@ -114,6 +114,8 @@ type Server struct {
 	requestRetentionWG        sync.WaitGroup
 	cpuSamplerCancel          context.CancelFunc
 	cpuSamplerWG              sync.WaitGroup
+	runtimeSnapshotSamplerCancel context.CancelFunc
+	runtimeSnapshotSamplerWG sync.WaitGroup
 	requestRetentionStatusMu  sync.RWMutex
 	requestRetentionStatus    requestRetentionRuntimeStatus
 	tokenBudgetMu sync.Mutex
@@ -172,6 +174,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	// 9. 按显式保留策略启动低频、分批次的历史请求清理；默认禁用。
 	srv.startRequestRetention()
 	srv.startRuntimeSampling()
+	srv.startRuntimeSnapshotSampling()
 	// 8. 打一条启动日志，记录关键配置（方便排查问题）
 	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout_seconds=%d (0=unlimited) auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
 	return srv
@@ -180,6 +183,20 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 // ShutdownAudit 优雅退出前排空审计写队列（应在 HTTP Shutdown 之后调用）。
 // 作用：程序关闭前，把还在内存里没写完的日志全部刷到数据库，避免丢失请求记录。
 func (s *Server) ShutdownAudit(ctx context.Context) error {
+	// 先停止后台运行时快照采样器，避免退出时留下上游请求。
+	if s.runtimeSnapshotSamplerCancel != nil {
+		s.runtimeSnapshotSamplerCancel()
+		done := make(chan struct{})
+		go func() {
+			s.runtimeSnapshotSamplerWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	// 先停止后台 CPU 采样器，避免退出时留下采样协程。
 	if s.cpuSamplerCancel != nil {
 		s.cpuSamplerCancel()
