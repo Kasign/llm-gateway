@@ -130,7 +130,7 @@ func (s *Server) cpuSnapshotPercent() (float64, bool) {
 	}
 	s.cpuSampleMu.Lock()
 	defer s.cpuSampleMu.Unlock()
-	if s.cpuProcLastSample.IsZero() {
+	if s.cpuProcLastSample.IsZero() || time.Since(s.cpuProcLastSample) > runtimeSnapshotMaxAge {
 		return 0, false
 	}
 	return s.cpuCachedPercent, true

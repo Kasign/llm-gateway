@@ -57,3 +57,27 @@ func TestRuntimeCPUSamplerParentCancellation(t *testing.T) {
 		t.Fatalf("父 Context 取消后不应继续周期采样: calls=%d", calls.Load())
 	}
 }
+
+
+func TestCPUSnapshotPercentRejectsStaleSample(t *testing.T) {
+ s := &Server{}
+ s.cpuSampleMu.Lock()
+ s.cpuCachedPercent = 42
+ s.cpuProcLastSample = time.Now().Add(-runtimeSnapshotMaxAge - time.Second)
+ s.cpuSampleMu.Unlock()
+ if value, ok := s.cpuSnapshotPercent(); ok {
+  t.Fatalf("stale CPU snapshot must be unavailable, got %v", value)
+ }
+}
+
+func TestCPUSnapshotPercentReturnsFreshSample(t *testing.T) {
+ s := &Server{}
+ s.cpuSampleMu.Lock()
+ s.cpuCachedPercent = 42
+ s.cpuProcLastSample = time.Now()
+ s.cpuSampleMu.Unlock()
+ value, ok := s.cpuSnapshotPercent()
+ if !ok || value != 42 {
+  t.Fatalf("expected fresh CPU snapshot 42, got value=%v ok=%v", value, ok)
+ }
+}
