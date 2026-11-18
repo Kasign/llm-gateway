@@ -303,6 +303,9 @@ func repeatKeepalive(ctx context.Context, id string, sink core.ResponseSink, lin
 type inferenceObserver struct{ s *Server }
 
 func (o inferenceObserver) On(ctx context.Context, ev core.Event) {
+	if timeline := requestTimelineFromContext(ctx); timeline != nil {
+		timeline.On(ctx, ev)
+	}
 	if o.s == nil {
 		return
 	}
@@ -548,6 +551,7 @@ func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 		TimeToFirstByteMS: firstByteMS, TimeToUpstreamHeadersMS: upstreamHeadersMS,
 		InputTokens: inTok, OutputTokens: outTok, TokenSource: tokenSrc, SpeedSource: speedSrc, PredictedPerSec: pps,
 		ModelTimings: requestModelTimings(promptN, predictedN, promptMS, predictedMS, promptPerSecond, predictedPerSecond),
+		Timeline: func() []requestTimelineEvent { if timeline := requestTimelineFromContext(ctx); timeline != nil { return timeline.snapshot() }; return nil }(),
 	})
 	if o.s.cfg.Logging.StorePayload && (len(st.Body) > 0 || len(resp) > 0) {
 		o.s.audit.SavePayload(st.ID, st.Body, resp)

@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
 	"sync"
+
+	"github.com/whl/llm-gateway/internal/core"
 	"time"
 )
 
@@ -112,4 +115,35 @@ func (t *requestTimeline) snapshot() []requestTimelineEvent {
 		}
 	}
 	return out
+}
+
+type requestTimelineContextKey struct{}
+
+func requestTimelineFromContext(ctx context.Context) *requestTimeline {
+	if ctx == nil {
+		return nil
+	}
+	timeline, _ := ctx.Value(requestTimelineContextKey{}).(*requestTimeline)
+	return timeline
+}
+
+// On 将 Pipeline 的既有里程碑映射到请求时间线，不参与决策或改变执行顺序。
+func (t *requestTimeline) On(_ context.Context, ev core.Event) {
+	if t == nil {
+		return
+	}
+	switch ev.Stage {
+	case core.StageParsed:
+		t.record("pipeline_started", ev.State.ParsedAt)
+	case core.StagePrepared:
+		t.record("prepared", ev.State.PreparedAt)
+	case core.StageReady:
+		t.record("ready", ev.State.ReadyAt)
+	case core.StageWarmStart:
+		t.record("warm_finished", ev.State.WarmAt)
+	case core.StageUpstreamStart:
+		t.record("upstream_started", ev.State.UpstreamStart)
+	case core.StageFinish:
+		t.recordNow("pipeline_finished")
+	}
 }

@@ -79,14 +79,17 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 		Stream:  st.Stream,
 		OnChunk: onChunk,
 		OnQueueWait: func(m provider.ConcurrencyWaitResult) {
+			if timeline := requestTimelineFromContext(ctx); timeline != nil { timeline.recordNow("provider_queue_wait") }
 			v := m.WaitMS
 			providerQueueWaitMS = &v
 			providerQueueWaitStatus = m.Status
 		},
 		OnUpstreamDispatch: func() {
+			if timeline := requestTimelineFromContext(ctx); timeline != nil { timeline.recordNow("upstream_dispatched") }
 			f.s.markProviderTokenBudgetDispatched(st.ID)
 		},
 		OnHeaders: func(_ http.Header, _ int) {
+			if timeline := requestTimelineFromContext(ctx); timeline != nil { timeline.recordNow("upstream_headers") }
 			v := time.Since(st.Started).Milliseconds()
 			upstreamHeadersMS = &v
 		},
@@ -101,6 +104,7 @@ func (f inferenceForwarder) Forward(ctx context.Context, st core.State, onChunk 
 			return nil
 		},
 		OnFirstByte: func() {
+			if timeline := requestTimelineFromContext(ctx); timeline != nil { timeline.recordNow("upstream_first_byte") }
 			v := time.Since(st.Started).Milliseconds()
 			firstByteMS = &v
 		},

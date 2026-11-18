@@ -66,12 +66,16 @@ func writeInferenceError(w http.ResponseWriter, rawPath string, status int, code
 // 门外拒绝的请求仍写一条请求日志（rejectInference），方便在调用记录里排查。
 func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	timeline := newRequestTimeline(start)
+	timeline.record("request_received", start)
 	id := requestID(r.Context())
 	if r.Method != http.MethodPost {
 		s.rejectInference(w, r, id, start, nil, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
 		return
 	}
+	timeline.recordNow("auth_started")
 	key, code := s.authenticateOutcome(r.Context(), r)
+	timeline.recordNow("auth_finished")
 	if code != "" {
 		msg := "Invalid API key"
 		status := http.StatusUnauthorized
@@ -82,7 +86,9 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		s.rejectInference(w, r, id, start, key, status, code, msg)
 		return
 	}
+	timeline.recordNow("client_rpm_started")
 	allowed, err := s.allowClientKeyRequest(r.Context(), key)
+	timeline.recordNow("client_rpm_finished")
 	if err != nil {
 		applog.Printf("[%s] rate limiter unavailable: %v", id, err)
 		// 底层错误只进入服务端日志；不要把 Redis/网络诊断写入调用方响应和请求审计。
@@ -95,7 +101,9 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxBodyBytes := maxInferenceRequestBodyBytesForPath(r.URL.Path)
+	timeline.recordNow("body_read_started")
 	body, err := readLimitedRequestBody(w, r, maxBodyBytes)
+	timeline.recordNow("body_read_finished")
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
@@ -112,6 +120,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	// 跟随客户端连接，并受网关超时限制。取消函数同时交给管理端「结束」。
 	ctx, cancel := s.proxyRequestContext(r.Context())
 	defer cancel()
+	ctx = context.WithValue(ctx, requestTimelineContextKey{}, timeline)
 	cleanupRun := s.beginInferenceRun(id, key, cancel, true)
 	defer cleanupRun()
 	sink := &responseSink{w: w}
