@@ -22,6 +22,8 @@ type RequestPhaseMS struct {
 	PrepMS                 int64  `json:"prep_ms"`
 	ModelLoadMS            int64  `json:"model_load_ms"`
 	UpstreamMS             int64  `json:"upstream_ms"`
+	ProviderQueueWaitMS    *int64 `json:"provider_queue_wait_ms,omitempty"`
+	ProviderQueueWaitStatus string `json:"provider_queue_wait_status,omitempty"`
 	TimeToUpstreamHeadersMS *int64 `json:"time_to_upstream_headers_ms,omitempty"`
 	TimeToFirstByteMS       *int64 `json:"time_to_first_byte_ms,omitempty"`
 	TTFTMS                  *int64 `json:"ttft_ms,omitempty"`
@@ -83,6 +85,7 @@ type streamTimings struct {
 func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	ph := RequestPhaseMS{
 		TotalMS: in.TotalMS, PrepMS: in.PrepMS, ModelLoadMS: in.ModelLoadMS, UpstreamMS: in.UpstreamMS,
+		ProviderQueueWaitMS: in.ProviderQueueWaitMS, ProviderQueueWaitStatus: in.ProviderQueueWaitStatus,
 		TimeToFirstByteMS: in.TimeToFirstByteMS, TimeToUpstreamHeadersMS: in.TimeToUpstreamHeadersMS,
 		GatewayBeforeInferMS: in.PrepMS + in.ModelLoadMS,
 	}

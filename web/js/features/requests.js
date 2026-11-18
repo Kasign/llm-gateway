@@ -411,6 +411,8 @@ function detailSections(j) {
     let block = `<section class="req-section"><h3>请求分析</h3>${reqKv([
       ['Gateway 准备', ph.prep_ms != null ? ph.prep_ms + ' ms' : null],
       ['模型加载/等待', ph.model_load_ms != null ? ph.model_load_ms + ' ms' : null],
+      ['Provider 队列等待', ph.provider_queue_wait_ms != null ? ph.provider_queue_wait_ms + ' ms' : null],
+      ['Provider 队列状态', ph.provider_queue_wait_status || null],
       ['上游响应头', ph.time_to_upstream_headers_ms != null ? ph.time_to_upstream_headers_ms + ' ms' : null],
       ['首字节到达', ph.time_to_first_byte_ms != null ? ph.time_to_first_byte_ms + ' ms' : null],
       ['首个实际输出 (TTFT)', ph.ttft_ms != null ? ph.ttft_ms + ' ms' : null],
