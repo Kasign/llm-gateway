@@ -11,7 +11,6 @@ import (
 )
 
 // RequestAnalysis 写入 request_logs.analysis_json，概括一次调用的阶段耗时与生成速度。
-// RequestAnalysis is persisted JSON for admin request detail.
 type RequestAnalysis struct {
 	Phases     RequestPhaseMS    `json:"phases_ms"`
 	Throughput RequestThroughput `json:"throughput"`
@@ -19,42 +18,57 @@ type RequestAnalysis struct {
 }
 
 type RequestPhaseMS struct {
-	TotalMS              int64  `json:"total_ms"`
-	PrepMS               int64  `json:"prep_ms"`
-	ModelLoadMS          int64  `json:"model_load_ms"`
+	TotalMS                int64  `json:"total_ms"`
+	PrepMS                 int64  `json:"prep_ms"`
+	ModelLoadMS            int64  `json:"model_load_ms"`
 	UpstreamMS             int64  `json:"upstream_ms"`
 	TimeToUpstreamHeadersMS *int64 `json:"time_to_upstream_headers_ms,omitempty"`
 	TimeToFirstByteMS       *int64 `json:"time_to_first_byte_ms,omitempty"`
-	TTFTMS                 *int64 `json:"ttft_ms,omitempty"`
-	TTFTContentMS        *int64 `json:"ttft_content_ms,omitempty"`
-	ThinkingMS           *int64 `json:"thinking_ms,omitempty"`
-	ContentGenerationMS  *int64 `json:"content_generation_ms,omitempty"`
-	PrefillUntilFirstMS  *int64 `json:"prefill_until_first_ms,omitempty"`
-	GatewayBeforeInferMS int64  `json:"gateway_before_infer_ms"`
+	TTFTMS                  *int64 `json:"ttft_ms,omitempty"`
+	TTFTContentMS           *int64 `json:"ttft_content_ms,omitempty"`
+	ThinkingMS              *int64 `json:"thinking_ms,omitempty"`
+	ContentGenerationMS     *int64 `json:"content_generation_ms,omitempty"`
+	PrefillUntilFirstMS     *int64 `json:"prefill_until_first_ms,omitempty"`
+	GatewayBeforeInferMS    int64  `json:"gateway_before_infer_ms"`
+}
+
+// RequestModelTimings 保留 llama.cpp 原始阶段测量；指针 nil 表示上游未提供该字段。
+type RequestModelTimings struct {
+	PromptN           *int64   `json:"prompt_n,omitempty"`
+	PredictedN        *int64   `json:"predicted_n,omitempty"`
+	PromptMS          *float64 `json:"prompt_ms,omitempty"`
+	PredictedMS       *float64 `json:"predicted_ms,omitempty"`
+	PromptPerSecond   *float64 `json:"prompt_per_second,omitempty"`
+	PredictedPerSecond *float64 `json:"predicted_per_second,omitempty"`
 }
 
 type RequestThroughput struct {
-	OutputTokensPerSec *float64 `json:"output_tokens_per_sec,omitempty"`
-	OutputTokens       *int64   `json:"output_tokens,omitempty"`
-	GenerationWindowMS int64    `json:"generation_window_ms,omitempty"`
-	Source             string   `json:"source,omitempty"`
-	Note               string   `json:"note,omitempty"`
+	OutputTokensPerSec *float64             `json:"output_tokens_per_sec,omitempty"`
+	OutputTokens       *int64               `json:"output_tokens,omitempty"`
+	GenerationWindowMS int64                `json:"generation_window_ms,omitempty"`
+	TokenSource        string               `json:"token_source,omitempty"`
+	SpeedSource        string               `json:"speed_source,omitempty"`
+	ModelTimings       *RequestModelTimings `json:"llama_timings,omitempty"`
+	Source             string               `json:"source,omitempty"` // 兼容旧版详情读取
+	Note               string               `json:"note,omitempty"`
 }
 
 type analysisInput struct {
-	TotalMS       int64
-	PrepMS        int64
-	ModelLoadMS   int64
-	UpstreamMS    int64
-	Stream        bool
-	TTFTMS                 *int64
+	TotalMS                 int64
+	PrepMS                  int64
+	ModelLoadMS             int64
+	UpstreamMS              int64
+	Stream                  bool
+	TTFTMS                  *int64
 	TimeToFirstByteMS       *int64
 	TimeToUpstreamHeadersMS *int64
 	StreamTiming            streamTimings
-	InputTokens     *int64
-	OutputTokens    *int64
-	TokenSource     string
-	PredictedPerSec *float64
+	InputTokens             *int64
+	OutputTokens            *int64
+	TokenSource             string
+	SpeedSource             string
+	PredictedPerSec         *float64
+	ModelTimings            *RequestModelTimings
 }
 
 type streamTimings struct {
@@ -66,13 +80,9 @@ type streamTimings struct {
 
 func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	ph := RequestPhaseMS{
-		TotalMS:              in.TotalMS,
-		PrepMS:               in.PrepMS,
-		ModelLoadMS:          in.ModelLoadMS,
-		UpstreamMS:             in.UpstreamMS,
-		TimeToFirstByteMS:       in.TimeToFirstByteMS,
-		TimeToUpstreamHeadersMS: in.TimeToUpstreamHeadersMS,
-		GatewayBeforeInferMS:    in.PrepMS + in.ModelLoadMS,
+		TotalMS: in.TotalMS, PrepMS: in.PrepMS, ModelLoadMS: in.ModelLoadMS, UpstreamMS: in.UpstreamMS,
+		TimeToFirstByteMS: in.TimeToFirstByteMS, TimeToUpstreamHeadersMS: in.TimeToUpstreamHeadersMS,
+		GatewayBeforeInferMS: in.PrepMS + in.ModelLoadMS,
 	}
 	if in.StreamTiming.FirstAnyMS != nil {
 		ph.TTFTMS = in.StreamTiming.FirstAnyMS
@@ -122,31 +132,21 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 
 	tp := RequestThroughput{
 		OutputTokens: in.OutputTokens,
-		Source:       "upstream_usage",
+		TokenSource:  in.TokenSource,
+		SpeedSource:  in.SpeedSource,
+		ModelTimings: in.ModelTimings,
+		Source:       in.TokenSource,
 	}
-	if in.TokenSource != "" {
-		tp.Source = in.TokenSource
-	}
-	if in.PredictedPerSec != nil && *in.PredictedPerSec > 0 {
+	if in.PredictedPerSec != nil && *in.PredictedPerSec > 0 && in.SpeedSource == "llama_timings" {
 		tp.OutputTokensPerSec = in.PredictedPerSec
-		if genMS > 0 {
-			tp.GenerationWindowMS = genMS
-		} else if in.UpstreamMS > 0 {
-			tp.GenerationWindowMS = in.UpstreamMS
-		}
-		tp.Note = "llama.cpp timings.predicted_per_second（decode 阶段）"
+		tp.Note = "llama.cpp timings.predicted_per_second（Decode 阶段实测；未提供匹配的 Gateway 生成窗口）"
 	} else if in.OutputTokens != nil && *in.OutputTokens > 0 && genMS > 0 {
 		tp.GenerationWindowMS = genMS
 		tp.OutputTokensPerSec = tokensPerSec(in.OutputTokens, genMS)
-		if tp.Source == "" || tp.Source == "upstream_usage" {
-			tp.Note = "completion_tokens ÷ 正文生成阶段时长（首条 content 至流结束；非流式为上游推理阶段）"
-		}
-	} else if in.OutputTokens != nil && *in.OutputTokens > 0 && in.UpstreamMS > 0 {
-		tp.GenerationWindowMS = in.UpstreamMS
-		tp.OutputTokensPerSec = tokensPerSec(in.OutputTokens, in.UpstreamMS)
-		tp.Note = "completion_tokens ÷ upstream_ms（未区分 prefill/思考，仅供参考）"
+		tp.SpeedSource = "gateway_window"
+		tp.Note = "输出 Token 数 ÷ Gateway 可观测生成窗口；不是后端原生 Decode 速度"
 	} else {
-		tp.Note = "无上游 usage.completion_tokens，无法计算真实 token 速度"
+		tp.Note = "缺少可用的 Decode 实测速度或匹配的生成窗口，速度未知"
 	}
 
 	summary := summarizeAnalysis(ph, tp, in.Stream)
@@ -180,10 +180,10 @@ func summarizeAnalysis(ph RequestPhaseMS, tp RequestThroughput, stream bool) []s
 		lines = append(lines, fmt.Sprintf("正文生成阶段约 %d ms", *ph.ContentGenerationMS))
 	}
 	if tp.OutputTokensPerSec != nil {
-		if tp.Source == "llama_timings" {
-			lines = append(lines, fmt.Sprintf("输出 token 速度 %.2f tok/s（llama.cpp timings）", *tp.OutputTokensPerSec))
+		if tp.SpeedSource == "llama_timings" {
+			lines = append(lines, fmt.Sprintf("输出 token 速度 %.2f tok/s（llama.cpp Decode 实测）", *tp.OutputTokensPerSec))
 		} else {
-			lines = append(lines, fmt.Sprintf("输出 token 速度 %.2f tok/s（基于上游 usage，窗口 %d ms）", *tp.OutputTokensPerSec, tp.GenerationWindowMS))
+			lines = append(lines, fmt.Sprintf("输出 token 速度 %.2f tok/s（Gateway 生成窗口派生，窗口 %d ms）", *tp.OutputTokensPerSec, tp.GenerationWindowMS))
 		}
 	} else {
 		lines = append(lines, tp.Note)
@@ -211,6 +211,10 @@ func decodeRequestAnalysis(raw string) (*RequestAnalysis, error) {
 	if err := json.Unmarshal([]byte(raw), &a); err != nil {
 		return nil, err
 	}
+	// 旧记录只有 source 字段时保留其 Token 来源含义；速度来源不从旧字段推断。
+	if a.Throughput.TokenSource == "" {
+		a.Throughput.TokenSource = a.Throughput.Source
+	}
 	return &a, nil
 }
 
@@ -220,12 +224,8 @@ func rebuildAnalysisFromLog(l *store.RequestLog, events []store.StreamEvent) *Re
 	}
 	st := streamTimingsFromEvents(events)
 	in := analysisInput{
-		TotalMS:      l.LatencyMS,
-		Stream:       effectiveStream(l, len(events)),
-		TTFTMS:       l.TTFTMS,
-		StreamTiming: st,
-		InputTokens:  l.InputTokens,
-		OutputTokens: l.OutputTokens,
+		TotalMS: l.LatencyMS, Stream: effectiveStream(l, len(events)), TTFTMS: l.TTFTMS,
+		StreamTiming: st, InputTokens: l.InputTokens, OutputTokens: l.OutputTokens,
 	}
 	if st.FirstAnyMS == nil && l.TTFTMS != nil {
 		in.StreamTiming.FirstAnyMS = l.TTFTMS
