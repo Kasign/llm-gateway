@@ -225,6 +225,45 @@ func TestApplyCounterDeltasRequiresComparableProcessAndScope(t *testing.T) {
 	if scopeChanged.Samples[0].DeltaReason != "model_scope_changed" {
 		t.Fatalf("model scope change must invalidate delta: %#v", scopeChanged.Samples[0])
 	}
+
+	cases := []struct {
+		name       string
+		mutate     func(*llama.MetricsSnapshot)
+		prevTarget string
+		curTarget  string
+		want       string
+	}{
+		{name: "upstream changed", prevTarget: "http://old", curTarget: "http://new", want: "upstream_changed"},
+		{name: "sampling gap", mutate: func(s *llama.MetricsSnapshot) { s.SampledAt = start.Add(20 * time.Second) }, prevTarget: "http://llama", curTarget: "http://llama", want: "sampling_gap"},
+		{name: "invalid window", mutate: func(s *llama.MetricsSnapshot) { s.SampledAt = start }, prevTarget: "http://llama", curTarget: "http://llama", want: "invalid_sampling_window"},
+		{name: "missing series", mutate: func(s *llama.MetricsSnapshot) { s.Samples[0].Name = "other_total" }, prevTarget: "http://llama", curTarget: "http://llama", want: "series_missing"},
+		{name: "invalid counter", mutate: func(s *llama.MetricsSnapshot) { s.Samples[0].Value = "NaN" }, prevTarget: "http://llama", curTarget: "http://llama", want: "invalid_counter_value"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current := makeCurrent("140", &processA, "model-a")
+			if tc.mutate != nil {
+				tc.mutate(current)
+			}
+			applyCounterDeltas(current, previous, tc.prevTarget, tc.curTarget)
+			if current.Samples[0].DeltaStatus != "not_comparable" || current.Samples[0].DeltaReason != tc.want {
+				t.Fatalf("expected not_comparable/%s, got %#v", tc.want, current.Samples[0])
+			}
+		})
+	}
+}
+
+func TestSampleLlamaMetricsCancellationIsIsolated(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &Server{}
+	s.setRuntimeSnapshotSample(nil, "complete", "upstream_runtime")
+	s.sampleLlamaMetrics(ctx, llama.New("http://127.0.0.1:1", 0, "llamacpp", ""), "")
+	got := s.runtimeSnapshotSampleLatest()
+	if got.Status != "complete" || got.MetricsStatus != "cancelled" || got.MetricsError != "sampling_cancelled" {
+		t.Fatalf("metrics cancellation must remain isolated: %#v", got)
+	}
 }
 
 func TestSampleLlamaMetricsTimeoutIsIsolated(t *testing.T) {
