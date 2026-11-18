@@ -9,11 +9,11 @@ import (
 // responseSink 同时满足 net/http 与 core.ResponseSink。
 // 保活一旦写出，之后的 WriteHeader 不再改状态行。
 type responseSink struct {
-	w      http.ResponseWriter
-	method string
-	mu     sync.Mutex
-	wrote  bool
-	status int
+	w        http.ResponseWriter
+	method   string
+	mu       sync.Mutex
+	wrote    bool
+	status   int
 	timeline *requestTimeline
 }
 

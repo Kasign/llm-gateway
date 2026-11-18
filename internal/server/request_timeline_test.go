@@ -177,6 +177,45 @@ func (w *hijackTimelineResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, er
 	return w.conn, bufio.NewReadWriter(bufio.NewReader(w.conn), bufio.NewWriter(w.conn)), nil
 }
 
+
+type shortWriteTimelineResponseWriter struct {
+	header http.Header
+}
+
+func (w *shortWriteTimelineResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *shortWriteTimelineResponseWriter) WriteHeader(int) {}
+func (w *shortWriteTimelineResponseWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
+}
+
+func TestResponseSinkRecordsPartialWriteAsSuccessAndFailure(t *testing.T) {
+	timeline := newRequestTimeline(time.Now())
+	sink := &responseSink{w: &shortWriteTimelineResponseWriter{}, timeline: timeline}
+	payload := []byte("partial")
+	n, err := sink.Write(payload)
+	if err != nil || n != len(payload)-1 {
+		t.Fatalf("unexpected short write result: n=%d err=%v", n, err)
+	}
+	events := timeline.snapshot()
+	if len(events) != 3 {
+		t.Fatalf("expected first, last and failed write events, got %+v", events)
+	}
+	want := []string{"gateway_first_write", "gateway_last_write", "gateway_write_failed"}
+	for i, name := range want {
+		if events[i].Name != name || events[i].Status != timelineStatusMeasured || events[i].OffsetMS == nil {
+			t.Fatalf("event %d = %+v, want measured %s", i, events[i], name)
+		}
+	}
+}
+
 func TestResponseSinkUnwrapPreservesResponseControllerCapabilities(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
