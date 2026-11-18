@@ -1743,7 +1743,6 @@ function benchPayloadForApi(target,scenario='performance',promptOverride=''){
     ?{model_key:gatewayKey,prompt:p.prompt,max_tokens:p.max_tokens}
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
   if(scenario==='tool_performance')body.scenario='tool_performance';
-  if(scenario==='tool_performance')body.tool_choice={type:'function',function:{name:'web.search'}};
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
@@ -1915,6 +1914,7 @@ function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverri
     stream:scenario!=='tool_performance',
     max_tokens:p.max_tokens,
   };
+  if(scenario==='tool_performance')body.tool_choice={type:'function',function:{name:'web.search'}};
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
