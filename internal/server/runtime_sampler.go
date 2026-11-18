@@ -47,7 +47,6 @@ func (s *Server) sampleCPU() {
 	}
 	now := time.Now()
 	s.cpuSampleMu.Lock()
-	defer s.cpuSampleMu.Unlock()
 	if s.cpuProcLastSample.IsZero() {
 		s.cpuLastTotalJiffies = total
 		s.cpuLastIdleJiffies = idle
@@ -65,8 +64,18 @@ func (s *Server) sampleCPU() {
 			s.cpuLastIdleJiffies = idle2
 			s.cpuProcLastSample = time.Now()
 		}
+		s.cpuSampleMu.Unlock()
 		return
 	}
+	totalDelta := total - s.cpuLastTotalJiffies
+	idleDelta := idle - s.cpuLastIdleJiffies
+	s.cpuLastTotalJiffies = total
+	s.cpuLastIdleJiffies = idle
+	s.cpuProcLastSample = now
+	if totalDelta > 0 {
+		s.cpuCachedPercent = clampCPUPercent(100 * float64(totalDelta-idleDelta) / float64(totalDelta))
+	}
+	s.cpuSampleMu.Unlock()
 	totalDelta := total - s.cpuLastTotalJiffies
 	idleDelta := idle - s.cpuLastIdleJiffies
 	s.cpuLastTotalJiffies = total

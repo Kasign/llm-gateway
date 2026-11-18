@@ -89,8 +89,6 @@ type Server struct {
 	cpuLastIdleJiffies  uint64     // 上次采样时 CPU 空闲时间片
 	cpuProcLastSample   time.Time  // 上次采样时间
 	cpuCachedPercent    float64    // 缓存的 CPU 使用率百分比（避免频繁重算）
-	cpuSamplerCancel    context.CancelFunc // 停止后台 CPU 采样器
-	cpuSamplerWG       sync.WaitGroup      // 等待后台 CPU 采样器退出
 	// —— 管理后台状态缓存 ——
 	adminStateMu     sync.Mutex                          // 管理状态锁
 	adminState       *adminStateSnap                     // 管理后台快照（登录状态、配置概览等，缓存减少 DB 查询）
@@ -169,7 +167,6 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	srv.loadWebLoginState(context.Background())
 	// 9. 按显式保留策略启动低频、分批次的历史请求清理；默认禁用。
 	srv.startRequestRetention()
-	srv.startRuntimeSampling()
 	// 8. 打一条启动日志，记录关键配置（方便排查问题）
 	applog.Infof("server initialized: redis=%s backend=%s llama=%s model=%s models_dir=%s timeout_seconds=%d (0=unlimited) auto_load=%v", cfg.Redis.Addr, srv.effectiveUpstream().Backend, srv.effectiveUpstream().BaseURL, srv.effectiveUpstream().ModelName, cfg.Storage.ModelsDir, cfg.Llama.RequestTimeout, cfg.Llama.AutoLoadOnProxy)
 	return srv
@@ -179,16 +176,6 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 // 作用：程序关闭前，把还在内存里没写完的日志全部刷到数据库，避免丢失请求记录。
 func (s *Server) ShutdownAudit(ctx context.Context) error {
 	// 先停止保留策略后台任务，避免它与数据库/进程关闭同时运行。
-	if s.cpuSamplerCancel != nil {
-		s.cpuSamplerCancel()
-		done := make(chan struct{})
-		go func() { s.cpuSamplerWG.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	if s.requestRetentionCancel != nil {
 		s.requestRetentionCancel()
 		done := make(chan struct{})
