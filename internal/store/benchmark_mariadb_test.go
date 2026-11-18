@@ -49,6 +49,25 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	run := BenchmarkRun{RunID: id, TaskID: id, RunNo: 1, RequestID: id, Status: "running", StartedAt: now}
 	if err := repo.CreateTaskAndRun(ctx, task, run); err != nil { t.Fatalf("create task/run: %v", err) }
 	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", id) }()
+
+	toolID := id + "-tool"
+	toolTask := BenchmarkTask{TaskID: toolID, Scenario: "tool_performance", Status: "completed", ConfigJSON: `{"condition_status":"partial","condition_missing":["backend_version"]}`, RunCount: 1, StartedAt: now}
+	toolRun := BenchmarkRun{RunID: toolID, TaskID: toolID, RunNo: 1, RequestID: toolID, Status: "completed", StartedAt: now}
+	if err := repo.CreateTaskAndRun(ctx, toolTask, toolRun); err != nil {
+		t.Fatalf("create tool task/run: %v", err)
+	}
+	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", toolID) }()
+	listed, total, err := repo.ListTasks(ctx, "tool_performance", "completed", 10, 0)
+	if err != nil || total != 1 || len(listed) != 1 || listed[0].TaskID != toolID {
+		t.Fatalf("filtered task list = %+v, total=%d, err=%v", listed, total, err)
+	}
+	page, pageTotal, err := repo.ListTasks(ctx, "", "", 1, 1)
+	if err != nil || pageTotal != 2 || len(page) != 1 {
+		t.Fatalf("paginated task list = %+v, total=%d, err=%v", page, pageTotal, err)
+	}
+	if _, _, err := repo.ListTasks(ctx, "", "", 101, 0); err == nil {
+		t.Fatal("ListTasks must reject limit above 100")
+	}
 	got, err := repo.GetTask(ctx, id)
 	if err != nil { t.Fatalf("get task: %v", err) }
 	if got.TaskID != id || got.Status != "running" || got.PromptLength != 32 || got.ConfigJSON != task.ConfigJSON {
