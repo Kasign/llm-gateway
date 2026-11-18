@@ -420,6 +420,7 @@ func (o inferenceObserver) onChunk(st core.State, chunk []byte) {
 // Touch / MarkUsed 只在成功后执行，失败的调用不算「使用过」。
 func (o inferenceObserver) onFinish(ctx context.Context, ev core.Event) {
 	st := ev.State
+	timeline := requestTimelineFromContext(ctx)
 	cancelAccepted := o.s.markCallFinishing(st.ID)
 	if o.s.runs != nil && o.s.runs.MarkFinishing(st.ID) {
 		cancelAccepted = true
