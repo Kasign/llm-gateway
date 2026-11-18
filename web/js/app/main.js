@@ -1859,7 +1859,6 @@ async function openBenchmarkHistory(jobId){
   if(!jobId)return;
   try{
     const result=await api('/api/benchmark/'+encodeURIComponent(jobId));
-    writeBenchStore({jobId});
     renderBenchResult(result);
     $('benchAnswer')?.scrollIntoView({block:'nearest',behavior:'smooth'});
   }catch(error){

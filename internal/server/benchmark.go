@@ -651,6 +651,9 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 				snapshot.ConditionMissing = []string{"condition_snapshot_unavailable"}
 			}
 		}
+		if snapshot.ConditionMissing == nil {
+			snapshot.ConditionMissing = []string{}
+		}
 		item["condition_sha256"] = snapshot.ConditionSHA256
 		item["condition_status"] = snapshot.ConditionStatus
 		item["condition_missing"] = snapshot.ConditionMissing
