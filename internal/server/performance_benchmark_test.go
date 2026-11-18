@@ -414,7 +414,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 // TestBenchmarkConditionMetadataHandlesMissingSnapshotFields 验证旧记录和缺失字段不会被误判为完整条件。
 func TestBenchmarkConditionMetadataHandlesMissingSnapshotFields(t *testing.T) {
 	fingerprint, status, missing, err := benchmarkConditionMetadata(map[string]interface{}{}, "prompt-hash")
-	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 6 {
+	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 7 {
 		t.Fatalf("missing snapshot metadata = %q/%q/%v, err=%v", fingerprint, status, missing, err)
 	}
 }
