@@ -1213,6 +1213,14 @@ try {
         body: JSON.stringify({
           summary: { request_id: smokeRequestID, status: 'completed', http_status: 200, method: 'POST', request_url: 'https://example.test/v1/chat/completions', api_key: 'Smoke Key', client_name: 'Browser Smoke', provider_id: 'mock-provider', model_requested: 'mock-model' },
           timing: { started_at: '2026-10-28T12:00:00Z', finished_at: '2026-10-28T12:00:01Z', latency_ms: 120, ttft_ms: 15, input_tokens: 5, output_tokens: 7, total_tokens: 12 },
+          analysis: {
+            timeline_only: true,
+            timeline: [
+              { name: 'request_received', offset_ms: 0, status: 'measured' },
+              { name: 'auth_started', offset_ms: 2, status: 'measured' },
+              { name: 'pipeline_started', offset_ms: null, status: 'not_reached' }
+            ]
+          },
           tool_calls: [
             { seq: 1, round: 1, tool_name: 'web.search', status: 'succeeded', duration_ms: 35, result_bytes: 128, created_at: '2026-10-28T12:00:00Z' },
             { seq: 2, round: 1, tool_name: 'web.search', status: 'failed', duration_ms: 5, result_bytes: 0, error_code: 'tool_execution_failed', created_at: '2026-10-28T12:00:01Z' }
@@ -1234,6 +1242,16 @@ try {
   const detailModal = page.locator('#detailModal');
   await page.locator('#detailModal.show').waitFor({ state: 'visible', timeout: 10000 });
   check('请求详情使用 Mock 详情接口响应', mockDetailRequestCount === 1, mockDetailRequestCount);
+  const timelineSummary = detailModal.locator('summary').filter({ hasText: '请求时间线 (3)' });
+  check('timeline_only 早期请求详情展示时间线入口', await timelineSummary.count() === 1);
+  if (await timelineSummary.count()) {
+    await timelineSummary.click();
+    check('时间线显示真实零毫秒、已测量和未到达状态', 
+      await detailModal.getByText('0 ms · 已测量', { exact: false }).count() >= 1 &&
+      await detailModal.getByText('— · 未到达', { exact: false }).count() >= 1);
+    check('timeline_only 不显示虚构的阶段耗时', 
+      await detailModal.getByText('请求分析', { exact: true }).count() === 0);
+  }
   await page.waitForFunction(() => document.activeElement === document.querySelector('#detailModal .card-head button'), null, { timeout: 5000 });
   check('请求详情弹窗打开后将焦点移入关闭按钮',
     await detailModal.locator('.card-head button').evaluate(el => document.activeElement === el));
