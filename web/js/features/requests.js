@@ -461,6 +461,50 @@ function detailSections(j) {
     block += `</section>`;
     add('analysis', 'swap', block);
   }
+  const timelineEvents = Array.isArray(j.analysis?.timeline) ? j.analysis.timeline : [];
+  if (timelineEvents.length) {
+    const eventLabels = {
+      request_received: '请求进入 Gateway',
+      auth_started: '鉴权开始',
+      auth_finished: '鉴权结束',
+      client_rpm_started: '客户端 RPM 检查开始',
+      client_rpm_finished: '客户端 RPM 检查结束',
+      body_read_started: '读取请求体开始',
+      body_read_finished: '读取请求体结束',
+      pipeline_started: 'Pipeline 开始',
+      prepared: '请求解析与改写完成',
+      ready: '模型与请求就绪',
+      warm_finished: 'WarmStart 完成',
+      upstream_started: '进入 Provider 调用',
+      provider_queue_wait: 'Provider 队列等待结果',
+      upstream_dispatched: '上游请求发出',
+      upstream_headers: '收到上游响应头',
+      upstream_first_byte: '读取上游首字节',
+      stream_first_any: '收到首个流式输出',
+      stream_first_reasoning: '收到首个 reasoning',
+      stream_first_content: '收到首个 content',
+      gateway_first_write: 'Gateway 首次写回正文',
+      gateway_last_write: 'Gateway 最后一次写回正文',
+      pipeline_finished: 'Pipeline 收尾完成',
+      handler_returned: 'HTTP Handler 即将返回',
+    };
+    const statusLabels = {
+      measured: '已测量',
+      not_applicable: '不适用',
+      not_reached: '未到达',
+      unknown: '未知',
+    };
+    const rows = timelineEvents.map((event, index) => {
+      const label = eventLabels[event.name] || event.name || '未知事件';
+      const offset = event.offset_ms != null ? Number(event.offset_ms) + ' ms' : '—';
+      const status = statusLabels[event.status] || event.status || '未知';
+      return [String(index + 1) + '. ' + label, offset + ' · ' + status];
+    });
+    add('timeline', 'fold',
+      reqPanelFold('请求时间线 (' + timelineEvents.length + ')',
+        '<p class="req-note">时间相对 HTTP Handler 入口；只显示真实记录的事件偏移，未测量事件不会补成 0 ms。</p>' +
+        reqKv(rows)));
+  }
   const hints = j.diagnosis || [];
   if (hints.length) {
     add(
