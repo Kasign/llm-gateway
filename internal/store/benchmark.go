@@ -279,6 +279,38 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 	return out, rows.Err()
 }
 
+
+ // ListTasks 返回按创建时间倒序排列的任务摘要；筛选与分页在数据库侧执行。
+func (r *BenchmarkRepo) ListTasks(ctx context.Context, scenario, status string, limit, offset int) ([]BenchmarkTask, int, error) {
+	if err := r.ready(); err != nil { return nil, 0, err }
+	if limit < 1 || limit > 100 || offset < 0 { return nil, 0, fmt.Errorf("invalid benchmark task list pagination") }
+	where := make([]string, 0, 2)
+	args := make([]any, 0, 2)
+	if scenario != "" { where = append(where, "scenario=?"); args = append(args, scenario) }
+	if status != "" { where = append(where, "status=?"); args = append(args, status) }
+	clause := ""
+	if len(where) > 0 { clause = " WHERE " + strings.Join(where, " AND ") }
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM benchmark_tasks"+clause, args...).Scan(&total); err != nil { return nil, 0, err }
+	queryArgs := append(append([]any(nil), args...), limit, offset)
+	rows, err := r.db.QueryContext(ctx, `SELECT task_id,scenario,status,COALESCE(provider_id,''),COALESCE(backend,''),COALESCE(model_key,''),COALESCE(model_id,''),COALESCE(config_json,''),run_count,started_at,finished_at,latency_ms,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
+		FROM benchmark_tasks`+clause+` ORDER BY created_at DESC,task_id DESC LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil { return nil, 0, err }
+	defer rows.Close()
+	out := make([]BenchmarkTask, 0, limit)
+	for rows.Next() {
+		var task BenchmarkTask
+		var finishedAt sql.NullTime
+		var latencyValue sql.NullInt64
+		if err := rows.Scan(&task.TaskID,&task.Scenario,&task.Status,&task.ProviderID,&task.Backend,&task.ModelKey,&task.ModelID,&task.ConfigJSON,&task.RunCount,&task.StartedAt,&finishedAt,&latencyValue,&task.ErrorCode,&task.ErrorMessage,&task.CreatedAt,&task.UpdatedAt); err != nil { return nil, 0, err }
+		if finishedAt.Valid { task.FinishedAt = &finishedAt.Time }
+		if latencyValue.Valid { task.LatencyMS = latencyValue.Int64 }
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil { return nil, 0, err }
+	return out, total, nil
+}
+
 // MarkInterrupted 将上次进程遗留的活动任务标记为 interrupted；不自动重放未知是否已出网的请求。
 func (r *BenchmarkRepo) MarkInterrupted(ctx context.Context) (int64, error) {
 	if err := r.ready(); err != nil {

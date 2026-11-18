@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -563,12 +564,80 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 //  1. 默认取请求里的 in.ModelKey（显式指定 model_key 时即此值）；
 //  2. 若为空且解析得到 m *model.Model，则回填 m.ModelKey（例如只传 model_id 但反查到了 DB 行）；
 //  3. 若 m 为 nil 且从未传 model_key，job.ModelKey 可能为空字符串，但 runBenchmark 仍可用 upstreamOnly 调用上游。
+
+type benchmarkTaskListQuery struct {
+	Scenario string
+	Status string
+	Limit int
+	Offset int
+}
+
+func parseBenchmarkTaskListQuery(r *http.Request) (benchmarkTaskListQuery, error) {
+	q := r.URL.Query()
+	out := benchmarkTaskListQuery{Scenario: strings.TrimSpace(q.Get("scenario")), Status: strings.TrimSpace(q.Get("status")), Limit: 20}
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 { return benchmarkTaskListQuery{}, errors.New("limit must be between 1 and 100") }
+		out.Limit = value
+	}
+	if raw := strings.TrimSpace(q.Get("offset")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 { return benchmarkTaskListQuery{}, errors.New("offset must be zero or greater") }
+		out.Offset = value
+	}
+	if out.Scenario != "" && out.Scenario != "performance" && out.Scenario != "tool_performance" { return benchmarkTaskListQuery{}, errors.New("unsupported benchmark scenario") }
+	switch out.Status {
+	case "", "running", "cancelling", "completed", "failed", "cancelled", "interrupted":
+	default: return benchmarkTaskListQuery{}, errors.New("unsupported benchmark status")
+	}
+	return out, nil
+}
+
+// benchmarkList 返回不含 Prompt、密钥标识和请求正文的历史任务摘要。
+func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
+	query, err := parseBenchmarkTaskListQuery(r)
+	if err != nil { jsonError(w, http.StatusBadRequest, "invalid_request", err.Error()); return }
+	if s.benchmarkRepo == nil { jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "benchmark task storage is unavailable"); return }
+	tasks, total, err := s.benchmarkRepo.ListTasks(r.Context(), query.Scenario, query.Status, query.Limit, query.Offset)
+	if err != nil { jsonError(w, http.StatusServiceUnavailable, "benchmark_store_unavailable", "failed to list benchmark tasks"); return }
+	items := make([]map[string]interface{}, 0, len(tasks))
+	for _, task := range tasks {
+		item := map[string]interface{}{
+			"job_id": task.TaskID, "scenario": task.Scenario, "status": task.Status,
+			"provider_id": task.ProviderID, "backend": task.Backend, "model_key": task.ModelKey,
+			"model_id": task.ModelID, "run_count": task.RunCount, "started_at": task.StartedAt,
+			"finished_at": task.FinishedAt, "latency_ms": task.LatencyMS, "error_code": task.ErrorCode,
+			"created_at": task.CreatedAt, "updated_at": task.UpdatedAt,
+		}
+		var snapshot struct {
+			ConditionSHA256 string `json:"condition_sha256"`
+			ConditionStatus string `json:"condition_status"`
+			ConditionMissing []string `json:"condition_missing"`
+		}
+		if json.Unmarshal([]byte(task.ConfigJSON), &snapshot) == nil {
+			item["condition_sha256"] = snapshot.ConditionSHA256
+			item["condition_status"] = snapshot.ConditionStatus
+			item["condition_missing"] = snapshot.ConditionMissing
+		} else {
+			item["condition_status"] = "unknown"
+			item["condition_missing"] = []string{"condition_snapshot_unavailable"}
+		}
+		items = append(items, item)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"items":items,"total":total,"limit":query.Limit,"offset":query.Offset})
+}
+
 func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
+	if r.Method == http.MethodGet {
+		s.benchmarkList(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
-		jsonError(w, 405, "method_not_allowed", "POST required")
+		jsonError(w, 405, "method_not_allowed", "GET or POST required")
 		return
 	}
 	key, authCode := s.authenticateBenchmarkKey(r)

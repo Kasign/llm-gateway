@@ -38,3 +38,13 @@ func TestDecodeBenchmarkRequestBodyEnforcesLimit(t *testing.T) {
 		t.Fatal("decodeBenchmarkRequestBody() must reject an oversized body")
 	}
 }
+
+func TestParseBenchmarkTaskListQuery(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/api/benchmark?scenario=tool_performance&status=completed&limit=50&offset=100", nil)
+	got, err := parseBenchmarkTaskListQuery(r)
+	if err != nil { t.Fatalf("parseBenchmarkTaskListQuery() error = %v", err) }
+	if got.Scenario != "tool_performance" || got.Status != "completed" || got.Limit != 50 || got.Offset != 100 { t.Fatalf("parsed query = %+v", got) }
+	for _, target := range []string{"/api/benchmark?limit=0","/api/benchmark?limit=101","/api/benchmark?offset=-1","/api/benchmark?scenario=unknown","/api/benchmark?status=unknown"} {
+		if _, err := parseBenchmarkTaskListQuery(httptest.NewRequest(http.MethodGet, target, nil)); err == nil { t.Errorf("parseBenchmarkTaskListQuery(%q) must reject invalid query", target) }
+	}
+}
