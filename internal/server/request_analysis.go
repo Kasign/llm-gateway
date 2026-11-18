@@ -113,6 +113,7 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	}
 
 	genMS := int64(0)
+	speedWindowMS := int64(0)
 	if in.StreamTiming.FirstContentMS != nil {
 		end := in.TotalMS
 		if in.StreamTiming.LastEventMS > 0 && in.StreamTiming.LastEventMS < end {
@@ -120,6 +121,7 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 		}
 		if end > *in.StreamTiming.FirstContentMS {
 			genMS = end - *in.StreamTiming.FirstContentMS
+			speedWindowMS = genMS
 			ph.ContentGenerationMS = &genMS
 		}
 	} else if !in.Stream && in.UpstreamMS > 0 {
@@ -140,9 +142,9 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	if in.PredictedPerSec != nil && *in.PredictedPerSec > 0 && in.SpeedSource == "llama_timings" {
 		tp.OutputTokensPerSec = in.PredictedPerSec
 		tp.Note = "llama.cpp timings.predicted_per_second（Decode 阶段实测；未提供匹配的 Gateway 生成窗口）"
-	} else if in.OutputTokens != nil && *in.OutputTokens > 0 && genMS > 0 {
-		tp.GenerationWindowMS = genMS
-		tp.OutputTokensPerSec = tokensPerSec(in.OutputTokens, genMS)
+	} else if in.OutputTokens != nil && *in.OutputTokens > 0 && speedWindowMS > 0 {
+		tp.GenerationWindowMS = speedWindowMS
+		tp.OutputTokensPerSec = tokensPerSec(in.OutputTokens, speedWindowMS)
 		tp.SpeedSource = "gateway_window"
 		tp.Note = "输出 Token 数 ÷ Gateway 可观测生成窗口；不是后端原生 Decode 速度"
 	} else {
