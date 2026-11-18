@@ -486,7 +486,7 @@ function detailSections(j) {
       gateway_first_write: 'Gateway 首次写回正文',
       gateway_last_write: 'Gateway 最后一次写回正文',
       pipeline_finished: 'Pipeline 收尾完成',
-      handler_returned: 'HTTP Handler 即将返回',
+      handler_exit_started: 'HTTP Handler 收尾开始',
     };
     const statusLabels = {
       measured: '已测量',

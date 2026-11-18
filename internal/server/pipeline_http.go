@@ -70,10 +70,44 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	timeline.record("request_received", start)
 	id := requestID(r.Context())
 	defer func() {
-		timeline.recordNow("handler_returned")
+		if !timeline.has("pipeline_started") {
+			timeline.markIfMissing("pipeline_started", timelineStatusNotReached)
+			timeline.markIfMissing("prepared", timelineStatusNotReached)
+			timeline.markIfMissing("ready", timelineStatusNotReached)
+			timeline.markIfMissing("upstream_started", timelineStatusNotReached)
+			timeline.markIfMissing("provider_queue_wait", timelineStatusNotReached)
+			timeline.markIfMissing("upstream_dispatched", timelineStatusNotReached)
+			timeline.markIfMissing("upstream_headers", timelineStatusNotReached)
+			timeline.markIfMissing("upstream_first_byte", timelineStatusNotReached)
+		} else {
+			if !timeline.has("prepared") { timeline.markIfMissing("prepared", timelineStatusNotReached) }
+			if !timeline.has("ready") { timeline.markIfMissing("ready", timelineStatusNotReached) }
+			if !timeline.has("upstream_started") {
+				timeline.markIfMissing("upstream_started", timelineStatusNotReached)
+				timeline.markIfMissing("provider_queue_wait", timelineStatusNotReached)
+				timeline.markIfMissing("upstream_dispatched", timelineStatusNotReached)
+				timeline.markIfMissing("upstream_headers", timelineStatusNotReached)
+				timeline.markIfMissing("upstream_first_byte", timelineStatusNotReached)
+			} else {
+				if !timeline.has("provider_queue_wait") { timeline.markIfMissing("provider_queue_wait", timelineStatusUnknown) }
+				if !timeline.has("upstream_dispatched") { timeline.markIfMissing("upstream_dispatched", timelineStatusNotReached) }
+				if !timeline.has("upstream_headers") { timeline.markIfMissing("upstream_headers", timelineStatusNotReached) }
+				if !timeline.has("upstream_first_byte") { timeline.markIfMissing("upstream_first_byte", timelineStatusNotReached) }
+			}
+		}
 		if analysis, ok := timeline.analysisSnapshot(); ok {
+			if !analysis.Stream {
+				timeline.markIfMissing("stream_first_any", timelineStatusNotApplicable)
+				timeline.markIfMissing("stream_first_reasoning", timelineStatusNotApplicable)
+				timeline.markIfMissing("stream_first_content", timelineStatusNotApplicable)
+			} else if !timeline.has("stream_first_any") {
+				timeline.markIfMissing("stream_first_any", timelineStatusNotReached)
+			}
+			timeline.recordNow("handler_exit_started")
 			analysis.Timeline = timeline.snapshot()
 			s.persistRequestAnalysis(context.Background(), id, analysis)
+		} else {
+			timeline.recordNow("handler_exit_started")
 		}
 	}()
 	if r.Method != http.MethodPost {

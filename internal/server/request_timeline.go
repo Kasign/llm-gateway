@@ -43,7 +43,7 @@ var requestTimelineEventNames = map[string]struct{}{
 	"upstream_headers": {}, "upstream_first_byte": {},
 	"stream_first_any": {}, "stream_first_reasoning": {}, "stream_first_content": {},
 	"gateway_first_write": {}, "gateway_last_write": {},
-	"pipeline_finished": {}, "handler_returned": {},
+	"pipeline_finished": {}, "handler_exit_started": {},
 }
 
 func newRequestTimeline(start time.Time) *requestTimeline {
@@ -226,14 +226,14 @@ func (t *requestTimeline) On(_ context.Context, ev core.Event) {
 	}
 	switch ev.Stage {
 	case core.StageParsed:
-		t.record("pipeline_started", ev.State.ParsedAt)
+		t.recordFirst("pipeline_started", ev.State.ParsedAt)
 	case core.StagePrepared:
-		t.record("prepared", ev.State.PreparedAt)
+		t.recordFirst("prepared", ev.State.PreparedAt)
 	case core.StageReady:
-		t.record("ready", ev.State.ReadyAt)
+		t.recordFirst("ready", ev.State.ReadyAt)
 	case core.StageWarmStart:
-		t.record("warm_finished", ev.State.WarmAt)
+		t.recordFirst("warm_finished", ev.State.WarmAt)
 	case core.StageUpstreamStart:
-		t.record("upstream_started", ev.State.UpstreamStart)
+		t.recordFirst("upstream_started", ev.State.UpstreamStart)
 	}
 }

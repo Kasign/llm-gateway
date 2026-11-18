@@ -2887,7 +2887,7 @@ components:
       properties:
         name:
           type: string
-          enum: [request_received, auth_started, auth_finished, client_rpm_started, client_rpm_finished, body_read_started, body_read_finished, pipeline_started, prepared, ready, warm_finished, upstream_started, provider_queue_wait, upstream_dispatched, upstream_headers, upstream_first_byte, stream_first_any, stream_first_reasoning, stream_first_content, gateway_first_write, gateway_last_write, pipeline_finished, handler_returned]
+          enum: [request_received, auth_started, auth_finished, client_rpm_started, client_rpm_finished, body_read_started, body_read_finished, pipeline_started, prepared, ready, warm_finished, upstream_started, provider_queue_wait, upstream_dispatched, upstream_headers, upstream_first_byte, stream_first_any, stream_first_reasoning, stream_first_content, gateway_first_write, gateway_last_write, pipeline_finished, handler_exit_started]
         offset_ms: { type: integer, format: int64, minimum: 0 }
         status: { type: string, enum: [measured, not_applicable, not_reached, unknown] }
       additionalProperties: false
