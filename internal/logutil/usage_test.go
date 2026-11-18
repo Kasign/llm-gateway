@@ -139,3 +139,29 @@ func TestTokensFromResponseSSETimingsWithoutFinalNewline(t *testing.T) {
 		t.Fatalf("last SSE timings not harvested: %+v", h)
 	}
 }
+
+func TestTokenHarvestKeepsZeroUsageValues(t *testing.T) {
+	var h TokenHarvest
+	h.mergeUsage(0, 0, 0)
+	if h.InputTokens == nil || *h.InputTokens != 0 || h.OutputTokens == nil || *h.OutputTokens != 0 || h.TotalTokens == nil || *h.TotalTokens != 0 {
+		t.Fatalf("zero usage values must remain observable: %+v", h)
+	}
+	if h.TokenSource != "upstream_usage" {
+		t.Fatalf("unexpected source: %q", h.TokenSource)
+	}
+}
+
+func TestTokenHarvestKeepsTimingFieldsWhenDecodeSpeedIsZero(t *testing.T) {
+	var h TokenHarvest
+	h.mergeTimings(Timings{
+		PromptN: 12, PromptNPresent: true, PredictedN: 0, PredictedNPresent: true,
+		PromptMS: 3, PromptMSPresent: true, PredictedMS: 4, PredictedMSPresent: true,
+		PromptPerSecond: 400, PromptPerSecondPresent: true, PredictedPerSecond: 0, PredictedPerSecondPresent: true,
+	})
+	if h.PromptN == nil || h.PredictedN == nil || h.PredictedMS == nil || h.PromptPerSecond == nil || h.PredictedPerSecond == nil {
+		t.Fatalf("timings fields were dropped: %+v", h)
+	}
+	if h.SpeedSource != "" || h.PredictedPerSec != nil {
+		t.Fatalf("zero Decode speed must not be treated as measured speed: %+v", h)
+	}
+}
