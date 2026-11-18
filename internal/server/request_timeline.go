@@ -264,6 +264,6 @@ func (t *requestTimeline) On(_ context.Context, ev core.Event) {
 	case core.StageUpstreamStart:
 		t.recordFirst("upstream_started", ev.State.UpstreamStart)
 	case core.StageFinish:
-		t.recordNow("pipeline_finished")
+		t.recordFirst("pipeline_finished", time.Now())
 	}
 }
