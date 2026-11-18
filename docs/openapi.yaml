@@ -1192,7 +1192,7 @@ paths:
                         run_count: { type: integer, minimum: 0 }
                         started_at: { type: string, format: date-time }
                         finished_at: { type: string, format: date-time, nullable: true }
-                        latency_ms: { type: integer, format: int64, minimum: 0 }
+                        latency_ms: { type: integer, format: int64, minimum: 0, nullable: true }
                         condition_sha256: { type: string }
                         condition_status: { type: string, enum: [complete, partial, unknown] }
                         condition_missing: { type: array, items: { type: string } }
