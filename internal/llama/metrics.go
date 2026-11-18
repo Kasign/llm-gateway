@@ -18,7 +18,6 @@ const DefaultMetricsResponseLimit int64 = 4 << 20
 
 var ErrMetricsResponseTooLarge = errors.New("llama.cpp metrics response exceeds size limit")
 
-// MetricType 保留 Prometheus 暴露的原始类型；未知类型不会被推断为 Gauge 或 Counter。
 type MetricType string
 
 const (
@@ -30,7 +29,7 @@ const (
 	MetricTypeUntyped   MetricType = "untyped"
 )
 
-// MetricSample 是一次 /metrics 抓取中的单个样本。Name、Type、Help 和 Labels 均来自上游。
+// MetricSample 保留上游原始名称、类型、帮助文本、标签和值，不猜测未知指标语义。
 type MetricSample struct {
 	Name      string            `json:"name"`
 	Type      MetricType        `json:"type"`
@@ -40,14 +39,12 @@ type MetricSample struct {
 	Timestamp *int64            `json:"timestamp_ms,omitempty"`
 }
 
-// MetricsSnapshot 保留动态发现的指标，不依赖编译时固定指标清单。
 type MetricsSnapshot struct {
 	SampledAt time.Time      `json:"sampled_at"`
 	Samples   []MetricSample `json:"samples"`
 }
 
-// FetchMetrics 读取 llama.cpp /metrics。调用方应为 ctx 设置独立短超时。
-// modelID 仅在 router mode 且已明确目标模型时传入；空值不擅自猜测默认模型。
+// FetchMetrics 读取 /metrics。调用方必须设置独立短超时；响应体有硬上限。
 func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int64) (int, []byte, error) {
 	if c == nil || c.IsOllama() {
 		return 0, nil, errors.New("llama.cpp metrics is unavailable for this backend")
@@ -56,9 +53,24 @@ func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int6
 		maxBytes = DefaultMetricsResponseLimit
 	}
 	path := "/metrics"
-	if strings.TrimSpace(modelID) != "" {
-		path += "?model=" + url.QueryEscape(strings.TrimSpace(modelID))
+	if modelID = strings.TrimSpace(modelID); modelID != "" {
+		path += "?model=" + url.QueryEscape(modelID)
 	}
+	return c.getBounded(ctx, path, maxBytes)
+}
+
+// FetchSlots 读取 /slots，但调用方不得将其加入默认轮询，除非已验证目标版本的 idle-sleep 行为。
+func (c *Client) FetchSlots(ctx context.Context, maxBytes int64) (int, []byte, error) {
+	if c == nil || c.IsOllama() {
+		return 0, nil, errors.New("llama.cpp slots is unavailable for this backend")
+	}
+	if maxBytes <= 0 {
+		maxBytes = 2 << 20
+	}
+	return c.getBounded(ctx, "/slots", maxBytes)
+}
+
+func (c *Client) getBounded(ctx context.Context, path string, maxBytes int64) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return 0, nil, err
@@ -80,7 +92,7 @@ func (c *Client) FetchMetrics(ctx context.Context, modelID string, maxBytes int6
 }
 
 // ParsePrometheusMetrics 动态解析 Prometheus text exposition format。
-// 未声明 TYPE 的样本标记为 untyped；不因指标名称后缀推断语义。
+// 标准 TYPE 声明格式为 "# TYPE <name> <type>"，未声明类型的样本标记为 untyped。
 func ParsePrometheusMetrics(body []byte, sampledAt time.Time) (*MetricsSnapshot, error) {
 	out := &MetricsSnapshot{SampledAt: sampledAt, Samples: make([]MetricSample, 0)}
 	types := make(map[string]MetricType)
@@ -95,17 +107,16 @@ func ParsePrometheusMetrics(body []byte, sampledAt time.Time) (*MetricsSnapshot,
 			continue
 		}
 		if strings.HasPrefix(line, "# HELP ") {
-			rest := strings.TrimPrefix(line, "# HELP ")
-			name, help, ok := strings.Cut(rest, " ")
-			if !ok || name == "" {
+			fields := strings.SplitN(strings.TrimPrefix(line, "# HELP "), " ", 2)
+			if len(fields) != 2 || fields[0] == "" {
 				return nil, fmt.Errorf("metrics line %d: invalid HELP declaration", lineNo)
 			}
-			helps[name] = help
+			helps[fields[0]] = fields[1]
 			continue
 		}
 		if strings.HasPrefix(line, "# TYPE ") {
 			fields := strings.Fields(line)
-			if len(fields) != 4 {
+			if len(fields) != 4 || fields[0] != "#" || fields[1] != "TYPE" || fields[2] == "" {
 				return nil, fmt.Errorf("metrics line %d: invalid TYPE declaration", lineNo)
 			}
 			t := MetricType(strings.ToLower(fields[3]))
@@ -126,7 +137,9 @@ func ParsePrometheusMetrics(body []byte, sampledAt time.Time) (*MetricsSnapshot,
 			for _, suffix := range []string{"_bucket", "_sum", "_count"} {
 				if strings.HasSuffix(sample.Name, suffix) {
 					sample.Type = types[strings.TrimSuffix(sample.Name, suffix)]
-					if sample.Type != "" { break }
+					if sample.Type != "" {
+						break
+					}
 				}
 			}
 		}
@@ -138,7 +151,9 @@ func ParsePrometheusMetrics(body []byte, sampledAt time.Time) (*MetricsSnapshot,
 			for _, suffix := range []string{"_bucket", "_sum", "_count"} {
 				if strings.HasSuffix(sample.Name, suffix) {
 					sample.Help = helps[strings.TrimSuffix(sample.Name, suffix)]
-					if sample.Help != "" { break }
+					if sample.Help != "" {
+						break
+					}
 				}
 			}
 		}
@@ -160,9 +175,9 @@ func parsePrometheusSample(line string) (MetricSample, error) {
 		return out, errors.New("missing sample value")
 	}
 	identity := line[:i]
-	rest := strings.TrimSpace(line[i:])
-	if identity == "" || rest == "" {
-		return out, errors.New("invalid sample")
+	fields := strings.Fields(strings.TrimSpace(line[i:]))
+	if len(fields) < 1 || len(fields) > 2 {
+		return out, errors.New("invalid sample value or timestamp")
 	}
 	labelStart := strings.IndexByte(identity, '{')
 	if labelStart >= 0 {
@@ -180,10 +195,6 @@ func parsePrometheusSample(line string) (MetricSample, error) {
 	}
 	if out.Name == "" {
 		return out, errors.New("empty metric name")
-	}
-	fields := strings.Fields(rest)
-	if len(fields) < 1 || len(fields) > 2 {
-		return out, errors.New("invalid sample value or timestamp")
 	}
 	value, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
@@ -205,20 +216,32 @@ func sampleIdentityEnd(line string) int {
 	for i := 0; i < len(line); i++ {
 		ch := line[i]
 		if inQuotes {
-			if escaped { escaped = false; continue }
-			if ch == '\\' { escaped = true; continue }
-			if ch == '"' { inQuotes = false }
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inQuotes = false
+			}
 			continue
 		}
 		switch ch {
 		case '"':
-			if inLabels { inQuotes = true }
+			if inLabels {
+				inQuotes = true
+			}
 		case '{':
 			inLabels = true
 		case '}':
 			inLabels = false
 		case ' ', '\t':
-			if !inLabels { return i }
+			if !inLabels {
+				return i
+			}
 		}
 	}
 	return -1
@@ -227,38 +250,65 @@ func sampleIdentityEnd(line string) int {
 func parsePrometheusLabels(input string) (map[string]string, error) {
 	labels := make(map[string]string)
 	for i := 0; i < len(input); {
-		for i < len(input) && (input[i] == ' ' || input[i] == ',') { i++ }
-		if i == len(input) { break }
+		for i < len(input) && (input[i] == ' ' || input[i] == ',') {
+			i++
+		}
+		if i == len(input) {
+			break
+		}
 		start := i
-		for i < len(input) && input[i] != '=' && input[i] != ',' { i++ }
-		if i >= len(input) || input[i] != '=' { return nil, errors.New("invalid label assignment") }
+		for i < len(input) && input[i] != '=' && input[i] != ',' {
+			i++
+		}
+		if i >= len(input) || input[i] != '=' {
+			return nil, errors.New("invalid label assignment")
+		}
 		key := strings.TrimSpace(input[start:i])
 		i++
-		if key == "" || i >= len(input) || input[i] != '"' { return nil, errors.New("invalid label value") }
+		if key == "" || i >= len(input) || input[i] != '"' {
+			return nil, errors.New("invalid label value")
+		}
 		i++
 		var value strings.Builder
 		closed := false
 		for i < len(input) {
 			ch := input[i]
 			i++
-			if ch == '"' { closed = true; break }
+			if ch == '"' {
+				closed = true
+				break
+			}
 			if ch == '\\' {
-				if i >= len(input) { return nil, errors.New("invalid label escape") }
-				esc := input[i]; i++
+				if i >= len(input) {
+					return nil, errors.New("invalid label escape")
+				}
+				esc := input[i]
+				i++
 				switch esc {
-				case 'n': value.WriteByte('\n')
-				case '"', '\\': value.WriteByte(esc)
-				default: return nil, errors.New("unsupported label escape")
+				case 'n':
+					value.WriteByte('\n')
+				case '"', '\\':
+					value.WriteByte(esc)
+				default:
+					return nil, errors.New("unsupported label escape")
 				}
 				continue
 			}
 			value.WriteByte(ch)
 		}
-		if !closed { return nil, errors.New("unterminated label value") }
-		if _, exists := labels[key]; exists { return nil, errors.New("duplicate label") }
+		if !closed {
+			return nil, errors.New("unterminated label value")
+		}
+		if _, exists := labels[key]; exists {
+			return nil, errors.New("duplicate label")
+		}
 		labels[key] = value.String()
-		for i < len(input) && input[i] == ' ' { i++ }
-		if i < len(input) && input[i] != ',' { return nil, errors.New("invalid label separator") }
+		for i < len(input) && input[i] == ' ' {
+			i++
+		}
+		if i < len(input) && input[i] != ',' {
+			return nil, errors.New("invalid label separator")
+		}
 	}
 	return labels, nil
 }

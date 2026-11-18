@@ -1,6 +1,8 @@
 package llama
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -40,4 +42,30 @@ func TestParsePrometheusMetricsRejectsMalformedSample(t *testing.T) {
 func TestParsePrometheusMetricsRejectsEmptyPayload(t *testing.T) {
 	_, err := ParsePrometheusMetrics([]byte("# HELP only metadata\n"), time.Now())
 	if err == nil { t.Fatal("expected empty payload error") }
+}
+
+func TestFetchMetricsUsesConfiguredAuthAndModel(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.RequestURI(), r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("metric 1\n"))
+	}))
+	defer srv.Close()
+	client := New(srv.URL, 0, "llamacpp", "upstream-secret")
+	status, body, err := client.FetchMetrics(t.Context(), "model A", 1024)
+	if err != nil { t.Fatal(err) }
+	if status != http.StatusOK || gotPath != "/metrics?model=model+A" || gotAuth != "Bearer upstream-secret" || string(body) != "metric 1\n" {
+		t.Fatalf("status=%d path=%q auth=%q body=%q", status, gotPath, gotAuth, body)
+	}
+}
+
+func TestFetchMetricsEnforcesResponseLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("12345"))
+	}))
+	defer srv.Close()
+	client := New(srv.URL, 0, "llamacpp", "")
+	_, _, err := client.FetchMetrics(t.Context(), "", 4)
+	if err != ErrMetricsResponseTooLarge { t.Fatalf("error=%v", err) }
 }

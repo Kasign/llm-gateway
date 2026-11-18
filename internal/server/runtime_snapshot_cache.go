@@ -1,8 +1,9 @@
-// server（runtime_snapshot_cache）：Ollama / llama 运行时快照短期共享缓存，避免首页+模型页并行打 /api/tags、/api/ps。
+// server（runtime_snapshot_cache）：本地 Provider 运行时快照与 llama.cpp Metrics 的短期内存缓存。
 package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -12,13 +13,18 @@ import (
 const (
 	upstreamRuntimeSnapshotTTL      = 10 * time.Second
 	upstreamRuntimeInMemoryCacheTTL = 30 * time.Second
+	llamaMetricsSamplingTimeout     = 2 * time.Second
 )
 
 type runtimeSnapshotSample struct {
-	Snapshot  *llama.RuntimeSnapshot
-	Status    string
-	Source    string
-	SampledAt time.Time
+	Snapshot         *llama.RuntimeSnapshot
+	Status           string
+	Source           string
+	SampledAt        time.Time
+	Metrics          *llama.MetricsSnapshot
+	MetricsStatus    string
+	MetricsError     string
+	MetricsSampledAt time.Time
 }
 
 type upstreamRuntimeSnapEntry struct {
@@ -87,10 +93,11 @@ func (s *Server) invalidateUpstreamRuntimeSnapshotCache() {
 	s.runtimeSnapMu.Unlock()
 }
 
-
-// sampleLocalRuntimeSnapshot 在后台采集本地 Provider 的运行时状态，不影响推理请求。
+// sampleLocalRuntimeSnapshot 采集本地 Provider 状态；Metrics 失败不影响模型目录快照。
 func (s *Server) sampleLocalRuntimeSnapshot(ctx context.Context) {
-	if s == nil { return }
+	if s == nil {
+		return
+	}
 	s.upstreamMu.RLock()
 	upstream := s.upstream
 	client := s.llama
@@ -98,8 +105,10 @@ func (s *Server) sampleLocalRuntimeSnapshot(ctx context.Context) {
 	backend := strings.ToLower(strings.TrimSpace(upstream.Backend))
 	if client == nil || (backend != "ollama" && backend != "llama.cpp" && backend != "llamacpp") {
 		s.setRuntimeSnapshotSample(nil, "unavailable", "local_provider")
+		s.setRuntimeMetricsSample(nil, "skipped", "backend_not_llamacpp")
 		return
 	}
+
 	var snap *llama.RuntimeSnapshot
 	var err error
 	if backend == "ollama" {
@@ -109,9 +118,57 @@ func (s *Server) sampleLocalRuntimeSnapshot(ctx context.Context) {
 	}
 	if err != nil || snap == nil {
 		s.setRuntimeSnapshotSample(nil, "unavailable", "upstream_runtime")
+	} else {
+		s.setRuntimeSnapshotSample(snap, "complete", "upstream_runtime")
+	}
+
+	if backend == "ollama" {
+		s.setRuntimeMetricsSample(nil, "skipped", "backend_not_llamacpp")
 		return
 	}
-	s.setRuntimeSnapshotSample(snap, "complete", "upstream_runtime")
+	s.sampleLlamaMetrics(ctx, client, upstream.ModelName)
+}
+
+// sampleLlamaMetrics 独立采集 Metrics；超时和端点故障不会传播到推理或 RuntimeSnapshot。
+func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client, modelID string) {
+	ctx, cancel := context.WithTimeout(parent, llamaMetricsSamplingTimeout)
+	defer cancel()
+
+	sampledAt := time.Now().UTC()
+	statusCode, body, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
+	if err != nil {
+		status := "unavailable"
+		code := "request_failed"
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			status, code = "timeout", "sampling_timeout"
+		case errors.Is(err, context.Canceled):
+			status, code = "cancelled", "sampling_cancelled"
+		case errors.Is(err, llama.ErrMetricsResponseTooLarge):
+			status, code = "invalid_response", "response_too_large"
+		}
+		s.setRuntimeMetricsSample(nil, status, code)
+		return
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		switch statusCode {
+		case 501:
+			s.setRuntimeMetricsSample(nil, "unsupported", "endpoint_disabled_or_unsupported")
+		case 400:
+			s.setRuntimeMetricsSample(nil, "needs_model", "router_model_required_or_invalid")
+		case 401, 403:
+			s.setRuntimeMetricsSample(nil, "unavailable", "upstream_auth_failed")
+		default:
+			s.setRuntimeMetricsSample(nil, "unavailable", "upstream_http_error")
+		}
+		return
+	}
+	snapshot, err := llama.ParsePrometheusMetrics(body, sampledAt)
+	if err != nil {
+		s.setRuntimeMetricsSample(nil, "invalid_response", "metrics_parse_failed")
+		return
+	}
+	s.setRuntimeMetricsSample(snapshot, "complete", "")
 }
 
 func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, source string) {
@@ -127,11 +184,51 @@ func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, s
 	s.runtimeSnapshotSample = &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: time.Now()}
 }
 
+func (s *Server) setRuntimeMetricsSample(snapshot *llama.MetricsSnapshot, status, errCode string) {
+	if s == nil {
+		return
+	}
+	s.runtimeSnapshotSampleMu.Lock()
+	defer s.runtimeSnapshotSampleMu.Unlock()
+	if s.runtimeSnapshotSample == nil {
+		s.runtimeSnapshotSample = &runtimeSnapshotSample{Status: "unavailable", Source: "runtime_sampler", SampledAt: time.Now()}
+	}
+	s.runtimeSnapshotSample.Metrics = cloneMetricsSnapshot(snapshot)
+	s.runtimeSnapshotSample.MetricsStatus = status
+	s.runtimeSnapshotSample.MetricsError = errCode
+	s.runtimeSnapshotSample.MetricsSampledAt = time.Now()
+}
+
+func cloneMetricsSnapshot(snapshot *llama.MetricsSnapshot) *llama.MetricsSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	out := &llama.MetricsSnapshot{SampledAt: snapshot.SampledAt, Samples: make([]llama.MetricSample, len(snapshot.Samples))}
+	for i, sample := range snapshot.Samples {
+		out.Samples[i] = sample
+		if sample.Labels != nil {
+			out.Samples[i].Labels = make(map[string]string, len(sample.Labels))
+			for key, value := range sample.Labels {
+				out.Samples[i].Labels[key] = value
+			}
+		}
+		if sample.Timestamp != nil {
+			ts := *sample.Timestamp
+			out.Samples[i].Timestamp = &ts
+		}
+	}
+	return out
+}
+
 func (s *Server) runtimeSnapshotSampleLatest() *runtimeSnapshotSample {
-	if s == nil { return nil }
+	if s == nil {
+		return nil
+	}
 	s.runtimeSnapshotSampleMu.RLock()
 	defer s.runtimeSnapshotSampleMu.RUnlock()
-	if s.runtimeSnapshotSample == nil { return nil }
+	if s.runtimeSnapshotSample == nil {
+		return nil
+	}
 	out := *s.runtimeSnapshotSample
 	if s.runtimeSnapshotSample.Snapshot != nil {
 		v := *s.runtimeSnapshotSample.Snapshot
@@ -139,5 +236,6 @@ func (s *Server) runtimeSnapshotSampleLatest() *runtimeSnapshotSample {
 		v.Catalog = append([]llama.CatalogItem(nil), v.Catalog...)
 		out.Snapshot = &v
 	}
+	out.Metrics = cloneMetricsSnapshot(s.runtimeSnapshotSample.Metrics)
 	return &out
 }
