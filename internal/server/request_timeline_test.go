@@ -216,6 +216,79 @@ func TestResponseSinkRecordsPartialWriteAsSuccessAndFailure(t *testing.T) {
 	}
 }
 
+
+type interruptedStreamResponseWriter struct {
+	header http.Header
+	writes int
+}
+
+func (w *interruptedStreamResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *interruptedStreamResponseWriter) WriteHeader(int) {}
+func (w *interruptedStreamResponseWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes == 1 {
+		return len(p), nil
+	}
+	return 0, errors.New("client connection closed")
+}
+
+type interruptedStreamForwarder struct{}
+
+func (interruptedStreamForwarder) Forward(_ context.Context, st core.State, _ core.ChunkFunc) (core.Result, error) {
+	sink, ok := st.Sink.(http.ResponseWriter)
+	if !ok {
+		return core.Result{}, errors.New("response sink does not implement http.ResponseWriter")
+	}
+	sink.WriteHeader(http.StatusOK)
+	if _, err := sink.Write([]byte("first chunk")); err != nil {
+		return core.Result{}, err
+	}
+	if _, err := sink.Write([]byte("interrupted chunk")); err != nil {
+		return core.Result{}, err
+	}
+	return core.Result{}, nil
+}
+
+func TestRequestTimelineRecordsStreamInterruptionAfterHeaders(t *testing.T) {
+	start := time.Now()
+	timeline := newRequestTimeline(start)
+	ctx := context.WithValue(context.Background(), requestTimelineContextKey{}, timeline)
+	writer := &interruptedStreamResponseWriter{}
+	sink := &responseSink{w: writer, method: http.MethodPost, timeline: timeline}
+	pipe := &core.Pipeline{
+		Resolve: func(context.Context, core.State) (core.ModelChoice, error) {
+			return core.ModelChoice{ProviderID: "test", UpstreamID: "test-model"}, nil
+		},
+		Forward: interruptedStreamForwarder{},
+		Observe: timeline,
+	}
+	_, err := pipe.Run(ctx, core.Request{
+		ID: "timeline-stream-interrupted", Method: http.MethodPost, Path: "/v1/chat/completions",
+		Body: []byte(`{"model":"test-model","messages":[],"stream":true}`),
+		Started: start, Sink: sink,
+	})
+	if err == nil {
+		t.Fatal("expected interrupted stream write to fail")
+	}
+	got := make(map[string]bool)
+	for _, event := range timeline.snapshot() {
+		got[event.Name] = event.Status == timelineStatusMeasured && event.OffsetMS != nil
+	}
+	for _, name := range []string{"gateway_first_write", "gateway_last_write", "gateway_write_failed", "pipeline_finished"} {
+		if !got[name] {
+			t.Fatalf("missing measured %s after stream interruption: %+v", name, timeline.snapshot())
+		}
+	}
+	if writer.writes != 2 {
+		t.Fatalf("unexpected underlying write count: %d", writer.writes)
+	}
+}
+
 func TestResponseSinkUnwrapPreservesResponseControllerCapabilities(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
