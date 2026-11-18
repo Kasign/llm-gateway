@@ -2858,6 +2858,8 @@ components:
         total_tokens: { type: integer, format: int64, minimum: 0 }
         token_source: { type: string }
         token_source_label: { type: string }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        speed_source_label: { type: string }
       additionalProperties: false
     RequestAnalysis:
       type: object
@@ -2892,11 +2894,26 @@ components:
     RequestThroughput:
       type: object
       properties:
-        output_tokens_per_sec: { type: number, minimum: 0 }
+        output_tokens_per_sec: { type: number, minimum: 0, description: 仅在存在 Decode 实测速度或匹配的流式生成窗口时提供。 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
-        generation_window_ms: { type: integer, format: int64, minimum: 0 }
-        source: { type: string }
+        generation_window_ms: { type: integer, format: int64, minimum: 0, description: 仅表示用于 Gateway 派生速度的流式正文窗口；Decode timings 不填此字段。 }
+        token_source: { type: string, enum: [upstream_usage, llama_timings] }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        llama_timings:
+          $ref: "#/components/schemas/RequestModelTimings"
+        source: { type: string, description: 兼容旧版混合来源字段；新客户端应使用 token_source 与 speed_source。 }
         note: { type: string }
+      additionalProperties: false
+    RequestModelTimings:
+      type: object
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      properties:
+        prompt_n: { type: integer, format: int64, minimum: 0 }
+        predicted_n: { type: integer, format: int64, minimum: 0 }
+        prompt_ms: { type: number, minimum: 0 }
+        predicted_ms: { type: number, minimum: 0 }
+        prompt_per_second: { type: number, minimum: 0 }
+        predicted_per_second: { type: number, minimum: 0 }
       additionalProperties: false
     ToolCallEvent:
       type: object
@@ -3971,6 +3988,8 @@ components:
         total_tokens: { type: integer, format: int64, minimum: 0 }
         token_source: { type: string }
         token_source_label: { type: string }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        speed_source_label: { type: string }
       additionalProperties: false
     RequestAnalysis:
       type: object
@@ -4005,11 +4024,26 @@ components:
     RequestThroughput:
       type: object
       properties:
-        output_tokens_per_sec: { type: number, minimum: 0 }
+        output_tokens_per_sec: { type: number, minimum: 0, description: 仅在存在 Decode 实测速度或匹配的流式生成窗口时提供。 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
-        generation_window_ms: { type: integer, format: int64, minimum: 0 }
-        source: { type: string }
+        generation_window_ms: { type: integer, format: int64, minimum: 0, description: 仅表示用于 Gateway 派生速度的流式正文窗口；Decode timings 不填此字段。 }
+        token_source: { type: string, enum: [upstream_usage, llama_timings] }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        llama_timings:
+          $ref: "#/components/schemas/RequestModelTimings"
+        source: { type: string, description: 兼容旧版混合来源字段；新客户端应使用 token_source 与 speed_source。 }
         note: { type: string }
+      additionalProperties: false
+    RequestModelTimings:
+      type: object
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      properties:
+        prompt_n: { type: integer, format: int64, minimum: 0 }
+        predicted_n: { type: integer, format: int64, minimum: 0 }
+        prompt_ms: { type: number, minimum: 0 }
+        predicted_ms: { type: number, minimum: 0 }
+        prompt_per_second: { type: number, minimum: 0 }
+        predicted_per_second: { type: number, minimum: 0 }
       additionalProperties: false
     StreamEvent:
       type: object
@@ -5014,6 +5048,8 @@ components:
         total_tokens: { type: integer, format: int64, minimum: 0 }
         token_source: { type: string }
         token_source_label: { type: string }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        speed_source_label: { type: string }
       additionalProperties: false
     RequestAnalysis:
       type: object
@@ -5048,11 +5084,26 @@ components:
     RequestThroughput:
       type: object
       properties:
-        output_tokens_per_sec: { type: number, minimum: 0 }
+        output_tokens_per_sec: { type: number, minimum: 0, description: 仅在存在 Decode 实测速度或匹配的流式生成窗口时提供。 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
-        generation_window_ms: { type: integer, format: int64, minimum: 0 }
-        source: { type: string }
+        generation_window_ms: { type: integer, format: int64, minimum: 0, description: 仅表示用于 Gateway 派生速度的流式正文窗口；Decode timings 不填此字段。 }
+        token_source: { type: string, enum: [upstream_usage, llama_timings] }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        llama_timings:
+          $ref: "#/components/schemas/RequestModelTimings"
+        source: { type: string, description: 兼容旧版混合来源字段；新客户端应使用 token_source 与 speed_source。 }
         note: { type: string }
+      additionalProperties: false
+    RequestModelTimings:
+      type: object
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      properties:
+        prompt_n: { type: integer, format: int64, minimum: 0 }
+        predicted_n: { type: integer, format: int64, minimum: 0 }
+        prompt_ms: { type: number, minimum: 0 }
+        predicted_ms: { type: number, minimum: 0 }
+        prompt_per_second: { type: number, minimum: 0 }
+        predicted_per_second: { type: number, minimum: 0 }
       additionalProperties: false
     StreamEvent:
       type: object
@@ -6091,6 +6142,8 @@ components:
         total_tokens: { type: integer, format: int64, minimum: 0 }
         token_source: { type: string }
         token_source_label: { type: string }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        speed_source_label: { type: string }
       additionalProperties: false
     RequestAnalysis:
       type: object
@@ -6125,11 +6178,26 @@ components:
     RequestThroughput:
       type: object
       properties:
-        output_tokens_per_sec: { type: number, minimum: 0 }
+        output_tokens_per_sec: { type: number, minimum: 0, description: 仅在存在 Decode 实测速度或匹配的流式生成窗口时提供。 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
-        generation_window_ms: { type: integer, format: int64, minimum: 0 }
-        source: { type: string }
+        generation_window_ms: { type: integer, format: int64, minimum: 0, description: 仅表示用于 Gateway 派生速度的流式正文窗口；Decode timings 不填此字段。 }
+        token_source: { type: string, enum: [upstream_usage, llama_timings] }
+        speed_source: { type: string, enum: [llama_timings, gateway_window] }
+        llama_timings:
+          $ref: "#/components/schemas/RequestModelTimings"
+        source: { type: string, description: 兼容旧版混合来源字段；新客户端应使用 token_source 与 speed_source。 }
         note: { type: string }
+      additionalProperties: false
+    RequestModelTimings:
+      type: object
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      properties:
+        prompt_n: { type: integer, format: int64, minimum: 0 }
+        predicted_n: { type: integer, format: int64, minimum: 0 }
+        prompt_ms: { type: number, minimum: 0 }
+        predicted_ms: { type: number, minimum: 0 }
+        prompt_per_second: { type: number, minimum: 0 }
+        predicted_per_second: { type: number, minimum: 0 }
       additionalProperties: false
     StreamEvent:
       type: object
