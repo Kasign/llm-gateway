@@ -10,6 +10,7 @@ import (
 // 保活一旦写出，之后的 WriteHeader 不再改状态行。
 type responseSink struct {
 	w      http.ResponseWriter
+	method string
 	mu     sync.Mutex
 	wrote  bool
 	status int
@@ -45,7 +46,7 @@ func (s *responseSink) Write(p []byte) (int, error) {
 	}
 	// 持锁写完一整块。保活 goroutine 和上游转发会并发写同一连接，不能在解锁后再写。
 	n, err := s.w.Write(p)
-	if n > 0 && s.timeline != nil {
+	if n > 0 && s.timeline != nil && s.method != http.MethodHead {
 		s.timeline.recordFirst("gateway_first_write", time.Now())
 		s.timeline.recordLatest("gateway_last_write", time.Now())
 	}

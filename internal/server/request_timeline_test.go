@@ -268,3 +268,16 @@ func TestResponseBodyWriteMissingStatusUsesHTTPBodySemantics(t *testing.T) {
 		})
 	}
 }
+
+
+func TestResponseSinkDoesNotRecordSuppressedHeadBody(t *testing.T) {
+	timeline := newRequestTimeline(time.Now())
+	recorder := httptest.NewRecorder()
+	sink := &responseSink{w: recorder, method: http.MethodHead, timeline: timeline}
+	if n, err := sink.Write([]byte("suppressed")); err != nil || n != len("suppressed") {
+		t.Fatalf("HEAD ResponseWriter semantics changed: n=%d err=%v", n, err)
+	}
+	if events := timeline.snapshot(); len(events) != 0 {
+		t.Fatalf("HEAD body suppression must not be reported as a successful body write: %+v", events)
+	}
+}

@@ -80,7 +80,7 @@ func (s *Server) serveInference(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	timeline := newRequestTimeline(start)
 	timeline.record("request_received", start)
-	sink := &responseSink{w: w, timeline: timeline}
+	sink := &responseSink{w: w, method: r.Method, timeline: timeline}
 	w = sink
 	id := requestID(r.Context())
 	defer func() {
