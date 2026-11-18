@@ -3111,7 +3111,20 @@ components:
           items:
             type: object
             additionalProperties: true
-        tool_metrics:\n          type: object\n          properties:\n            model_rounds: { type: integer, minimum: 0 }\n            tool_rounds: { type: integer, minimum: 0 }\n            tool_calls: { type: integer, minimum: 0 }\n            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }\n            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }\n            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }\n          additionalProperties: false\n        request_id: { type: string }
+        tool_metrics:
+          type: object
+          properties:
+            model_rounds: { type: integer, minimum: 0 }
+            tool_rounds: { type: integer, minimum: 0 }
+            tool_calls: { type: integer, minimum: 0 }
+            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }
+            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+          additionalProperties: false
+        request_id: { type: string }
         request_log: { type: string }
         payload_persisted: { type: boolean, description: "完整请求/响应正文是否已按 logging.store_payload 持久化" }
         analysis:
@@ -4176,7 +4189,20 @@ components:
           items:
             type: object
             additionalProperties: true
-        tool_metrics:\n          type: object\n          properties:\n            model_rounds: { type: integer, minimum: 0 }\n            tool_rounds: { type: integer, minimum: 0 }\n            tool_calls: { type: integer, minimum: 0 }\n            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }\n            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }\n            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }\n          additionalProperties: false\n        request_id: { type: string }
+        tool_metrics:
+          type: object
+          properties:
+            model_rounds: { type: integer, minimum: 0 }
+            tool_rounds: { type: integer, minimum: 0 }
+            tool_calls: { type: integer, minimum: 0 }
+            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }
+            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+          additionalProperties: false
+        request_id: { type: string }
         request_log: { type: string }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
@@ -5206,7 +5232,20 @@ components:
           items:
             type: object
             additionalProperties: true
-        tool_metrics:\n          type: object\n          properties:\n            model_rounds: { type: integer, minimum: 0 }\n            tool_rounds: { type: integer, minimum: 0 }\n            tool_calls: { type: integer, minimum: 0 }\n            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }\n            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }\n            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }\n          additionalProperties: false\n        request_id: { type: string }
+        tool_metrics:
+          type: object
+          properties:
+            model_rounds: { type: integer, minimum: 0 }
+            tool_rounds: { type: integer, minimum: 0 }
+            tool_calls: { type: integer, minimum: 0 }
+            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }
+            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+          additionalProperties: false
+        request_id: { type: string }
         request_log: { type: string }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
@@ -6270,7 +6309,20 @@ components:
           items:
             type: object
             additionalProperties: true
-        tool_metrics:\n          type: object\n          properties:\n            model_rounds: { type: integer, minimum: 0 }\n            tool_rounds: { type: integer, minimum: 0 }\n            tool_calls: { type: integer, minimum: 0 }\n            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }\n            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }\n            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }\n            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }\n          additionalProperties: false\n        request_id: { type: string }
+        tool_metrics:
+          type: object
+          properties:
+            model_rounds: { type: integer, minimum: 0 }
+            tool_rounds: { type: integer, minimum: 0 }
+            tool_calls: { type: integer, minimum: 0 }
+            model_decision_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_decision_status: { type: string, enum: [measured, not_applicable, unknown] }
+            tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
+            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+          additionalProperties: false
+        request_id: { type: string }
         request_log: { type: string }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
