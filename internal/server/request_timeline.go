@@ -28,9 +28,9 @@ type requestTimelineEvent struct {
 // requestTimeline 使用请求入口的单调时钟记录有限数量的事件。
 // 它只保存事件名、相对偏移和测量状态，不接触请求或响应正文。
 type requestTimeline struct {
-	mu     sync.Mutex
-	start  time.Time
-	events []requestTimelineEvent
+	mu       sync.Mutex
+	start    time.Time
+	events   []requestTimelineEvent
 	analysis *analysisInput
 }
 
@@ -50,9 +50,21 @@ func newRequestTimeline(start time.Time) *requestTimeline {
 	if start.IsZero() {
 		start = time.Now()
 	}
-	return &requestTimeline{start: start, events: make([]requestTimelineEvent, 0, requestTimelineMaxEvents)}
+	return &requestTimeline{
+		start:  start,
+		events: make([]requestTimelineEvent, 0, requestTimelineMaxEvents),
+	}
 }
 
+func (t *requestTimeline) offset(at time.Time) (int64, bool) {
+	if t == nil || at.IsZero() {
+		return 0, false
+	}
+	offset := at.Sub(t.start).Milliseconds()
+	return offset, offset >= 0
+}
+
+// record 记录确实发生的事件；仅用于语义上只发生一次的边界。
 func (t *requestTimeline) record(name string, at time.Time) {
 	if t == nil {
 		return
@@ -60,11 +72,8 @@ func (t *requestTimeline) record(name string, at time.Time) {
 	if _, ok := requestTimelineEventNames[name]; !ok {
 		return
 	}
-	if at.IsZero() {
-		return
-	}
-	offset := at.Sub(t.start).Milliseconds()
-	if offset < 0 {
+	offset, ok := t.offset(at)
+	if !ok {
 		return
 	}
 	t.mu.Lock()
@@ -78,16 +87,16 @@ func (t *requestTimeline) record(name string, at time.Time) {
 	})
 }
 
-
+// recordFirst 对可能重复触发的回调只保留第一次真实发生时间。
 func (t *requestTimeline) recordFirst(name string, at time.Time) {
-	if t == nil || at.IsZero() {
+	if t == nil {
 		return
 	}
 	if _, ok := requestTimelineEventNames[name]; !ok {
 		return
 	}
-	offset := at.Sub(t.start).Milliseconds()
-	if offset < 0 {
+	offset, ok := t.offset(at)
+	if !ok {
 		return
 	}
 	t.mu.Lock()
@@ -101,18 +110,21 @@ func (t *requestTimeline) recordFirst(name string, at time.Time) {
 		return
 	}
 	value := offset
-	t.events = append(t.events, requestTimelineEvent{Name: name, OffsetMS: &value, Status: timelineStatusMeasured})
+	t.events = append(t.events, requestTimelineEvent{
+		Name: name, OffsetMS: &value, Status: timelineStatusMeasured,
+	})
 }
 
+// recordLatest 对持续发生的事件保留最后一次真实发生时间。
 func (t *requestTimeline) recordLatest(name string, at time.Time) {
-	if t == nil || at.IsZero() {
+	if t == nil {
 		return
 	}
 	if _, ok := requestTimelineEventNames[name]; !ok {
 		return
 	}
-	offset := at.Sub(t.start).Milliseconds()
-	if offset < 0 {
+	offset, ok := t.offset(at)
+	if !ok {
 		return
 	}
 	t.mu.Lock()
@@ -128,13 +140,16 @@ func (t *requestTimeline) recordLatest(name string, at time.Time) {
 	if len(t.events) >= requestTimelineMaxEvents {
 		return
 	}
-	t.events = append(t.events, requestTimelineEvent{Name: name, OffsetMS: &value, Status: timelineStatusMeasured})
+	t.events = append(t.events, requestTimelineEvent{
+		Name: name, OffsetMS: &value, Status: timelineStatusMeasured,
+	})
 }
 
 func (t *requestTimeline) recordNow(name string) {
 	t.record(name, time.Now())
 }
 
+// markIfMissing 只标记明确未测得的状态，不为缺失事件生成时间偏移。
 func (t *requestTimeline) markIfMissing(name, status string) {
 	if t == nil {
 		return
@@ -161,7 +176,9 @@ func (t *requestTimeline) markIfMissing(name, status string) {
 }
 
 func (t *requestTimeline) setAnalysis(in analysisInput) {
-	if t == nil { return }
+	if t == nil {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	copy := in
@@ -169,20 +186,27 @@ func (t *requestTimeline) setAnalysis(in analysisInput) {
 }
 
 func (t *requestTimeline) analysisSnapshot() (analysisInput, bool) {
-	if t == nil { return analysisInput{}, false }
+	if t == nil {
+		return analysisInput{}, false
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.analysis == nil { return analysisInput{}, false }
-	out := *t.analysis
-	return out, true
+	if t.analysis == nil {
+		return analysisInput{}, false
+	}
+	return *t.analysis, true
 }
 
 func (t *requestTimeline) has(name string) bool {
-	if t == nil { return false }
+	if t == nil {
+		return false
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, event := range t.events {
-		if event.Name == name && event.Status == timelineStatusMeasured { return true }
+		if event.Name == name && event.Status == timelineStatusMeasured {
+			return true
+		}
 	}
 	return false
 }
@@ -202,8 +226,12 @@ func (t *requestTimeline) snapshot() []requestTimelineEvent {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].OffsetMS == nil { return false }
-		if out[j].OffsetMS == nil { return true }
+		if out[i].OffsetMS == nil {
+			return false
+		}
+		if out[j].OffsetMS == nil {
+			return true
+		}
 		return *out[i].OffsetMS < *out[j].OffsetMS
 	})
 	return out
