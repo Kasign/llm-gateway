@@ -47,10 +47,10 @@ type MetricSample struct {
 }
 
 type MetricsSnapshot struct {
-	SampledAt            time.Time      `json:"sampled_at"`
-	ProcessInstanceID     *string        `json:"process_instance_id,omitempty"`
-	ModelScope           string         `json:"model_scope,omitempty"`
-	Samples              []MetricSample `json:"samples"`
+	SampledAt         time.Time      `json:"sampled_at"`
+	ProcessInstanceID *string        `json:"process_instance_id,omitempty"`
+	ModelScope        string         `json:"model_scope,omitempty"`
+	Samples           []MetricSample `json:"samples"`
 }
 
 // FetchMetrics 读取 /metrics。调用方必须设置独立短超时；响应体有硬上限。

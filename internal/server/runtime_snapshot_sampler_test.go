@@ -15,7 +15,7 @@ func TestSampleLlamaMetricsStoresDynamicSnapshot(t *testing.T) {
 		if r.URL.Path != "/metrics" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
-		w.Header().Set("Process-Start-Time-Unix", "1700000000")
+		w.Header().Set("Process-Start-Time-Unix", "256533562943")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("# TYPE runtime_new_metric gauge\nruntime_new_metric 0.5\n"))
 	}))
