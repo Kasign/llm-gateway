@@ -22,7 +22,7 @@ func TestParseUsageResponsesInputOutput(t *testing.T) {
 }
 
 func TestParseUsageResponseCompletedNested(t *testing.T) {
-	raw := `data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":7}}`
+	raw := `data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":7}}}`
 	in, out, total, ok := ParseUsageChunk([]byte(raw))
 	if !ok || in != 3 || out != 7 || total != 10 {
 		t.Fatalf("nested usage: in=%d out=%d total=%d ok=%v", in, out, total, ok)
