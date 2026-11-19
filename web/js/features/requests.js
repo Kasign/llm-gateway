@@ -480,13 +480,38 @@ function detailSections(j) {
           ? tp.output_tokens_per_sec.toFixed(2) + ' tok/s' + (tp.speed_source === 'gateway_window' && Number(tp.generation_window_ms) > 0 ? ' (' + tp.generation_window_ms + ' ms Gateway 窗口)' : tp.speed_source === 'llama_timings' ? '（llama.cpp Decode 实测）' : '（速度来源未知）')
           : null,
       ],
-      ['Prompt Eval Token', tp.llama_timings?.prompt_n ?? null],
+      ['Prompt Eval Token（非缓存）', tp.llama_timings?.prompt_n ?? null],
+      ['缓存 Token（llama.cpp cache_n）', tp.llama_timings?.cache_n ?? null],
+      ['缓存 Token（上游 usage）', tp.llama_timings?.usage_cached_tokens ?? null],
+      ['缓存 Token（/completion）', tp.llama_timings?.tokens_cached ?? null],
+      ['Tokens Evaluated（上游字段）', tp.llama_timings?.tokens_evaluated ?? null],
       ['Prompt Eval 耗时', tp.llama_timings?.prompt_ms != null ? tp.llama_timings.prompt_ms + ' ms' : null],
+      ['Prompt Eval 每 Token', tp.llama_timings?.prompt_per_token_ms != null ? Number(tp.llama_timings.prompt_per_token_ms).toFixed(4) + ' ms/token' : null],
       ['Prompt Eval 速度', tp.llama_timings?.prompt_per_second != null ? tp.llama_timings.prompt_per_second.toFixed(2) + ' token/s' : null],
       ['Decode Token', tp.llama_timings?.predicted_n ?? null],
       ['Decode 耗时', tp.llama_timings?.predicted_ms != null ? tp.llama_timings.predicted_ms + ' ms' : null],
+      ['Decode 每 Token', tp.llama_timings?.predicted_per_token_ms != null ? Number(tp.llama_timings.predicted_per_token_ms).toFixed(4) + ' ms/token' : null],
       ['Decode 速度（原始 timings）', tp.llama_timings?.predicted_per_second != null ? tp.llama_timings.predicted_per_second.toFixed(2) + ' token/s' : null],
     ])}`;
+    const progressSamples = Array.isArray(tp.llama_timings?.prompt_progress) ? tp.llama_timings.prompt_progress : [];
+    if (progressSamples.length) {
+      const shown = progressSamples.slice(-20);
+      const progressRows = shown.map((sample, index) => {
+        const total = Number(sample.total), cache = Number(sample.cache), processed = Number(sample.processed), timeMS = Number(sample.time_ms);
+        const denominator = total - cache, numerator = processed - cache;
+        const percent = Number.isFinite(denominator) && denominator > 0 && Number.isFinite(numerator) &&
+          numerator >= 0 && numerator <= denominator ? (numerator / denominator * 100).toFixed(1) + '%' : '未知';
+        return reqKv([
+          ['采样序号', String(progressSamples.length - shown.length + index + 1)],
+          ['已处理 / 总量', Number.isFinite(processed) && Number.isFinite(total) ? processed + ' / ' + total : '未知'],
+          ['缓存 Token', Number.isFinite(cache) ? cache : '未知'],
+          ['非缓存 Prompt 进度', percent],
+          ['上游耗时', Number.isFinite(timeMS) ? timeMS + ' ms' : '未知'],
+        ]);
+      }).join('');
+      block += reqPanelFold('Prompt progress（' + progressSamples.length + ' 个采样点，展示最近 ' + shown.length + ' 个）',
+        progressRows + '<p class="req-note">进度按 (processed - cache) / (total - cache) 计算；分母无效或计数越界时不推算百分比。</p>');
+    }
     const runtime = j.analysis.runtime_snapshot || null;
     if (runtime) {
       const runtimeRows = [

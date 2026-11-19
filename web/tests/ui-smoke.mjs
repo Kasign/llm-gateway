@@ -238,7 +238,19 @@ try {
           condition_status: 'complete',
           condition_missing: []
         },
-        analysis: { phases_ms: { total_ms: 1250, upstream_ms: 1100 }, throughput: { output_tokens_per_sec: 27.2 } },
+        analysis: {
+          phases_ms: { total_ms: 1250, upstream_ms: 1100 },
+          throughput: {
+            output_tokens_per_sec: 27.2,
+            llama_timings: {
+              cache_n: 80, prompt_n: 20, predicted_n: 34, tokens_cached: 80,
+              usage_cached_tokens: 75, tokens_evaluated: 20,
+              prompt_ms: 100, prompt_per_token_ms: 5, prompt_per_second: 200,
+              predicted_ms: 100, predicted_per_token_ms: 2.9412, predicted_per_second: 34,
+              prompt_progress: [{ total: 100, cache: 80, processed: 90, time_ms: 500 }]
+            }
+          }
+        },
         stream_events: []
       }) });
       return;
@@ -274,6 +286,13 @@ try {
   check('点击历史任务详情后在历史区域展示任务内容',
     (await page.locator('#benchHistoryDetail').textContent()).includes('历史任务详情正文') &&
     (await page.locator('#benchHistoryDetail').textContent()).includes('smoke-model'));
+  const benchmarkTimingDetail = await page.locator('#benchHistoryDetail').textContent();
+  check('Benchmark 历史详情展示缓存、每 Token timing 与 Prompt progress',
+    benchmarkTimingDetail.includes('模型原生 Timings') &&
+    benchmarkTimingDetail.includes('Prompt Eval 每 Token') &&
+    benchmarkTimingDetail.includes('Decode 每 Token') &&
+    benchmarkTimingDetail.includes('Prompt progress') &&
+    benchmarkTimingDetail.includes('50.0%'));
   check('查看历史详情不会覆盖当前性能测试输出',
     !(await page.locator('#benchAnswer').textContent()).includes('历史任务详情正文'));
 
@@ -1370,6 +1389,29 @@ try {
   check('请求详情弹窗 Escape 关闭并将焦点返回触发按钮',
     await detailTrigger.evaluate(el => document.activeElement === el) &&
     await page.locator('#detailModal').getAttribute('aria-hidden') === 'true');
+  const requestTimingDetail = await page.evaluate(() => {
+    const root = document.createElement('div');
+    window.applyRequestDetail(root, {
+      summary: { request_id: 'browser-smoke-timing-detail', status: 'completed', http_status: 200, method: 'POST', request_url: '/v1/chat/completions', provider_id: 'llamacpp' },
+      timing: { latency_ms: 1000, input_tokens: 100, output_tokens: 34, total_tokens: 134 },
+      analysis: {
+        timeline_only: false,
+        throughput: { llama_timings: {
+          cache_n: 80, prompt_n: 20, predicted_n: 34, usage_cached_tokens: 75,
+          prompt_ms: 100, prompt_per_token_ms: 5, predicted_ms: 100,
+          predicted_per_token_ms: 2.94,
+          prompt_progress: [{ total: 100, cache: 80, processed: 90, time_ms: 500 }]
+        }}
+      }
+    });
+    return root.textContent;
+  });
+  check('请求详情展示缓存 Token、每 Token timing 与 Prompt progress',
+    requestTimingDetail.includes('缓存 Token（llama.cpp cache_n）') &&
+    requestTimingDetail.includes('Prompt Eval 每 Token') &&
+    requestTimingDetail.includes('Decode 每 Token') &&
+    requestTimingDetail.includes('Prompt progress') &&
+    requestTimingDetail.includes('50.0%'));
   const toastCountBeforeSilentPoll = await page.locator('#toastHost .toast').count();
   failNextRequestList = true;
   expectedSilentRequestPollFailure = true;

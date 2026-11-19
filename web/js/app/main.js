@@ -1988,6 +1988,43 @@ function renderBenchmarkToolCalls(wrap,job){
   }
   return html+'</div></details>';
 }
+function renderBenchmarkModelTimings(analysis){
+  const t=analysis?.throughput?.llama_timings;
+  if(!t)return '';
+  const rows=[
+    ['Prompt Eval Token（非缓存）',t.prompt_n],
+    ['缓存 Token（llama.cpp cache_n）',t.cache_n],
+    ['缓存 Token（上游 usage）',t.usage_cached_tokens],
+    ['缓存 Token（/completion）',t.tokens_cached],
+    ['Tokens Evaluated（上游字段）',t.tokens_evaluated],
+    ['Prompt Eval 耗时',t.prompt_ms!=null?t.prompt_ms+' ms':null],
+    ['Prompt Eval 每 Token',t.prompt_per_token_ms!=null?Number(t.prompt_per_token_ms).toFixed(4)+' ms/token':null],
+    ['Prompt Eval 速度',t.prompt_per_second!=null?Number(t.prompt_per_second).toFixed(2)+' token/s':null],
+    ['Decode Token',t.predicted_n],
+    ['Decode 耗时',t.predicted_ms!=null?t.predicted_ms+' ms':null],
+    ['Decode 每 Token',t.predicted_per_token_ms!=null?Number(t.predicted_per_token_ms).toFixed(4)+' ms/token':null],
+    ['Decode 速度',t.predicted_per_second!=null?Number(t.predicted_per_second).toFixed(2)+' token/s':null],
+  ];
+  let html='<details class="bench-detail-fold"><summary>模型原生 Timings</summary><div class="bench-detail-fold-body">'+reqKv(rows);
+  const samples=Array.isArray(t.prompt_progress)?t.prompt_progress:[];
+  if(samples.length){
+    const shown=samples.slice(-20);
+    html+='<h4>Prompt progress（'+samples.length+' 个采样点）</h4>'+shown.map((sample,index)=>{
+      const total=Number(sample.total),cache=Number(sample.cache),processed=Number(sample.processed),timeMS=Number(sample.time_ms);
+      const denominator=total-cache,numerator=processed-cache;
+      const percent=Number.isFinite(denominator)&&denominator>0&&Number.isFinite(numerator)&&numerator>=0&&numerator<=denominator
+        ?(numerator/denominator*100).toFixed(1)+'%':'未知';
+      return reqKv([
+        ['采样序号',String(samples.length-shown.length+index+1)],
+        ['已处理 / 总量',Number.isFinite(processed)&&Number.isFinite(total)?processed+' / '+total:'未知'],
+        ['缓存 Token',Number.isFinite(cache)?cache:'未知'],
+        ['非缓存 Prompt 进度',percent],
+        ['上游耗时',Number.isFinite(timeMS)?timeMS+' ms':'未知'],
+      ]);
+    }).join('')+'<p class="req-note">进度按 (processed - cache) / (total - cache) 计算；无效分母或越界计数不推算百分比。</p>';
+  }
+  return html+'</div></details>';
+}
 function renderBenchmarkHistoryDetail(wrap){
   const box=$('benchHistoryDetail');
   if(!box)return;
@@ -2036,6 +2073,7 @@ function renderBenchmarkHistoryDetail(wrap){
     if(throughput.note)html+='<p class="req-note">'+esc(throughput.note)+'</p>';
     html+='</div></details>';
   }
+  html+=renderBenchmarkModelTimings(analysis);
   if(wrap.acceptance){
     const acceptance=wrap.acceptance;
     html+='<section class="bench-detail-fold"><h4>验收判定</h4><p><span class="pill">'+esc(acceptance.case_id)+' · '+esc(acceptance.status)+'</span></p><p>'+esc(acceptance.message)+'</p><p class="small muted">原因码：<code>'+esc(acceptance.reason_code)+'</code> · 规则版本：'+esc(acceptance.rules_version)+'</p></section>';
@@ -2267,6 +2305,7 @@ function renderBenchAnalysis(wrap){
     html+='<h3 style="margin:12px 0 10px;font-size:14px">阶段耗时分解</h3><dl>'+
       rows.map(([key,value])=>'<dt>'+esc(labels[key]||key)+'</dt><dd>'+esc(String(value))+' ms</dd>').join('')+'</dl>';
   }
+  html+=renderBenchmarkModelTimings(a);
   if(a.summary?.length)html+='<ul class="req-hints" style="margin:10px 0 0">'+a.summary.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>';
   if(a.throughput?.note)html+='<p class="req-note">'+esc(a.throughput.note)+'</p>';
   box.style.display='block';
