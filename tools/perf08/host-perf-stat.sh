@@ -48,6 +48,11 @@ exe_name="${exe_path##*/}"
 exe_name="${exe_name% (deleted)}"
 [[ "$exe_name" == "llama-server" ]] || fail "目标可执行文件是 '${exe_name:-unknown}'，不是 llama-server；不会按进程名猜测模型实例"
 
+parent_pid="$(awk '/^PPid:/ { print $2 }' "$proc_dir/status")"
+[[ "$parent_pid" =~ ^[1-9][0-9]*$ ]] || fail "无法读取目标进程的父 PID"
+parent_comm="$(cat "/proc/$parent_pid/comm" 2>/dev/null || true)"
+[[ "$parent_comm" == "llama-server" ]] || fail "目标进程的父进程不是 llama-server Router；请确认传入的是 Router 创建的模型 child PID"
+
 start_ticks="$(proc_start_ticks)" || fail "无法读取 PID 启动时间"
 [[ "$start_ticks" =~ ^[0-9]+$ ]] || fail "PID 启动时间格式异常"
 
@@ -67,12 +72,23 @@ fi
 cpu_model="$(awk -F: '/model name[[:space:]]*:/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || true)"
 perf_version="$(perf --version 2>&1 | head -n 1)"
 perf_paranoid="$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || printf 'unavailable')"
+cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status 2>/dev/null || true)"
+has_perfmon=0
+if [[ "$cap_eff" =~ ^[0-9a-fA-F]+$ ]] && (( (16#$cap_eff & (1 << 38)) != 0 )); then
+  has_perfmon=1
+fi
+allow_hardware=0
+if (( EUID == 0 || has_perfmon == 1 )) || { [[ "$perf_paranoid" =~ ^-?[0-9]+$ ]] && (( perf_paranoid <= 1 )); }; then
+  allow_hardware=1
+fi
 
 {
   printf 'schema_version=1\n'
   printf 'scope=process_window\n'
   printf 'request_correlation=none\n'
   printf 'host_pid=%s\n' "$pid"
+  printf 'parent_pid=%s\n' "$parent_pid"
+  printf 'parent_executable_comm=llama-server\n'
   printf 'process_start_ticks=%s\n' "$start_ticks"
   printf 'executable=llama-server\n'
   printf 'binary_build_id=%s\n' "${build_id:-unavailable}"
@@ -84,12 +100,16 @@ perf_paranoid="$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || printf 
   printf 'started_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'hardware_pmu_events='
   pmus=()
-  [[ -d /sys/bus/event_source/devices/cpu_core ]] && pmus+=(cpu_core)
-  [[ -d /sys/bus/event_source/devices/cpu_atom ]] && pmus+=(cpu_atom)
+  if (( allow_hardware )); then
+    [[ -d /sys/bus/event_source/devices/cpu_core ]] && pmus+=(cpu_core)
+    [[ -d /sys/bus/event_source/devices/cpu_atom ]] && pmus+=(cpu_atom)
+  fi
   if (( ${#pmus[@]} )); then
     printf '%s\n' "$(IFS=,; echo "${pmus[*]}")"
-  else
+  elif (( allow_hardware )); then
     printf 'not_detected\n'
+  else
+    printf 'not_sampled_permissions\n'
   fi
 } >"$output_dir/metadata.txt"
 chmod 600 "$output_dir/metadata.txt"
@@ -100,10 +120,10 @@ event_args=(
   -e cpu-migrations
   -e page-faults
 )
-if [[ -d /sys/bus/event_source/devices/cpu_core ]]; then
+if (( allow_hardware )) && [[ -d /sys/bus/event_source/devices/cpu_core ]]; then
   event_args+=(-e cpu_core/cycles/ -e cpu_core/instructions/)
 fi
-if [[ -d /sys/bus/event_source/devices/cpu_atom ]]; then
+if (( allow_hardware )) && [[ -d /sys/bus/event_source/devices/cpu_atom ]]; then
   event_args+=(-e cpu_atom/cycles/ -e cpu_atom/instructions/)
 fi
 
