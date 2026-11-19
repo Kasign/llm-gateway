@@ -1826,13 +1826,13 @@ async function loadBenchHistory(){
     if(!items.length){
       list.innerHTML=emptyState('暂无符合条件的 Benchmark 任务');
     }else{
-      list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
+      list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>验收用例</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
         items.map(item=>{
           const scenarioLabel=item.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(item.scenario==='tool_performance'?'工具调用性能（强制调用诊断）':'普通性能');
           const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms!=null?item.latency_ms+' ms':'未知');
           const model=item.model_id||item.model_key||item.backend||'—';
-          return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'" aria-controls="benchHistoryDetail" aria-expanded="false">查看</button></td></tr>';
+          return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td>'+(item.acceptance_case_id?'<span class="pill">'+esc(item.acceptance_case_id)+'</span>':'—')+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'" aria-controls="benchHistoryDetail" aria-expanded="false">查看</button></td></tr>';
         }).join(''));
     }
     const page=$('benchHistoryPage');
@@ -1999,6 +1999,7 @@ function renderBenchmarkHistoryDetail(wrap){
   const coreMetrics=[
     ['状态',statusLabel(job.status)],
     ['场景',job.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(job.scenario==='tool_performance'?'工具调用性能（强制调用诊断）':'普通性能')],
+    ['验收用例',job.acceptance_case_id||'未关联'],
     ['模型',job.model_id||job.model_key||'—'],
     ['Backend',job.backend||'—'],
     ['总耗时',job.latency_ms!=null?job.latency_ms+' ms':'未知'],
@@ -2034,6 +2035,10 @@ function renderBenchmarkHistoryDetail(wrap){
     if(extraThroughput.length)html+='<h4>其他吞吐指标</h4><dl class="bench-history-detail-grid">'+extraThroughput.map(([key,value])=>'<dt>'+esc(key)+'</dt><dd>'+esc(String(value))+'</dd>').join('')+'</dl>';
     if(throughput.note)html+='<p class="req-note">'+esc(throughput.note)+'</p>';
     html+='</div></details>';
+  }
+  if(wrap.acceptance){
+    const acceptance=wrap.acceptance;
+    html+='<section class="bench-detail-fold"><h4>验收判定</h4><p><span class="pill">'+esc(acceptance.case_id)+' · '+esc(acceptance.status)+'</span></p><p>'+esc(acceptance.message)+'</p><p class="small muted">原因码：<code>'+esc(acceptance.reason_code)+'</code> · 规则版本：'+esc(acceptance.rules_version)+'</p></section>';
   }
   html+=renderBenchmarkToolCalls(wrap,job);
   if(content)html+='<details class="bench-detail-fold"><summary>正文 content（'+formatTokenCount(job.content_chars??content.length)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(content)+'</pre></div></details>';
