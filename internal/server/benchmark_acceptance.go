@@ -2,10 +2,28 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 )
 
 const benchmarkAcceptanceRulesVersion = "1"
+
+// benchmarkAcceptanceCasesAPI 返回服务端维护的验收用例目录。
+func (s *Server) benchmarkAcceptanceCasesAPI(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		jsonError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"items": benchmarkAcceptanceCatalog(),
+		"rules_version": benchmarkAcceptanceRulesVersion,
+	})
+}
 
 // benchmarkAcceptanceCase 描述一个项目内置的工具调用验收用例。
 // Prompt 不属于用例身份；同一用例允许按部署模型能力调整提示词，但判定规则保持稳定。
