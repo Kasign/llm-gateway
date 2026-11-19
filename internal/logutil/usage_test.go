@@ -191,6 +191,9 @@ func TestPromptProgressSplitSSEAndBounded(t *testing.T) {
 	if len(h.PromptProgress) != maxPromptProgressSamples {
 		t.Fatalf("progress sample cap violated: %d", len(h.PromptProgress))
 	}
+	if got := h.PromptProgress[len(h.PromptProgress)-1].Processed; got != maxPromptProgressSamples+9 {
+		t.Fatalf("latest progress sample was dropped: processed=%d", got)
+	}
 }
 
 func TestPromptProgressRejectsIncompleteAndInvalidValues(t *testing.T) {

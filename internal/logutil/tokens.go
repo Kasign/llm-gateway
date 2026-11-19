@@ -269,13 +269,19 @@ func parseTopLevelTokenCount(raw, key string) *int64 {
 }
 
 func (h *TokenHarvest) appendPromptProgress(sample PromptProgressSample) {
-	if h == nil || len(h.PromptProgress) >= maxPromptProgressSamples {
+	if h == nil {
 		return
 	}
 	if n := len(h.PromptProgress); n > 0 && h.PromptProgress[n-1] == sample {
 		return
 	}
-	h.PromptProgress = append(h.PromptProgress, sample)
+	if len(h.PromptProgress) < maxPromptProgressSamples {
+		h.PromptProgress = append(h.PromptProgress, sample)
+		return
+	}
+	// 保留首个采样点和最新 255 个采样点，避免高频进度事件把最终状态挤出窗口。
+	copy(h.PromptProgress[1:], h.PromptProgress[2:])
+	h.PromptProgress[maxPromptProgressSamples-1] = sample
 }
 
 func (h *TokenHarvest) mergeTimings(t Timings) {

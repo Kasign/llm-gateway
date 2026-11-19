@@ -71,7 +71,7 @@ func (t *requestTrace) recordStreamChunk(chunk []byte) {
 			return
 		}
 		if _, ok := logutil.ParsePromptProgress(raw); ok {
-			t.appendStreamEvent("prompt_progress", "progress", 0, "", "")
+			// 进度数值由 TokenHarvest 单独限量保存；不占用普通流事件配额。
 			return
 		}
 		d, ok := logutil.ParseStreamDelta(raw)
