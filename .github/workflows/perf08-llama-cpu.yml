@@ -6,7 +6,7 @@ on:
       - dev
     paths:
       - ".github/workflows/perf08-llama-cpu.yml"
-      - "tools/perf08/**"
+      - "tools/perf08/patches/**"
   workflow_dispatch:
 
 permissions:
