@@ -39,7 +39,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
-  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});loadBenchHistory().catch(()=>{});}
+  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});loadBenchHistory().catch(()=>{});loadBenchmarkAcceptanceCases().catch(()=>{});}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference'&&globalThis.InferenceParams)globalThis.InferenceParams.load().catch(()=>{});
@@ -2332,6 +2332,19 @@ function renderBenchResult(wrap){
   const rawBody=j.response||'';
   $('benchRaw').textContent=rawBody.trim().startsWith('data:')?rawBody:JSON.stringify({analysis:wrap.analysis,job:j,acceptance:wrap.acceptance,stream_events:evs,response:tryParse(rawBody)||rawBody},null,2);
   const ef=$('benchEventsFold');if(ef&&evs.length)ef.open=evs.length<=80;
+  renderBenchmarkAcceptanceResult(wrap);
+}
+function renderBenchmarkAcceptanceResult(wrap){
+  const box=$('benchAcceptanceResult');
+  if(!box)return;
+  const acceptance=wrap?.acceptance;
+  if(!acceptance){box.className='bench-acceptance-result msg muted';box.textContent='尚未执行项目验收。';return;}
+  const labels={pass:'通过',fail:'失败',inconclusive:'证据不足',not_run:'未执行'};
+  const status=acceptance.status||'inconclusive';
+  box.className='bench-acceptance-result msg '+(status==='pass'?'ok':status==='fail'?'err':'warn');
+  const job=benchJobPayload(wrap);
+  const request=job.request_id?' · Request ID：'+job.request_id:'';
+  box.textContent=acceptance.case_id+' · '+(labels[status]||status)+'：'+(acceptance.message||'无判定说明')+request;
 }
 function tryParse(s){try{return JSON.parse(s)}catch{return s}}
 
@@ -2406,13 +2419,14 @@ async function stopBenchmark(){
 }
 
 async function runBenchmark(scenario='performance'){
-  const acceptanceCaseID=scenario==='acceptance'?($('benchAcceptanceCase')?.value||''):'';
-  if(scenario==='acceptance'){
+  const isAcceptance=scenario==='acceptance';
+  const acceptanceCaseID=isAcceptance?($('benchAcceptanceCase')?.value||''):'';
+  if(isAcceptance){
     if(!acceptanceCaseID){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='请先选择验收用例。';}return;}
     scenario=acceptanceCaseID==='TM-05'?'tool_performance':'tool_performance_auto';
   }
   const toolScenario=scenario==='tool_performance'||scenario==='tool_performance_auto';
-  const promptOverride=toolScenario?($('benchToolPrompt')?.value||'').trim():'';
+  const promptOverride=toolScenario?($(isAcceptance?'benchAcceptancePrompt':'benchToolPrompt')?.value||'').trim():'';
   if(toolScenario&&!promptOverride){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
   const clientKey=($('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
@@ -2425,6 +2439,7 @@ async function runBenchmark(scenario='performance'){
   const token=benchPollToken;
   setBenchRunning(true);
   const ans0=$('benchAnswer');if(ans0){ans0.className='bench-answer muted';ans0.textContent='正在连接上游…'}
+  if(isAcceptance){const box=$('benchAcceptanceResult');if(box){box.className='bench-acceptance-result msg muted';box.textContent='正在提交验收任务…';}}
   $('benchReasoningWrap')&&( $('benchReasoningWrap').style.display='none');
   $('benchAnalysis')&&($('benchAnalysis').style.display='none',$('benchAnalysis').innerHTML='');
   $('benchEventsFold')&&($('benchEventsFold').style.display='none');
@@ -2447,6 +2462,7 @@ async function runBenchmark(scenario='performance'){
     if(token!==benchPollToken)return;
     const ansE=$('benchAnswer');if(ansE){ansE.className='bench-answer err';ansE.textContent=e.message}
     const metE=$('benchMetrics');if(metE)metE.innerHTML='';
+    if(isAcceptance){const box=$('benchAcceptanceResult');if(box){box.className='bench-acceptance-result msg err';box.textContent=e.message||'验收任务提交失败';}}
   }finally{
     if(token===benchPollToken)setBenchRunning(false);
   }
@@ -2478,11 +2494,8 @@ function updateBenchmarkAcceptancePrompt(){
     'TM-04':'Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。',
     'TM-05':'请搜索 Go 官方发布信息，并总结最新稳定版本。'
   };
-  if(prompts[id]&&$('benchToolPrompt'))$('benchToolPrompt').value=prompts[id];
+  if(prompts[id]&&$('benchAcceptancePrompt'))$('benchAcceptancePrompt').value=prompts[id];
 }
-$('benchToolPerformanceConfig')?.addEventListener('toggle',()=>{
-  if($('benchToolPerformanceConfig')?.open)loadBenchmarkAcceptanceCases();
-});
 $('benchAcceptanceCase')?.addEventListener('change',updateBenchmarkAcceptancePrompt);
 $('benchHistoryCompareBtn')?.addEventListener('click',()=>openBenchmarkComparison());
 $('benchHistoryList')?.addEventListener('change',event=>{
