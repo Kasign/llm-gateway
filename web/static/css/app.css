@@ -1021,3 +1021,11 @@ body.auth-locked{overflow:hidden}
   .token-stats-summary .stat b{font-size:17px}
   .token-stats-card .card-head{flex-direction:column;align-items:stretch}
 }
+
+
+/* 请求详情：一键复制给支持人员的精简诊断包。 */
+.req-diagnostic-copy{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.req-diagnostic-copy h3{margin:0 0 4px}
+.req-diagnostic-copy .req-note{margin:0;max-width:760px}
+.req-diagnostic-copy .btn{flex:0 0 auto;white-space:nowrap}
+@media(max-width:560px){.req-diagnostic-copy{align-items:stretch}.req-diagnostic-copy .btn{width:100%;min-height:40px}}
