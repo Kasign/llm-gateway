@@ -61,7 +61,7 @@ tools:
     base_url: ""
     # 是否允许明文 HTTP。仅在可信内网链路确实使用 HTTP 时开启；跨不可信网络应使用 HTTPS。
     allow_insecure_http: false
-    # 是否允许目标解析到 RFC1918 私有网段。Docker 内网服务通常需要；公网部署一般保持 false。
+    # 是否允许目标解析到私有地址（IPv4 RFC1918、IPv6 ULA）。Docker 内网服务通常需要；公网部署一般保持 false。
     # 开启后仍会拦截 loopback、链路本地、组播及保留地址，并执行 DNS 目标校验；不要将其理解为允许任意内网访问。
     allow_private_network: false
     # 单次搜索请求超时秒数；0 使用程序默认值，最大 30 秒。

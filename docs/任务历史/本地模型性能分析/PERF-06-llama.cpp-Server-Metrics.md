@@ -1,0 +1,468 @@
+# 当前任务：PERF-06 llama.cpp Server Metrics
+
+> 状态：进行中（真实 Gateway sampler/API 单请求 Metrics 对账已通过；Benchmark 详情交互去重、Browser Smoke/CI 与 Slots 能力状态收尾仍待验收）
+> 更新日期：2026-11-19
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 前序任务：[PERF-05 完整 Request Timeline](任务历史/本地模型性能分析/PERF-05-完整Request-Timeline.md)
+> 总体方案：[本地模型全链路性能分析方案](本地模型全链路性能分析方案.md)
+> 任务规划权威来源：[整体任务规划](整体任务规划.md)
+
+## 1. 目标
+
+接入 llama.cpp Server 官方观测接口，形成 Gateway 可关联的 L1 进程级与 slot 级证据，优先评估并接入 `/metrics`、`/slots`。本任务只负责 Server 原生 Metrics，不提前接入请求级 Inference Timing（PERF-07），也不进入 GGML Deep Profile（PERF-08）。
+
+必须明确区分：
+- 进程级：Server 启动以来或当前进程的累计计数、Gauge、运行状态。
+- Slot 级：某一采样时刻各 slot 的状态、占用及其可可靠读取的字段。
+- 请求级：本任务不把进程/slot 数据伪装成单请求耗时或单请求 Token 数。
+- 窗口级：Counter delta 必须带采样起止时间、窗口长度、进程身份和可比性状态。
+
+## 2. 硬约束
+
+1. 不改变普通 `/v1` 请求的认证、解析、Pipeline 顺序、Provider 选择、流式写回、错误处理和取消时序。
+2. `/metrics`、`/slots` 只能由后台低频采样器调用，不得放进每请求热路径，不得为每次推理额外发起探测。
+3. 优先使用 llama.cpp 官方原生端点和现有本地 Provider 配置；不复制或重建通用 HTTP Client。
+4. 仅对明确配置为本地且可信的 llama.cpp Server 目标采集；沿用现有 SSRF/目标地址限制和超时约束，不允许把任意用户可控 URL 作为采集目标。
+5. 每个字段必须记录来源、原始名称、单位、类型、语义、采样时间、作用范围和缺失状态；不确定的字段保持 unknown/unsupported，不填 0。
+6. Counter 重置、进程重启、Server 重建或采样间隔异常时，不计算可比 delta；必须标记 not_comparable 并给出原因。
+7. 默认不持久化高频原始样本；先评估现有 RuntimeSnapshot、RequestAnalysis、诊断存储和查询接口，避免重复表和重复采样器。
+8. 不保存 Prompt、Response、Reasoning 或工具参数/结果正文。
+
+## 3. 子任务
+
+### PERF-06.1 现状盘点与端点验证（代码盘点完成，真实 Metrics endpoint 已验证）
+- 审查本地 Provider 配置、llama.cpp HTTP Client、RuntimeSnapshot sampler、生命周期管理与关闭流程。
+- 查明实际支持的 `/metrics`、`/slots` 端点、响应格式、字段及 Server 版本差异；不凭印象假设字段存在。
+- 确认认证、监听地址、超时、采样频率和端点失败行为。
+- 明确端点能力不可用时的 skipped/unavailable/degraded 语义。
+
+### PERF-06.2 动态发现与数据契约（按动态方案执行）
+- `/metrics` 使用 Prometheus exposition parser 动态发现样本，不维护封闭的指标名称白名单；保留原始名称、上游 TYPE、HELP、labels、数值文本（避免大整数精度损失并保留 NaN/Inf）、上游时间戳和本地采样时间。
+- 未声明 TYPE 的样本标记 `untyped`；未知类型/未知指标保留原始证据，不推断单位、语义或可否做 delta。
+- 建立独立语义注册表：只为已验证的指标声明单位、scope、Counter/Gauge 语义和计算规则；版本新增指标先进入 unknown，不阻断其它已知指标采集。
+- Counter delta 仅在类型、标签集合、model scope、进程身份和采样窗口均可比较时计算；缺少可靠进程身份、Counter 回退、采样中断或 scope 变化时标记 `not_comparable`。
+- `/slots` 使用版本容忍的 JSON 解码，但仅提取显式安全白名单字段；未知字段忽略，原始 JSON、params、generation_prompt、samplers、Prompt 和请求正文一律不保存。
+- 实际部署版本用于真实端点验收，不作为开始动态解析器开发的前置条件；端点不可用、501、router model 缺失分别记录能力状态，不伪装成采集成功。
+- 复用现有 RuntimeSnapshot sampler 生命周期，Metrics/Slots 采集结果与模型目录快照分开存放，避免破坏现有 RuntimeSnapshot 语义；先以内存最近快照为主，不新增高频持久化表。
+
+### PERF-06.3 后台采样实现
+- 复用或扩展现有后台采样生命周期，低频、有界、可取消、可诊断。
+- 采样失败不得阻塞推理，不得使 RuntimeSnapshot 整体失效；各端点独立记录状态。
+- 防止重叠采样、goroutine 泄漏和关闭时等待失控。
+
+### PERF-06.4 关联与展示
+- 明确请求分析收尾时关联的是“最近一次进程/slot 快照”，不得声称是请求执行期间的瞬时状态。
+- 如果现有存储/接口可以承载则复用；若需新增字段或接口，先给出使用场景和迁移方案。
+- UI 显示进程级、slot 级、窗口级标签和采样新鲜度；不与请求级耗时混排成一个可加总时间线。
+
+### PERF-06.5 验收
+- 单元测试覆盖合法/非法响应、未知字段、缺失字段、Counter 重置、进程身份变化、超时、取消、端点不支持。
+- 集成测试验证采样不阻塞普通请求、不会重复采样、Server Shutdown 后无残留 goroutine。
+- 验证低频采样开销和数据新鲜度；没有真实 llama.cpp 环境时明确标注模拟 HTTP fixture，不宣称真实 Server 验收。
+- OpenAPI、中文文档和管理台同步；Go CI、竞态/静态检查、构建与 Browser Smoke 通过后封版。
+
+## 4. 第一轮审查清单
+
+- [ ] 当前本地 Provider 的 endpoint、模型配置和健康检查入口
+- [ ] llama.cpp Server 版本与真实端点能力来源
+- [ ] 现有 HTTP Client 是否可安全复用
+- [ ] RuntimeSnapshot sampler 的周期、缓存、过期、并发和 Shutdown 行为
+- [ ] 现有 RequestAnalysis 存储和查询结构是否适合承载最近快照
+- [ ] `/metrics` 与 `/slots` 字段矩阵及版本兼容策略
+- [ ] 采样失败、端点不支持、进程重启、Counter reset 的诊断状态
+
+## 5.1 PERF-06.1 现状盘点结果（第一轮）
+
+### Gateway 现有能力
+
+- `internal/llama.Client` 已统一持有 BaseURL、backend、上游 API Key 和 HTTP Client；所有请求可复用 Bearer 认证。新增观测端点应扩展此客户端，不另建连接池。
+- `llama.Client` 的 HTTP Client Timeout 由 `llama.request_timeout_seconds` 控制；显式配置 0 表示关闭客户端整体超时。后台 Metrics 采集必须另设独立的短超时 Context，不能继承推理请求的长超时或无限超时配置。
+- 现有 `rawGet` 使用 `io.ReadAll` 且没有响应体大小上限，不能直接用于可能包含大量 Slot 状态的 `/slots`，也不应将原始响应正文写入日志或存储；新采集入口需要有界读取、检查读取错误和严格解析。
+- `RuntimeSnapshot` sampler 已独立后台运行，周期为 5 秒，采集和 CPU sampler 分离；每轮串行执行，不会并行重叠。其 context 在 `ShutdownAudit` 中取消并等待退出。
+- 现有 sampler 只读取当前活动本地 Provider，Ollama 走 `/api/ps`，llama.cpp 走现有 RuntimeSnapshot；远程 Provider 时不采集本地上游。PERF-06 需要限定 backend 为 llama.cpp，不能把 Ollama 或远程 Provider 当成 llama.cpp metrics。
+- 当前 `docker-compose.yml` 只部署 Gateway，llama.cpp Server 由外部容器/1Panel 管理；仓库无法证明实际运行的 llama.cpp 版本、启动参数或 `--metrics` 是否开启。真实端点能力必须在用户部署环境验证，不能用代码 fixture 冒充。
+
+### llama.cpp 官方端点契约（需按实际部署版本复核）
+
+- 官方 Server README 当前说明：`GET /metrics` 需要启动参数 `--metrics`；router mode 必须传 `?model={model_id}`，否则返回 400。官方示例包含 Counter 与 Gauge 两类指标，不能把累计 Counter 直接当成瞬时请求值。
+- 官方 Server README 当前说明：`GET /slots` 默认开启，但可用 `--no-slots` 关闭；返回 slot 状态及处理统计。示例响应包含 `params`、`generation_prompt`、采样参数等请求相关内容，因此只允许解析明确列出的非敏感字段，绝不保留原始 JSON、Prompt、generation_prompt、采样参数或其他请求正文。
+- 官方 README 的 idle-sleep 豁免列表明确列出 `/metrics`，但未列出 `/slots`；不能推定 `/slots` 轮询不会重置 idle timer。未核实实际版本行为前，`/slots` 不得直接加入常规轮询。
+- 官方文档还说明禁用的 metrics/slots endpoint 会返回 501；该状态应记录为 `unsupported/skipped`，不应判定 Gateway 或模型服务故障。
+- 参考：[llama.cpp Server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)（master 为滚动文档，字段和行为最终以部署版本及真实响应为准）。
+
+### 当前未决项
+
+1. 用户部署的 llama.cpp 版本、镜像 tag/commit、启动参数和 router 模式尚未取得；没有 SSH/1Panel/Docker 入口，本轮不声称已连接真实 Server。
+2. `/metrics` router mode 的 model 参数如何选择，需要结合实际模型路由语义决定；不能随意只取 Gateway 默认 ModelName 代表整个 Server。
+3. 进程重启识别没有可靠来源前，不得跨不确定进程边界计算 Counter delta；Counter 下降、采样窗口中断或身份未知时应标记 not_comparable。
+4. `/slots` 的 idle-sleep 行为和允许暴露的字段需要对部署版本进行验证；在此之前优先只盘点，不纳入默认采样。
+5. 新增采样需要独立的 Context 超时、响应体上限、并发/重入保护和 Shutdown 等待边界；不得直接复用无界 `rawGet`。
+
+## 6. 动态兼容决策与当前进度
+
+用户已确认按动态方案实施，不再以固定 llama.cpp 版本或固定指标清单作为开发前置条件。
+
+### 已确定的实现策略
+
+1. 动态发现与语义解释分离：采集器解析上游实际暴露的指标；语义注册表只解释已验证指标，未知指标只保留证据。
+2. 原始指标类型以 Prometheus `# TYPE` 为准；未声明类型标记 `untyped`，不通过 `_total` 等名称后缀推断 Counter。
+3. 不将 Build 信息当作进程实例 ID。优先使用可信的进程启动时间/实例标识；缺失时不跨采样周期宣称 Counter delta 可比。
+4. `/metrics` 与 `/slots` 能力独立探测、独立记录状态；端点禁用不导致普通 RuntimeSnapshot 失败。
+5. `/slots` 先按白名单提取最小状态字段；不保存原始 JSON 或任何请求内容字段。是否常规轮询还要考虑部署版本 idle-sleep 行为，默认不启用高频 Slots 轮询。
+6. 动态采集结果先保存在独立的内存快照中，后续确认查询/关联场景后再决定是否扩展 RequestAnalysis 或持久化。
+
+### 已完成
+
+- 完成 `llama.Client`、RuntimeSnapshot sampler、缓存和关闭生命周期的代码审查。
+- 确认当前采样周期为 5 秒、采样串行执行；需要为观测请求设置独立短超时，避免上游阻塞拖住采样器。
+- 确认现有 `rawGet` 无响应体大小上限，观测端点不能复用该无界读取路径。
+- 已新增动态 Prometheus 指标解析、有界 `/metrics` 抓取、后台采样和管理台动态展示；Slots 目前只完成安全解析与有界抓取接口，不做自动轮询。
+- 前一阶段代码提交：`73e0561868dba111f42236ab9ce6176351f40f5c`（`feat: 增加 llama.cpp 进程身份与 Counter 窗口观测`）。
+- 最新自动化验收基线：`73b31619e28f40c043d7325d48560d164632275e`；Go CI `44287151996` 的 5 个 Job 全部成功；Browser Smoke `44287151998` 桌面、窄屏与核心交互验收成功。
+- 用户真实环境已返回 `GET /metrics?model=Qwen3.5-4B-IQ4_NL` 的 HTTP 200、Prometheus exposition 响应、15 个指标样本和 `Process-Start-Time-Unix: 256533562943`。随后用户通过真实推理使该模型指标产生非零累计值：`prompt_tokens_total=11`、`tokens_predicted_total=1083`、`n_decode_total=1084`。这证明该实例的 Metrics 已记录真实推理活动；仍未证明 Gateway 后台 sampler/API 已读取同一实例样本及正确计算窗口增量。
+- 最新代码基线 `72d62498a2926a540586f7fdd3d482072dad92dc` 的 Go CI `44293989928`（5/5 Job）和 Browser Smoke `44293989922` 均已完成且成功。自动化验收与真实 Server 验收分别记录，不互相替代。
+
+### 当前阶段进度
+
+- [x] 将 Metrics 能力接入现有 RuntimeSnapshot 后台 sampler，并增加独立超时、能力状态、最近快照缓存。
+- [x] 完成 `/slots` 白名单解析和有界读取；**当前只提供解析/抓取能力，不加入默认轮询**，原因是部署版本的 idle-sleep 行为尚未核实。
+- [x] 管理 Runtime API 返回动态 Metrics 快照，OpenAPI 和管理台已展示指标名称、类型、原始值、标签、采样时间及状态。
+- [x] 读取 llama.cpp `Process-Start-Time-Unix` 响应头；经核对上游源码，当前值来自 `ggml_time_us()`（CLOCK_MONOTONIC，微秒），不是 Unix 时间戳。代码/API 已将其改为不透明的 `process_instance_id` 字符串，只用于比较进程实例是否变化。
+- [x] 对 Prometheus 明确声明为 Counter 的序列计算窗口增量；仅在上游目标、model scope、进程启动时间、序列标签、采样窗口一致且 Counter 未回退时标记 comparable，其余情况输出 not_comparable 原因。
+- [x] 修正 HTTP 400 分类：只有请求未提供 model 参数且响应明确提示缺少 model 时才标记 needs_model；其他 400 标记 upstream_bad_request。
+- [x] 补充进程身份、Counter reset、scope 变化、模型参数缺失与非法模型参数测试。
+- [x] 真实部署验收第一步：目标 router model ID `Qwen3.5-4B-IQ4_NL` 被 `/metrics` 接受，HTTP 200，Prometheus 指标及进程身份响应头已取得。
+- [x] 真实部署验收第二步（Metrics 原生端点）：用户完成真实推理后，`prompt_tokens_total=11`、`tokens_predicted_total=1083`、`n_decode_total=1084`，确认 Counter 增长。
+- [x] 真实部署验收第三步（Gateway 端到端）：用户从 Gateway 管理台读取同一 llama.cpp 实例的 Metrics 快照；单次普通性能测试前、执行中、结束后三组数据可连续对账，Counter Delta 与 Benchmark 的输入/输出 Token、生成耗时和输出速度吻合。
+
+## 7. 不做
+
+- 不修改普通推理请求路径。
+- 不增加每请求上游探测。
+- 不把进程累计指标当作单请求指标。
+- 不对无法确认语义的指标做猜测性归因。
+- 不提前实现 PERF-07 的 timings_per_token / prompt progress。
+- 不提前实现 PERF-08 的 GGML/Backend Deep Profile。
+- 不声称完成真实部署或真实 NUC Server 验收。
+
+
+## 8. 后续自动化验收补充（2026-11-19）
+
+- 在 `dev` 分支新增采样循环可测试函数，验证首次立即采样、周期执行串行不重叠，以及取消 Context 可中断当前采样并退出。
+- 提交：`01c4c0a5c59f6f69b652f5d87ce3a617e7df3d77`（实现与测试）；`2493cca4339f36a366def78d4955b1a55d4ecbde`（补齐 atomic 测试依赖）。
+- Go CI：[44309960150](https://github.com/Kasign/llm-gateway/actions/runs/44309960150)，成功；Browser Smoke：[44309960200](https://github.com/Kasign/llm-gateway/actions/runs/44309960200)，成功。
+- 本次 CI 只证明模拟采样回调的生命周期行为，不替代真实 llama.cpp/Gateway 连续采样验收。
+- 后续审查发现管理运行时 API 的实际响应包含 `server_metrics`，而 OpenAPI 的 `RuntimeSnapshot` 未定义该字段；动态指标样本字段也缺少独立 Schema。本轮同步补充 `ServerMetrics` 与 `ServerMetricSample` 契约，明确原始值字符串、进程实例标识、采样新鲜度和 Counter 窗口字段。
+
+
+## 9. 管理 Runtime API 授权回归补充（2026-11-19）
+
+- 新增 Handler 级权限回归测试：向 `GET /api/admin/runtime` 仅提供部署 Admin API Key 必须返回 HTTP 401，确保运行时状态仍只接受有效 Web Session。
+- 既有 `TestBuildAdminRuntimeOverviewRemoteDoesNotExposeLocalModelState` 已覆盖远程 Provider 不返回本地模型状态；`runtimeAPI` 仅在当前活动后端为 `llamacpp` 时附加 `server_metrics`，远程 Provider 和 Ollama 不会附加该字段。
+- 本轮新增测试验证认证边界；未伪称真实 Gateway 到 llama.cpp 的连续采样验收。真实部署第三步仍待用户环境核对。
+
+
+## 10. Runtime Metrics 响应组装隔离测试（2026-11-19）
+
+- 将 `server_metrics` 附加逻辑抽取为 `attachRuntimeServerMetrics`，管理 Runtime API 的响应结构保持不变。
+- 新增后端隔离测试：仅 `llamacpp` 附加 Metrics；`ollama`、远程 Provider、未知后端会清除可能残留的 `server_metrics` 字段；另覆盖 nil 响应对象。
+- 本轮只验证 API 响应组装边界，不替代已有的采样失败隔离测试，也不代表真实 Gateway 到 llama.cpp 的部署验收。
+- 相关提交：`20bb441`（响应组装隔离）；`f7ce989`（后端隔离测试）；`166feb4`（仅 llama.cpp 后端读取 Metrics 缓存，避免远程 Provider 请求产生无用本地缓存读取）。
+- 待本轮 CI 完成后补记结果；真实部署第三步仍待验证。
+
+
+## 11. Metrics OpenAPI 契约去重与字段一致性（2026-11-19）
+
+- 清理 `components.schemas` 中重复的 `ServerMetricSample` 定义，删除未被运行时响应引用的冗余 `ServerMetrics`，统一由 `RuntimeSnapshot.server_metrics` 引用 `ServerMetricsSnapshot`。
+- 扩展高风险契约检查：逐项核对 `llama.MetricSample` 的 JSON 字段、运行时 Metrics 响应字段及 Schema 引用；同时检测 `components.schemas` 重复名称，防止后续再次发生同名定义覆盖。
+- 自动化检查结果：Go CI run `44439811911` 的“配置、API 契约与前端”Job 已通过 OpenAPI 路由检查和高风险 Schema/Handler 契约检查；完整 Go CI 尚在执行中。
+- 字段语义说明：`model_scope` 为空时由 JSON `omitempty` 省略；非空时表示本次 Metrics 请求使用的模型范围。
+- 真实 Gateway 到 llama.cpp 连续采样验收仍未完成，不能以本轮契约检查代替。
+
+
+## 12. Runtime Metrics 前端进程身份字段对齐（2026-11-19）
+
+- 管理台的 Metrics 展示位于「本地模型」页面的「运行概览」卡片下方，不是独立侧边栏菜单；「模型测试」页面不展示该卡片。
+- 审查发现前端仍读取旧字段 `process_start_time_unix` 并将其当 Unix 时间戳格式化；后端已改为不透明字符串 `process_instance_id`，导致页面无法正确展示进程身份。
+- 已修复 `web/js/app/main.js`：改为读取并转义展示 `process_instance_id`，不再错误转换为日期。
+- 修复提交：`abcb257abdd929abd11a144de291b370d7952110`（`fix: 对齐 Runtime Metrics 进程实例字段展示`）。
+- 自动化 CI 状态待回读；部署后的真实 Gateway 端到端采样验收仍未完成。
+
+## PERF-06 管理台请求详情展示补充（2026-11-19）
+
+- Benchmark 历史任务「查看」统一展示为「请求详情」，继续复用 `GET /api/benchmark/{job_id}`，不新增重复详情接口。
+- 详情按响应实际存在的字段展示请求状态、场景、模型、Backend、请求 ID、HTTP 状态、耗时、Token、吞吐、条件指纹、阶段耗时、正文与 Reasoning；缺失字段不填造默认值。
+- 工具调用详情优先从任务响应中的结构化 `tool_calls` 提取工具名称、调用 ID 和参数；同时展示已有脱敏工具执行事件及工具阶段指标。未被后端保存的字段不伪造，也不回填敏感请求正文。
+- 前端修改提交：`48808c450c26fba5f2b57fc619f484d4a64076d0`（`feat: 扩展 Benchmark 请求详情与工具调用展示`）。
+- 当前仅完成代码提交与 GitHub 回读；浏览器交互、真实工具调用任务和 CI 尚未验收，不标记 PERF-06 完成。
+
+
+## 13. Gateway Metrics 单请求端到端对账与详情交互去重（2026-11-19）
+
+### 真实环境单请求证据
+
+用户确认该测试窗口内没有其他请求。通过 Gateway 管理台取得执行前、执行中和执行结束后的 Metrics 快照，并与同一次 Benchmark 普通性能测试请求详情对账。
+
+| 指标 | 测试前 | 执行中 | 结束后 | 归因结果 |
+|---|---:|---:|---:|---|
+| prompt_tokens_total | 837 | 854 | 854 | 增量 +17 |
+| prompt_seconds_total | 14.7483 | 15.1479 | 15.1479 | 增量 +0.3996 秒 |
+| tokens_predicted_total | 3377 | 3377 | 7377 | 增量 +4000 |
+| tokens_predicted_seconds_total | 291.098 | 291.098 | 926.31 | 增量 +635.212 秒 |
+| requests_processing | — | 1 | 0 | 请求执行中到结束 |
+| n_decode_total | 3382 | 6292 | 7383 | 进程累计 Decode 调用变化，不作为生成 Token 数 |
+
+Benchmark 请求详情：
+- 开始：2026-11-19 10:44:41；结束：2026-11-19 10:55:16；总耗时约 635 秒。
+- TTFT：444 ms。
+- Token in/out/total：17 / 4000 / 4017。
+- 输出速度：6.30 Token/s。
+- 生成阶段：约 10.6 分钟。
+- 用户确认测试期间没有其他请求。
+
+交叉核算：
+- Prompt Token 增量：17，与 Benchmark 输入 Token 一致。
+- 生成 Token 增量：4000，与 Benchmark 输出 Token 一致。
+- 生成耗时增量：635.212 秒，与 Benchmark 生成阶段约 635 秒吻合，差值约 0.212 秒。
+- Metrics 推算速度：4000 / 635.212 = 6.30 Token/s，与 Benchmark 一致。
+- 执行中 requests_processing=1，结束后为 0。
+
+结论：真实 Gateway 后台采样、Runtime API 展示、Counter 窗口增量和单请求 Metrics/Benchmark 对账已取得端到端证据。该结论仅适用于本次单请求、无并发请求、相同进程和 model scope 的测试条件；不得将进程级累计指标普遍解释为请求级指标。
+
+### Benchmark 页面交互审查与本轮调整
+
+- 审查发现实时结果区 `benchMetrics` 已展示总耗时、TTFT、Token 和输出速度，而 `benchAnalysis` 又重复展示总耗时、TTFT 和输出速度。
+- 历史「请求详情」中，核心结果与阶段耗时再次重复展示 total_ms/ttft_ms，核心结果与吞吐区重复展示 output_tokens_per_sec。
+- 工具阶段摘要、工具执行事件、历史工具详情缺少一致的折叠层级；长正文和 Reasoning 默认占用详情页空间。
+- 本轮调整：实时分析只展示阶段分解，不重复总耗时/TTFT/输出速度；历史详情将核心结果作为首屏摘要，测试条件与元数据、阶段耗时与额外吞吐、工具调用、正文和 Reasoning 改为按需展开；工具指标即使没有事件记录也可以展示。
+- 前端文件：`web/js/app/main.js`、`web/static/css/app.css`。未新增 API、数据库表或采集器；工具参数展示对 API Key、Authorization、Cookie、Secret、Password、Credential 和访问/刷新 Token 等敏感字段进行脱敏。
+- 本轮代码提交：`4587c6ac4907f43d7547636b081d254f212eb5b2`（详情指标去重与层级调整）；`92fe9e225252c5275fccb89a76c66fe17f0923f1`（折叠详情交互样式）；`f105f174885204487f01127bc46fb7f576213186`（工具参数敏感字段脱敏）；`2170c050e3f973b8e48335ec60b1dd325f991b1a`（详情展开状态与键盘焦点恢复）；`118ba2d64157df934fa2710eaffd53089fc955d9`（标题焦点、加载失败关闭入口及扩展凭据字段脱敏）。
+- 待完成：Browser Smoke/CI、窄屏与键盘交互回归、真实普通性能与工具调用历史详情的部署验收。
+
+
+## Benchmark 工具自主决策模式补充（2026-11-19）
+
+### 审查结论
+
+- 原 \`tool_performance\` 场景在默认 Prompt 中明确要求“必须实际调用搜索工具”，请求体同时将 \`tool_choice\` 固定为指定 \`web.search\`。
+- 因此原场景测量的是强制工具调用链路，不代表模型自主判断是否需要工具；默认 Query 也不应要求用户显式写出工具名称或调用命令。
+
+### 本轮改造
+
+- 新增 \`tool_performance_auto\`：默认自然决策模式。服务端仍提供 Registry 中已授权的 \`web.search\` 工具定义，\`tool_choice=auto\`，由模型自行决定是否调用；默认问题只表达业务需求，不含工具指令。
+- 保留 \`tool_performance\` 既有语义作为强制调用诊断模式，继续使用指定 \`web.search\` 的 \`tool_choice\`，不改变历史任务的含义与既有 API 客户端行为。
+- 管理台提供“自然工具调用测试”和“强制工具调用诊断”两个入口；历史记录明确标注自然决策与强制调用/旧版。
+- 配置快照记录 \`tool_choice_mode\`，自然决策与强制调用任务的条件指纹不同，严格比较不会混合两种模式。
+- 新增模型工具决策结果（called / not_called / unknown）、实际执行尝试/成功/失败数量及执行成功率；自然决策模式下已完成但未调用工具，工具执行与最终生成工具阶段标记 \`not_applicable\`，不误报为缺失测量。
+- 保留现有权限校验、工具 Registry、Coordinator、Runtime、审计与请求级 Pipeline；不修改普通 \`/v1\` 请求。
+
+### 自动化覆盖
+
+- 新增场景选择策略测试。
+- 新增请求体断言：自然模式传递 \`tool_choice=auto\`，强制诊断仍指定 \`web.search\`。
+- 新增自然模式未调用工具时的指标语义测试。
+- 新增真实工具执行事件的耗时、成功率和最终生成阶段指标测试。
+- 新增强制模式未能调用工具时仍标记 unknown 的测试。
+- OpenAPI 已同步场景枚举与工具决策/成功率字段。
+
+### 代码提交
+
+- 代码已提交到 `dev`，按文件回读确认当前实现：
+  - `internal/server/benchmark.go`：`436630faae6c3ae941799042379274860ad4bdac`（自然场景、旧场景兼容、比较口径与事件读取可用性）
+  - `internal/server/benchmark_tool_metrics.go`：`06dc32aa3996832cbcb767c26c665d40c14457e6`（决策、执行尝试/成功率及防止缺失审计事件误判）
+  - `internal/server/benchmark_tool_scenario_test.go`：`c2e8a7a1fd40e29c1bbc2a2c2fe9df67bc69a95e`（场景、请求体、指标状态与缺失事件证据测试）
+  - `web/js/app/main.js`：`c35e13b352970411ba157ae5034ca297f9e52cad`（入口、请求预览、结果展示、运行按钮状态及普通性能详情隔离）
+  - `web/index.html`：`8ff383ddc00bed6f382bbacabc27dfbe12cc2535`（自然决策/强制诊断入口与历史筛选）
+  - `docs/openapi.yaml`：`8fa07d7279bfed6366f1dfefb370edd0823bbc75`（场景枚举与响应契约）
+- 自动化测试已在后续修复提交上实际运行，结果见文末“CI 失败复盘与回归测试修复”；Browser Smoke 通过不代表真实模型自主决策验收完成，仍需用户部署环境验证。
+
+### 后续真实验收
+
+- 用相同模型、Prompt 和测试条件分别运行自然决策与强制调用诊断。
+- 自然决策结果需核对模型是否发起 Tool Calls、工具事件是否成功、最终回答是否引用工具结果；若未调用工具，保留 not_called 证据，不伪造工具阶段耗时。
+- 强制诊断用于验证模型/Provider/Coordinator 对指定工具调用协议的兼容性。
+
+### 自然决策未调用工具时的阶段耗时口径修正（2026-11-19）
+
+- 复核发现：自然决策模式下模型选择不调用工具时，单轮模型响应同时包含“是否调用工具的决策”和最终回答；原实现把最终生成阶段标记为 `not_applicable`，丢失了实际回答耗时。
+- 已修正：保留 `model_decision_ms`，同时将同一轮耗时填入 `model_final_generation_ms`，状态标记为 `combined_with_decision`。这明确表示两者来自同一次模型请求，不能相加，也不能解释为两个独立阶段。
+- 管理台实时与历史详情均显示“与决策合并测量”，避免误读为独立的最终生成耗时。
+- 新增测试覆盖自然未调用场景的合并耗时；尚待当前 Go CI 实际执行结果确认。
+- 相关提交：`9b92df7`（指标口径修正）、`c63e0fa`（回归测试）、`7f39798`（前端状态展示）。
+
+### 工具审计可用性参数接线修复（2026-11-19）
+
+- CI 日志确认历史一次 Browser Smoke 在构建 Gateway 阶段失败：`benchmark_persistence.go` 调用 `buildBenchmarkToolMetrics` 时少传 `eventsAvailable` 参数，导致编译失败；浏览器步骤因此未执行。
+- 已修复调用点，并将 `ListToolCallEvents` 的错误状态显式映射为 `toolEventsAvailable`。只有事件查询成功返回（即使结果为空）时，才允许自然决策单轮完成推断为 `not_called`；仓储缺失或查询失败保持 `unknown`。
+- 修复提交：`939bb3e`。后续 CI 需要在包含该提交的最新 HEAD 上重新验证；旧 run 的失败不能作为修复后结果。
+
+
+
+### CI 失败复盘与回归测试修复（2026-11-19）
+
+- Go CI run `44452587232` 的真实失败根因已定位：`performance_benchmark_test.go` 仍使用旧函数签名，未随生产代码更新传入 `tool_choice` 和 `eventsAvailable`。Gateway 主程序构建成功，但测试包编译失败；稳态负载、故障注入 Job 中的测试命令也因此在编译阶段失败，并非三类独立运行时故障。
+- 已更新旧测试调用：强制诊断请求显式传入 `required`；有审计事件的指标测试传入事件可用；无事件失败场景传入不可用；普通场景传入可用状态。提交：`f5d9d65e02f9f27268e565713d2f0b50401c3b49`。
+- Browser Smoke run `44452566708` 实际完成 Gateway 构建、启动和浏览器执行，结果为 191/192。唯一失败项是历史详情测试：测试在详情容器刚显示“正在加载”时立即读取文本，没有等待异步详情 API 渲染完成；不是已确认的页面渲染缺陷。
+- 已将 Browser Smoke 改为等待历史详情同时出现正文和模型标识后再断言，避免异步竞态。提交：`c1643e4e3ae9b81a7ac3dcac96f33b562671fe30`。
+- Browser Smoke 日志中的 Providers API 503 属于该隔离测试环境预期的 Provider 不可用响应，单独记录为预期失败，不是本次 191/192 的失败断言。
+- 上述修复已推送到 `dev`，等待新 SHA 对应的 Go CI 与 Browser Smoke 重新执行；本节只记录根因和修复，不提前标记 CI 通过。
+
+- 后续 OpenAPI 审查发现 `model_final_generation_status` 的 4 处响应 Schema 均遗漏 `combined_with_decision`。已统一补齐枚举并添加语义说明，明确该值表示同一次模型请求合并测量，不能将决策与最终生成耗时相加。提交：`1626c776153db23b6c3a4c2f833c53d0ed05ce0a`。
+
+
+### 修复后 CI 验收结果（2026-11-19）
+
+- Go CI：[`44455922409`](https://github.com/Kasign/llm-gateway/actions/runs/44455922409)，提交 `b21d5920868ce349368dc9fddbe59082e075fdd8`，最终结论 `success`。5 个 Job 全部通过：配置/API 契约与前端、Go 单元/集成/竞态/静态检查、Gateway 稳态负载与审计持久化、故障注入与恢复、编译与 Docker 镜像。
+- Browser Smoke：[`44455922431`](https://github.com/Kasign/llm-gateway/actions/runs/44455922431)，同一提交 `b21d5920`，最终结论 `success`。真实 Gateway 构建启动后，桌面、窄屏和核心交互验收通过。
+- 第二轮 Go 测试发现旧指标测试事件缺少 `Status: succeeded`，使其不再符合新统计口径；已修正样本，提交 `b21d5920868ce349368dc9fddbe59082e075fdd8`，随后完整 Go CI 通过。
+- OpenAPI 的 4 处 `model_final_generation_status` Schema 已包含 `combined_with_decision` 并说明合并测量语义；配置/API 契约 Job 通过。
+- 当前代码层 CI 与 Browser Smoke 已通过；尚未完成用户真实模型的自然调用/不调用、工具执行失败、工具结果回传和强制诊断五类部署验收。不能据此宣称真实模型工具 Benchmark 全面完成。
+
+
+### 工具 Benchmark 审计证据完整性复审（2026-11-19）
+
+- Go CI 与 Browser Smoke 均已通过，但进一步沿真实调用链复审发现：当前 `tool_call_decision=not_called` 的推断条件仍不够严谨。
+- 根因：`tool_mode.go` 将 Coordinator 产生的工具事件交给 `audit.Writer.InsertToolCallEvents` 异步入队；该方法可能因队列满、Writer 关闭或数据库写入失败而丢弃/写失败。Benchmark 读取端只检查 `ListToolCallEvents` 查询是否成功；“查询成功且结果为空”不能证明该请求没有产生工具调用事件。
+- 具体风险：模型实际发起工具调用，但异步审计事件未成功落库时，任务完成后可能被误判为 `not_called`。现有 `eventsAvailable` 只证明读取接口可用，不证明本次请求的审计写入完整。
+- 已确认 Writer 有全局异步写入成功/失败/丢弃计数和 `Flush`，但全局计数不能直接作为请求级完整性证据；不能简单用全局统计替代请求级状态。
+- 当前不改动 Coordinator/Runtime 的工具执行安全边界。后续应在请求级建立可信的工具决策证据：Coordinator 执行结束时直接记录本次决策（called / not_called / unknown），并将决策状态与 Benchmark Run 一起持久化；历史任务只使用持久化决策证据，旧记录缺少该证据时保持 `unknown`。工具执行次数/成功率仍以实际工具审计事件为依据，不能由决策状态推算。
+- 本项是工具 Benchmark 指标可信度的剩余代码缺口；在修复并补齐异步审计丢弃/写失败测试前，不应把自然决策的 `not_called` 历史指标标记为完全可靠。
+
+
+### 请求级工具决策证据修复（2026-11-19）
+
+- `benchmarkToolCallDecision` 在 Coordinator 返回后同步判定本次请求：存在工具事件（包括 rejected）记为 `called`；无事件且至少完成一轮、最终模型响应为 2xx 且无 Coordinator 错误时记为 `not_called`；其他情况为 `unknown`。
+- 决策证据通过 Benchmark Job 锁保护，并随 `BenchmarkRun` 写入数据库；同时持久化 Coordinator 同步观察到的 `tool_call_event_count`。历史数据库通过增量迁移新增决策字段（默认 `unknown`）和事件数量字段（默认 `0`），初始 schema 同步更新。旧记录不根据空审计事件回填。
+- Benchmark 历史详情和比较结果从持久化 Run 读取决策与预期事件数。决策为 `called` 时，只有审计查询成功且落库事件数与 Coordinator 同步观察数一致，才计算工具执行尝试、成功率与耗时；全部丢失、部分丢失、查询失败或旧记录缺少数量证据时，执行指标保持 unknown。
+- 自然决策模式只有在任务最终 completed、决策证据为 `not_called` 且模型轮次耗时存在时，才显示“与决策合并测量”；失败任务不会展示 not_called。
+- 审计查询成功状态仅用于核对事件数是否完整，不再参与 `not_called` 决策推断；请求级决策以 Coordinator 同步证据为准。
+- 回归测试覆盖请求级决策与事件数写入、持久化映射、2xx/非 2xx/Coordinator 错误、审计事件全部或部分丢失、审计查询失败（called 与 unknown 两种决策）、被拒绝工具调用仍记为 called 但不计执行尝试、空事件但决策 unknown、失败任务和缺失轮次边界。
+- SQL 核对：`benchmark_runs` INSERT 列数/占位符/参数均为 32；UPDATE 参数为 28；ListRuns 查询列与 Scan 参数均为 32。当前代码实现和测试已推送至 `dev`，最新代码测试提交 `4d6f4f3da32c1cd6222c526445ebc2a42e2734f8`。自动化 CI 尚未取得最终代码 SHA 的实际运行结果，不能标记为通过；真实模型五类部署验收仍待用户环境执行。
+
+
+### 请求级工具决策持久化链路复审（2026-11-19）
+
+- 已沿 `Coordinator.RunWithObserver → tool_mode.forwardWithTools → benchmarkJob → persistenceRecords → BenchmarkRepo.UpdateTaskAndRun → ListRuns → benchmarkGetFromStore / benchmarkComparisonSide` 回读当前 `dev` 实现。
+- Coordinator 的观察回调同步执行；每个被拒绝、执行成功或执行失败的工具调用都会产生事件。观察回调自身由 Coordinator 的 panic 保护包裹；Server 回调只做内存切片追加，不触碰数据库。
+- Benchmark Run 的决策和事件数已接入创建/更新 SQL、ListRuns SELECT/Scan、历史详情恢复及历史比较读取；旧库新增字段默认 `unknown` / `0`，代码没有对历史空事件进行决策回填。
+- Coordinator 当前单请求工具调用预算为最多 3 轮、每轮最多 3 次；历史读取上限为 9 条，与正常执行预算相符。超过预算的分支不会被错误推断为 `not_called`：Coordinator 返回错误时决策为 `unknown`，或已有事件时为 `called`。
+- 本轮发现的验证缺口：仓库没有 `internal/store/benchmark_test.go`；`internal/db/migrate_test.go` 目前只覆盖 CREATE TABLE 名称解析，没有覆盖旧库升级、重复迁移和新字段读写往返。因此此前 SQL 列数/占位符核对只能证明静态接线一致，不能替代 MariaDB 实际执行验证。
+- 下一项代码验收应补充可重复的 MariaDB 集成测试：从旧版 `benchmark_runs` 表结构执行迁移，确认新字段默认值；再执行 BenchmarkRun 创建、更新、ListRuns 往返，断言 `called/not_called/unknown` 与事件数不丢失；重复执行迁移验证幂等性。测试必须使用隔离数据库/独立 schema，不得对开发或生产库执行破坏性清理。
+- 当前最新代码 SHA `4d6f4f3da32c1cd6222c526445ebc2a42e2734f8` 未关联 Actions runs 或 status checks。未取得上述 MariaDB 集成测试及最新 SHA CI 证据前，持久化迁移验收保持待验证；真实模型五类部署验收仍需用户环境执行。
+
+
+### MariaDB 持久化迁移集成测试补充（2026-11-19）
+
+- 新增 `internal/db/mariadb_integration_test.go`，以当前初始 Schema 为基础构造缺少 `tool_call_decision` / `tool_call_event_count` 的旧版表结构，并预置一条历史 Benchmark Run。
+- 测试使用 `MARIADB_TEST_DSN` 显式启用；连接账号必须有 CREATE DATABASE / DROP DATABASE 权限。测试创建随机命名的独立 schema，所有测试表和数据仅位于该 schema，结束时删除该 schema，不会清理 DSN 指向的原始数据库。
+- 验证项：旧记录迁移后保持 `unknown/0`；连续执行两次迁移；核验两个新字段的数据库默认值；通过 `BenchmarkRepo` 验证 `called + event_count=2` 的创建/更新/读取往返，以及 `not_called + event_count=0` 的读取往返。
+- 本测试未配置 `MARIADB_TEST_DSN` 时会明确 Skip。因此普通 Go CI 即使通过，也不能代表 MariaDB 集成路径已执行。CI 需提供专用 MariaDB 服务和具备创建/删除独立 schema 权限的测试账号，并将 DSN 注入该测试 Job，才能把本项纳入自动验收。
+- 当前尚未取得本测试在真实 MariaDB 上的执行结果；本次只完成测试代码提交，不标记数据库迁移验收通过。
+
+
+### MariaDB 迁移集成测试接入现有 Go CI（2026-11-19）
+
+- 已确认现有 `.github/workflows/go-ci.yml` 的 `go-quality` Job 已启动 MariaDB 11.4 服务，并在 `go test ./...` 前设置 `MYSQL_TEST_DSN`。
+- 本次只在该 Job 增加 `MARIADB_TEST_DSN`，复用同一个 CI MariaDB 服务；没有新增服务、工作流或测试数据库实例。集成测试会清空 DSN 的 DBName，在服务内创建随机隔离 schema，结束后删除该 schema。
+- 新测试由现有 `go test ./...` 自动发现并执行；未设置 DSN 的本地环境会 Skip，CI 的 `go-quality` 则显式提供 DSN，预期执行真实 MariaDB 测试。
+- 尚未取得本次工作流提交 SHA 的运行结果。需等 GitHub Actions 对该 push 完成后，核对 `go-quality` 中该测试确实执行（非 Skip），并检查其余 CI Job；当前不提前标记通过。
+- 为提供可直接审阅的执行证据，现有 `go-quality` Job 已增加独立步骤 `go test -count=1 -run TestMariaDBBenchmarkDecisionMigration -v ./internal/db`，先于完整 `go test ./...` 执行；`-count=1` 禁用测试结果缓存，`-v` 输出测试名称和 Skip/Pass 状态。该步骤仍受 `CI=true` 缺失 DSN 即失败的门禁保护。
+- CI 防漏门禁：当 `CI=true` 且未配置 `MARIADB_TEST_DSN` 时，迁移集成测试直接 Fail；本地未配置时仍允许 Skip，避免 CI 配置回归时静默跳过。
+
+
+### MariaDB 集成测试首次 CI 反馈与修正（2026-11-19）
+
+- 首次接入后的 Go CI Run `44465031307`（SHA `9fd8013cc6a180e910dd90c8a590233f4af062a7`）失败，日志确认 MariaDB 服务正常启动且 `MARIADB_TEST_DSN` 已注入，集成测试确实执行，没有被 Skip。
+- 数据库测试失败点是 MariaDB `information_schema.COLUMNS.COLUMN_DEFAULT` 将字符串默认值返回为带 SQL 引号的 `'unknown'`，原断言错误地只接受 `unknown`。现调整断言以兼容 SQL 字面量引号；仍校验其语义值必须严格为 `unknown`，数值默认值必须为 `0`。
+- 同一 CI 还发现 `TestBuildBenchmarkToolMetricsSeparatesModelAndToolStages` 的旧测试夹具没有设置请求级 `ToolCallDecision` 和 `ToolCallEventCount`。新实现要求审计事件数量与 Coordinator 同步观察数一致才计算执行指标，因此测试夹具补齐 `called/3` 证据，未放宽实现条件或测试期望。
+- 上述修正分别提交：`e715475386f80bb866c464ef7289b77a91cad45c`、`ba2a4f17b45dc099246aae0baf681b26a5ba135b`。修正后的 CI 尚待执行，当前不能标记通过。
+- 首次 CI 中其余 4 个 Job 均成功：编译与 Docker 镜像、配置/API 契约与前端、Gateway 稳态负载与审计持久化、Gateway 故障注入与恢复验证；Go Job 因上述两个测试失败而未继续竞态和静态检查。
+
+
+### MariaDB 持久化验收与完整 Go CI 通过（2026-11-19）
+
+- 修正后的 Go CI Run `44465704821` 对应 SHA `c8c162f3b61802e1f3b43b0ce5bc799272fbbac6`，最终结论为 success。
+- `go-quality` Job 的独立 MariaDB 迁移验收步骤通过；随后完整 `go test ./...`、竞态测试 `go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live ./internal/tools/...` 和 `go vet ./...` 均通过。
+- 其余 Job 全部通过：配置/API 契约与前端、编译与 Docker 镜像、Gateway 稳态负载与审计持久化、Gateway 故障注入与恢复验证。
+- MariaDB 集成测试已经在 CI 的 MariaDB 11.4 服务上实际执行，覆盖旧 Schema 升级、重复迁移幂等、旧记录默认状态、Benchmark Run 创建/更新/读取往返和字段默认值；该项不再是待执行状态。
+- 当前工具决策持久化及 MariaDB 迁移代码验收可标记为 CI 通过。真实模型五类工具调用行为仍需在实际部署模型环境验收，不能由模拟测试或 CI 代替。
+
+
+## 工具调用 Benchmark 真实模型验收计划（2026-11-19）
+
+- 工具决策与审计完整性代码验收已完成：请求级 `tool_call_decision` / `tool_call_event_count` 持久化、审计事件数量一致性校验、旧库迁移和 MariaDB 往返测试均已由 Go CI 验证。
+- 代码 SHA `c8c162f3b61802e1f3b43b0ce5bc799272fbbac6` 的 Go CI Run [44465704821](https://github.com/Kasign/llm-gateway/actions/runs/44465704821) 5/5 Job 成功；文档 SHA `6bb2da6a94e133bb4ff92e6977134c2ae649e658` 的 Go CI Run [44465984791](https://github.com/Kasign/llm-gateway/actions/runs/44465984791) 最终也为 success。
+- 已复审真实调用链：Benchmark 创建入口校验工具启用、SearXNG 配置、Web 服务 API Key 的工具授权和模型授权；Worker 经过既有 Pipeline；Coordinator 同步观察工具事件并形成请求级决策；历史详情读取持久化决策和审计事件。
+- 真实模型验收尚未执行。已新增 `scripts/benchmark_tool_acceptance.sh`，通过现有 Benchmark API 在用户部署环境创建单个任务、轮询终态并保存脱敏任务响应；脚本不自动判定模型行为通过。私有 Gateway、模型和 SearXNG 运行环境不能由 GitHub CI 代替。
+- 五类行为矩阵及判读规则已写入 [BENCH-05 工具调用性能测试](任务历史/Benchmark体系升级/BENCH-05-工具调用性能测试.md)：TM-01 自然调用、TM-02 自然不调用、TM-03 隔离环境工具失败、TM-04 工具结果回传后最终生成、TM-05 强制调用诊断。
+- 下一步是在实际部署管理台逐项运行并记录脱敏任务证据。TM-03 必须使用独立验收环境的专用故障响应端点，不得修改生产 SearXNG 配置。未取得实际任务详情前，五项全部保持“待验收”。
+
+
+### 真实模型验收执行工具准备（2026-11-19）
+
+- `scripts/benchmark_tool_acceptance.sh` 初始提交为 `60fcb5104b8cee6174a6dad68cd87f27054d0cdc`；随后以 `a3635509c4b57f4e0432eca1b75cd89714b2ba7c` 修复证据文件名潜在覆盖问题，并以 `cab0647e13f9ae1b564baf840e17bb88ac671fd8` 修正文档中的脚本执行方式。脚本复用现有 Benchmark 创建/状态接口，不修改服务端执行逻辑。
+- 脚本要求分别提供网页登录会话 Token（`GATEWAY_ADMIN_SESSION`）和客户端服务 API Key（`GATEWAY_CLIENT_API_KEY`），并使用 `GATEWAY_URL` 指定部署地址；可选固定 `MODEL_ID`。凭据仅从环境变量读取，不写入结果文件。
+- 脚本按单任务顺序执行，轮询终态并保存完整任务响应 JSON；终端只摘要展示决策、执行统计和工具事件。结果文件不包含请求认证头，但可能包含 Prompt 和模型输出，分享前必须人工检查并按需脱敏。脚本是证据采集器，不以 HTTP 200 或任务 completed 自动代替 TM-01～TM-05 的通过条件。
+- TM-03 需要独立验收 Gateway 预先配置专用故障响应 SearXNG 端点；脚本不会远程修改工具配置，避免误操作生产环境。
+- 当前尚未连接用户私有部署环境，未执行任何真实模型请求。TM-01～TM-05 仍保持待验收；下一步在部署环境使用脚本逐项采集证据，并按 BENCH-05 判读。
+
+
+### 工具调用验收项目化审计（2026-11-19）
+
+- 已确认管理台原本就有自然决策/强制调用入口、历史任务、详情、阶段指标和严格比较；后端已有异步 Benchmark API、MariaDB Task/Run 持久化与请求级审计证据。不得再建一套执行 API、历史页面或数据表。
+- 当前真实缺口不是“没有工具”，而是没有项目内 TM-01～TM-05 用例目录及统一服务端判定器。现阶段管理台展示测量数据，五类验收仍由人按文档判断；Shell 脚本只采集，不负责判定。
+- 已将现状、缺口、约束和实施顺序补充到 BENCH-05。后续先实现用例 ID、判定器和测试，再接入现有任务配置快照/历史详情与管理台。旧任务不猜测回填用例；TM-03 必须有服务端可信隔离环境标识，客户端不能自行声明安全。
+- 当前仅完成审计和任务边界定义，尚未实现项目级判定功能；TM-01～TM-05 真实模型部署验收仍待执行。
+
+### 工具调用验收项目化第一阶段实现（2026-11-19）
+
+- 已完成前序审计确定的第一阶段：TM-01～TM-05 服务端用例目录、纯判定器、创建任务关联、配置快照持久化、历史恢复、管理台选择与判定展示、OpenAPI 和 Shell 采集器接入。
+- 沿用既有 `benchmark_tasks.config_json`，没有新增验收数据库表或平行任务系统。旧任务没有用例 ID 时保持未关联。
+- 判定器统一输出 `pass / fail / inconclusive / not_run`。关键证据不足或审计不完整时为 `inconclusive`；TM-03 仅认可 `failed` / `timed_out` 审计事件，不把 `cancelled` 误判为工具故障。
+- TM-03 的服务端隔离门禁现已采用部署配置 `benchmark.isolated_environment`；默认 false 时返回 409 并在目录标记为不可执行，只有专用验收 Gateway 显式设为 true 后才开放。客户端不能自报隔离状态。
+- Shell 脚本新增可选 `ACCEPTANCE_CASE_ID`，读取服务端用例目录并复用服务端判定结果；不在脚本中复制判定逻辑。
+- 当前代码最新提交为 `5fb8d89ef82fd385c8d4887eb88025c5fe6c9736`，之后只有文档提交 `141deae80bf5c471b61f7ec5c9bfba3820a43c1b`。代码与最新文档 SHA 的 Go CI 尚未取得最终结果；中间 SHA 工作流因新提交被取消，不记为通过。
+- Browser Smoke 在较早的代码 SHA `30384d3dc0041ab59795e24023c66080e1a5db86` 上，Bundle 构建与 Gateway 启动步骤通过，浏览器安装/交互验收尚未完成。需要以最新代码 SHA 重新取得完整 Go CI 与 Browser Smoke 结果。
+- 尚未访问用户私有 Gateway，TM-01～TM-05 真实模型验收仍未执行。下一步先完成最新 SHA 自动化验证，再根据 CI 结果修复；随后补齐 TM-03 隔离环境能力并执行部署验收。
+
+### 项目内工具验收能力 CI 复验结果（2026-11-19）
+
+- 最新代码 SHA `059790429a77b5f0410da2eea0ad6890ed08423d` 的 Go CI Run [44473562385](https://github.com/Kasign/llm-gateway/actions/runs/44473562385) 最终 `success`，5/5 Job 全部成功。
+- MariaDB Benchmark 决策迁移集成验收、`go test ./...`、指定包竞态测试、`go vet ./...` 均通过；配置/API 契约与前端、Docker 构建、Gateway 故障注入恢复、稳态负载与审计持久化全部通过。
+- 首轮失败原因是 TM-03 单测夹具把 `failed` 事件传给“未观察到故障”测试，导致测试期望与夹具矛盾；已修正夹具为 `succeeded`，没有更改判定规则。修正后的完整 Go CI 通过。
+- Browser Smoke Run [44473562450](https://github.com/Kasign/llm-gateway/actions/runs/44473562450) 对同一 SHA 完成，桌面、窄屏和核心交互验收成功。
+- Shell 脚本目录读取顺序已修正：先创建临时响应文件并定义请求函数，再读取验收目录，避免设置 `ACCEPTANCE_CASE_ID` 时出现未定义函数/文件的问题。
+- `benchmark.isolated_environment` 默认关闭；配置契约、默认关闭测试、目录动态状态和 TM-03 创建门禁均已通过当前 SHA CI。隔离 Gateway 启用后的真实部署验证仍待执行。真实模型 TM-01～TM-05 尚未执行。
+
+### TM-03 隔离环境门禁实现（2026-11-19）
+
+- 新增部署级配置 `benchmark.isolated_environment`，在 `internal/config.Config` 中读取；`config.yaml` 与 `config.example.yaml` 默认均为 `false`。该字段不开放给管理台或 Benchmark 请求体，客户端无法自行声明隔离状态。
+- `GET /api/benchmark/acceptance-cases` 根据服务端配置计算 TM-03 的 `manual_only`；默认关闭时不可选。只有专用验收 Gateway 配置为 true 并重启后，目录才开放 TM-03。
+- `POST /api/benchmark` 使用同一服务端配置校验 TM-03；未启用时返回 409。TM-03 判定仍只认可审计事件 `failed` / `timed_out`，取消事件不算故障。
+- 配置矩阵、示例配置和 OpenAPI 已同步更新。当前 SHA 的完整 Go CI 与 Browser Smoke 均已通过；实际专用验收 Gateway 的开启路径仍需在隔离部署中验证，不能在生产 Gateway 开启此项。
+
+
+## 11. 收尾验收与归档（2026-11-19）
+
+### 自动化验收
+
+- 最新代码与配置模板提交：`e96cc342d8583f8508ab772ca9d3f5746311a40c`。
+- Go CI Run [44482283881](https://github.com/Kasign/llm-gateway/actions/runs/44482283881)：5/5 Job 成功，包含配置/API 契约、完整 Go 测试、竞态与静态检查、Gateway 稳态负载/审计持久化、故障注入恢复、编译和 Docker 镜像。
+- Web UI Browser Smoke Run [44482283902](https://github.com/Kasign/llm-gateway/actions/runs/44482283902)：192/192 检查通过。真实 Gateway、MariaDB、Redis 和 Chromium 环境下完成桌面、390px 窄屏、页面横向溢出、导航、Benchmark 历史详情、请求详情弹窗 Tab/Shift+Tab 焦点循环、Escape 关闭与焦点返回等检查。
+- Benchmark 详情指标去重后的 UI 代码与上述 Browser Smoke 使用相同版本；窄屏与键盘交互不再作为未执行项。
+- 删除仓库根目录 `config.yaml` 后，首次 CI 暴露了两个旧依赖：配置契约脚本和配置加载测试仍读取根目录文件。已改为以 `config.example.yaml` 作为唯一受版本控制的配置模板；真实部署配置由部署挂载/部署环境提供，不再提交到仓库。
+- `config.example.yaml` 已补充工具调用与 SearXNG 配置的中文注释；默认仍关闭工具调用和私网访问，避免模板默认扩大攻击面。
+
+### Slots 最终决策
+
+- 当前已实现 `/slots` 有界抓取和字段白名单解析，未知字段及 `params`、`generation_prompt`、`samplers` 等请求内容不会进入快照。
+- 当前没有把 `/slots` 接入后台周期采样、Runtime API 或管理台。原因是部署中的 llama.cpp 版本、启动参数和 `/slots` 轮询对 idle-sleep 的影响尚未取得证据；官方滚动文档不能代替部署版本验证。
+- 本阶段将 Slots 能力状态明确记录为 `not_sampled`（未采样、能力未知），而不是 `unsupported` 或 `complete`。不新增一个没有真实采样数据支撑的 API 状态字段，也不冒险开启轮询。
+- 后续只有在部署版本确认 `/slots` 端点启用且轮询不会破坏 idle-sleep 行为后，才评估低频采样与 UI 展示。该延期不阻塞已通过真实端到端对账的 Metrics 主线。
+
+### PERF-06 结论
+
+- Metrics 主线完成：真实 Gateway sampler/API 的进程级指标快照、Counter 窗口增量与同一 Benchmark 请求完成交叉对账；输入 Token 17、输出 Token 4000、生成耗时增量 635.212 秒、推算 6.30 Token/s 均与请求详情吻合，且测试窗口无并发请求。
+- 自动化验收、窄屏和键盘交互均通过。
+- PERF-06 归档为“已完成（Slots 自动采集明确延期）”。未完成的真实模型普通性能/工具调用详情验收仍归属于最终部署回归，不伪装成 CI 已覆盖。
