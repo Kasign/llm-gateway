@@ -1921,23 +1921,25 @@ function benchmarkToolCalls(wrap,job){
 function renderBenchmarkToolCalls(wrap,job){
   const calls=benchmarkToolCalls(wrap,job);
   const events=Array.isArray(wrap?.tool_call_events)?wrap.tool_call_events:[];
-  if(!calls.length&&!events.length)return '';
-  let html='<h4>工具调用</h4>';
+  const metrics=wrap?.tool_metrics||job?.tool_metrics;
+  if(!calls.length&&!events.length&&!metrics)return '';
+  const countParts=[];
+  if(calls.length)countParts.push(calls.length+' 次调用');
+  if(events.length)countParts.push(events.length+' 条执行事件');
+  let html='<details class="bench-detail-fold"><summary>工具调用详情'+(countParts.length?'（'+countParts.join(' · ')+'）':'')+'</summary><div class="bench-detail-fold-body">';
   if(calls.length){
-    html+=calls.map((call,index)=>{
+    html+='<h4>模型发起的调用</h4>'+calls.map((call,index)=>{
       const fn=call.function||call;
       const name=fn.name||call.name||'未知工具';
       let args=fn.arguments??call.arguments??call.input??null;
-      if(typeof args==='string'){
-        try{args=JSON.parse(args)}catch{}
-      }
+      if(typeof args==='string'){try{args=JSON.parse(args)}catch{}}
       const argsText=args==null?'未提供参数':JSON.stringify(args,null,2);
-      return '<section class="bench-condition"><strong>调用 '+(index+1)+' · '+esc(name)+'</strong>'+
+      return '<section class="bench-tool-call"><strong>调用 '+(index+1)+' · '+esc(name)+'</strong>'+
         (call.id?'<p class="req-note">调用 ID：<code>'+esc(call.id)+'</code></p>':'')+
         '<pre class="bench-out">'+esc(argsText)+'</pre></section>';
     }).join('');
-  }else{
-    html+='<p class="req-note">任务记录未保留结构化工具调用参数，以下展示可用的脱敏事件摘要。</p>';
+  }else if(events.length){
+    html+='<p class="req-note">任务记录未保留结构化工具调用参数，以下展示可用的脱敏执行事件摘要。</p>';
   }
   if(events.length){
     html+='<h4>工具执行事件</h4>'+wrapTable(
@@ -1948,10 +1950,9 @@ function renderBenchmarkToolCalls(wrap,job){
         '<td>'+esc(String(event.result_bytes??'—'))+'</td><td>'+esc(event.error_code||'—')+'</td></tr>').join('')
     );
   }
-  const metrics=wrap?.tool_metrics||job?.tool_metrics;
   if(metrics){
     const value=(v,status)=>status==='measured'&&v!=null?String(v)+' ms':(status==='not_applicable'?'不适用':(v==null?'未知':String(v)));
-    html+='<h4>工具调用耗时</h4><dl class="bench-history-detail-grid">'+[
+    html+='<h4>工具阶段指标</h4><dl class="bench-history-detail-grid">'+[
       ['模型决策',value(metrics.model_decision_ms,metrics.model_decision_status)],
       ['工具执行合计',value(metrics.tool_execution_total_ms,metrics.tool_execution_status)],
       ['模型最终生成',value(metrics.model_final_generation_ms,metrics.model_final_generation_status)],
@@ -1959,7 +1960,7 @@ function renderBenchmarkToolCalls(wrap,job){
       ['工具调用数',metrics.tool_calls??calls.length]
     ].map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>';
   }
-  return html;
+  return html+'</div></details>';
 }
 function renderBenchmarkHistoryDetail(wrap){
   const box=$('benchHistoryDetail');
@@ -1967,41 +1968,50 @@ function renderBenchmarkHistoryDetail(wrap){
   const job=benchJobPayload(wrap);
   const {content,reasoning}=benchTextsFromJob(job);
   const analysis=wrap.analysis||job.analysis||{};
+  const phases=analysis.phases_ms||{};
   const throughput=analysis.throughput||{};
-  const metrics=[
+  const coreMetrics=[
     ['状态',statusLabel(job.status)],
     ['场景',job.scenario==='tool_performance'?'工具调用性能':'普通性能'],
-    ['模型',job.model_id||job.model_key||job.backend||'—'],
+    ['模型',job.model_id||job.model_key||'—'],
     ['Backend',job.backend||'—'],
-    ['请求 ID',job.request_id||'—'],
-    ['HTTP 状态',job.http_status??'—'],
     ['总耗时',job.latency_ms!=null?job.latency_ms+' ms':'未知'],
     ['TTFT',job.ttft_ms!=null?job.ttft_ms+' ms':'未知'],
     ['输入 Token',job.input_tokens??'未知'],
     ['输出 Token',job.output_tokens??'未知'],
     ['总 Token',job.total_tokens??'未知'],
-    ['输出速度',throughput.output_tokens_per_sec!=null?Number(throughput.output_tokens_per_sec).toFixed(2)+' tok/s':'未知'],
-    ['正文字符',job.content_chars??'未知'],
-    ['思考字符',job.reasoning_chars??'未知'],
-    ['响应字节',job.response_bytes??'未知'],
-    ['流式事件数',job.stream_event_count??'未知'],
-    ['上游模型标识',job.llama_model||'—'],
-    ['开始时间',job.started_at?fmtDate(job.started_at):'—'],
-    ['结束时间',job.finished_at?fmtDate(job.finished_at):'—'],
+    ['输出速度',throughput.output_tokens_per_sec!=null?Number(throughput.output_tokens_per_sec).toFixed(2)+' tok/s':'未知']
   ];
-  let html='<div class="card-head"><div><h3>请求详情</h3><p class="small muted">Benchmark 任务 ID：<code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
-  html+='<h4>请求与结果</h4><dl class="bench-history-detail-grid">'+metrics.filter(([,v])=>v!=null&&v!=='—').map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>';
-  html+=renderBenchCondition(job);
-  if(analysis.phases_ms){
-    html+='<h4>阶段耗时</h4><dl class="bench-history-detail-grid">'+Object.entries(analysis.phases_ms).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v==null?'未知':String(v)+' ms')+'</dd>').join('')+'</dl>';
-  }
-  if(Object.keys(throughput).length){
-    html+='<h4>吞吐指标</h4><dl class="bench-history-detail-grid">'+Object.entries(throughput).filter(([,v])=>v!=null&&typeof v!=='object').map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>';
+  const metadata=[
+    ['请求 ID',job.request_id],['HTTP 状态',job.http_status],
+    ['上游模型标识',job.llama_model],['开始时间',job.started_at?fmtDate(job.started_at):null],
+    ['结束时间',job.finished_at?fmtDate(job.finished_at):null],
+    ['正文字符',job.content_chars],['思考字符',job.reasoning_chars],
+    ['响应字节',job.response_bytes],['流式事件数',job.stream_event_count]
+  ].filter(([,value])=>value!=null&&value!=='');
+  let html='<div class="card-head"><div><h3>请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
+  html+='<h4>核心结果</h4><dl class="bench-history-detail-grid">'+coreMetrics.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v??'未知'))+'</dd>').join('')+'</dl>';
+  html+='<details class="bench-detail-fold"><summary>测试条件与请求元数据</summary><div class="bench-detail-fold-body">'+renderBenchCondition(job)+
+    (metadata.length?'<dl class="bench-history-detail-grid">'+metadata.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>':'')+
+    '</div></details>';
+  const phaseLabels={
+    prep_ms:'Gateway 准备',model_load_ms:'模型加载',upstream_ms:'上游推理',
+    time_to_upstream_headers_ms:'上游响应头',time_to_first_byte_ms:'上游首字节',
+    ttft_content_ms:'首条正文',thinking_ms:'思考阶段',content_generation_ms:'正文生成',
+    prefill_until_first_ms:'首 Token 前 Prompt 处理',gateway_before_infer_ms:'Gateway 推理前'
+  };
+  const phaseRows=Object.entries(phases).filter(([key,value])=>value!=null&&!['total_ms','ttft_ms'].includes(key));
+  const extraThroughput=Object.entries(throughput).filter(([key,value])=>key!=='output_tokens_per_sec'&&key!=='note'&&value!=null&&typeof value!=='object');
+  if(phaseRows.length||extraThroughput.length||throughput.note){
+    html+='<details class="bench-detail-fold"><summary>阶段耗时与吞吐明细</summary><div class="bench-detail-fold-body">';
+    if(phaseRows.length)html+='<h4>阶段耗时</h4><dl class="bench-history-detail-grid">'+phaseRows.map(([key,value])=>'<dt>'+esc(phaseLabels[key]||key)+'</dt><dd>'+esc(String(value))+' ms</dd>').join('')+'</dl>';
+    if(extraThroughput.length)html+='<h4>其他吞吐指标</h4><dl class="bench-history-detail-grid">'+extraThroughput.map(([key,value])=>'<dt>'+esc(key)+'</dt><dd>'+esc(String(value))+'</dd>').join('')+'</dl>';
     if(throughput.note)html+='<p class="req-note">'+esc(throughput.note)+'</p>';
+    html+='</div></details>';
   }
   html+=renderBenchmarkToolCalls(wrap,job);
-  if(content)html+='<h4>正文 content</h4><pre class="bench-out">'+esc(content)+'</pre>';
-  if(reasoning)html+='<h4>思考 reasoning</h4><pre class="bench-out">'+esc(reasoning)+'</pre>';
+  if(content)html+='<details class="bench-detail-fold"><summary>正文 content（'+formatTokenCount(job.content_chars)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(content)+'</pre></div></details>';
+  if(reasoning)html+='<details class="bench-detail-fold"><summary>思考 reasoning（'+formatTokenCount(job.reasoning_chars)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(reasoning)+'</pre></div></details>';
   if(job.error)html+='<p class="msg err">'+esc(job.error)+'</p>';
   if(job.error_code)html+='<p class="req-note">错误码：<code>'+esc(job.error_code)+'</code></p>';
   box.innerHTML=html;
@@ -2180,12 +2190,13 @@ function renderBenchCondition(j){
 }
 function renderBenchAnalysis(wrap){
   const box=$('benchAnalysis');if(!box)return;
-  const a=wrap.analysis;
-  const hasPhases=Boolean(a&&a.phases_ms);
+  const a=wrap.analysis||{};
+  const p=a.phases_ms||{};
+  const hasPhases=Object.keys(p).some(key=>!['total_ms','ttft_ms'].includes(key)&&p[key]!=null);
   const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
   const toolMetrics=benchJobPayload(wrap).scenario==='tool_performance'?(wrap.tool_metrics||null):null;
   const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
-  let toolHTML='';
+  let html=conditionHTML;
   if(toolMetrics){
     const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='not_applicable'?'不适用':'未知');
     const rows=[
@@ -2194,27 +2205,29 @@ function renderBenchAnalysis(wrap){
       ['模型最终生成',metricValue(toolMetrics.model_final_generation_ms,toolMetrics.model_final_generation_status)],
       ['模型轮数',toolMetrics.model_rounds??0],['工具轮数',toolMetrics.tool_rounds??0],['工具调用数',toolMetrics.tool_calls??0],
     ];
-    toolHTML='<h3 style="margin:12px 0 8px;font-size:14px">工具调用阶段指标</h3><dl>'+
+    html+='<h3 style="margin:12px 0 8px;font-size:14px">工具调用阶段</h3><dl>'+
       rows.map(([label,value])=>'<dt>'+esc(label)+'</dt><dd>'+esc(String(value))+'</dd>').join('')+'</dl>';
     if(toolEvents.length){
-      toolHTML+='<h3 style="margin:12px 0 8px;font-size:14px">工具事件（脱敏摘要）</h3>'+wrapTable('<tr><th>#</th><th>轮次</th><th>工具</th><th>状态</th><th>耗时</th><th>结果字节</th><th>错误码</th></tr>'+
-        toolEvents.map(event=>'<tr><td>'+esc(String(event.seq??''))+'</td><td>'+esc(String(event.round??''))+'</td><td>'+esc(event.tool_name||'—')+'</td><td>'+esc(event.status||'—')+'</td><td>'+esc(String(event.duration_ms??'—'))+' ms</td><td>'+esc(String(event.result_bytes??'—'))+'</td><td>'+esc(event.error_code||'—')+'</td></tr>').join(''));
+      html+='<details class="bench-detail-fold"><summary>工具执行事件（'+toolEvents.length+' 条）</summary><div class="bench-detail-fold-body">'+
+        wrapTable('<tr><th>#</th><th>轮次</th><th>工具</th><th>状态</th><th>耗时</th><th>结果字节</th><th>错误码</th></tr>'+
+        toolEvents.map(event=>'<tr><td>'+esc(String(event.seq??''))+'</td><td>'+esc(String(event.round??''))+'</td><td>'+esc(event.tool_name||'—')+'</td><td>'+esc(event.status||'—')+'</td><td>'+esc(String(event.duration_ms??'—'))+(event.duration_ms!=null?' ms':'')+'</td><td>'+esc(String(event.result_bytes??'—'))+'</td><td>'+esc(event.error_code||'—')+'</td></tr>').join(''))+
+        '</div></details>';
     }
   }
-  if(!hasPhases&&!conditionHTML){box.style.display='none';box.innerHTML='';return}
-  box.style.display='block';
-  let html=conditionHTML+toolHTML;
   if(hasPhases){
-    const p=a.phases_ms,tp=a.throughput||{};
-    html+='<h3 style="margin:12px 0 10px;font-size:14px">请求分析</h3><dl>'+
-      [['总耗时',p.total_ms!=null?p.total_ms+' ms':null],['Gateway 准备',p.prep_ms+' ms'],['模型加载',p.model_load_ms+' ms'],['上游推理',p.upstream_ms+' ms'],
-      ['首 token',p.ttft_ms!=null?p.ttft_ms+' ms':null],['首条正文',p.ttft_content_ms!=null?p.ttft_content_ms+' ms':null],
-      ['思考阶段',p.thinking_ms!=null?p.thinking_ms+' ms':null],['正文生成',p.content_generation_ms!=null?p.content_generation_ms+' ms':null],
-      ['输出速度',tp.output_tokens_per_sec!=null?tp.output_tokens_per_sec.toFixed(2)+' tok/s':null],
-      ].filter(x=>x[1]!=null).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join('')+'</dl>'+
-      (a.summary?.length?'<ul class="req-hints" style="margin:10px 0 0">'+a.summary.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+
-      (tp.note?'<p class="req-note">'+esc(tp.note)+'</p>':'');
+    const labels={
+      prep_ms:'Gateway 准备',model_load_ms:'模型加载',upstream_ms:'上游推理',
+      time_to_upstream_headers_ms:'上游响应头',time_to_first_byte_ms:'上游首字节',
+      ttft_content_ms:'首条正文',thinking_ms:'思考阶段',content_generation_ms:'正文生成',
+      prefill_until_first_ms:'首 Token 前 Prompt 处理',gateway_before_infer_ms:'Gateway 推理前'
+    };
+    const rows=Object.entries(p).filter(([key,value])=>value!=null&&!['total_ms','ttft_ms'].includes(key));
+    html+='<h3 style="margin:12px 0 10px;font-size:14px">阶段耗时分解</h3><dl>'+
+      rows.map(([key,value])=>'<dt>'+esc(labels[key]||key)+'</dt><dd>'+esc(String(value))+' ms</dd>').join('')+'</dl>';
   }
+  if(a.summary?.length)html+='<ul class="req-hints" style="margin:10px 0 0">'+a.summary.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>';
+  if(a.throughput?.note)html+='<p class="req-note">'+esc(a.throughput.note)+'</p>';
+  box.style.display='block';
   box.innerHTML=html;
 }
 function renderBenchStreamEvents(evs){
