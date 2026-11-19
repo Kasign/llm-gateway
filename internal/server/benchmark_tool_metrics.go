@@ -33,6 +33,11 @@ func decodeBenchmarkRoundDurations(raw string) []int64 {
 // benchmarkToolMetrics 是服务端计算的工具场景阶段指标，前端只负责展示，不重新计算。
 type benchmarkToolMetrics struct {
 	ToolChoiceMode string `json:"tool_choice_mode"`
+	ToolCallDecision string `json:"tool_call_decision"`
+	ToolExecutionAttempts int `json:"tool_execution_attempts"`
+	ToolExecutionSuccesses int `json:"tool_execution_successes"`
+	ToolExecutionFailures int `json:"tool_execution_failures"`
+	ToolExecutionSuccessRate *float64 `json:"tool_execution_success_rate,omitempty"`
 	ModelRounds int `json:"model_rounds"`
 	ToolRounds int `json:"tool_rounds"`
 	ToolCalls int `json:"tool_calls"`
@@ -54,6 +59,7 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		return metrics
 	}
 	metrics.ToolChoiceMode = benchmarkToolChoiceMode(job.Scenario)
+	metrics.ToolCallDecision = "unknown"
 	metrics.ModelDecisionStatus = "unknown"
 	metrics.ToolExecutionStatus = "unknown"
 	metrics.ModelFinalGenerationStatus = "unknown"
@@ -66,20 +72,35 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 
 	seenRounds := make(map[int]struct{}, len(events))
 	var total int64
-	executedEvents := 0
 	for _, event := range events {
 		seenRounds[event.Round] = struct{}{}
 		switch event.Status {
-		case "succeeded", "failed", "timed_out", "cancelled":
-			executedEvents++
+		case "succeeded":
+			metrics.ToolExecutionAttempts++
+			metrics.ToolExecutionSuccesses++
+			if event.DurationMS > 0 && total <= int64(^uint64(0)>>1)-event.DurationMS {
+				total += event.DurationMS
+			}
+		case "failed", "timed_out", "cancelled":
+			metrics.ToolExecutionAttempts++
+			metrics.ToolExecutionFailures++
 			if event.DurationMS > 0 && total <= int64(^uint64(0)>>1)-event.DurationMS {
 				total += event.DurationMS
 			}
 		}
 	}
+	if len(events) > 0 {
+		metrics.ToolCallDecision = "called"
+	} else if job.Status == "completed" {
+		metrics.ToolCallDecision = "not_called"
+	}
+	if metrics.ToolExecutionAttempts > 0 {
+		rate := float64(metrics.ToolExecutionSuccesses) / float64(metrics.ToolExecutionAttempts) * 100
+		metrics.ToolExecutionSuccessRate = &rate
+	}
 	metrics.ToolCalls = len(events)
 	metrics.ToolRounds = len(seenRounds)
-	if executedEvents > 0 {
+	if metrics.ToolExecutionAttempts > 0 {
 		v := total
 		metrics.ToolExecutionTotalMS = &v
 		metrics.ToolExecutionStatus = "measured"
@@ -88,7 +109,7 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		metrics.ToolExecutionStatus = "not_applicable"
 		metrics.ModelFinalGenerationStatus = "not_applicable"
 	}
-	if job.Status == "completed" && executedEvents > 0 && len(job.ModelRoundDurationsMS) >= 2 {
+	if job.Status == "completed" && metrics.ToolExecutionAttempts > 0 && len(job.ModelRoundDurationsMS) >= 2 {
 		v := job.ModelRoundDurationsMS[len(job.ModelRoundDurationsMS)-1]
 		metrics.ModelFinalGenerationMS = &v
 		metrics.ModelFinalGenerationStatus = "measured"
