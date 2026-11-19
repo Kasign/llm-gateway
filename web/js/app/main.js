@@ -1940,7 +1940,8 @@ function sanitizeBenchmarkToolArguments(value,depth=0){
 function renderBenchmarkToolCalls(wrap,job){
   const calls=benchmarkToolCalls(wrap,job);
   const events=Array.isArray(wrap?.tool_call_events)?wrap.tool_call_events:[];
-  const metrics=wrap?.tool_metrics||job?.tool_metrics;
+  const isToolScenario=['tool_performance','tool_performance_auto'].includes(job?.scenario);
+  const metrics=isToolScenario?(wrap?.tool_metrics||job?.tool_metrics):null;
   if(!calls.length&&!events.length&&!metrics)return '';
   const countParts=[];
   if(calls.length)countParts.push(calls.length+' 次调用');
