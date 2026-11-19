@@ -1782,7 +1782,7 @@ function benchPayloadForApi(target,scenario='performance',promptOverride=''){
   const body=gatewayKey
     ?{model_key:gatewayKey,prompt:p.prompt,max_tokens:p.max_tokens}
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
-  if(scenario==='tool_performance')body.scenario='tool_performance';
+  if(scenario==='tool_performance'||scenario==='tool_performance_auto')body.scenario=scenario;
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
@@ -1825,7 +1825,7 @@ async function loadBenchHistory(){
     }else{
       list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
         items.map(item=>{
-          const scenarioLabel=item.scenario==='tool_performance'?'工具调用性能':'普通性能';
+          const scenarioLabel=item.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(item.scenario==='tool_performance'?'工具调用性能（强制调用/旧版）':'普通性能');
           const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms!=null?item.latency_ms+' ms':'未知');
           const model=item.model_id||item.model_key||item.backend||'—';
@@ -1991,7 +1991,7 @@ function renderBenchmarkHistoryDetail(wrap){
   const throughput=analysis.throughput||{};
   const coreMetrics=[
     ['状态',statusLabel(job.status)],
-    ['场景',job.scenario==='tool_performance'?'工具调用性能':'普通性能'],
+    ['场景',job.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(job.scenario==='tool_performance'?'工具调用性能（强制调用/旧版）':'普通性能')],
     ['模型',job.model_id||job.model_key||'—'],
     ['Backend',job.backend||'—'],
     ['总耗时',job.latency_ms!=null?job.latency_ms+' ms':'未知'],
@@ -2148,9 +2148,10 @@ function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverri
   const body={
     model:upstreamModel||'（当前上游）',
     messages:[{role:'user',content:p.prompt}],
-    stream:scenario!=='tool_performance',
+    stream:scenario!=='tool_performance'&&scenario!=='tool_performance_auto',
     max_tokens:p.max_tokens,
   };
+  if(scenario==='tool_performance_auto')body.tool_choice='auto';
   if(scenario==='tool_performance')body.tool_choice={type:'function',function:{name:'web.search'}};
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
@@ -2218,12 +2219,14 @@ function renderBenchAnalysis(wrap){
   const p=a.phases_ms||{};
   const hasPhases=Object.keys(p).some(key=>!['total_ms','ttft_ms'].includes(key)&&p[key]!=null);
   const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
-  const toolMetrics=benchJobPayload(wrap).scenario==='tool_performance'?(wrap.tool_metrics||null):null;
+  const toolScenario=['tool_performance','tool_performance_auto'].includes(benchJobPayload(wrap).scenario);
+  const toolMetrics=toolScenario?(wrap.tool_metrics||null):null;
   const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
   let html=conditionHTML;
   if(toolMetrics){
     const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='not_applicable'?'不适用':'未知');
     const rows=[
+      ['工具选择策略',toolMetrics.tool_choice_mode==='auto'?'自然决策（auto）':'强制调用（web.search）'],
       ['模型决策',metricValue(toolMetrics.model_decision_ms,toolMetrics.model_decision_status)],
       ['工具执行合计',metricValue(toolMetrics.tool_execution_total_ms,toolMetrics.tool_execution_status)],
       ['模型最终生成',metricValue(toolMetrics.model_final_generation_ms,toolMetrics.model_final_generation_status)],
@@ -2387,8 +2390,9 @@ async function stopBenchmark(){
 }
 
 async function runBenchmark(scenario='performance'){
-  const promptOverride=scenario==='tool_performance'?($('benchToolPrompt')?.value||'').trim():'';
-  if(scenario==='tool_performance'&&!promptOverride){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
+  const toolScenario=scenario==='tool_performance'||scenario==='tool_performance_auto';
+  const promptOverride=toolScenario?($('benchToolPrompt')?.value||'').trim():'';
+  if(toolScenario&&!promptOverride){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
   const clientKey=($('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const answer=$('benchAnswer');
