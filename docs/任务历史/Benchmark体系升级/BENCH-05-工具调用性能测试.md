@@ -114,7 +114,7 @@
 ### 真实模型验收采集脚本（2026-11-19）
 
 - 新增 `scripts/benchmark_tool_acceptance.sh`，复用现有 `POST /api/benchmark` 与 `GET /api/benchmark/{job_id}`，不新增服务端接口或平行执行链路。
-- 脚本每次只创建一个任务，轮询到终态后保存完整任务响应 JSON，并在终端摘要展示决策、执行统计和工具事件状态；它负责采集证据，不自动把模型行为判为通过，最终仍按 TM-01～TM-05 的矩阵人工判读。结果文件不包含请求认证头，但可能包含 Prompt 和模型输出；分享前必须人工检查并按需脱敏。
+- 脚本每次只创建一个任务，轮询到终态后保存完整任务响应 JSON。设置 `ACCEPTANCE_CASE_ID` 时，脚本先读取服务端用例目录，校验用例存在、场景匹配且不是 `manual_only`，随后把用例 ID 随创建请求提交；终端摘要展示服务端 `acceptance` 判定，不在脚本中复制判定规则。未设置用例 ID 时保留原始采集模式。结果文件不包含请求认证头，但可能包含 Prompt 和模型输出；分享前必须人工检查并按需脱敏。
 - 认证明确分离：`GATEWAY_ADMIN_SESSION` 是网页登录会话 Token，放在 `Authorization: Bearer`；`GATEWAY_CLIENT_API_KEY` 是具有模型及 `web.search` 授权的客户端服务 Key，放在 `X-Client-API-Key`。二者不可互换。脚本不会把凭据写入证据文件。
 - 运行依赖 Bash、curl、jq。脚本按普通文件提交，使用 `bash` 执行。示例：
   ```bash
@@ -122,8 +122,8 @@
   export GATEWAY_ADMIN_SESSION="网页登录会话Token"
   export GATEWAY_CLIENT_API_KEY="客户端服务API Key"
 
-  # TM-01：自然决策并调用（需按结果判读）
-  SCENARIO=tool_performance_auto bash scripts/benchmark_tool_acceptance.sh
+  # TM-01：自然决策并调用（服务端自动给出验收判定）
+  ACCEPTANCE_CASE_ID=TM-01 SCENARIO=tool_performance_auto bash scripts/benchmark_tool_acceptance.sh
 
   # TM-02：自然决策不调用
   SCENARIO=tool_performance_auto \
@@ -135,11 +135,11 @@
     PROMPT="Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。" \
     bash scripts/benchmark_tool_acceptance.sh
 
-  # TM-05：强制调用诊断
-  SCENARIO=tool_performance bash scripts/benchmark_tool_acceptance.sh
+  # TM-05：强制调用诊断并由服务端判定
+  ACCEPTANCE_CASE_ID=TM-05 SCENARIO=tool_performance bash scripts/benchmark_tool_acceptance.sh
   ```
 - 可通过 `MODEL_ID` 固定上游模型 ID；未设置时使用当前活动模型。默认最大输出 384 Token，默认轮询超时 1800 秒，可通过 `MAX_TOKENS`、`POLL_INTERVAL_SECONDS`、`POLL_TIMEOUT_SECONDS` 调整。输出目录默认为当前目录下 `benchmark-tool-evidence/`，文件权限受 `umask 077` 保护。
-- TM-03 仍须在独立验收 Gateway 中预先将 SearXNG 指向专用故障响应端点，再运行自然决策场景；脚本不会修改服务端工具配置，也不会触碰生产环境。超时退出时脚本报告 Job ID 和查询地址，不会伪造终态结果。
+- TM-03 当前在服务端创建接口明确返回 HTTP 409，原因是尚无可信的隔离环境配置。仅把独立 Gateway 的 SearXNG 指向故障端点还不足以开放执行；需先实现并确认服务端隔离环境门禁。脚本不会修改服务端工具配置，也不会触碰生产环境。超时退出时脚本报告 Job ID 和查询地址，不会伪造终态结果。
 - 当前仅完成采集工具和使用说明，未访问或调用用户私有 Gateway；TM-01～TM-05 的真实模型结果仍全部待部署环境执行。
 
 
