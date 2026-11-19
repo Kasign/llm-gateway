@@ -50,20 +50,32 @@ llama:
   max_output_tokens: 8192
 
 
-# 工具调用默认关闭。模型范围与调用方工具授权在 Web「服务密钥」中配置。
+# 工具调用默认关闭。启用后，仍需在 Web「服务密钥」中配置调用方的模型与工具授权。
 tools:
+  # 工具总开关；关闭时不注册或执行工具。
   enabled: false
+  # 服务端允许注册的工具白名单；具体调用方还必须通过服务密钥授权。
   allowed_tools: []
   searxng:
-    # 仅当 allowed_tools 包含 web.search 时必填。
+    # SearXNG 服务地址。仅当启用 web.search 时必填；Docker 同网络可使用服务名，例如 http://searxng:8080。
     base_url: ""
+    # 是否允许明文 HTTP。仅在可信内网链路确实使用 HTTP 时开启；跨不可信网络应使用 HTTPS。
     allow_insecure_http: false
+    # 是否允许目标解析到 RFC1918 私有网段。Docker 内网服务通常需要；公网部署一般保持 false。
+    # 开启后仍会拦截 loopback、链路本地、组播及保留地址，并执行 DNS 目标校验；不要将其理解为允许任意内网访问。
     allow_private_network: false
+    # 单次搜索请求超时秒数；0 使用程序默认值，最大 30 秒。
     request_timeout_seconds: 8
+    # 最多返回的搜索结果条数，范围 1–5。
     max_results: 5
+    # 上游响应体最大字节数；524288 = 512 KiB，最大 4 MiB。
     max_response_bytes: 524288
+    # SearXNG 安全搜索等级：0 关闭，1 中等，2 严格。
     safe_search: 1
+    # 默认搜索语言；留空时不向 SearXNG 传 language 参数，由 SearXNG/搜索引擎自行决定。
+    # 如需固定中文，可尝试 zh-CN；实际支持范围取决于 SearXNG 版本及启用的搜索引擎。
     default_language: ""
+    # 搜索分类；general 表示综合搜索。
     categories: [general]
 
 # 真实工具故障验收只能在独立 Gateway 启用；生产环境必须保持 false。

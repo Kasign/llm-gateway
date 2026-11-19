@@ -236,9 +236,9 @@ api_key: "${LLM_GATEWAY_TEST_NUMERIC_STRING}"
 	}
 }
 
-// TestRootConfigLoadsWithZeroLocalRequestTimeout protects the real deployment
-// config from YAML/environment type regressions that Compose parsing cannot catch.
-func TestRootConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
+// TestExampleConfigLoadsWithZeroLocalRequestTimeout protects the deployment
+// template from YAML/environment type regressions that Compose parsing cannot catch.
+func TestExampleConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
 	// Use non-production values; Load validates config but does not connect to services.
 	for key, value := range map[string]string{
 		"LLM_GATEWAY_ADMIN_API_KEY":       "ci-admin-api-key-for-config-test",
@@ -259,10 +259,10 @@ func TestRootConfigLoadsWithZeroLocalRequestTimeout(t *testing.T) {
 		t.Setenv(key, value)
 	}
 
-	rootConfig := filepath.Join("..", "..", "config.yaml")
-	cfg, err := Load(rootConfig)
+	exampleConfig := filepath.Join("..", "..", "config.example.yaml")
+	cfg, err := Load(exampleConfig)
 	if err != nil {
-		t.Fatalf("repository-root config.yaml should load with the example deployment environment: %v", err)
+		t.Fatalf("config.example.yaml should load with the example deployment environment: %v", err)
 	}
 	if cfg.Llama.RequestTimeoutSeconds == nil || *cfg.Llama.RequestTimeoutSeconds != 0 {
 		t.Fatalf("request_timeout_seconds = %v, want explicit 0 from environment", cfg.Llama.RequestTimeoutSeconds)

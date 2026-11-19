@@ -21,16 +21,15 @@ var (
 type tree struct { root *yaml.Node; paths map[string]bool; values map[string]string }
 func main(){if e:=run();e!=nil{fmt.Fprintln(os.Stderr,"配置契约检查失败：",e);os.Exit(1)}}
 func run()error{
- actual,e:=readTree("config.yaml");if e!=nil{return e};example,e:=readTree("config.example.yaml");if e!=nil{return e}
- typ:=reflect.TypeOf(cfg.Config{});if e=knownFields(actual.root,typ,"");e!=nil{return fmt.Errorf("config.yaml: %w",e)};if e=knownFields(example.root,typ,"");e!=nil{return fmt.Errorf("config.example.yaml: %w",e)}
- if e=compareTrees(actual,example);e!=nil{return e}
+ example,e:=readTree("config.example.yaml");if e!=nil{return e}
+ typ:=reflect.TypeOf(cfg.Config{});if e=knownFields(example.root,typ,"");e!=nil{return fmt.Errorf("config.example.yaml: %w",e)}
  envData,e:=os.ReadFile(".env.example");if e!=nil{return e};composeData,e:=os.ReadFile("docker-compose.yml");if e!=nil{return e}
  envs:=parseAssignments(string(envData));passed:=composeEnvironment(string(composeData))
- for _,t:=range []*tree{actual,example}{refs:=map[string]bool{};collectRefs(t.root,refs);for n:=range refs{if !envs[n]{return fmt.Errorf("YAML 引用的变量 %s 未写入 .env.example",n)};if !passed[n]{return fmt.Errorf("YAML 变量 %s 未由 Compose 显式注入容器",n)}}}
- for _,line:=range strings.Split(string(composeData),"\n"){line=strings.TrimSpace(line);if line==""||strings.HasPrefix(line,"#"){continue};for _,m:=range requiredComposeVar.FindAllStringSubmatch(line,-1){if len(m)==2&&!envs[m[1]]{return fmt.Errorf("Compose 必需变量 %s 未写入 .env.example",m[1])}}}
- if e=checkNoProviderPresets(actual,example,string(envData),string(composeData));e!=nil{return e}
+ refs:=map[string]bool{};collectRefs(example.root,refs);for n:=range refs{if !envs[n]{return fmt.Errorf("config.example.yaml 引用的变量 %s 未写入 .env.example",n)};if !passed[n]{return fmt.Errorf("config.example.yaml 变量 %s 未由 Compose 显式注入容器",n)}}
+ for _,line:=range strings.Split(string(composeData),"\\n"){line=strings.TrimSpace(line);if line==""||strings.HasPrefix(line,"#"){continue};for _,m:=range requiredComposeVar.FindAllStringSubmatch(line,-1){if len(m)==2&&!envs[m[1]]{return fmt.Errorf("Compose 必需变量 %s 未写入 .env.example",m[1])}}}
+ if e=checkNoProviderPresets(example,example,string(envData),string(composeData));e!=nil{return e}
  if e=checkProviderDocumentation();e!=nil{return e}
- fmt.Printf("配置契约检查通过：两份 YAML %d 个路径；远程 Provider 仅由 Web 管理台维护。\n",len(actual.paths));return nil
+ fmt.Printf("配置契约检查通过：config.example.yaml %d 个路径；远程 Provider 仅由 Web 管理台维护。\\n",len(example.paths));return nil
 }
 func readTree(path string)(*tree,error){data,e:=os.ReadFile(path);if e!=nil{return nil,e};var root yaml.Node;if e=yaml.Unmarshal(data,&root);e!=nil{return nil,fmt.Errorf("解析 %s: %w",path,e)};t:=&tree{root:&root,paths:map[string]bool{},values:map[string]string{}};shape(&root,"",t.paths,t.values);return t,nil}
 func deref(t reflect.Type)reflect.Type{for t!=nil&&t.Kind()==reflect.Pointer{t=t.Elem()};return t}
