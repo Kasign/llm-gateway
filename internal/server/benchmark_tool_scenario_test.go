@@ -130,7 +130,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 		Status:                "failed",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, false)
 	if metrics.ToolChoiceMode != "required" {
 		t.Fatalf("tool_choice_mode = %q, want required", metrics.ToolChoiceMode)
 	}
@@ -149,5 +149,20 @@ func TestBuildBenchmarkToolMetricsOrdinaryScenarioIsNotApplicable(t *testing.T) 
 	}
 	if metrics.ToolExecutionStatus != "not_applicable" || metrics.ModelFinalGenerationStatus != "not_applicable" {
 		t.Fatalf("ordinary scenario tool statuses = %q/%q, want not_applicable", metrics.ToolExecutionStatus, metrics.ModelFinalGenerationStatus)
+	}
+}
+
+func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWhenEventsUnavailable(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status:   "completed",
+		ModelRoundDurationsMS: []int64{125},
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	if metrics.ToolCallDecision != "unknown" {
+		t.Fatalf("tool call decision = %q, want unknown without event evidence", metrics.ToolCallDecision)
+	}
+	if metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("tool execution status = %q, want unknown without event evidence", metrics.ToolExecutionStatus)
 	}
 }
