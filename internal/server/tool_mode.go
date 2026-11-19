@@ -140,7 +140,7 @@ func (f inferenceForwarder) forwardWithTools(
 		auditEvents = append(auditEvents, mapToolCallAuditEvent(event))
 	})
 	decision := benchmarkToolCallDecision(result.ModelRounds, result.Response.StatusCode, len(auditEvents), runErr)
-	recordBenchmarkToolCallDecision(ctx, decision)
+	recordBenchmarkToolCallDecision(ctx, decision, len(auditEvents))
 	if len(auditEvents) > 0 && s.audit != nil {
 		s.audit.InsertToolCallEvents(st.ID, auditEvents)
 	}
