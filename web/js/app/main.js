@@ -1976,6 +1976,9 @@ function renderBenchmarkToolCalls(wrap,job){
       ['工具执行合计',value(metrics.tool_execution_total_ms,metrics.tool_execution_status)],
       ['模型最终生成',value(metrics.model_final_generation_ms,metrics.model_final_generation_status)],
       ['模型轮数',metrics.model_rounds??'未知'],['工具轮数',metrics.tool_rounds??'未知'],
+      ['模型工具决策',metrics.tool_call_decision==='called'?'调用了工具':(metrics.tool_call_decision==='not_called'?'未调用工具':'未知')],
+      ['执行尝试 / 成功 / 失败',(metrics.tool_execution_attempts??0)+' / '+(metrics.tool_execution_successes??0)+' / '+(metrics.tool_execution_failures??0)],
+      ['执行成功率',metrics.tool_execution_success_rate!=null?Number(metrics.tool_execution_success_rate).toFixed(1)+'%':'未知'],
       ['工具调用数',metrics.tool_calls??calls.length]
     ].map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>';
   }
@@ -2227,6 +2230,9 @@ function renderBenchAnalysis(wrap){
     const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='not_applicable'?'不适用':'未知');
     const rows=[
       ['工具选择策略',toolMetrics.tool_choice_mode==='auto'?'自然决策（auto）':'强制调用（web.search）'],
+      ['模型工具决策',toolMetrics.tool_call_decision==='called'?'调用了工具':(toolMetrics.tool_call_decision==='not_called'?'未调用工具':'未知')],
+      ['执行尝试 / 成功 / 失败',(toolMetrics.tool_execution_attempts??0)+' / '+(toolMetrics.tool_execution_successes??0)+' / '+(toolMetrics.tool_execution_failures??0)],
+      ['执行成功率',toolMetrics.tool_execution_success_rate!=null?Number(toolMetrics.tool_execution_success_rate).toFixed(1)+'%':'未知'],
       ['模型决策',metricValue(toolMetrics.model_decision_ms,toolMetrics.model_decision_status)],
       ['工具执行合计',metricValue(toolMetrics.tool_execution_total_ms,toolMetrics.tool_execution_status)],
       ['模型最终生成',metricValue(toolMetrics.model_final_generation_ms,toolMetrics.model_final_generation_status)],
