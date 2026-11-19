@@ -32,7 +32,7 @@ func benchmarkToolCallDecision(modelRounds, responseStatus, eventCount int, runE
 	return "unknown"
 }
 
-func recordBenchmarkToolCallDecision(ctx context.Context, decision string) {
+func recordBenchmarkToolCallDecision(ctx context.Context, decision string, eventCount int) {
 	if ctx == nil || (decision != "called" && decision != "not_called" && decision != "unknown") {
 		return
 	}
@@ -42,6 +42,7 @@ func recordBenchmarkToolCallDecision(ctx context.Context, decision string) {
 	}
 	job.mu.Lock()
 	job.ToolCallDecision = decision
+	job.ToolCallEventCount = eventCount
 	job.mu.Unlock()
 }
 
@@ -72,7 +73,7 @@ type benchmarkToolMetrics struct {
 	ModelFinalGenerationStatus string `json:"model_final_generation_status"`
 }
 
-func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent) benchmarkToolMetrics {
+func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent, eventsAvailable bool) benchmarkToolMetrics {
 	metrics := benchmarkToolMetrics{
 		ToolChoiceMode: "not_applicable",
 		ToolCallDecision: "not_applicable",
@@ -95,8 +96,10 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		metrics.ModelDecisionStatus = "measured"
 	}
 
+	eventsComplete := eventsAvailable && job.ToolCallEventCount == len(events)
 	seenRounds := make(map[int]struct{}, len(events))
 	var total int64
+	if eventsComplete {
 	for _, event := range events {
 		seenRounds[event.Round] = struct{}{}
 		switch event.Status {
@@ -114,8 +117,9 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 			}
 		}
 	}
+	}
 	switch {
-	case len(events) > 0 || job.ToolCallDecision == "called":
+	case job.ToolCallDecision == "called" || len(events) > 0:
 		metrics.ToolCallDecision = "called"
 	case job.Status == "completed" && job.ToolCallDecision == "not_called":
 		metrics.ToolCallDecision = "not_called"
@@ -126,8 +130,12 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		rate := float64(metrics.ToolExecutionSuccesses) / float64(metrics.ToolExecutionAttempts) * 100
 		metrics.ToolExecutionSuccessRate = &rate
 	}
-	metrics.ToolCalls = len(events)
-	metrics.ToolRounds = len(seenRounds)
+	if eventsComplete {
+		metrics.ToolCalls = len(events)
+		metrics.ToolRounds = len(seenRounds)
+	} else if job.ToolCallDecision == "called" {
+		metrics.ToolCalls = job.ToolCallEventCount
+	}
 	if metrics.ToolExecutionAttempts > 0 {
 		v := total
 		metrics.ToolExecutionTotalMS = &v
