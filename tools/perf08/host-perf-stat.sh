@@ -78,7 +78,7 @@ if [[ "$cap_eff" =~ ^[0-9a-fA-F]+$ ]] && (( (16#$cap_eff & (1 << 38)) != 0 )); t
   has_perfmon=1
 fi
 allow_hardware=0
-if (( EUID == 0 || has_perfmon == 1 )) || { [[ "$perf_paranoid" =~ ^-?[0-9]+$ ]] && (( perf_paranoid <= 1 )); }; then
+if (( EUID == 0 || has_perfmon == 1 )) || { [[ "$perf_paranoid" =~ ^-?[0-9]+$ ]] && (( perf_paranoid <= 0 )); }; then
   allow_hardware=1
 fi
 

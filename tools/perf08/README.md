@@ -19,7 +19,7 @@ tools/perf08/host-perf-stat.sh <host-pid> [duration-seconds] [output-directory]
 - 传入宿主机 PID，脚本要求目标可执行文件 basename 为 `llama-server`，且父进程 comm 为 `llama-server` Router；用于拒绝误采 Router 主进程或容器内 PID。
 - 默认 10 秒，最多 10 秒；只对指定 PID 使用 `perf stat -p`。
 - 不使用全系统 `-a`，不执行 `perf record`，不生成 `perf.data`。
-- 基础采集 task-clock、context-switches、cpu-migrations、page-faults。只有当前为 root、持有 CAP_PERFMON，或 `perf_event_paranoid <= 1` 时，才在检测到 Intel Hybrid PMU 后加入 cpu_core / cpu_atom 的 cycles 和 instructions；否则仅采软件事件，并在 metadata 标记 `not_sampled_permissions`。
+- 基础采集 task-clock、context-switches、cpu-migrations、page-faults。只有当前为 root、持有 CAP_PERFMON，或 `perf_event_paranoid <= 0` 时，才在检测到 Intel Hybrid PMU 后加入 cpu_core / cpu_atom 的 cycles 和 instructions；否则仅采软件事件，并在 metadata 标记 `not_sampled_permissions`。
 - 输出 `metadata.txt` 和 `perf-stat.csv`，目录权限 0700、文件权限 0600。
 - 元数据绑定 PID、进程启动 ticks 和 binary build-id，防止 PID 复用导致错误归因。
 - 输出明确为 `scope=process_window`、`request_correlation=none`，不能写入请求级 RequestAnalysis 或作为 request-native profile。
