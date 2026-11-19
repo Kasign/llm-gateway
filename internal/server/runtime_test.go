@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/config"
@@ -63,4 +64,28 @@ func TestRuntimeAPIRejectsAdminAPIKey(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("runtimeAPI with Admin API Key returned %d, want 401; body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+
+// server_metrics 只属于本地 llama.cpp；切换到其它后端时必须清除旧缓存字段。
+func TestAttachRuntimeServerMetricsOnlyForLlamacpp(t *testing.T) {
+	metrics := map[string]interface{}{"status": "complete"}
+	for _, backend := range []string{"llamacpp", "ollama", "deepseek", "openai", "unknown"} {
+		t.Run(backend, func(t *testing.T) {
+			snapshot := map[string]interface{}{"backend": backend, "server_metrics": "stale"}
+			attachRuntimeServerMetrics(snapshot, backend, metrics)
+			got, exists := snapshot["server_metrics"]
+			if strings.EqualFold(backend, "llamacpp") {
+				if !exists || got != metrics {
+					t.Fatalf("llamacpp metrics = %#v, exists=%v; want supplied metrics", got, exists)
+				}
+			} else if exists {
+				t.Fatalf("%s runtime leaked local server_metrics: %#v", backend, got)
+			}
+		})
+	}
+}
+
+func TestAttachRuntimeServerMetricsHandlesNilSnapshot(t *testing.T) {
+	attachRuntimeServerMetrics(nil, "llamacpp", map[string]interface{}{"status": "complete"})
 }
