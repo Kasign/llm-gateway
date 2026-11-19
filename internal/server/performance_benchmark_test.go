@@ -457,7 +457,7 @@ func TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness(t *testing.T) {
 
 // TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent 验证工具性能场景构造非流式强制工具调用请求。
 func TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent(t *testing.T) {
-	body := string(buildBenchmarkToolChatBody("active-model", benchRunInput{Prompt: "请搜索资料", MaxTokens: 256}))
+	body := string(buildBenchmarkToolChatBody("active-model", benchRunInput{Prompt: "请搜索资料", MaxTokens: 256}, "required"))
 	for _, want := range []string{`"stream":false`, `"tool_choice"`, `"web.search"`, `"tools":[]`, `"model":"active-model"`, `"max_tokens":256`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("tool benchmark body missing %s: %s", want, body)
@@ -473,7 +473,7 @@ func TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent(t *testing
 func TestBuildBenchmarkToolMetricsSeparatesModelAndToolStages(t *testing.T) {
 	job := benchmarkJobSnapshot{Scenario: "tool_performance", Status: "completed", ModelRoundDurationsMS: []int64{120, 45, 300}}
 	events := []store.ToolCallEvent{{Round: 1, DurationMS: 20}, {Round: 1, DurationMS: 30}, {Round: 2, DurationMS: 50}}
-	got := buildBenchmarkToolMetrics(job, events)
+	got := buildBenchmarkToolMetrics(job, events, true)
 	if got.ModelRounds != 3 || got.ToolRounds != 2 || got.ToolCalls != 3 { t.Fatalf("stage counts = %+v", got) }
 	if got.ModelDecisionMS == nil || *got.ModelDecisionMS != 120 || got.ModelDecisionStatus != "measured" { t.Fatalf("decision metric = %+v", got) }
 	if got.ToolExecutionTotalMS == nil || *got.ToolExecutionTotalMS != 100 || got.ToolExecutionStatus != "measured" { t.Fatalf("tool metric = %+v", got) }
@@ -481,9 +481,9 @@ func TestBuildBenchmarkToolMetricsSeparatesModelAndToolStages(t *testing.T) {
 }
 
 func TestBuildBenchmarkToolMetricsDoesNotInventMissingStages(t *testing.T) {
-	got := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "tool_performance", Status: "failed"}, nil)
+	got := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "tool_performance", Status: "failed"}, nil, false)
 	if got.ModelDecisionMS != nil || got.ToolExecutionTotalMS != nil || got.ModelFinalGenerationMS != nil || got.ModelFinalGenerationStatus != "unknown" { t.Fatalf("missing stage metrics = %+v", got) }
-	ordinary := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance"}, nil)
+	ordinary := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance"}, nil, true)
 	if ordinary.ModelDecisionStatus != "not_applicable" || ordinary.ToolExecutionStatus != "not_applicable" || ordinary.ModelFinalGenerationStatus != "not_applicable" { t.Fatalf("ordinary scenario metrics = %+v", ordinary) }
 }
 
