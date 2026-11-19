@@ -344,3 +344,22 @@ func TestBuildBenchmarkToolMetricsCalledDecisionWithAuditReadFailureKeepsExecuti
 		t.Fatalf("execution metrics = %#v, want unknown when audit read fails", metrics)
 	}
 }
+
+
+func TestBuildBenchmarkToolMetricsRejectedCallRemainsCalledWithoutExecutionAttempt(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "called",
+		ToolCallEventCount: 1,
+		ModelRoundDurationsMS: []int64{125},
+	}
+	events := []store.ToolCallEvent{{Round: 1, Status: "rejected"}}
+	metrics := buildBenchmarkToolMetrics(job, events, true)
+	if metrics.ToolCallDecision != "called" || metrics.ToolCalls != 1 {
+		t.Fatalf("decision/call count = %q/%d, want called/1", metrics.ToolCallDecision, metrics.ToolCalls)
+	}
+	if metrics.ToolExecutionAttempts != 0 || metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("execution metrics = %#v, want no execution attempt for rejected call", metrics)
+	}
+}
