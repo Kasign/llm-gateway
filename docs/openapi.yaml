@@ -3135,6 +3135,56 @@ components:
           items:
             $ref: "#/components/schemas/ServerMetricSample"
       additionalProperties: false
+    ServerMetrics:
+      type: object
+      description: |
+        llama.cpp Server 的最近一次进程级 Metrics 快照，仅在活动后端为本地 llama.cpp 时出现。
+        不是单请求指标；status=stale 表示最近一次采样已超过 RuntimeSnapshot 新鲜度阈值。
+        未知指标保留原始名称、TYPE、HELP、labels 与数值文本，不推断单位或业务语义。
+      required: [status, samples]
+      properties:
+        status:
+          type: string
+          enum: [complete, unavailable, unsupported, needs_model, invalid_response, timeout, cancelled, stale]
+        source_status:
+          type: string
+          description: status=stale 时最近一次实际采样状态。
+        reason_code: { type: string }
+        source: { type: string, const: llama_cpp_server_metrics }
+        sampled_at: { type: string, format: date-time }
+        age_ms: { type: integer, format: int64, minimum: 0 }
+        process_instance_id:
+          type: string
+          description: 不透明的进程实例标识，只用于比较实例是否变化，不是 Unix 时间戳。
+        model_scope: { type: string }
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServerMetricSample"
+      additionalProperties: true
+    ServerMetricSample:
+      type: object
+      required: [name, type, value]
+      properties:
+        name: { type: string }
+        type:
+          type: string
+          enum: [unknown, counter, gauge, histogram, summary, untyped]
+        help: { type: string }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        value:
+          type: string
+          description: 原始数值文本，避免大整数精度损失并保留 NaN/Inf。
+        timestamp_ms: { type: integer, format: int64 }
+        delta_status: { type: string, enum: [comparable, not_comparable] }
+        delta_reason: { type: string }
+        delta_value: { type: string }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        window_ms: { type: integer, format: int64, minimum: 0 }
+      additionalProperties: false
     RuntimeSnapshot:
       type: object
       description: 活动后端运行时快照。远程 Provider 不支持本地加载/卸载时，loaded/catalog 为空数组。
