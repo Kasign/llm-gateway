@@ -80,7 +80,7 @@ func TestBuildBenchmarkToolMetricsNaturalDecisionWithoutToolCall(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125},
 		ToolCallDecision: "not_called",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolChoiceMode != "auto" {
 		t.Fatalf("tool_choice_mode = %q, want auto", metrics.ToolChoiceMode)
 	}
@@ -108,7 +108,7 @@ func TestBuildBenchmarkToolMetricsIncludesActualToolExecution(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
 	events := []store.ToolCallEvent{{Round: 1, Status: "succeeded", DurationMS: 55}}
-	metrics := buildBenchmarkToolMetrics(job, events)
+	metrics := buildBenchmarkToolMetrics(job, events, true)
 	if metrics.ToolExecutionStatus != "measured" || metrics.ToolExecutionTotalMS == nil || *metrics.ToolExecutionTotalMS != 55 {
 		t.Fatalf("tool execution metric = %#v, want measured 55ms", metrics)
 	}
@@ -146,7 +146,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 }
 
 func TestBuildBenchmarkToolMetricsOrdinaryScenarioIsNotApplicable(t *testing.T) {
-	metrics := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance", Status: "completed"}, nil)
+	metrics := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance", Status: "completed"}, nil, true)
 	if metrics.ToolChoiceMode != "not_applicable" || metrics.ToolCallDecision != "not_applicable" {
 		t.Fatalf("ordinary scenario tool mode/decision = %q/%q, want not_applicable", metrics.ToolChoiceMode, metrics.ToolCallDecision)
 	}
@@ -189,6 +189,8 @@ func TestBuildBenchmarkToolMetricsCalledDecisionWithoutAuditEventsKeepsExecution
 		Scenario: "tool_performance_auto",
 		Status: "completed",
 		ToolCallDecision: "called",
+		ToolCallEventCount: 1,
+		ToolCallEventCount: 1,
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
 	metrics := buildBenchmarkToolMetrics(job, nil)
@@ -218,15 +220,15 @@ func TestRecordBenchmarkToolCallDecisionStoresRequestEvidence(t *testing.T) {
 	job := &benchmarkJob{ToolCallDecision: "unknown"}
 	ctx := withBenchmarkToolMetrics(context.Background(), job)
 
-	recordBenchmarkToolCallDecision(ctx, "called")
+	recordBenchmarkToolCallDecision(ctx, "called", 2)
 	if got := job.snapshot().ToolCallDecision; got != "called" {
 		t.Fatalf("decision after called = %q, want called", got)
 	}
-	recordBenchmarkToolCallDecision(ctx, "not_called")
+	recordBenchmarkToolCallDecision(ctx, "not_called", 0)
 	if got := job.snapshot().ToolCallDecision; got != "not_called" {
 		t.Fatalf("decision after not_called = %q, want not_called", got)
 	}
-	recordBenchmarkToolCallDecision(ctx, "unknown")
+	recordBenchmarkToolCallDecision(ctx, "unknown", 0)
 	if got := job.snapshot().ToolCallDecision; got != "unknown" {
 		t.Fatalf("decision after unknown = %q, want unknown", got)
 	}
@@ -235,7 +237,7 @@ func TestRecordBenchmarkToolCallDecisionStoresRequestEvidence(t *testing.T) {
 func TestRecordBenchmarkToolCallDecisionIgnoresInvalidAndNonBenchmarkContexts(t *testing.T) {
 	job := &benchmarkJob{ToolCallDecision: "unknown"}
 	recordBenchmarkToolCallDecision(context.Background(), "called")
-	recordBenchmarkToolCallDecision(withBenchmarkToolMetrics(context.Background(), job), "invalid")
+	recordBenchmarkToolCallDecision(withBenchmarkToolMetrics(context.Background(), job), "invalid", 0)
 	if got := job.snapshot().ToolCallDecision; got != "unknown" {
 		t.Fatalf("decision = %q, want unknown", got)
 	}
@@ -248,7 +250,7 @@ func TestBenchmarkPersistenceRecordsIncludeToolCallDecision(t *testing.T) {
 		runRecord: store.BenchmarkRun{RunID: "run", TaskID: "task"},
 	}
 	_, run := job.persistenceRecords()
-	if run.ToolCallDecision != "called" {
+	if run.ToolCallDecision != "called" || run.ToolCallEventCount != 0 {
 		t.Fatalf("persisted tool call decision = %q, want called", run.ToolCallDecision)
 	}
 }
@@ -301,5 +303,24 @@ func TestBuildBenchmarkToolMetricsFailedJobDoesNotExposeNotCalled(t *testing.T) 
 	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want unknown for failed job", metrics)
+	}
+}
+
+
+func TestBuildBenchmarkToolMetricsPartialAuditLossKeepsExecutionUnknown(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "called",
+		ToolCallEventCount: 2,
+		ModelRoundDurationsMS: []int64{125, 230},
+	}
+	events := []store.ToolCallEvent{{Round: 1, Status: "succeeded", DurationMS: 55}}
+	metrics := buildBenchmarkToolMetrics(job, events, true)
+	if metrics.ToolCallDecision != "called" || metrics.ToolCalls != 2 {
+		t.Fatalf("decision/call count = %q/%d, want called/2", metrics.ToolCallDecision, metrics.ToolCalls)
+	}
+	if metrics.ToolExecutionAttempts != 0 || metrics.ToolExecutionSuccessRate != nil || metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("execution metrics = %#v, want unknown when persisted audit count is incomplete", metrics)
 	}
 }
