@@ -121,7 +121,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		ContentChars: run.ContentChars,
 		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
 		ToolCallDecision: run.ToolCallDecision, ToolCallEventCount: run.ToolCallEventCount,
-		Stream: task.Scenario != "tool_performance",
+		Stream: !isBenchmarkToolScenario(task.Scenario),
 	}
 	events := []store.StreamEvent{}
 	toolEvents := []store.ToolCallEvent{}
