@@ -52,6 +52,7 @@ type BenchmarkRun struct {
 	InferenceLatencyStatus string
 	TTFTStatus             string
 	ModelRoundDurationsJSON string
+	ToolCallDecision string
 	HTTPStatus         int
 	ResponseBytes      int64
 	InputTokens        *int64
@@ -128,12 +129,12 @@ func (r *BenchmarkRepo) CreateTaskAndRun(ctx context.Context, task BenchmarkTask
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO benchmark_runs
-		(run_id,task_id,run_no,request_id,status,provider_id,model_key,model_id,started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,model_round_durations_json,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,error_code,error_message,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(run_id,task_id,run_no,request_id,status,provider_id,model_key,model_id,started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,model_round_durations_json,tool_call_decision,http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,error_code,error_message,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.RunID, run.TaskID, run.RunNo, run.RequestID, defaultString(run.Status, "running"),
 		nullIfEmpty(run.ProviderID), nullIfEmpty(run.ModelKey), nullIfEmpty(run.ModelID), run.StartedAt, run.FinishedAt,
 		nullablePositiveInt64(run.LatencyMS), nullableMetricMS(run.ModelLoadMS), defaultString(run.ModelLoadStatus, "unknown"),
-		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"), nullIfEmpty(run.ModelRoundDurationsJSON),
+		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"), nullIfEmpty(run.ModelRoundDurationsJSON), defaultString(run.ToolCallDecision, "unknown"),
 		nullablePositiveInt64(int64(run.HTTPStatus)), nullablePositiveInt64(run.ResponseBytes),
 		run.InputTokens, run.OutputTokens, run.TotalTokens, run.TTFTMS, run.StreamEvents, run.ReasoningChars,
 		run.ContentChars, nullIfEmpty(run.ErrorCode), nullIfEmpty(run.ErrorMessage), run.CreatedAt, run.UpdatedAt)
@@ -182,13 +183,13 @@ func (r *BenchmarkRepo) UpdateTaskAndRun(ctx context.Context, task BenchmarkTask
 		}
 	}
 	res, err = tx.ExecContext(ctx, `UPDATE benchmark_runs SET
-		status=?,provider_id=?,model_key=?,model_id=?,finished_at=?,latency_ms=?,model_load_ms=?,model_load_status=?,inference_latency_ms=?,inference_latency_status=?,ttft_status=?,model_round_durations_json=?,
+		status=?,provider_id=?,model_key=?,model_id=?,finished_at=?,latency_ms=?,model_load_ms=?,model_load_status=?,inference_latency_ms=?,inference_latency_status=?,ttft_status=?,model_round_durations_json=?,tool_call_decision=?,
 		http_status=?,response_bytes=?,input_tokens=?,output_tokens=?,total_tokens=?,ttft_ms=?,stream_event_count=?,
 		reasoning_chars=?,content_chars=?,error_code=?,error_message=?,updated_at=?
 		WHERE run_id=? AND task_id=?`,
 		run.Status, nullIfEmpty(run.ProviderID), nullIfEmpty(run.ModelKey), nullIfEmpty(run.ModelID), run.FinishedAt,
 		nullablePositiveInt64(run.LatencyMS), nullableMetricMS(run.ModelLoadMS), defaultString(run.ModelLoadStatus, "unknown"),
-		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"), nullIfEmpty(run.ModelRoundDurationsJSON),
+		nullableMetricMS(run.InferenceLatencyMS), defaultString(run.InferenceLatencyStatus, "unknown"), defaultString(run.TTFTStatus, "unknown"), nullIfEmpty(run.ModelRoundDurationsJSON), defaultString(run.ToolCallDecision, "unknown"),
 		nullablePositiveInt64(int64(run.HTTPStatus)), nullablePositiveInt64(run.ResponseBytes),
 		run.InputTokens, run.OutputTokens, run.TotalTokens, run.TTFTMS, run.StreamEvents,
 		run.ReasoningChars, run.ContentChars, nullIfEmpty(run.ErrorCode), nullIfEmpty(run.ErrorMessage),
@@ -241,7 +242,7 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT run_id,task_id,run_no,request_id,status,COALESCE(provider_id,''),COALESCE(model_key,''),COALESCE(model_id,''),started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,COALESCE(model_round_durations_json,''),http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
+	rows, err := r.db.QueryContext(ctx, `SELECT run_id,task_id,run_no,request_id,status,COALESCE(provider_id,''),COALESCE(model_key,''),COALESCE(model_id,''),started_at,finished_at,latency_ms,model_load_ms,model_load_status,inference_latency_ms,inference_latency_status,ttft_status,COALESCE(model_round_durations_json,''),COALESCE(tool_call_decision,'unknown'),http_status,response_bytes,input_tokens,output_tokens,total_tokens,ttft_ms,stream_event_count,reasoning_chars,content_chars,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at
 		FROM benchmark_runs WHERE task_id=? ORDER BY run_no ASC`, taskID)
 	if err != nil {
 		return nil, err
@@ -256,7 +257,7 @@ func (r *BenchmarkRepo) ListRuns(ctx context.Context, taskID string) ([]Benchmar
 		var input, output, total, ttft sql.NullInt64
 		if err := rows.Scan(&run.RunID, &run.TaskID, &run.RunNo, &run.RequestID, &run.Status,
 			&run.ProviderID, &run.ModelKey, &run.ModelID, &run.StartedAt, &finishedAt,
-			&latency, &load, &loadStatus, &inference, &inferenceStatus, &ttftStatus, &run.ModelRoundDurationsJSON, &status, &responseBytes, &input, &output, &total, &ttft,
+			&latency, &load, &loadStatus, &inference, &inferenceStatus, &ttftStatus, &run.ModelRoundDurationsJSON, &run.ToolCallDecision, &status, &responseBytes, &input, &output, &total, &ttft,
 			&run.StreamEvents, &run.ReasoningChars, &run.ContentChars, &run.ErrorCode, &run.ErrorMessage,
 			&run.CreatedAt, &run.UpdatedAt); err != nil {
 			return nil, err
