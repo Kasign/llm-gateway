@@ -471,6 +471,13 @@ code{font-family:var(--mono);font-size:12px;color:var(--accent-2)}
 .bench-analysis dt{color:var(--text-3);margin:0}
 .bench-analysis dd{margin:0;color:var(--text)}
 
+.bench-detail-fold{margin:10px 0;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.bench-detail-fold>summary{padding:10px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style-position:inside}
+.bench-detail-fold[open]>summary{border-bottom:1px solid var(--border)}
+.bench-detail-fold-body{padding:4px 12px 12px;min-width:0}
+.bench-detail-fold-body>h4:first-child{margin-top:8px}
+.bench-tool-call{margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:9px;min-width:0}
+.bench-tool-call .bench-out{margin-bottom:0}
 .bench-history-detail{margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
 .bench-history-detail .card-head{align-items:flex-start}
 .bench-history-detail-grid{display:grid;grid-template-columns:minmax(110px,180px) minmax(0,1fr);gap:7px 12px;margin:12px 0}
