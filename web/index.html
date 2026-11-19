@@ -503,14 +503,15 @@
             <div class="fold-body"><pre id="benchReqPreview" class="bench-out">—</pre></div>
           </details>
           <details class="bench-fold" id="benchToolPerformanceConfig">
-            <summary>工具调用性能测试（web.search）</summary>
-            <p class="small muted">该场景属于 Benchmark 任务，使用非流式请求，强制 web.search，并单独统计模型决策、工具执行与最终生成耗时。需要客户端 Key 同时具备当前模型访问权限和 web.search 权限。</p>
+            <summary>工具调用性能测试</summary>
+            <p class="small muted">默认采用自然决策：工具定义会提供给模型，由模型自行判断是否调用 web.search；不在问题中要求必须调用。另提供强制调用诊断，用于验证工具执行链路。两种模式都需要客户端 Key 具备当前模型访问权限和 web.search 权限。</p>
             <div class="field">
-              <label for="benchToolPrompt">工具性能测试提示词</label>
-              <textarea id="benchToolPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果说明版本号和发布日期。必须实际调用搜索工具。</textarea>
+              <label for="benchToolPrompt">测试问题</label>
+              <textarea id="benchToolPrompt" rows="3">Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。</textarea>
             </div>
             <div class="bench-actions">
-              <button type="button" class="btn primary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance')">开始工具调用性能测试</button>
+              <button type="button" class="btn primary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">开始自然工具调用测试</button>
+              <button type="button" class="btn secondary" id="benchToolForceRunBtn" onclick="runBenchmark('tool_performance')">强制工具调用诊断</button>
             </div>
           </details>
           <details class="bench-fold">
@@ -529,7 +530,8 @@
           <select id="benchHistoryScenario">
             <option value="">全部场景</option>
             <option value="performance">普通性能</option>
-            <option value="tool_performance">工具调用性能</option>
+            <option value="tool_performance_auto">工具调用性能（自然决策）</option>
+            <option value="tool_performance">工具调用性能（强制调用/旧版）</option>
           </select>
           <label class="small" for="benchHistoryStatus">状态</label>
           <select id="benchHistoryStatus">
