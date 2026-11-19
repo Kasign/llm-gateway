@@ -94,6 +94,7 @@ type benchmarkJob struct {
 	ReasoningText  string     `json:"reasoning_text,omitempty"`
 	ContentChars   int        `json:"content_chars,omitempty"`
 	ErrorCode      string     `json:"error_code,omitempty"`
+	ToolCallDecision string `json:"-"`
 	taskRecord     store.BenchmarkTask
 	runRecord      store.BenchmarkRun
 	cancel         context.CancelFunc
@@ -195,6 +196,7 @@ type benchmarkJobSnapshot struct {
 	ReasoningText  string     `json:"reasoning_text,omitempty"`
 	ContentChars   int        `json:"content_chars,omitempty"`
 	ErrorCode      string     `json:"error_code,omitempty"`
+	ToolCallDecision string `json:"-"`
 }
 
 // snapshot 在锁内复制业务字段到独立 DTO，供 HTTP 序列化使用。
@@ -214,7 +216,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,
 		RequestID: j.RequestID, Stream: j.Stream, TTFTMS: j.TTFTMS, StreamEvents: j.StreamEvents,
 		ReasoningChars: j.ReasoningChars, ContentText: j.ContentText, ReasoningText: j.ReasoningText,
-		ContentChars: j.ContentChars, ErrorCode: j.ErrorCode,
+		ContentChars: j.ContentChars, ErrorCode: j.ErrorCode, ToolCallDecision: j.ToolCallDecision,
 	}
 	return out
 }
@@ -742,6 +744,7 @@ func (s *Server) benchmarkComparisonSide(r *http.Request, taskID string) (benchm
 		Scenario: task.Scenario,
 		Status: task.Status,
 		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
+		ToolCallDecision: run.ToolCallDecision,
 	}
 	toolEvents := []store.ToolCallEvent{}
 	toolEventsAvailable := false
@@ -1072,7 +1075,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	job := &benchmarkJob{
 		ID: jobID, Scenario: scenario, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: !isBenchmarkToolScenario(scenario),
-		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown",
+		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown", ToolCallDecision: "unknown",
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: append([]string(nil), conditionMissing...),
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
 		taskRecord: taskRecord, runRecord: runRecord,
