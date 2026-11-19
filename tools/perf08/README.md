@@ -8,15 +8,15 @@
 
 ### 宿主机进程采样
 
-脚本：`tools/perf08/host-perf-stat.sh`
+脚本：`tools/perf08/host-perf-stat.sh`。用户当前容器名为 `Llama-cpp` 时，可直接传该容器名自动解析唯一模型 child PID。
 
 ```bash
-tools/perf08/host-perf-stat.sh <host-pid> [duration-seconds] [output-directory]
+tools/perf08/host-perf-stat.sh <host-pid|container-name> [duration-seconds] [output-directory]
 ```
 
 约束：
 
-- 传入宿主机 PID，脚本要求目标可执行文件 basename 为 `llama-server`，且父进程 comm 为 `llama-server` Router；用于拒绝误采 Router 主进程或容器内 PID。
+- 可传宿主机 PID，也可传容器名。传容器名时，脚本通过 `docker top` 查找父子进程均为 `llama-server` 的 Router model child；必须恰好找到一个，否则拒绝猜测。传 PID 时同样校验父进程 comm 为 `llama-server`，拒绝误采 Router 主进程或容器内 PID。
 - 默认 10 秒，最多 10 秒；只对指定 PID 使用 `perf stat -p`。
 - 不使用全系统 `-a`，不执行 `perf record`，不生成 `perf.data`。
 - 基础采集 task-clock、context-switches、cpu-migrations、page-faults。只有当前为 root、持有 CAP_PERFMON，或 `perf_event_paranoid <= 0` 时，才在检测到 Intel Hybrid PMU 后加入 cpu_core / cpu_atom 的 cycles 和 instructions；否则仅采软件事件，并在 metadata 标记 `not_sampled_permissions`。

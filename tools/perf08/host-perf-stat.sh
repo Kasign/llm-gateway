@@ -4,7 +4,7 @@ set -Eeuo pipefail
 usage() {
   cat >&2 <<'EOF'
 用法:
-  tools/perf08/host-perf-stat.sh <host-pid> [duration-seconds] [output-directory]
+  tools/perf08/host-perf-stat.sh <host-pid|container-name> [duration-seconds] [output-directory]
 
 只对宿主机上的 llama-server 进程执行短时 perf stat。
 - duration 默认 10 秒，允许范围 1..10 秒
@@ -21,12 +21,45 @@ fail() {
 
 [[ $# -ge 1 && $# -le 3 ]] || { usage; exit 2; }
 
-pid="$1"
+target="$1"
 duration="${2:-10}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-output_dir="${3:-$HOME/perf08-captures/$timestamp-pid-$pid}"
+output_dir="${3:-$HOME/perf08-captures/$timestamp}"
 
-[[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "PID 必须是正整数"
+container_name=""
+if [[ "$target" =~ ^[1-9][0-9]*$ ]]; then
+  pid="$target"
+else
+  container_name="$target"
+  command -v docker >/dev/null 2>&1 || fail "未找到 docker；请直接传入宿主机 PID"
+  process_list="$(docker top "$container_name" -eo pid,ppid,comm 2>/dev/null)" || fail "无法读取容器 $container_name 的进程列表"
+  mapfile -t child_pids < <(
+    awk '
+      $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 == "llama-server" {
+        is_llama[$1] = 1
+        parent[$1] = $2
+        order[++n] = $1
+      }
+      END {
+        for (i = 1; i <= n; i++) {
+          pid = order[i]
+          if (is_llama[parent[pid]]) {
+            print pid
+          }
+        }
+      }
+    ' <<<"$process_list"
+  )
+  if (( ${#child_pids[@]} != 1 )); then
+    printf '容器 %s 中发现 %s 个 Router 子模型进程，要求恰好 1 个；拒绝猜测目标 PID。\n' "$container_name" "${#child_pids[@]}" >&2
+    printf '%s\n' "$process_list" >&2
+    exit 2
+  fi
+  pid="${child_pids[0]}"
+fi
+
+[[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "未解析到有效的宿主机 PID"
+output_dir="${output_dir}-pid-$pid"
 [[ "$duration" =~ ^[0-9]+$ ]] || fail "采样时长必须是整数秒"
 (( duration >= 1 && duration <= 10 )) || fail "首轮采样时长限制为 1..10 秒"
 command -v perf >/dev/null 2>&1 || fail "未找到 perf；脚本不会自动安装或提权"
@@ -87,6 +120,7 @@ fi
   printf 'scope=process_window\n'
   printf 'request_correlation=none\n'
   printf 'host_pid=%s\n' "$pid"
+  printf 'container_name=%s\n' "${container_name:-not_provided}"
   printf 'parent_pid=%s\n' "$parent_pid"
   printf 'parent_executable_comm=llama-server\n'
   printf 'process_start_ticks=%s\n' "$start_ticks"
