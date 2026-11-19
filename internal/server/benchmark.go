@@ -1249,22 +1249,6 @@ func setBenchInt64(obj map[string]interface{}, key string, v *int64) {
 	}
 }
 
-// isBenchmarkToolScenario 判断是否进入工具调用 Benchmark；tool_performance 保留旧版强制调用语义。
-func isBenchmarkToolScenario(scenario string) bool {
-	return scenario == "tool_performance" || scenario == "tool_performance_auto"
-}
-
-// benchmarkToolChoiceMode 返回模型首轮工具选择策略。旧场景 tool_performance 继续表示强制调用。
-func benchmarkToolChoiceMode(scenario string) string {
-	if scenario == "tool_performance_auto" {
-		return "auto"
-	}
-	if scenario == "tool_performance" {
-		return "required"
-	}
-	return "not_applicable"
-}
-
 // buildBenchmarkToolChatBody 构造非流式工具 Benchmark 请求；工具定义由服务端 Registry 覆盖。
 func buildBenchmarkToolChatBody(llamaName string, in benchRunInput, choiceMode string) []byte {
 	toolChoice := interface{}("auto")
