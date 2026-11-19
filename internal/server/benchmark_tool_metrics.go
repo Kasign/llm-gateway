@@ -72,7 +72,7 @@ type benchmarkToolMetrics struct {
 	ModelFinalGenerationStatus string `json:"model_final_generation_status"`
 }
 
-func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent, eventsAvailable bool) benchmarkToolMetrics {
+func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent) benchmarkToolMetrics {
 	metrics := benchmarkToolMetrics{
 		ToolChoiceMode: "not_applicable",
 		ToolCallDecision: "not_applicable",
