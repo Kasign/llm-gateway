@@ -1130,8 +1130,8 @@ def validate(
             "RuntimeSnapshot.server_metrics must reference ServerMetricsSnapshot",
         )
 
-        schemas_section = source.split("\\n  schemas:\\n", 1)[1].split("\\n  parameters:\\n", 1)[0]
-        schema_names = re.findall(r"(?m)^    ([A-Za-z][A-Za-z0-9_-]*):[ \\t]*$", schemas_section)
+        schemas_section = source.split("\n  schemas:\n", 1)[1].split("\n  parameters:\n", 1)[0]
+        schema_names = re.findall(r"(?m)^    ([A-Za-z][A-Za-z0-9_-]*):[ \t]*$", schemas_section)
         duplicate_schema_names = sorted({name for name in schema_names if schema_names.count(name) > 1})
         require(
             not duplicate_schema_names,
