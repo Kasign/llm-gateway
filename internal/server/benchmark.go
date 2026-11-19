@@ -1186,12 +1186,10 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 	}
 	events := []store.StreamEvent{}
 	toolEvents := []store.ToolCallEvent{}
-	toolEventsAvailable := false
 	if s.logs != nil {
 		events, _ = s.logs.ListStreamEvents(r.Context(), id, 2000)
 		var toolEventsErr error
 		toolEvents, toolEventsErr = s.logs.ListToolCallEvents(r.Context(), id, 9)
-		toolEventsAvailable = toolEventsErr == nil
 		if toolEventsErr != nil {
 			toolEvents = nil
 		}
