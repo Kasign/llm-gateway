@@ -24,7 +24,7 @@ fail() {
 target="$1"
 duration="${2:-10}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-output_dir="${3:-$HOME/perf08-captures/$timestamp}"
+requested_output_dir="${3:-}"
 
 container_name=""
 if [[ "$target" =~ ^[1-9][0-9]*$ ]]; then
@@ -59,7 +59,11 @@ else
 fi
 
 [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "未解析到有效的宿主机 PID"
-output_dir="${output_dir}-pid-$pid"
+if [[ -n "$requested_output_dir" ]]; then
+  output_dir="$requested_output_dir"
+else
+  output_dir="$HOME/perf08-captures/$timestamp-pid-$pid"
+fi
 [[ "$duration" =~ ^[0-9]+$ ]] || fail "采样时长必须是整数秒"
 (( duration >= 1 && duration <= 10 )) || fail "首轮采样时长限制为 1..10 秒"
 command -v perf >/dev/null 2>&1 || fail "未找到 perf；脚本不会自动安装或提权"
