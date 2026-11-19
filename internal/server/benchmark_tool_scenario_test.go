@@ -82,6 +82,9 @@ func TestBuildBenchmarkToolMetricsNaturalDecisionWithoutToolCall(t *testing.T) {
 	if metrics.ToolChoiceMode != "auto" {
 		t.Fatalf("tool_choice_mode = %q, want auto", metrics.ToolChoiceMode)
 	}
+	if metrics.ToolCallDecision != "not_called" {
+		t.Fatalf("tool_call_decision = %q, want not_called", metrics.ToolCallDecision)
+	}
 	if metrics.ModelDecisionStatus != "measured" || metrics.ModelDecisionMS == nil || *metrics.ModelDecisionMS != 125 {
 		t.Fatalf("model decision metric = %#v, want measured 125ms", metrics)
 	}
@@ -106,6 +109,12 @@ func TestBuildBenchmarkToolMetricsIncludesActualToolExecution(t *testing.T) {
 	metrics := buildBenchmarkToolMetrics(job, events)
 	if metrics.ToolExecutionStatus != "measured" || metrics.ToolExecutionTotalMS == nil || *metrics.ToolExecutionTotalMS != 55 {
 		t.Fatalf("tool execution metric = %#v, want measured 55ms", metrics)
+	}
+	if metrics.ToolCallDecision != "called" || metrics.ToolExecutionAttempts != 1 || metrics.ToolExecutionSuccesses != 1 || metrics.ToolExecutionFailures != 0 {
+		t.Fatalf("tool execution counts/decision = %#v, want called and 1/1/0", metrics)
+	}
+	if metrics.ToolExecutionSuccessRate == nil || *metrics.ToolExecutionSuccessRate != 100 {
+		t.Fatalf("tool execution success rate = %v, want 100%%", metrics.ToolExecutionSuccessRate)
 	}
 	if metrics.ModelFinalGenerationStatus != "measured" || metrics.ModelFinalGenerationMS == nil || *metrics.ModelFinalGenerationMS != 230 {
 		t.Fatalf("final generation metric = %#v, want measured 230ms", metrics)
