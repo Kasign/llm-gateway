@@ -77,6 +77,7 @@ func TestBuildBenchmarkToolMetricsNaturalDecisionWithoutToolCall(t *testing.T) {
 		Scenario:              "tool_performance_auto",
 		Status:                "completed",
 		ModelRoundDurationsMS: []int64{125},
+		ToolCallDecision: "not_called",
 	}
 	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolChoiceMode != "auto" {
@@ -129,6 +130,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 		Scenario:              "tool_performance",
 		Status:                "failed",
 		ModelRoundDurationsMS: []int64{125},
+		ToolCallDecision: "unknown",
 	}
 	metrics := buildBenchmarkToolMetrics(job, nil, false)
 	if metrics.ToolChoiceMode != "required" {
@@ -172,9 +174,40 @@ func TestBuildBenchmarkToolMetricsDoesNotInferNoCallFromMissingEvents(t *testing
 		Scenario:              "tool_performance_auto",
 		Status:                "completed",
 		ModelRoundDurationsMS: []int64{125, 230},
+		ToolCallDecision: "unknown",
 	}
 	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("metrics without tool events but multiple model rounds = %#v, want unknown decision/execution", metrics)
+	}
+}
+
+
+func TestBuildBenchmarkToolMetricsCalledDecisionWithoutAuditEventsKeepsExecutionUnknown(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "called",
+		ModelRoundDurationsMS: []int64{125, 230},
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	if metrics.ToolCallDecision != "called" {
+		t.Fatalf("tool call decision = %q, want called", metrics.ToolCallDecision)
+	}
+	if metrics.ToolExecutionAttempts != 0 || metrics.ToolExecutionSuccessRate != nil || metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("execution metrics = %#v, want unknown without request audit events", metrics)
+	}
+}
+
+func TestBuildBenchmarkToolMetricsUnknownDoesNotInferNoCallFromEmptyAvailableEvents(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "unknown",
+		ModelRoundDurationsMS: []int64{125},
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
+	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
+		t.Fatalf("metrics = %#v, want unknown decision and final generation", metrics)
 	}
 }
