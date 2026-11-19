@@ -509,13 +509,7 @@
               <label for="benchToolPrompt">测试问题</label>
               <textarea id="benchToolPrompt" rows="3">Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。</textarea>
             </div>
-            <div class="field">
-              <label for="benchAcceptanceCase">项目验收用例</label>
-              <select id="benchAcceptanceCase"><option value="">正在加载验收用例…</option></select>
-              <p class="small muted">验收结果由服务端根据请求级决策和完整审计证据判定。TM-03 仅允许在隔离验收环境执行。</p>
-            </div>
             <div class="bench-actions">
-              <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
               <button type="button" class="btn secondary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">开始自然工具调用测试</button>
               <button type="button" class="btn secondary" id="benchToolForceRunBtn" onclick="runBenchmark('tool_performance')">强制工具调用诊断</button>
             </div>
@@ -524,6 +518,25 @@
             <summary>原始 SSE / JSON 响应</summary>
             <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
           </details>
+        </div>
+
+        <div class="card" id="benchAcceptanceCard">
+          <div class="card-head">
+            <div><h2>项目验收</h2><p>按服务端定义的 TM-01～TM-05 用例执行真实模型验收；判定依据为请求级决策与完整审计证据。</p></div>
+          </div>
+          <div class="field">
+            <label for="benchAcceptanceCase">验收用例</label>
+            <select id="benchAcceptanceCase"><option value="">正在加载验收用例…</option></select>
+            <p class="small muted">TM-03 需要服务端启用隔离验收环境；未满足隔离条件时不能执行。验收结果不会因工具单次成功而自动判定通过。</p>
+          </div>
+          <div class="field">
+            <label for="benchAcceptancePrompt">验收提示词</label>
+            <textarea id="benchAcceptancePrompt" rows="3">Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。</textarea>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
+          </div>
+          <div id="benchAcceptanceResult" class="bench-acceptance-result msg muted" role="status" aria-live="polite">尚未执行项目验收。</div>
         </div>
 
       <div class="card" id="benchHistoryCard">
