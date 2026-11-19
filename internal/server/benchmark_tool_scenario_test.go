@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -209,5 +210,45 @@ func TestBuildBenchmarkToolMetricsUnknownDoesNotInferNoCallFromEmptyAvailableEve
 	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want unknown decision and final generation", metrics)
+	}
+}
+
+
+func TestRecordBenchmarkToolCallDecisionStoresRequestEvidence(t *testing.T) {
+	job := &benchmarkJob{ToolCallDecision: "unknown"}
+	ctx := withBenchmarkToolMetrics(context.Background(), job)
+
+	recordBenchmarkToolCallDecision(ctx, "called")
+	if got := job.snapshot().ToolCallDecision; got != "called" {
+		t.Fatalf("decision after called = %q, want called", got)
+	}
+	recordBenchmarkToolCallDecision(ctx, "not_called")
+	if got := job.snapshot().ToolCallDecision; got != "not_called" {
+		t.Fatalf("decision after not_called = %q, want not_called", got)
+	}
+	recordBenchmarkToolCallDecision(ctx, "unknown")
+	if got := job.snapshot().ToolCallDecision; got != "unknown" {
+		t.Fatalf("decision after unknown = %q, want unknown", got)
+	}
+}
+
+func TestRecordBenchmarkToolCallDecisionIgnoresInvalidAndNonBenchmarkContexts(t *testing.T) {
+	job := &benchmarkJob{ToolCallDecision: "unknown"}
+	recordBenchmarkToolCallDecision(context.Background(), "called")
+	recordBenchmarkToolCallDecision(withBenchmarkToolMetrics(context.Background(), job), "invalid")
+	if got := job.snapshot().ToolCallDecision; got != "unknown" {
+		t.Fatalf("decision = %q, want unknown", got)
+	}
+}
+
+func TestBenchmarkPersistenceRecordsIncludeToolCallDecision(t *testing.T) {
+	job := &benchmarkJob{
+		ToolCallDecision: "called",
+		taskRecord: store.BenchmarkTask{TaskID: "task"},
+		runRecord: store.BenchmarkRun{RunID: "run", TaskID: "task"},
+	}
+	_, run := job.persistenceRecords()
+	if run.ToolCallDecision != "called" {
+		t.Fatalf("persisted tool call decision = %q, want called", run.ToolCallDecision)
 	}
 }
