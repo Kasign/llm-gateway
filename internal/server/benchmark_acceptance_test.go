@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/whl/llm-gateway/internal/store"
+)
 
 func acceptanceEvidence(caseID string) (benchmarkJobSnapshot, benchmarkToolMetrics) {
 	item, ok := benchmarkAcceptanceCaseByID(caseID)
@@ -73,7 +77,7 @@ func TestEvaluateBenchmarkAcceptancePassesExpectedEvidence(t *testing.T) {
 			if tt.prepare != nil {
 				tt.prepare(&job, &metrics)
 			}
-			got := evaluateBenchmarkAcceptance(tt.id, job, metrics)
+			got := evaluateBenchmarkAcceptanceWithEvents(tt.id, job, metrics, acceptanceTestEvents(tt.id))
 			if got.Status != "pass" {
 				t.Fatalf("result = %+v, want pass", got)
 			}
@@ -151,7 +155,7 @@ func TestEvaluateBenchmarkAcceptanceTM04RequiresSecondModelRound(t *testing.T) {
 
 func TestEvaluateBenchmarkAcceptanceTM03RequiresObservedFailure(t *testing.T) {
 	job, metrics := acceptanceEvidence("TM-03")
-	got := evaluateBenchmarkAcceptance("TM-03", job, metrics)
+	got := evaluateBenchmarkAcceptanceWithEvents("TM-03", job, metrics, []store.ToolCallEvent{{Status: "failed"}})
 	if got.Status != "fail" || got.ReasonCode != "tool_failure_not_observed" {
 		t.Fatalf("result = %+v, want tool_failure_not_observed", got)
 	}
@@ -165,5 +169,21 @@ func TestBenchmarkAcceptanceCaseIDFromConfigJSON(t *testing.T) {
 		if got := benchmarkAcceptanceCaseIDFromConfigJSON(raw); got != "" {
 			t.Errorf("case ID from %q = %q, want empty", raw, got)
 		}
+	}
+}
+
+func acceptanceTestEvents(caseID string) []store.ToolCallEvent {
+	if caseID == "TM-03" {
+		return []store.ToolCallEvent{{Status: "failed"}}
+	}
+	return []store.ToolCallEvent{{Status: "succeeded"}}
+}
+
+func TestEvaluateBenchmarkAcceptanceTM03DoesNotTreatCancellationAsFailure(t *testing.T) {
+	job, metrics := acceptanceEvidence("TM-03")
+	metrics.ToolExecutionFailures = 1
+	got := evaluateBenchmarkAcceptanceWithEvents("TM-03", job, metrics, []store.ToolCallEvent{{Status: "cancelled"}})
+	if got.Status != "fail" || got.ReasonCode != "tool_failure_not_observed" {
+		t.Fatalf("result = %+v, want failure not observed for cancellation only", got)
 	}
 }
