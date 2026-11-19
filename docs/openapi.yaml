@@ -3210,7 +3210,11 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
+        scenario:
+          type: string
+          enum: [performance, tool_performance_auto, tool_performance]
+          default: performance
+          description: tool_performance_auto 为模型自主决策是否调用工具；tool_performance 为兼容旧版的强制 web.search 诊断场景。
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -4318,7 +4322,11 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
+        scenario:
+          type: string
+          enum: [performance, tool_performance_auto, tool_performance]
+          default: performance
+          description: tool_performance_auto 为模型自主决策是否调用工具；tool_performance 为兼容旧版的强制 web.search 诊断场景。
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -5381,7 +5389,11 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
+        scenario:
+          type: string
+          enum: [performance, tool_performance_auto, tool_performance]
+          default: performance
+          description: tool_performance_auto 为模型自主决策是否调用工具；tool_performance 为兼容旧版的强制 web.search 诊断场景。
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -6478,7 +6490,11 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
+        scenario:
+          type: string
+          enum: [performance, tool_performance_auto, tool_performance]
+          default: performance
+          description: tool_performance_auto 为模型自主决策是否调用工具；tool_performance 为兼容旧版的强制 web.search 诊断场景。
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
