@@ -137,4 +137,17 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 	if metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("tool execution status = %q, want unknown for failed forced invocation", metrics.ToolExecutionStatus)
 	}
+	if metrics.ToolCallDecision != "unknown" {
+		t.Fatalf("tool call decision = %q, want unknown for failed forced invocation", metrics.ToolCallDecision)
+	}
+}
+
+func TestBuildBenchmarkToolMetricsOrdinaryScenarioIsNotApplicable(t *testing.T) {
+	metrics := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance", Status: "completed"}, nil)
+	if metrics.ToolChoiceMode != "not_applicable" || metrics.ToolCallDecision != "not_applicable" {
+		t.Fatalf("ordinary scenario tool mode/decision = %q/%q, want not_applicable", metrics.ToolChoiceMode, metrics.ToolCallDecision)
+	}
+	if metrics.ToolExecutionStatus != "not_applicable" || metrics.ModelFinalGenerationStatus != "not_applicable" {
+		t.Fatalf("ordinary scenario tool statuses = %q/%q, want not_applicable", metrics.ToolExecutionStatus, metrics.ModelFinalGenerationStatus)
+	}
 }
