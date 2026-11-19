@@ -3,6 +3,7 @@ package llama
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,5 +86,52 @@ func TestStreamProxyFlushesChunkBeforeObserver(t *testing.T) {
 	}
 	if observedBytes != len(payload) {
 		t.Fatalf("observer saw %d bytes, want %d", observedBytes, len(payload))
+	}
+}
+
+
+func TestStreamProxyStopsReadingWhenClientCancels(t *testing.T) {
+	const firstChunk = "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(firstChunk))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	client := New(upstream.URL, 5*time.Second, "llamacpp", "")
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+	writer := newStreamProxyRecordingWriter()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	observerCalls := 0
+	err := client.StreamProxy(
+		ctx,
+		writer,
+		request,
+		"/v1/chat/completions",
+		strings.NewReader("{}"),
+		func(chunk []byte) {
+			observerCalls++
+			if len(writer.events) == 0 || writer.events[len(writer.events)-1] != "flush" {
+				t.Errorf("observer ran before the current chunk was flushed: events=%v", writer.events)
+			}
+			cancel()
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("StreamProxy error = %v, want context.Canceled", err)
+	}
+	if observerCalls != 1 {
+		t.Fatalf("observer calls = %d, want 1", observerCalls)
+	}
+	if got := writer.body.String(); got != firstChunk {
+		t.Fatalf("client body = %q, want first flushed chunk %q", got, firstChunk)
 	}
 }
