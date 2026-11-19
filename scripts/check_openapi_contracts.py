@@ -31,6 +31,7 @@ RUNTIME_TYPES_FILE = ROOT / "internal" / "llama" / "runtime.go"
 OLLAMA_TAG_TYPES_FILE = ROOT / "internal" / "catalog" / "ollama" / "tags.go"
 INFERENCE_OPS_FILE = ROOT / "internal" / "server" / "inference_ops.go"
 RUNTIME_HANDLER_FILE = ROOT / "internal" / "server" / "runtime.go"
+LLAMA_METRICS_FILE = ROOT / "internal" / "llama" / "metrics.go"
 INFERENCE_PARAMS_SCHEMA_FILE = ROOT / "internal" / "inferenceparams" / "schema.go"
 
 
@@ -280,6 +281,7 @@ def validate(
     ollama_tag_types: str,
     inference_ops: str,
     runtime_handler: str,
+    llama_metrics_source: str,
     inference_params_schema: str,
     inference_params_handler: str,
 ) -> list[str]:
@@ -1100,6 +1102,42 @@ def validate(
             except ValueError:
                 errors.append(f"RuntimeSnapshot: missing runtime field {field!r}")
 
+        # llama.cpp Metrics DTO、运行时响应引用与 OpenAPI Schema 必须保持一致。
+        metrics_schema = schema_block(source, "ServerMetricSample")
+        metrics_decl = re.search(r"(?ms)^type MetricSample struct \{(.*?)^\}", llama_metrics_source)
+        if metrics_decl is None:
+            raise ValueError("internal/llama/metrics.go: type MetricSample struct not found")
+        metrics_json_fields = {
+            tag for tag in re.findall(r'json:"([^",]+)', metrics_decl.group(1))
+            if tag and tag != "-"
+        }
+        for field in sorted(metrics_json_fields):
+            try:
+                schema_field_block(metrics_schema, field)
+            except ValueError:
+                errors.append(f"ServerMetricSample: missing MetricSample JSON field {field!r}")
+
+        metrics_snapshot_schema = schema_block(source, "ServerMetricsSnapshot")
+        for field in ("status", "reason_code", "source_status", "source", "sampled_at", "age_ms",
+                      "process_instance_id", "model_scope", "samples"):
+            try:
+                schema_field_block(metrics_snapshot_schema, field)
+            except ValueError:
+                errors.append(f"ServerMetricsSnapshot: missing runtime response field {field!r}")
+        server_metrics_field = schema_field_block(runtime_schema, "server_metrics")
+        require(
+            '#/components/schemas/ServerMetricsSnapshot' in server_metrics_field,
+            "RuntimeSnapshot.server_metrics must reference ServerMetricsSnapshot",
+        )
+
+        schemas_section = source.split("\\n  schemas:\\n", 1)[1].split("\\n  parameters:\\n", 1)[0]
+        schema_names = re.findall(r"(?m)^    ([A-Za-z][A-Za-z0-9_-]*):[ \\t]*$", schemas_section)
+        duplicate_schema_names = sorted({name for name in schema_names if schema_names.count(name) > 1})
+        require(
+            not duplicate_schema_names,
+            "OpenAPI components.schemas contains duplicate schema names: " + ", ".join(duplicate_schema_names),
+        )
+
         # 推理参数管理 API：动态表单字段、参数 DTO 与三个路由的状态码必须与实现一致。
         inference_routes = [
             ("/api/admin/inference-params/schema", "get", "inferenceParamsSchemaAPI"),
@@ -1254,6 +1292,7 @@ def main() -> int:
         runtime_types = RUNTIME_TYPES_FILE.read_text(encoding="utf-8")
         ollama_tag_types = OLLAMA_TAG_TYPES_FILE.read_text(encoding="utf-8")
         runtime_handler = RUNTIME_HANDLER_FILE.read_text(encoding="utf-8")
+        llama_metrics_source = LLAMA_METRICS_FILE.read_text(encoding="utf-8")
         inference_ops = INFERENCE_OPS_FILE.read_text(encoding="utf-8")
         inference_params_schema = INFERENCE_PARAMS_SCHEMA_FILE.read_text(encoding="utf-8")
         inference_params_handler = (ROOT / "internal" / "server" / "admin_inference_params_http.go").read_text(encoding="utf-8")
@@ -1278,6 +1317,7 @@ def main() -> int:
             ollama_tag_types,
             inference_ops,
             runtime_handler,
+            llama_metrics_source,
             inference_params_schema,
             inference_params_handler,
         )
