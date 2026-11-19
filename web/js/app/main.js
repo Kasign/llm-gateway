@@ -1829,7 +1829,7 @@ async function loadBenchHistory(){
           const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms!=null?item.latency_ms+' ms':'未知');
           const model=item.model_id||item.model_key||item.backend||'—';
-          return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'">查看</button></td></tr>';
+          return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'" aria-controls="benchHistoryDetail" aria-expanded="false">查看</button></td></tr>';
         }).join(''));
     }
     const page=$('benchHistoryPage');
@@ -2036,9 +2036,14 @@ function renderBenchmarkHistoryDetail(wrap){
   box.innerHTML=html;
   box.hidden=false;
   box.scrollIntoView({block:'nearest',behavior:'smooth'});
+  box.querySelector('h3')?.focus({preventScroll:true});
 }
-async function openBenchmarkHistory(jobId){
+let benchHistoryDetailTrigger=null;
+async function openBenchmarkHistory(jobId,trigger=null){
   if(!jobId)return;
+  if(benchHistoryDetailTrigger&&benchHistoryDetailTrigger!==trigger)benchHistoryDetailTrigger.setAttribute('aria-expanded','false');
+  if(trigger)benchHistoryDetailTrigger=trigger;
+  if(benchHistoryDetailTrigger)benchHistoryDetailTrigger.setAttribute('aria-expanded','true');
   const box=$('benchHistoryDetail');
   if(box){box.hidden=false;box.innerHTML='<p class="muted">正在加载任务详情…</p>';}
   try{
@@ -2442,10 +2447,16 @@ $('benchHistoryPrev')?.addEventListener('click',()=>{benchHistoryOffset=Math.max
 $('benchHistoryNext')?.addEventListener('click',()=>{benchHistoryOffset+=BENCH_HISTORY_PAGE_SIZE;loadBenchHistory().catch(()=>{});});
 $('benchHistoryList')?.addEventListener('click',event=>{
   const button=event.target.closest('[data-bench-history-id]');
-  if(button)openBenchmarkHistory(button.dataset.benchHistoryId);
+  if(button)openBenchmarkHistory(button.dataset.benchHistoryId,button);
 });
 $('benchHistoryDetail')?.addEventListener('click',event=>{
-  if(event.target.closest('[data-bench-history-detail-close]'))$('benchHistoryDetail').hidden=true;
+  if(!event.target.closest('[data-bench-history-detail-close]'))return;
+  $('benchHistoryDetail').hidden=true;
+  if(benchHistoryDetailTrigger){
+    benchHistoryDetailTrigger.setAttribute('aria-expanded','false');
+    if(benchHistoryDetailTrigger.isConnected)benchHistoryDetailTrigger.focus();
+  }
+  benchHistoryDetailTrigger=null;
 });
 
 exposeGlobals({
