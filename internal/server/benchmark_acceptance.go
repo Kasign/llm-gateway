@@ -7,12 +7,12 @@ const benchmarkAcceptanceRulesVersion = "1"
 // benchmarkAcceptanceCase 描述一个项目内置的工具调用验收用例。
 // Prompt 不属于用例身份；同一用例允许按部署模型能力调整提示词，但判定规则保持稳定。
 type benchmarkAcceptanceCase struct {
-	ID             string
-	Title          string
-	Description    string
-	Scenario       string
-	ToolChoiceMode string
-	ManualOnly     bool
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Scenario       string `json:"scenario"`
+	ToolChoiceMode string `json:"tool_choice_mode"`
+	ManualOnly     bool   `json:"manual_only"`
 }
 
 var benchmarkAcceptanceCases = []benchmarkAcceptanceCase{
