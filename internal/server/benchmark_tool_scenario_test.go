@@ -133,7 +133,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125},
 		ToolCallDecision: "unknown",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolChoiceMode != "required" {
 		t.Fatalf("tool_choice_mode = %q, want required", metrics.ToolChoiceMode)
 	}
@@ -236,7 +236,7 @@ func TestRecordBenchmarkToolCallDecisionStoresRequestEvidence(t *testing.T) {
 
 func TestRecordBenchmarkToolCallDecisionIgnoresInvalidAndNonBenchmarkContexts(t *testing.T) {
 	job := &benchmarkJob{ToolCallDecision: "unknown"}
-	recordBenchmarkToolCallDecision(context.Background(), "called")
+	recordBenchmarkToolCallDecision(context.Background(), "called", 0)
 	recordBenchmarkToolCallDecision(withBenchmarkToolMetrics(context.Background(), job), "invalid", 0)
 	if got := job.snapshot().ToolCallDecision; got != "unknown" {
 		t.Fatalf("decision = %q, want unknown", got)
