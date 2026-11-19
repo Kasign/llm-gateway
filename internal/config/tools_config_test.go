@@ -69,3 +69,10 @@ func TestToolsConfigRequiresExplicitInsecureHTTP(t *testing.T) {
 		t.Fatalf("explicit plain HTTP opt-in rejected: %v", err)
 	}
 }
+
+func TestBenchmarkIsolatedEnvironmentDefaultsDisabled(t *testing.T) {
+	var cfg Config
+	if cfg.Benchmark.IsolatedEnvironment {
+		t.Fatal("benchmark isolated environment must default to disabled")
+	}
+}
