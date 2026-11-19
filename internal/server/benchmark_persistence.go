@@ -124,14 +124,12 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	}
 	events := []store.StreamEvent{}
 	toolEvents := []store.ToolCallEvent{}
-	toolEventsAvailable := false
 	if s.logs != nil {
 		events, _ = s.logs.ListStreamEvents(r.Context(), run.RequestID, 2000)
 		var toolEventsErr error
 		toolEvents, toolEventsErr = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
-		toolEventsAvailable = toolEventsErr == nil
 	}
-	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents, toolEventsAvailable)
+	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents)
 	out := map[string]interface{}{
 		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "tool_metrics": toolMetrics, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": false,
