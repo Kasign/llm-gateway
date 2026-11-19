@@ -3316,8 +3316,8 @@ components:
         tool_metrics:
           type: object
           properties:
-            tool_choice_mode: { type: string, enum: [auto, required] }
-            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_choice_mode: { type: string, enum: [auto, required, not_applicable] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown, not_applicable] }
             tool_execution_attempts: { type: integer, minimum: 0 }
             tool_execution_successes: { type: integer, minimum: 0 }
             tool_execution_failures: { type: integer, minimum: 0 }
@@ -4423,8 +4423,8 @@ components:
         tool_metrics:
           type: object
           properties:
-            tool_choice_mode: { type: string, enum: [auto, required] }
-            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_choice_mode: { type: string, enum: [auto, required, not_applicable] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown, not_applicable] }
             tool_execution_attempts: { type: integer, minimum: 0 }
             tool_execution_successes: { type: integer, minimum: 0 }
             tool_execution_failures: { type: integer, minimum: 0 }
@@ -5495,8 +5495,8 @@ components:
         tool_metrics:
           type: object
           properties:
-            tool_choice_mode: { type: string, enum: [auto, required] }
-            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_choice_mode: { type: string, enum: [auto, required, not_applicable] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown, not_applicable] }
             tool_execution_attempts: { type: integer, minimum: 0 }
             tool_execution_successes: { type: integer, minimum: 0 }
             tool_execution_failures: { type: integer, minimum: 0 }
@@ -6601,8 +6601,8 @@ components:
         tool_metrics:
           type: object
           properties:
-            tool_choice_mode: { type: string, enum: [auto, required] }
-            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_choice_mode: { type: string, enum: [auto, required, not_applicable] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown, not_applicable] }
             tool_execution_attempts: { type: integer, minimum: 0 }
             tool_execution_successes: { type: integer, minimum: 0 }
             tool_execution_failures: { type: integer, minimum: 0 }
