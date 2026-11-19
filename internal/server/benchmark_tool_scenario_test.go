@@ -91,8 +91,8 @@ func TestBuildBenchmarkToolMetricsNaturalDecisionWithoutToolCall(t *testing.T) {
 	if metrics.ToolExecutionStatus != "not_applicable" {
 		t.Fatalf("tool execution status = %q, want not_applicable", metrics.ToolExecutionStatus)
 	}
-	if metrics.ModelFinalGenerationStatus != "not_applicable" {
-		t.Fatalf("final generation status = %q, want not_applicable", metrics.ModelFinalGenerationStatus)
+	if metrics.ModelFinalGenerationStatus != "combined_with_decision" || metrics.ModelFinalGenerationMS == nil || *metrics.ModelFinalGenerationMS != 125 {
+		t.Fatalf("final generation metric = %#v, want combined_with_decision 125ms", metrics)
 	}
 	if metrics.ToolCalls != 0 || metrics.ToolRounds != 0 {
 		t.Fatalf("unexpected tool counts: calls=%d rounds=%d", metrics.ToolCalls, metrics.ToolRounds)
