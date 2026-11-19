@@ -161,7 +161,7 @@ func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWithoutDecisionEvidence(t *t
 		Status:   "completed",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" {
 		t.Fatalf("tool call decision = %q, want unknown without event evidence", metrics.ToolCallDecision)
 	}
