@@ -187,3 +187,15 @@ func TestEvaluateBenchmarkAcceptanceTM03DoesNotTreatCancellationAsFailure(t *tes
 		t.Fatalf("result = %+v, want failure not observed for cancellation only", got)
 	}
 }
+
+func TestEvaluateBenchmarkAcceptanceRequiresFinalModelGeneration(t *testing.T) {
+	for _, id := range []string{"TM-01", "TM-05"} {
+		job, metrics := acceptanceEvidence(id)
+		metrics.ModelRounds = 1
+		metrics.ModelFinalGenerationStatus = "unknown"
+		got := evaluateBenchmarkAcceptanceWithEvents(id, job, metrics, acceptanceTestEvents(id))
+		if got.Status != "inconclusive" {
+			t.Errorf("%s result = %+v, want inconclusive without final generation evidence", id, got)
+		}
+	}
+}
