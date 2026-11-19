@@ -76,6 +76,10 @@ type Config struct {
 	} `yaml:"storage"`
 	Agents []AgentRouteConfig `yaml:"agents"`
 	Tools   ToolsConfig       `yaml:"tools"`
+	Benchmark struct {
+		// IsolatedEnvironment 只能由独立验收 Gateway 的部署配置启用；默认 false。
+		IsolatedEnvironment bool `yaml:"isolated_environment"`
+	} `yaml:"benchmark"`
 	Download struct {
 		HFBaseURL        string `yaml:"hf_base_url"`
 		OllamaLibraryURL string `yaml:"ollama_library_url"`
