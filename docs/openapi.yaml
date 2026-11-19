@@ -1157,7 +1157,7 @@ paths:
       parameters:
         - name: scenario
           in: query
-          schema: { type: string, enum: [performance, tool_performance] }
+          schema: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         - name: status
           in: query
           schema: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
@@ -1183,7 +1183,7 @@ paths:
                       required: [job_id, scenario, status, run_count, started_at, condition_status]
                       properties:
                         job_id: { type: string }
-                        scenario: { type: string, enum: [performance, tool_performance] }
+                        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
                         status: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
                         provider_id: { type: string }
                         backend: { type: string }
@@ -3210,7 +3210,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance], default: performance }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -3247,7 +3247,7 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance] }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, cancelling, completed, failed, cancelled, interrupted] }
         model_key: { type: string }
@@ -3312,6 +3312,7 @@ components:
         tool_metrics:
           type: object
           properties:
+            tool_choice_mode: { type: string, enum: [auto, required] }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -4317,7 +4318,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance], default: performance }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -4354,7 +4355,7 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance] }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
@@ -4409,6 +4410,7 @@ components:
         tool_metrics:
           type: object
           properties:
+            tool_choice_mode: { type: string, enum: [auto, required] }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -5379,7 +5381,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance], default: performance }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -5416,7 +5418,7 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance] }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
@@ -5471,6 +5473,7 @@ components:
         tool_metrics:
           type: object
           properties:
+            tool_choice_mode: { type: string, enum: [auto, required] }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -6475,7 +6478,7 @@ components:
       type: object
       properties:
         model_key: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance], default: performance }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance], default: performance }
         model_id: { type: string }
         model: { type: string, description: model_id 的兼容别名。 }
         prompt: { type: string }
@@ -6512,7 +6515,7 @@ components:
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
         job_id: { type: string }
-        scenario: { type: string, enum: [performance, tool_performance] }
+        scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
         status: { type: string, enum: [running, completed, failed, cancelled] }
         model_key: { type: string }
@@ -6567,6 +6570,7 @@ components:
         tool_metrics:
           type: object
           properties:
+            tool_choice_mode: { type: string, enum: [auto, required] }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
