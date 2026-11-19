@@ -22,9 +22,9 @@ fail() {
 [[ $# -ge 1 && $# -le 3 ]] || { usage; exit 2; }
 
 pid="$1"
-duration="\${2:-10}"
+duration="${2:-10}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-output_dir="\${3:-$HOME/perf08-captures/$timestamp-pid-$pid}"
+output_dir="${3:-$HOME/perf08-captures/$timestamp-pid-$pid}"
 
 [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "PID 必须是正整数"
 [[ "$duration" =~ ^[0-9]+$ ]] || fail "采样时长必须是整数秒"
@@ -39,14 +39,14 @@ proc_start_ticks() {
   local stat_line
   stat_line="$(<"$proc_dir/stat")" || return 1
   # comm 字段由括号包裹，先移除到最后一个 ') '，再取原始字段 22（剩余字段第 20 项）。
-  stat_line="\${stat_line##*) }"
+  stat_line="${stat_line##*) }"
   awk '{print $20}' <<<"$stat_line"
 }
 
 exe_path="$(readlink -f "$proc_dir/exe" 2>/dev/null || true)"
-exe_name="\${exe_path##*/}"
-exe_name="\${exe_name% (deleted)}"
-[[ "$exe_name" == "llama-server" ]] || fail "目标可执行文件是 '\${exe_name:-unknown}'，不是 llama-server；不会按进程名猜测模型实例"
+exe_name="${exe_path##*/}"
+exe_name="${exe_name% (deleted)}"
+[[ "$exe_name" == "llama-server" ]] || fail "目标可执行文件是 '${exe_name:-unknown}'，不是 llama-server；不会按进程名猜测模型实例"
 
 start_ticks="$(proc_start_ticks)" || fail "无法读取 PID 启动时间"
 [[ "$start_ticks" =~ ^[0-9]+$ ]] || fail "PID 启动时间格式异常"
@@ -75,9 +75,9 @@ perf_paranoid="$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || printf 
   printf 'host_pid=%s\n' "$pid"
   printf 'process_start_ticks=%s\n' "$start_ticks"
   printf 'executable=llama-server\n'
-  printf 'binary_build_id=%s\n' "\${build_id:-unavailable}"
+  printf 'binary_build_id=%s\n' "${build_id:-unavailable}"
   printf 'host_kernel=%s\n' "$(uname -r)"
-  printf 'cpu_model=%s\n' "\${cpu_model:-unavailable}"
+  printf 'cpu_model=%s\n' "${cpu_model:-unavailable}"
   printf 'perf_version=%s\n' "$perf_version"
   printf 'perf_event_paranoid=%s\n' "$perf_paranoid"
   printf 'duration_seconds=%s\n' "$duration"
@@ -86,8 +86,8 @@ perf_paranoid="$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || printf 
   pmus=()
   [[ -d /sys/bus/event_source/devices/cpu_core ]] && pmus+=(cpu_core)
   [[ -d /sys/bus/event_source/devices/cpu_atom ]] && pmus+=(cpu_atom)
-  if (( \${#pmus[@]} )); then
-    printf '%s\n' "$(IFS=,; echo "\${pmus[*]}")"
+  if (( ${#pmus[@]} )); then
+    printf '%s\n' "$(IFS=,; echo "${pmus[*]}")"
   else
     printf 'not_detected\n'
   fi
@@ -112,7 +112,7 @@ printf '输出目录: %s\n' "$output_dir"
 printf '采集范围: process_window；不具备 request ID 关联\n'
 
 set +e
-perf stat -x, -o "$output_dir/perf-stat.csv" -p "$pid" "\${event_args[@]}" -- sleep "$duration"
+perf stat -x, -o "$output_dir/perf-stat.csv" -p "$pid" "${event_args[@]}" -- sleep "$duration"
 perf_status=$?
 set -e
 chmod 600 "$output_dir/perf-stat.csv" 2>/dev/null || true
