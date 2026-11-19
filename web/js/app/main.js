@@ -1825,7 +1825,7 @@ async function loadBenchHistory(){
     }else{
       list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
         items.map(item=>{
-          const scenarioLabel=item.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(item.scenario==='tool_performance'?'工具调用性能（强制调用/旧版）':'普通性能');
+          const scenarioLabel=item.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(item.scenario==='tool_performance'?'工具调用性能（强制调用诊断）':'普通性能');
           const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms!=null?item.latency_ms+' ms':'未知');
           const model=item.model_id||item.model_key||item.backend||'—';
@@ -1994,7 +1994,7 @@ function renderBenchmarkHistoryDetail(wrap){
   const throughput=analysis.throughput||{};
   const coreMetrics=[
     ['状态',statusLabel(job.status)],
-    ['场景',job.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(job.scenario==='tool_performance'?'工具调用性能（强制调用/旧版）':'普通性能')],
+    ['场景',job.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(job.scenario==='tool_performance'?'工具调用性能（强制调用诊断）':'普通性能')],
     ['模型',job.model_id||job.model_key||'—'],
     ['Backend',job.backend||'—'],
     ['总耗时',job.latency_ms!=null?job.latency_ms+' ms':'未知'],
