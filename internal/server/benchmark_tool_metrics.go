@@ -49,7 +49,7 @@ type benchmarkToolMetrics struct {
 	ModelFinalGenerationStatus string `json:"model_final_generation_status"`
 }
 
-func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent) benchmarkToolMetrics {
+func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent, eventsAvailable bool) benchmarkToolMetrics {
 	metrics := benchmarkToolMetrics{
 		ToolChoiceMode: "not_applicable",
 		ToolCallDecision: "not_applicable",
@@ -93,7 +93,7 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 	}
 	if len(events) > 0 {
 		metrics.ToolCallDecision = "called"
-	} else if job.Status == "completed" {
+	} else if job.Status == "completed" && eventsAvailable {
 		metrics.ToolCallDecision = "not_called"
 	}
 	if metrics.ToolExecutionAttempts > 0 {
@@ -106,7 +106,7 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		v := total
 		metrics.ToolExecutionTotalMS = &v
 		metrics.ToolExecutionStatus = "measured"
-	} else if job.Status == "completed" && metrics.ToolChoiceMode == "auto" && len(events) == 0 {
+	} else if job.Status == "completed" && eventsAvailable && metrics.ToolChoiceMode == "auto" && len(events) == 0 {
 		// 自然决策模式下模型可以合理地选择不调用工具；这是有效结果，不是缺失测量。
 		metrics.ToolExecutionStatus = "not_applicable"
 		metrics.ModelFinalGenerationStatus = "not_applicable"
