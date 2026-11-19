@@ -1197,7 +1197,7 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		}
 	}
 	snap := job.snapshot()
-	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents, toolEventsAvailable)
+	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents)
 	payloadPersisted := false
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" && snap.Status != "cancelling" {
 		_, payloadErr := s.logs.GetPayload(r.Context(), snap.RequestID)
