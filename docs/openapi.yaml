@@ -1146,6 +1146,40 @@ paths:
           $ref: "#/components/responses/AdminError"
         "502":
           $ref: "#/components/responses/AdminError"
+  /api/benchmark/acceptance-cases:
+    get:
+      operationId: getApiBenchmarkAcceptanceCases
+      tags: [Admin]
+      summary: 查询工具调用验收用例目录
+      description: 返回服务端维护的 TM-01～TM-05 用例及规则版本。TM-03 标记为隔离环境专用，当前不允许通过普通 Benchmark API 自动启动。
+      security:
+        - AdminSessionBearer: []
+      responses:
+        "200":
+          description: 验收用例目录
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, rules_version]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, title, description, scenario, tool_choice_mode, manual_only]
+                      properties:
+                        id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
+                        title: { type: string }
+                        description: { type: string }
+                        scenario: { type: string, enum: [tool_performance_auto, tool_performance] }
+                        tool_choice_mode: { type: string, enum: [auto, required] }
+                        manual_only: { type: boolean }
+                  rules_version: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/AdminError"
   /api/benchmark:
     get:
       operationId: getApiBenchmark
@@ -3209,6 +3243,7 @@ components:
     BenchmarkCreateRequest:
       type: object
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05], description: 可选的项目内置验收用例 ID；TM-03 需要隔离环境，当前创建接口会拒绝执行。 }
         model_key: { type: string }
         scenario:
           type: string
@@ -3250,6 +3285,7 @@ components:
       type: object
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
         job_id: { type: string }
         scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
@@ -3301,6 +3337,16 @@ components:
       type: object
       required: [job, stream_events, request_id, request_log]
       properties:
+        acceptance:
+          type: object
+          required: [case_id, status, reason_code, message, rules_version]
+          properties:
+            case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
+            status: { type: string, enum: [pass, fail, inconclusive, not_run] }
+            reason_code: { type: string }
+            message: { type: string }
+            rules_version: { type: string }
+          additionalProperties: false
         job:
           $ref: "#/components/schemas/BenchmarkJob"
         stream_events:
@@ -4326,6 +4372,7 @@ components:
     BenchmarkCreateRequest:
       type: object
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05], description: 可选的项目内置验收用例 ID；TM-03 需要隔离环境，当前创建接口会拒绝执行。 }
         model_key: { type: string }
         scenario:
           type: string
@@ -4367,6 +4414,7 @@ components:
       type: object
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
         job_id: { type: string }
         scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
@@ -4408,6 +4456,16 @@ components:
       type: object
       required: [job, stream_events, request_id, request_log]
       properties:
+        acceptance:
+          type: object
+          required: [case_id, status, reason_code, message, rules_version]
+          properties:
+            case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
+            status: { type: string, enum: [pass, fail, inconclusive, not_run] }
+            reason_code: { type: string }
+            message: { type: string }
+            rules_version: { type: string }
+          additionalProperties: false
         job:
           $ref: "#/components/schemas/BenchmarkJob"
         stream_events:
@@ -5398,6 +5456,7 @@ components:
     BenchmarkCreateRequest:
       type: object
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05], description: 可选的项目内置验收用例 ID；TM-03 需要隔离环境，当前创建接口会拒绝执行。 }
         model_key: { type: string }
         scenario:
           type: string
@@ -5439,6 +5498,7 @@ components:
       type: object
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
         job_id: { type: string }
         scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
@@ -5480,6 +5540,16 @@ components:
       type: object
       required: [job, stream_events, request_id, request_log]
       properties:
+        acceptance:
+          type: object
+          required: [case_id, status, reason_code, message, rules_version]
+          properties:
+            case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
+            status: { type: string, enum: [pass, fail, inconclusive, not_run] }
+            reason_code: { type: string }
+            message: { type: string }
+            rules_version: { type: string }
+          additionalProperties: false
         job:
           $ref: "#/components/schemas/BenchmarkJob"
         stream_events:
@@ -6504,6 +6574,7 @@ components:
     BenchmarkCreateRequest:
       type: object
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05], description: 可选的项目内置验收用例 ID；TM-03 需要隔离环境，当前创建接口会拒绝执行。 }
         model_key: { type: string }
         scenario:
           type: string
@@ -6545,6 +6616,7 @@ components:
       type: object
       required: [job_id, status, model_key, llama_model, prompt_len, max_tokens, started_at, stream]
       properties:
+        acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
         job_id: { type: string }
         scenario: { type: string, enum: [performance, tool_performance_auto, tool_performance] }
         model_round_durations_ms: { type: array, items: { type: integer, format: int64, minimum: 0 }, description: "各次非流式模型调用的墙钟耗时，按调用顺序排列" }
@@ -6586,6 +6658,16 @@ components:
       type: object
       required: [job, stream_events, request_id, request_log]
       properties:
+        acceptance:
+          type: object
+          required: [case_id, status, reason_code, message, rules_version]
+          properties:
+            case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05] }
+            status: { type: string, enum: [pass, fail, inconclusive, not_run] }
+            reason_code: { type: string }
+            message: { type: string }
+            rules_version: { type: string }
+          additionalProperties: false
         job:
           $ref: "#/components/schemas/BenchmarkJob"
         stream_events:
