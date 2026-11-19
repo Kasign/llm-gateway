@@ -3317,6 +3317,11 @@ components:
           type: object
           properties:
             tool_choice_mode: { type: string, enum: [auto, required] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_execution_attempts: { type: integer, minimum: 0 }
+            tool_execution_successes: { type: integer, minimum: 0 }
+            tool_execution_failures: { type: integer, minimum: 0 }
+            tool_execution_success_rate: { type: number, minimum: 0, maximum: 100, nullable: true }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -4419,6 +4424,11 @@ components:
           type: object
           properties:
             tool_choice_mode: { type: string, enum: [auto, required] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_execution_attempts: { type: integer, minimum: 0 }
+            tool_execution_successes: { type: integer, minimum: 0 }
+            tool_execution_failures: { type: integer, minimum: 0 }
+            tool_execution_success_rate: { type: number, minimum: 0, maximum: 100, nullable: true }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -5486,6 +5496,11 @@ components:
           type: object
           properties:
             tool_choice_mode: { type: string, enum: [auto, required] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_execution_attempts: { type: integer, minimum: 0 }
+            tool_execution_successes: { type: integer, minimum: 0 }
+            tool_execution_failures: { type: integer, minimum: 0 }
+            tool_execution_success_rate: { type: number, minimum: 0, maximum: 100, nullable: true }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
@@ -6587,6 +6602,11 @@ components:
           type: object
           properties:
             tool_choice_mode: { type: string, enum: [auto, required] }
+            tool_call_decision: { type: string, enum: [called, not_called, unknown] }
+            tool_execution_attempts: { type: integer, minimum: 0 }
+            tool_execution_successes: { type: integer, minimum: 0 }
+            tool_execution_failures: { type: integer, minimum: 0 }
+            tool_execution_success_rate: { type: number, minimum: 0, maximum: 100, nullable: true }
             model_rounds: { type: integer, minimum: 0 }
             tool_rounds: { type: integer, minimum: 0 }
             tool_calls: { type: integer, minimum: 0 }
