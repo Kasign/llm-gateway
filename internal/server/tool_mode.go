@@ -139,12 +139,7 @@ func (f inferenceForwarder) forwardWithTools(
 	result, runErr := toolCoordinator.RunWithObserver(toolCtx, st.Body, allowedNames, func(event coordinator.ToolCallEvent) {
 		auditEvents = append(auditEvents, mapToolCallAuditEvent(event))
 	})
-	decision := "unknown"
-	if len(auditEvents) > 0 {
-		decision = "called"
-	} else if runErr == nil && result.ModelRounds > 0 {
-		decision = "not_called"
-	}
+	decision := benchmarkToolCallDecision(result.ModelRounds, result.Response.StatusCode, len(auditEvents), runErr)
 	recordBenchmarkToolCallDecision(ctx, decision)
 	if len(auditEvents) > 0 && s.audit != nil {
 		s.audit.InsertToolCallEvents(st.ID, auditEvents)
