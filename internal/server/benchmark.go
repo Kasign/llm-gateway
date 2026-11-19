@@ -59,6 +59,7 @@ type benchmarkJob struct {
 	mu             sync.RWMutex
 	ID             string     `json:"job_id"`
 	Scenario       string     `json:"scenario"`
+	AcceptanceCaseID string `json:"acceptance_case_id,omitempty"`
 	Status         string     `json:"status"`
 	ModelKey       string     `json:"model_key"`
 	LlamaModel     string     `json:"llama_model"`
@@ -162,6 +163,7 @@ func (j *benchmarkJob) requestStop() bool {
 type benchmarkJobSnapshot struct {
 	ID             string     `json:"job_id"`
 	Scenario       string     `json:"scenario"`
+	AcceptanceCaseID string `json:"acceptance_case_id,omitempty"`
 	Status         string     `json:"status"`
 	ModelKey       string     `json:"model_key"`
 	LlamaModel     string     `json:"llama_model"`
@@ -206,7 +208,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	out := benchmarkJobSnapshot{
-		ID: j.ID, Scenario: j.Scenario, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
+		ID: j.ID, Scenario: j.Scenario, AcceptanceCaseID: j.AcceptanceCaseID, Status: j.Status, ModelKey: j.ModelKey, LlamaModel: j.LlamaModel,
 		PromptLen: j.PromptLen, MaxTokens: j.MaxTokens, StartedAt: j.StartedAt,
 		FinishedAt: j.FinishedAt, LatencyMS: j.LatencyMS, HTTPStatus: j.HTTPStatus,
 		ResponseBytes: j.ResponseBytes, ResponseTruncated: j.ResponseTruncated,
@@ -898,6 +900,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		ModelID          string   `json:"model_id"`
 		Model            string   `json:"model"`
 		Scenario         string   `json:"scenario"`
+		AcceptanceCaseID string `json:"acceptance_case_id"`
 		Prompt           string   `json:"prompt"`
 		MaxTokens        int      `json:"max_tokens"`
 		UseActive        bool     `json:"use_active"`
@@ -927,6 +930,22 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if scenario != "performance" && scenario != "tool_performance" && scenario != "tool_performance_auto" {
 		jsonError(w, http.StatusBadRequest, "benchmark_scenario_unsupported", "unsupported benchmark scenario")
 		return
+	}
+	acceptanceCaseID := strings.ToUpper(strings.TrimSpace(in.AcceptanceCaseID))
+	if acceptanceCaseID != "" {
+		acceptanceCase, ok := benchmarkAcceptanceCaseByID(acceptanceCaseID)
+		if !ok {
+			jsonError(w, http.StatusBadRequest, "benchmark_acceptance_case_unsupported", "unsupported benchmark acceptance case")
+			return
+		}
+		if acceptanceCase.Scenario != scenario {
+			jsonError(w, http.StatusBadRequest, "benchmark_acceptance_scenario_mismatch", "acceptance case does not match benchmark scenario")
+			return
+		}
+		if acceptanceCase.ManualOnly {
+			jsonError(w, http.StatusConflict, "benchmark_acceptance_isolated_required", "this acceptance case requires a separately configured isolated Gateway; automated execution is disabled")
+			return
+		}
 	}
 	modelID := strings.TrimSpace(in.ModelID)
 	if modelID == "" {
@@ -1032,6 +1051,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	configSnapshot := map[string]interface{}{
 		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey, "tool_names": toolNames,
 		"model_id": taskModelID, "scenario": scenario, "tool_choice_mode": toolChoiceMode,
+		"acceptance_case_id": acceptanceCaseID,
 		"max_tokens": in.MaxTokens, "stream": !isBenchmarkToolScenario(scenario),
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
@@ -1076,7 +1096,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		ProviderID: target.Backend, ModelKey: modelKey, ModelID: taskModelID, StartedAt: now,
 	}
 	job := &benchmarkJob{
-		ID: jobID, Scenario: scenario, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: !isBenchmarkToolScenario(scenario),
+		ID: jobID, Scenario: scenario, AcceptanceCaseID: acceptanceCaseID, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: !isBenchmarkToolScenario(scenario),
 		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown", ToolCallDecision: "unknown", ToolCallEventCount: 0,
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: append([]string(nil), conditionMissing...),
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
