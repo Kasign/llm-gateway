@@ -1918,6 +1918,24 @@ function benchmarkToolCalls(wrap,job){
     return true;
   });
 }
+function sanitizeBenchmarkToolArguments(value,depth=0){
+  if(depth>8)return '[嵌套层级过深]';
+  if(Array.isArray(value))return value.slice(0,100).map(item=>sanitizeBenchmarkToolArguments(item,depth+1));
+  if(value&&typeof value==='object'){
+    const out={};
+    for(const [key,item] of Object.entries(value).slice(0,100)){
+      out[key]=/(?:api[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token)/i.test(key)
+        ?'[已脱敏]':sanitizeBenchmarkToolArguments(item,depth+1);
+    }
+    return out;
+  }
+  if(typeof value==='string'){
+    return value
+      .replace(/Bearer\s+[^\s"',}]+/gi,'Bearer [已脱敏]')
+      .replace(/((?:api[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token)\s*[:=]\s*)["']?[^,\s"'}]+/gi,'$1[已脱敏]');
+  }
+  return value;
+}
 function renderBenchmarkToolCalls(wrap,job){
   const calls=benchmarkToolCalls(wrap,job);
   const events=Array.isArray(wrap?.tool_call_events)?wrap.tool_call_events:[];
@@ -1933,7 +1951,8 @@ function renderBenchmarkToolCalls(wrap,job){
       const name=fn.name||call.name||'未知工具';
       let args=fn.arguments??call.arguments??call.input??null;
       if(typeof args==='string'){try{args=JSON.parse(args)}catch{}}
-      const argsText=args==null?'未提供参数':JSON.stringify(args,null,2);
+      const safeArgs=args==null?null:sanitizeBenchmarkToolArguments(args);
+      const argsText=safeArgs==null?'未提供参数':JSON.stringify(safeArgs,null,2);
       return '<section class="bench-tool-call"><strong>调用 '+(index+1)+' · '+esc(name)+'</strong>'+
         (call.id?'<p class="req-note">调用 ID：<code>'+esc(call.id)+'</code></p>':'')+
         '<pre class="bench-out">'+esc(argsText)+'</pre></section>';
@@ -2010,8 +2029,8 @@ function renderBenchmarkHistoryDetail(wrap){
     html+='</div></details>';
   }
   html+=renderBenchmarkToolCalls(wrap,job);
-  if(content)html+='<details class="bench-detail-fold"><summary>正文 content（'+formatTokenCount(job.content_chars)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(content)+'</pre></div></details>';
-  if(reasoning)html+='<details class="bench-detail-fold"><summary>思考 reasoning（'+formatTokenCount(job.reasoning_chars)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(reasoning)+'</pre></div></details>';
+  if(content)html+='<details class="bench-detail-fold"><summary>正文 content（'+formatTokenCount(job.content_chars??content.length)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(content)+'</pre></div></details>';
+  if(reasoning)html+='<details class="bench-detail-fold"><summary>思考 reasoning（'+formatTokenCount(job.reasoning_chars??reasoning.length)+' 字符）</summary><div class="bench-detail-fold-body"><pre class="bench-out">'+esc(reasoning)+'</pre></div></details>';
   if(job.error)html+='<p class="msg err">'+esc(job.error)+'</p>';
   if(job.error_code)html+='<p class="req-note">错误码：<code>'+esc(job.error_code)+'</code></p>';
   box.innerHTML=html;
