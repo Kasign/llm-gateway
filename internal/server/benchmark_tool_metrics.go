@@ -32,6 +32,7 @@ func decodeBenchmarkRoundDurations(raw string) []int64 {
 
 // benchmarkToolMetrics 是服务端计算的工具场景阶段指标，前端只负责展示，不重新计算。
 type benchmarkToolMetrics struct {
+	ToolChoiceMode string `json:"tool_choice_mode"`
 	ModelRounds int `json:"model_rounds"`
 	ToolRounds int `json:"tool_rounds"`
 	ToolCalls int `json:"tool_calls"`
@@ -49,9 +50,10 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		ToolExecutionStatus: "not_applicable",
 		ModelFinalGenerationStatus: "not_applicable",
 	}
-	if job.Scenario != "tool_performance" {
+	if !isBenchmarkToolScenario(job.Scenario) {
 		return metrics
 	}
+	metrics.ToolChoiceMode = benchmarkToolChoiceMode(job.Scenario)
 	metrics.ModelDecisionStatus = "unknown"
 	metrics.ToolExecutionStatus = "unknown"
 	metrics.ModelFinalGenerationStatus = "unknown"
@@ -61,22 +63,32 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		metrics.ModelDecisionMS = &v
 		metrics.ModelDecisionStatus = "measured"
 	}
-	if len(events) > 0 {
-		seenRounds := make(map[int]struct{}, len(events))
-		var total int64
-		for _, event := range events {
-			seenRounds[event.Round] = struct{}{}
+
+	seenRounds := make(map[int]struct{}, len(events))
+	var total int64
+	executedEvents := 0
+	for _, event := range events {
+		seenRounds[event.Round] = struct{}{}
+		switch event.Status {
+		case "succeeded", "failed", "timed_out", "cancelled":
+			executedEvents++
 			if event.DurationMS > 0 && total <= int64(^uint64(0)>>1)-event.DurationMS {
 				total += event.DurationMS
 			}
 		}
+	}
+	metrics.ToolCalls = len(events)
+	metrics.ToolRounds = len(seenRounds)
+	if executedEvents > 0 {
 		v := total
 		metrics.ToolExecutionTotalMS = &v
 		metrics.ToolExecutionStatus = "measured"
-		metrics.ToolCalls = len(events)
-		metrics.ToolRounds = len(seenRounds)
+	} else if job.Status == "completed" && metrics.ToolChoiceMode == "auto" && len(events) == 0 {
+		// 自然决策模式下模型可以合理地选择不调用工具；这是有效结果，不是缺失测量。
+		metrics.ToolExecutionStatus = "not_applicable"
+		metrics.ModelFinalGenerationStatus = "not_applicable"
 	}
-	if job.Status == "completed" && len(job.ModelRoundDurationsMS) >= 2 {
+	if job.Status == "completed" && executedEvents > 0 && len(job.ModelRoundDurationsMS) >= 2 {
 		v := job.ModelRoundDurationsMS[len(job.ModelRoundDurationsMS)-1]
 		metrics.ModelFinalGenerationMS = &v
 		metrics.ModelFinalGenerationStatus = "measured"
