@@ -22,6 +22,16 @@ func benchmarkToolRoundObserver(ctx context.Context) func(time.Duration) {
 	return job.recordModelRoundDuration
 }
 
+func benchmarkToolCallDecision(modelRounds, responseStatus, eventCount int, runErr error) string {
+	if eventCount > 0 {
+		return "called"
+	}
+	if runErr == nil && modelRounds > 0 && responseStatus >= 200 && responseStatus < 300 {
+		return "not_called"
+	}
+	return "unknown"
+}
+
 func recordBenchmarkToolCallDecision(ctx context.Context, decision string) {
 	if ctx == nil || (decision != "called" && decision != "not_called" && decision != "unknown") {
 		return
