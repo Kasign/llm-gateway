@@ -87,10 +87,20 @@ func (s *Server) runtimeAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 502, "runtime_error", err.Error())
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(s.effectiveUpstream().Backend), "llamacpp") {
-		snap["server_metrics"] = s.runtimeMetricsOverview()
-	}
+	attachRuntimeServerMetrics(snap, s.effectiveUpstream().Backend, s.runtimeMetricsOverview())
 	json.NewEncoder(w).Encode(snap)
+}
+
+// attachRuntimeServerMetrics 只向本地 llama.cpp 运行时响应附加进程级 Metrics。
+// 远程 Provider 和 Ollama 不得暴露本地 llama.cpp 的缓存样本。
+func attachRuntimeServerMetrics(snapshot map[string]interface{}, backend string, metrics interface{}) {
+	if snapshot == nil {
+		return
+	}
+	delete(snapshot, "server_metrics")
+	if strings.EqualFold(strings.TrimSpace(backend), "llamacpp") {
+		snapshot["server_metrics"] = metrics
+	}
 }
 
 func (s *Server) buildAdminRuntimeOverview(ctx context.Context) (map[string]interface{}, error) {
