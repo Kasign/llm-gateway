@@ -2905,7 +2905,7 @@ components:
         loaded_vram_bytes: { type: integer, format: int64, minimum: 0 }
         host_cpu_percent: { type: number, minimum: 0 }
         status: { type: string, enum: [complete, partial, unavailable] }
-        source: { type: string }
+        source: { type: string, const: llama_cpp_server_metrics }
         sampled_at: { type: string, format: date-time }
         age_ms: { type: integer, format: int64, minimum: 0 }
       additionalProperties: false
@@ -3109,7 +3109,7 @@ components:
         sampled_at: { type: string, format: date-time }
         age_ms: { type: integer, format: int64, minimum: 0 }
         process_instance_id: { type: string, description: llama.cpp Process-Start-Time-Unix 响应头的原始进程实例标识。当前上游由 ggml_time_us() 单调时钟微秒计数生成，不是 Unix 时间戳；仅用于识别进程实例变化，不得转换为日期时间。缺失时不计算 Counter 窗口增量。 }
-        model_scope: { type: string, description: 本次 /metrics 请求使用的模型范围；空字符串表示未指定模型参数。 }
+        model_scope: { type: string, description: 本次 /metrics 请求使用的模型范围；未指定模型参数时因 omitempty 而省略。 }
         samples:
           type: array
           items:
