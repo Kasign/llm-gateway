@@ -1,6 +1,9 @@
 package server
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const benchmarkAcceptanceRulesVersion = "1"
 
@@ -41,6 +44,17 @@ func benchmarkAcceptanceCaseByID(id string) (benchmarkAcceptanceCase, bool) {
 		}
 	}
 	return benchmarkAcceptanceCase{}, false
+}
+
+// benchmarkAcceptanceCaseIDFromConfigJSON 从持久化任务配置恢复验收用例关联；旧任务返回空字符串。
+func benchmarkAcceptanceCaseIDFromConfigJSON(raw string) string {
+	var snapshot struct {
+		AcceptanceCaseID string `json:"acceptance_case_id"`
+	}
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &snapshot) != nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(snapshot.AcceptanceCaseID))
 }
 
 func benchmarkAcceptanceCatalog() []benchmarkAcceptanceCase {
