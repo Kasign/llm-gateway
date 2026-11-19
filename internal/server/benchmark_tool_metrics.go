@@ -107,9 +107,12 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		metrics.ToolExecutionTotalMS = &v
 		metrics.ToolExecutionStatus = "measured"
 	} else if job.Status == "completed" && eventsAvailable && len(job.ModelRoundDurationsMS) == 1 && metrics.ToolChoiceMode == "auto" && len(events) == 0 {
-		// 自然决策模式下模型可以合理地选择不调用工具；这是有效结果，不是缺失测量。
+		// 自然决策模式下模型可以合理地选择不调用工具；第一轮响应同时包含决策与最终回答，
+		// 无法从单次模型请求中拆分两段耗时，因此显式标记为合并测量，而不是不适用或重复计时。
 		metrics.ToolExecutionStatus = "not_applicable"
-		metrics.ModelFinalGenerationStatus = "not_applicable"
+		v := job.ModelRoundDurationsMS[0]
+		metrics.ModelFinalGenerationMS = &v
+		metrics.ModelFinalGenerationStatus = "combined_with_decision"
 	}
 	if job.Status == "completed" && metrics.ToolExecutionAttempts > 0 && len(job.ModelRoundDurationsMS) >= 2 {
 		v := job.ModelRoundDurationsMS[len(job.ModelRoundDurationsMS)-1]
