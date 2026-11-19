@@ -14,6 +14,12 @@
 tools/perf08/host-perf-stat.sh <host-pid|container-name> [duration-seconds] [output-directory]
 ```
 
+在用户当前容器名仍为 `Llama-cpp` 的主机上，可直接执行：
+
+```bash
+bash tools/perf08/host-perf-stat.sh Llama-cpp 10
+```
+
 约束：
 
 - 可传宿主机 PID，也可传容器名。传容器名时，脚本通过 `docker top` 查找父子进程均为 `llama-server` 的 Router model child；必须恰好找到一个，否则拒绝猜测。传 PID 时同样校验父进程 comm 为 `llama-server`，拒绝误采 Router 主进程或容器内 PID。
@@ -54,7 +60,7 @@ tools/perf08/host-perf-stat.sh <host-pid|container-name> [duration-seconds] [out
 
 ## 脚本自动化验证
 
-`.github/workflows/perf08-host-script.yml` 对脚本执行 `bash -n`，并使用 mock Docker/perf 与临时 `llama-server` 父子进程验证：
+`.github/workflows/perf08-host-script.yml`（Run `44511368692`，success）对脚本执行 `bash -n`，并使用 mock Docker/perf 与临时 `llama-server` 父子进程验证：
 
 - 容器名能唯一解析 Router 的模型 child PID。
 - 不会把 Router 父进程作为采样目标。
