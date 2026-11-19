@@ -934,7 +934,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	acceptanceCaseID := strings.ToUpper(strings.TrimSpace(in.AcceptanceCaseID))
 	if acceptanceCaseID != "" {
-		acceptanceCase, ok := benchmarkAcceptanceCaseByID(acceptanceCaseID)
+		acceptanceCase, ok := benchmarkAcceptanceCaseForEnvironment(acceptanceCaseID, s.cfg != nil && s.cfg.Benchmark.IsolatedEnvironment)
 		if !ok {
 			jsonError(w, http.StatusBadRequest, "benchmark_acceptance_case_unsupported", "unsupported benchmark acceptance case")
 			return
@@ -944,7 +944,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if acceptanceCase.ManualOnly {
-			jsonError(w, http.StatusConflict, "benchmark_acceptance_isolated_required", "this acceptance case requires a separately configured isolated Gateway; automated execution is disabled")
+			jsonError(w, http.StatusConflict, "benchmark_acceptance_isolated_required", "TM-03 requires benchmark.isolated_environment=true on this dedicated Gateway")
 			return
 		}
 	}
