@@ -156,3 +156,14 @@ func TestEvaluateBenchmarkAcceptanceTM03RequiresObservedFailure(t *testing.T) {
 		t.Fatalf("result = %+v, want tool_failure_not_observed", got)
 	}
 }
+
+func TestBenchmarkAcceptanceCaseIDFromConfigJSON(t *testing.T) {
+	if got := benchmarkAcceptanceCaseIDFromConfigJSON(`{"acceptance_case_id":"tm-04"}`); got != "TM-04" {
+		t.Fatalf("case ID = %q, want TM-04", got)
+	}
+	for _, raw := range []string{"", "{", `{"scenario":"tool_performance_auto"}`} {
+		if got := benchmarkAcceptanceCaseIDFromConfigJSON(raw); got != "" {
+			t.Errorf("case ID from %q = %q, want empty", raw, got)
+		}
+	}
+}
