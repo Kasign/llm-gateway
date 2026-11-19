@@ -177,7 +177,7 @@ func TestBuildBenchmarkToolMetricsDoesNotInferNoCallFromMissingEvents(t *testing
 		ModelRoundDurationsMS: []int64{125, 230},
 		ToolCallDecision: "unknown",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("metrics without tool events but multiple model rounds = %#v, want unknown decision/execution", metrics)
 	}
@@ -193,7 +193,7 @@ func TestBuildBenchmarkToolMetricsCalledDecisionWithoutAuditEventsKeepsExecution
 		ToolCallEventCount: 1,
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "called" {
 		t.Fatalf("tool call decision = %q, want called", metrics.ToolCallDecision)
 	}
@@ -209,7 +209,7 @@ func TestBuildBenchmarkToolMetricsUnknownDoesNotInferNoCallFromEmptyAvailableEve
 		ToolCallDecision: "unknown",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want unknown decision and final generation", metrics)
 	}
@@ -287,7 +287,7 @@ func TestBuildBenchmarkToolMetricsNotCalledWithoutRoundDoesNotPanic(t *testing.T
 		Status: "completed",
 		ToolCallDecision: "not_called",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "not_called" || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want explicit decision with unavailable execution timing", metrics)
 	}
@@ -300,7 +300,7 @@ func TestBuildBenchmarkToolMetricsFailedJobDoesNotExposeNotCalled(t *testing.T) 
 		ToolCallDecision: "not_called",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil)
+	metrics := buildBenchmarkToolMetrics(job, nil, true)
 	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want unknown for failed job", metrics)
 	}
