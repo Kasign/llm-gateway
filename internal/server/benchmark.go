@@ -744,10 +744,16 @@ func (s *Server) benchmarkComparisonSide(r *http.Request, taskID string) (benchm
 		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
 	}
 	toolEvents := []store.ToolCallEvent{}
+	toolEventsAvailable := false
 	if s.logs != nil {
-		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
+		var eventsErr error
+		toolEvents, eventsErr = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
+		toolEventsAvailable = eventsErr == nil
+		if eventsErr != nil {
+			toolEvents = nil
+		}
 	}
-	toolMetrics := buildBenchmarkToolMetrics(snapshot, toolEvents)
+	toolMetrics := buildBenchmarkToolMetrics(snapshot, toolEvents, toolEventsAvailable)
 	metrics := map[string]*int64{
 		"latency_ms": nil,
 		"inference_latency_ms": nil,
@@ -1179,12 +1185,18 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 	}
 	events := []store.StreamEvent{}
 	toolEvents := []store.ToolCallEvent{}
+	toolEventsAvailable := false
 	if s.logs != nil {
 		events, _ = s.logs.ListStreamEvents(r.Context(), id, 2000)
-		toolEvents, _ = s.logs.ListToolCallEvents(r.Context(), id, 9)
+		var toolEventsErr error
+		toolEvents, toolEventsErr = s.logs.ListToolCallEvents(r.Context(), id, 9)
+		toolEventsAvailable = toolEventsErr == nil
+		if toolEventsErr != nil {
+			toolEvents = nil
+		}
 	}
 	snap := job.snapshot()
-	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents)
+	toolMetrics := buildBenchmarkToolMetrics(snap, toolEvents, toolEventsAvailable)
 	payloadPersisted := false
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil && snap.Status != "running" && snap.Status != "cancelling" {
 		_, payloadErr := s.logs.GetPayload(r.Context(), snap.RequestID)
