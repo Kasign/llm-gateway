@@ -53,7 +53,6 @@ fi
 BASE_URL="${GATEWAY_URL%/}"
 mkdir -p "$OUTPUT_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RESULT_FILE="$OUTPUT_DIR/${STAMP}-${SCENARIO}.json"
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$RESPONSE_FILE"' EXIT
 
@@ -96,6 +95,7 @@ if [[ -z "$JOB_ID" ]]; then
   exit 1
 fi
 POLL_URL="$BASE_URL/api/benchmark/$JOB_ID"
+RESULT_FILE="$OUTPUT_DIR/${STAMP}-${SCENARIO}-${JOB_ID}.json"
 STARTED_AT="$(date +%s)"
 
 while true; do
