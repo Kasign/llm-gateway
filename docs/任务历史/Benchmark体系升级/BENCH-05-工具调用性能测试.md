@@ -194,6 +194,6 @@
 
 ### 当前验证状态
 
-- 最新代码提交：`b74834f7b161cff6a651ca499a10420415a0f961`。Go CI Run [44472774248](https://github.com/Kasign/llm-gateway/actions/runs/44472774248) 最终 `success`，5/5 Job 全部通过；MariaDB 迁移集成、完整 Go 测试、竞态测试、静态检查、API 契约、前端、Docker、故障注入和稳态审计负载均通过。
-- Browser Smoke Run [44472288039](https://github.com/Kasign/llm-gateway/actions/runs/44472288039) 对本阶段管理台改动完成，桌面、窄屏和核心交互验收成功。该次验证的前端代码与当前版本一致；后续提交只调整服务端判定边界、脚本和文档。
-- 随后的文档更新仍有独立 Go CI 在执行；不改变上述代码 SHA 的验证结论。
+- 最新代码提交：`059790429a77b5f0410da2eea0ad6890ed08423d`。Go CI Run [44473562385](https://github.com/Kasign/llm-gateway/actions/runs/44473562385) 最终 `success`，5/5 Job 全部通过；MariaDB 迁移集成、完整 Go 测试、竞态测试、静态检查、API 契约、前端、Docker、故障注入和稳态审计负载均通过。
+- Browser Smoke Run [44473562450](https://github.com/Kasign/llm-gateway/actions/runs/44473562450) 对同一 SHA 完成，桌面、窄屏和核心交互验收成功。
+- `benchmark.isolated_environment` 默认关闭、服务端目录动态标记和 TM-03 创建门禁已通过当前 SHA 的 Go CI；实际专用验收 Gateway 启用后的端到端验证仍未执行。
