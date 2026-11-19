@@ -16,6 +16,7 @@
 | llama.request_timeout_seconds | LLAMA_REQUEST_TIMEOUT_SECONDS | 低 | 重启 | 0 不设 Gateway 整体时限；请求 Context 取消仍有效 |
 | 模型加载与输出上限 | config.yaml | 低 | 重启 | 不替代 OpenResty 或调用方超时 |
 | 模型目录与下载策略 | MODEL_HOST_DIR 在 .env；下载策略在 YAML | 低 | 重启 | 容器内模型目录固定为 /data/models |
+| benchmark.isolated_environment | config.yaml（仅独立验收 Gateway） | 高风险开关 | 重启 | 默认 false；仅用于允许 TM-03 工具故障验收，生产环境必须保持 false |
 | 日志与保留策略 | config.yaml | 高 | 重启 | 正文可能包含提示词/代码；retention_days=0 不自动清理 |
 
 ## 2. 远程 Provider（Web 管理台）
