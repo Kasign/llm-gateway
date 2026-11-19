@@ -330,6 +330,56 @@ function renderToolCallsSection(j) {
   return reqPanelFold(`工具调用明细 (${events.length})`, inner);
 }
 
+function diagnosticBundle(j) {
+  const s = j.summary || {};
+  const log = j.log || {};
+  const t = j.timing || {};
+  const analysis = j.analysis || {};
+  const payload = j.payload || {};
+  const safeHeaders = (headers) => {
+    if (!headers || typeof headers !== 'object') return {};
+    const allowed = ['content-type', 'content-length'];
+    return Object.fromEntries(Object.entries(headers).filter(([key]) => allowed.includes(key.toLowerCase())));
+  };
+  const parseBody = (value) => {
+    if (!value) return null;
+    try { return JSON.parse(value); } catch { return String(value).slice(0, 12000); }
+  };
+  return {
+    report_type: 'llm_gateway_request_diagnostic', report_version: 1,
+    request: {
+      request_id: detailRequestId(j), status: s.status || log.status || null,
+      gateway_http_status: s.http_status ?? log.http_status ?? null,
+      upstream_http_status: s.upstream_http_status ?? log.upstream_http_status ?? null,
+      error_code: s.error_code || log.error_code || null, error_message: s.error_message || log.error_message || null,
+      provider_id: s.provider_id || log.provider_id || null,
+      model_client: s.model_client || j.request_params?.model_client || log.model_requested || null,
+      model_upstream: s.model_upstream || j.request_params?.model_upstream || log.model_actual || null,
+      endpoint: s.endpoint || log.endpoint || null, method: s.method || log.method || null,
+      stream: s.stream ?? log.stream ?? null, started_at: t.started_at || log.started_at || null,
+      finished_at: t.finished_at || log.finished_at || null, latency_ms: t.latency_ms ?? log.latency_ms ?? null,
+      input_tokens: t.input_tokens ?? log.input_tokens ?? null, output_tokens: t.output_tokens ?? log.output_tokens ?? null,
+      total_tokens: t.total_tokens ?? log.total_tokens ?? null
+    },
+    analysis: { phases_ms: analysis.phases_ms || null, throughput: analysis.throughput || null,
+      runtime_snapshot: analysis.runtime_snapshot || null, summary: analysis.summary || [],
+      diagnosis: j.diagnosis || null, timeline: analysis.timeline || [] },
+    tool_calls: Array.isArray(j.tool_calls) ? j.tool_calls : [],
+    tool_call_count: j.tool_call_count ?? (Array.isArray(j.tool_calls) ? j.tool_calls.length : 0),
+    request_params: j.request_params || null,
+    recorded_request_body_note: j.request_body_note || j.payload_note || null,
+    recorded_request_body: parseBody(j.request_body || j.request_preview || payload.request_body),
+    upstream_response_body: parseBody(j.response_body || j.response_preview || payload.response_body),
+    upstream_headers: safeHeaders(j.upstream_headers || payload.upstream_headers)
+  };
+}
+
+export async function copyDiagnosticBundle(btn) {
+  const j = window.__requestDetailSnapshot || {};
+  const bundle = diagnosticBundle(j);
+  if (!bundle.request.request_id) { await flashCopyBtn(btn, false); return; }
+  await flashCopyBtn(btn, await writeClipboard(JSON.stringify(bundle, null, 2)));
+}
 function detailSections(j) {
   const s = j.summary || {};
   const t = j.timing || {};
@@ -347,6 +397,7 @@ function detailSections(j) {
       `<p style="margin:0 0 10px"><button type="button" class="btn sm danger" onclick="cancelRequest('${encodeURIComponent(rid).replace(/'/g, "%27")}')">结束这条调用</button></p>`,
     );
   }
+  add('diagnostic-copy', 'swap', '<section class="req-section req-diagnostic-copy"><div><h3>问题反馈</h3><p class="req-note">复制精简诊断包，包含请求错误、模型耗时、工具调用轮次和必要请求参数；不包含 API Key 凭证及请求头敏感字段。</p></div><button type="button" class="btn sm" data-req-copy-diagnostic>复制诊断信息</button></section>');
   if (j.payload_note) add('note', 'swap', `<p class="req-note warn" style="margin:0 0 10px">${esc(j.payload_note)}</p>`);
   add(
     'overview',
@@ -624,6 +675,7 @@ function patchStreamSection(el, html) {
 // 同一条记录轮询时只改变化的区块，折叠和滚动留在原节点上。
 // 换记录，或关闭后再打开，则整页重画，不沿用上一份详情。
 export function applyRequestDetail(root, j) {
+  window.__requestDetailSnapshot = j;
   const rid = detailRequestId(j);
   if (root.dataset.detailRequest !== rid) {
     root.replaceChildren();
@@ -737,6 +789,12 @@ export function closeModal() {
 
 $('detailModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'detailModal') closeModal();
+  const diagnosticBtn = e.target.closest?.('[data-req-copy-diagnostic]');
+  if (diagnosticBtn) {
+    e.preventDefault();
+    copyDiagnosticBundle(diagnosticBtn);
+    return;
+  }
   const copyBtn = e.target.closest?.('[data-req-copy]');
   if (copyBtn) {
     e.preventDefault();
