@@ -267,6 +267,10 @@ try {
     await page.locator('#benchHistoryDetail').count() === 1);
   await page.locator('#benchHistoryList [data-bench-history-id="benchmark-history-smoke-1"]').click();
   await page.locator('#benchHistoryDetail').waitFor({ state: 'visible', timeout: 5000 });
+  await page.waitForFunction(() => {
+    const detail = document.getElementById('benchHistoryDetail')?.textContent || '';
+    return detail.includes('历史任务详情正文') && detail.includes('smoke-model');
+  }, null, { timeout: 5000 });
   check('点击历史任务详情后在历史区域展示任务内容',
     (await page.locator('#benchHistoryDetail').textContent()).includes('历史任务详情正文') &&
     (await page.locator('#benchHistoryDetail').textContent()).includes('smoke-model'));
