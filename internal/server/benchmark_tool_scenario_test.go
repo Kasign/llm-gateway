@@ -277,3 +277,29 @@ func TestBenchmarkToolCallDecisionRequiresSuccessfulFinalResponse(t *testing.T) 
 		})
 	}
 }
+
+
+func TestBuildBenchmarkToolMetricsNotCalledWithoutRoundDoesNotPanic(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "not_called",
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil)
+	if metrics.ToolCallDecision != "not_called" || metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("metrics = %#v, want explicit decision with unavailable execution timing", metrics)
+	}
+}
+
+func TestBuildBenchmarkToolMetricsFailedJobDoesNotExposeNotCalled(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "failed",
+		ToolCallDecision: "not_called",
+		ModelRoundDurationsMS: []int64{125},
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil)
+	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
+		t.Fatalf("metrics = %#v, want unknown for failed job", metrics)
+	}
+}
