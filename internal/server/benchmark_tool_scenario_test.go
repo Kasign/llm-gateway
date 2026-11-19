@@ -191,7 +191,7 @@ func TestBuildBenchmarkToolMetricsCalledDecisionWithoutAuditEventsKeepsExecution
 		ToolCallDecision: "called",
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolCallDecision != "called" {
 		t.Fatalf("tool call decision = %q, want called", metrics.ToolCallDecision)
 	}
@@ -207,7 +207,7 @@ func TestBuildBenchmarkToolMetricsUnknownDoesNotInferNoCallFromEmptyAvailableEve
 		ToolCallDecision: "unknown",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, true)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolCallDecision != "unknown" || metrics.ModelFinalGenerationStatus != "unknown" {
 		t.Fatalf("metrics = %#v, want unknown decision and final generation", metrics)
 	}
