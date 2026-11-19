@@ -1972,7 +1972,7 @@ function renderBenchmarkToolCalls(wrap,job){
     );
   }
   if(metrics){
-    const value=(v,status)=>status==='measured'&&v!=null?String(v)+' ms':(status==='not_applicable'?'不适用':(v==null?'未知':String(v)));
+    const value=(v,status)=>status==='measured'&&v!=null?String(v)+' ms':(status==='combined_with_decision'&&v!=null?String(v)+' ms（与决策合并测量）':(status==='not_applicable'?'不适用':(v==null?'未知':String(v))));
     html+='<h4>工具阶段指标</h4><dl class="bench-history-detail-grid">'+[
       ['模型决策',value(metrics.model_decision_ms,metrics.model_decision_status)],
       ['工具执行合计',value(metrics.tool_execution_total_ms,metrics.tool_execution_status)],
@@ -2229,7 +2229,7 @@ function renderBenchAnalysis(wrap){
   const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
   let html=conditionHTML;
   if(toolMetrics){
-    const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='not_applicable'?'不适用':'未知');
+    const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='combined_with_decision'&&value!=null?value+' ms（与决策合并测量）':(status==='not_applicable'?'不适用':'未知'));
     const rows=[
       ['工具选择策略',toolMetrics.tool_choice_mode==='auto'?'自然决策（auto）':'强制调用（web.search）'],
       ['模型工具决策',toolMetrics.tool_call_decision==='called'?'调用了工具':(toolMetrics.tool_call_decision==='not_called'?'未调用工具':'未知')],
