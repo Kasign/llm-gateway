@@ -570,6 +570,21 @@ type benchmarkTaskListQuery struct {
 	Offset   int
 }
 
+func isBenchmarkToolScenario(scenario string) bool {
+	return scenario == "tool_performance" || scenario == "tool_performance_auto"
+}
+
+// benchmarkToolChoiceMode 保留旧场景强制调用语义，新场景默认允许模型自主决策。
+func benchmarkToolChoiceMode(scenario string) string {
+	if scenario == "tool_performance_auto" {
+		return "auto"
+	}
+	if scenario == "tool_performance" {
+		return "required"
+	}
+	return "not_applicable"
+}
+
 func parseBenchmarkTaskListQuery(r *http.Request) (benchmarkTaskListQuery, error) {
 	q := r.URL.Query()
 	out := benchmarkTaskListQuery{
@@ -591,7 +606,7 @@ func parseBenchmarkTaskListQuery(r *http.Request) (benchmarkTaskListQuery, error
 		}
 		out.Offset = value
 	}
-	if out.Scenario != "" && out.Scenario != "performance" && out.Scenario != "tool_performance" {
+	if out.Scenario != "" && out.Scenario != "performance" && out.Scenario != "tool_performance" && out.Scenario != "tool_performance_auto" {
 		return benchmarkTaskListQuery{}, errors.New("unsupported benchmark scenario")
 	}
 	switch out.Status {
@@ -898,7 +913,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	in.ModelKey = strings.TrimSpace(in.ModelKey)
 	scenario := strings.TrimSpace(in.Scenario)
 	if scenario == "" { scenario = "performance" }
-	if scenario != "performance" && scenario != "tool_performance" {
+	if scenario != "performance" && scenario != "tool_performance" && scenario != "tool_performance_auto" {
 		jsonError(w, http.StatusBadRequest, "benchmark_scenario_unsupported", "unsupported benchmark scenario")
 		return
 	}
@@ -932,8 +947,8 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.Prompt == "" {
-		if scenario == "tool_performance" {
-			in.Prompt = "请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果说明版本号和发布日期。必须实际调用搜索工具。"
+		if isBenchmarkToolScenario(scenario) {
+			in.Prompt = "Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。"
 		} else {
 			in.Prompt = "Write a small, correct Objective-C function and explain it in one paragraph."
 		}
@@ -957,7 +972,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if taskModelID == "" {
 		taskModelID = activeUpstream.ModelName
 	}
-	if scenario == "tool_performance" {
+	if isBenchmarkToolScenario(scenario) {
 		if s.cfg == nil || !s.cfg.Tools.Enabled || s.toolInitErr != nil || s.toolRegistry == nil || s.toolRuntime == nil {
 			jsonError(w, http.StatusServiceUnavailable, "tool_system_unavailable", "tool system is unavailable")
 			return
@@ -998,10 +1013,15 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
 	}
 	toolNames := []string{}
-	if scenario == "tool_performance" { toolNames = []string{"web.search"} }
+	toolChoiceMode := "not_applicable"
+	if isBenchmarkToolScenario(scenario) {
+		toolNames = []string{"web.search"}
+		toolChoiceMode = benchmarkToolChoiceMode(scenario)
+	}
 	configSnapshot := map[string]interface{}{
 		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey, "tool_names": toolNames,
-		"model_id": taskModelID, "scenario": scenario, "max_tokens": in.MaxTokens, "stream": scenario != "tool_performance",
+		"model_id": taskModelID, "scenario": scenario, "tool_choice_mode": toolChoiceMode,
+		"max_tokens": in.MaxTokens, "stream": !isBenchmarkToolScenario(scenario),
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
@@ -1045,7 +1065,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		ProviderID: target.Backend, ModelKey: modelKey, ModelID: taskModelID, StartedAt: now,
 	}
 	job := &benchmarkJob{
-		ID: jobID, Scenario: scenario, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: scenario != "tool_performance",
+		ID: jobID, Scenario: scenario, Status: "running", ModelKey: modelKey, RequestID: jobID, Stream: !isBenchmarkToolScenario(scenario),
 		ModelLoadStatus: "unknown", InferenceLatencyStatus: "unknown", TTFTStatus: "unknown",
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: append([]string(nil), conditionMissing...),
 		PromptLen: len(in.Prompt), MaxTokens: in.MaxTokens, StartedAt: now,
@@ -1229,11 +1249,31 @@ func setBenchInt64(obj map[string]interface{}, key string, v *int64) {
 	}
 }
 
-// buildBenchmarkToolChatBody 构造强制工具调用的非流式请求；工具定义由服务端 Registry 覆盖。
-func buildBenchmarkToolChatBody(llamaName string, in benchRunInput) []byte {
+// isBenchmarkToolScenario 判断是否进入工具调用 Benchmark；tool_performance 保留旧版强制调用语义。
+func isBenchmarkToolScenario(scenario string) bool {
+	return scenario == "tool_performance" || scenario == "tool_performance_auto"
+}
+
+// benchmarkToolChoiceMode 返回模型首轮工具选择策略。旧场景 tool_performance 继续表示强制调用。
+func benchmarkToolChoiceMode(scenario string) string {
+	if scenario == "tool_performance_auto" {
+		return "auto"
+	}
+	if scenario == "tool_performance" {
+		return "required"
+	}
+	return "not_applicable"
+}
+
+// buildBenchmarkToolChatBody 构造非流式工具 Benchmark 请求；工具定义由服务端 Registry 覆盖。
+func buildBenchmarkToolChatBody(llamaName string, in benchRunInput, choiceMode string) []byte {
+	toolChoice := interface{}("auto")
+	if choiceMode == "required" {
+		toolChoice = map[string]interface{}{"type": "function", "function": map[string]string{"name": "web.search"}}
+	}
 	obj := map[string]interface{}{
 		"model": llamaName, "messages": []map[string]string{{"role": "user", "content": in.Prompt}},
-		"stream": false, "tools": []interface{}{}, "tool_choice": map[string]interface{}{"type": "function", "function": map[string]string{"name": "web.search"}},
+		"stream": false, "tools": []interface{}{}, "tool_choice": toolChoice,
 	}
 	if in.MaxTokens > 0 { obj["max_tokens"] = in.MaxTokens }
 	setBenchFloat(obj, "temperature", in.Temperature); setBenchFloat(obj, "top_p", in.TopP)
@@ -1403,7 +1443,9 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	applog.Debugf("[benchmark:%s] model ready in %dms resolved=%s", job.ID, time.Since(loadStart).Milliseconds(), llamaName)
 
 	body := buildBenchmarkChatBody(llamaName, in)
-	if job.Scenario == "tool_performance" { body = buildBenchmarkToolChatBody(llamaName, in) }
+	if isBenchmarkToolScenario(job.Scenario) {
+		body = buildBenchmarkToolChatBody(llamaName, in, benchmarkToolChoiceMode(job.Scenario))
+	}
 	if len(body) == 0 {
 		job.finish("failed", 500, time.Since(job.StartedAt).Milliseconds(), nil, errors.New("build request body failed"), nil, 0, 0)
 		return
@@ -1412,7 +1454,7 @@ func (s *Server) runBenchmark(workerCtx context.Context, workerCancel context.Ca
 	defer cleanupRun()
 	inferenceStart := time.Now()
 	obs := &benchRunObserver{job: job, started: inferenceStart}
-	stream := job.Scenario != "tool_performance"
+	stream := !isBenchmarkToolScenario(job.Scenario)
 	if !stream { ctx = withBenchmarkToolMetrics(ctx, job) }
 	accept := "application/json"
 	if stream { accept = "text/event-stream" }
