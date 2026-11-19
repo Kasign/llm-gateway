@@ -1924,7 +1924,7 @@ function sanitizeBenchmarkToolArguments(value,depth=0){
   if(value&&typeof value==='object'){
     const out={};
     for(const [key,item] of Object.entries(value).slice(0,100)){
-      out[key]=/(?:api[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token)/i.test(key)
+      out[key]=/(?:(?:api|client|admin|private)[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token|session(?:[_-]?id)?)/i.test(key)
         ?'[已脱敏]':sanitizeBenchmarkToolArguments(item,depth+1);
     }
     return out;
@@ -1932,7 +1932,7 @@ function sanitizeBenchmarkToolArguments(value,depth=0){
   if(typeof value==='string'){
     return value
       .replace(/Bearer\s+[^\s"',}]+/gi,'Bearer [已脱敏]')
-      .replace(/((?:api[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token)\s*[:=]\s*)["']?[^,\s"'}]+/gi,'$1[已脱敏]');
+      .replace(/((?:(?:api|client|admin|private)[_-]?key|authorization|cookie|secret|password|credential|access[_-]?token|refresh[_-]?token|session(?:[_-]?id)?)\s*[:=]\s*)["']?[^,\s"'}]+/gi,'$1[已脱敏]');
   }
   return value;
 }
@@ -2008,7 +2008,7 @@ function renderBenchmarkHistoryDetail(wrap){
     ['正文字符',job.content_chars],['思考字符',job.reasoning_chars],
     ['响应字节',job.response_bytes],['流式事件数',job.stream_event_count]
   ].filter(([,value])=>value!=null&&value!=='');
-  let html='<div class="card-head"><div><h3>请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
+  let html='<div class="card-head"><div><h3 tabindex="-1">请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
   html+='<h4>核心结果</h4><dl class="bench-history-detail-grid">'+coreMetrics.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v??'未知'))+'</dd>').join('')+'</dl>';
   html+='<details class="bench-detail-fold"><summary>测试条件与请求元数据</summary><div class="bench-detail-fold-body">'+renderBenchCondition(job)+
     (metadata.length?'<dl class="bench-history-detail-grid">'+metadata.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>':'')+
@@ -2050,7 +2050,7 @@ async function openBenchmarkHistory(jobId,trigger=null){
     const result=await api('/api/benchmark/'+encodeURIComponent(jobId));
     renderBenchmarkHistoryDetail(result);
   }catch(error){
-    if(box){box.hidden=false;box.innerHTML='<div class="msg err">'+esc(error.message||'历史任务详情加载失败')+'</div>';}
+    if(box){box.hidden=false;box.innerHTML='<div class="msg err">'+esc(error.message||'历史任务详情加载失败')+' <button type="button" class="btn sm ghost" data-bench-history-detail-close>关闭详情</button></div>';}
   }
 }
 
