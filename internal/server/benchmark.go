@@ -1233,7 +1233,7 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
 	}
 	if snap.AcceptanceCaseID != "" {
-		out["acceptance"] = evaluateBenchmarkAcceptance(snap.AcceptanceCaseID, snap, toolMetrics)
+		out["acceptance"] = evaluateBenchmarkAcceptanceWithEvents(snap.AcceptanceCaseID, snap, toolMetrics, toolEvents)
 	}
 	if snap.Status != "running" && snap.Status != "cancelling" {
 		if raw, err := s.logs.GetRequestAnalysis(r.Context(), id); err == nil {
