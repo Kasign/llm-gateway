@@ -139,7 +139,7 @@
   ACCEPTANCE_CASE_ID=TM-05 SCENARIO=tool_performance bash scripts/benchmark_tool_acceptance.sh
   ```
 - 可通过 `MODEL_ID` 固定上游模型 ID；未设置时使用当前活动模型。默认最大输出 384 Token，默认轮询超时 1800 秒，可通过 `MAX_TOKENS`、`POLL_INTERVAL_SECONDS`、`POLL_TIMEOUT_SECONDS` 调整。输出目录默认为当前目录下 `benchmark-tool-evidence/`，文件权限受 `umask 077` 保护。
-- TM-03 当前在服务端创建接口明确返回 HTTP 409，原因是尚无可信的隔离环境配置。仅把独立 Gateway 的 SearXNG 指向故障端点还不足以开放执行；需先实现并确认服务端隔离环境门禁。脚本不会修改服务端工具配置，也不会触碰生产环境。超时退出时脚本报告 Job ID 和查询地址，不会伪造终态结果。
+- TM-03 默认在服务端创建接口返回 HTTP 409，因为 `benchmark.isolated_environment` 默认 false。只有独立验收 Gateway 在 `config.yaml` 显式设为 true 并重启后，目录才会将 TM-03 标记为可执行；生产环境必须保持 false。仅修改 SearXNG 故障端点不构成隔离授权。脚本不会修改服务端工具配置，也不会触碰生产环境。超时退出时脚本报告 Job ID 和查询地址，不会伪造终态结果。
 - 当前仅完成采集工具和使用说明，未访问或调用用户私有 Gateway；TM-01～TM-05 的真实模型结果仍全部待部署环境执行。
 
 
@@ -185,12 +185,12 @@
 - `POST /api/benchmark` 接受可选 `acceptance_case_id`。服务端校验用例 ID 与场景匹配，并将 ID 写入现有 `benchmark_tasks.config_json` 配置快照；没有新增表或重复执行链路。旧任务配置中没有该字段时保持未关联。
 - 任务详情由服务端判定器返回 `acceptance`，包含 `pass / fail / inconclusive / not_run`、稳定原因码、说明和规则版本。实时任务与 Gateway 重启后从 MariaDB 恢复的历史任务复用同一判定器。
 - 判定只使用服务端任务状态、请求级决策、审计完整性、工具执行事件、模型轮数和最终生成阶段；前端与 Shell 脚本不计算结论。审计不完整或关键证据缺失返回 `inconclusive`，不能按零次调用推断成功或失败。
-- TM-03 判定要求审计事件明确为 `failed` 或 `timed_out`；`cancelled` 不计为工具故障。由于当前还没有服务端可信隔离环境配置，TM-03 在创建接口返回 409，管理台目录将其标记为不可自动执行。客户端不能通过自报环境字段绕过。
+- TM-03 判定要求审计事件明确为 `failed` 或 `timed_out`；`cancelled` 不计为工具故障。服务端以部署配置 `benchmark.isolated_environment` 控制是否开放创建，默认 false；未启用时返回 409，管理台目录将其标记为不可自动执行。客户端不能通过自报环境字段绕过。
 - 管理台已增加用例选择、默认提示词切换、执行入口、当前任务判定展示、历史列表用例 ID 和历史详情判定说明；仍复用现有 Benchmark 页面与历史数据。
 - `scripts/benchmark_tool_acceptance.sh` 增加可选 `ACCEPTANCE_CASE_ID`，先读取服务端目录校验场景和 `manual_only`，再创建任务；结果摘要输出服务端 `acceptance`。未设置用例 ID 时保留原有普通采集行为。
 - OpenAPI 已补充用例目录、创建请求字段、任务字段、判定结果和 TM-03 的隔离错误响应。
 - 自动化测试覆盖五个用例的成功路径、决策缺失、审计不完整、任务未结束、场景不匹配、TM-04 缺少第二轮、TM-03 取消事件不能冒充故障，以及配置快照恢复。
-- 本阶段没有访问用户私有 Gateway，也没有执行真实模型请求。TM-01～TM-05 的真实模型部署验收仍待执行；TM-03 还需要先建设可信隔离环境开关。
+- 本阶段没有访问用户私有 Gateway，也没有执行真实模型请求。TM-01～TM-05 的真实模型部署验收仍待执行；TM-03 的服务端隔离配置开关已加入，尚需在专用验收 Gateway 验证启用路径，生产环境保持关闭。
 
 ### 当前验证状态
 
