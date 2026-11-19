@@ -11,18 +11,24 @@ import (
 // Timings 为 llama.cpp chat/completions 响应中的 timings 对象。
 // Present 字段用于区分合法的 0 与字段缺失；它们不参与 JSON 序列化。
 type Timings struct {
-	PromptN                  int64   `json:"prompt_n"`
-	PredictedN               int64   `json:"predicted_n"`
-	PredictedPerSecond       float64 `json:"predicted_per_second"`
-	PromptMS                 float64 `json:"prompt_ms"`
-	PredictedMS              float64 `json:"predicted_ms"`
-	PromptPerSecond          float64 `json:"prompt_per_second"`
-	PromptNPresent           bool    `json:"-"`
-	PredictedNPresent        bool    `json:"-"`
-	PromptMSPresent          bool    `json:"-"`
-	PredictedMSPresent       bool    `json:"-"`
-	PromptPerSecondPresent   bool    `json:"-"`
-	PredictedPerSecondPresent bool   `json:"-"`
+	CacheN                    int64   `json:"cache_n"`
+	PromptN                   int64   `json:"prompt_n"`
+	PredictedN                int64   `json:"predicted_n"`
+	PredictedPerSecond        float64 `json:"predicted_per_second"`
+	PromptMS                  float64 `json:"prompt_ms"`
+	PredictedMS               float64 `json:"predicted_ms"`
+	PromptPerTokenMS          float64 `json:"prompt_per_token_ms"`
+	PredictedPerTokenMS       float64 `json:"predicted_per_token_ms"`
+	PromptPerSecond           float64 `json:"prompt_per_second"`
+	CacheNPresent             bool    `json:"-"`
+	PromptNPresent            bool    `json:"-"`
+	PredictedNPresent         bool    `json:"-"`
+	PromptMSPresent           bool    `json:"-"`
+	PredictedMSPresent        bool    `json:"-"`
+	PromptPerTokenMSPresent   bool    `json:"-"`
+	PredictedPerTokenMSPresent bool   `json:"-"`
+	PromptPerSecondPresent    bool    `json:"-"`
+	PredictedPerSecondPresent bool    `json:"-"`
 }
 
 func parseTimingsJSON(raw string) (Timings, bool) {
@@ -41,14 +47,17 @@ func parseTimingsJSON(raw string) (Timings, bool) {
 	}
 
 	var t Timings
+	t.CacheN, t.CacheNPresent = parseTimingsInt(fields["cache_n"])
 	t.PromptN, t.PromptNPresent = parseTimingsInt(fields["prompt_n"])
 	t.PredictedN, t.PredictedNPresent = parseTimingsInt(fields["predicted_n"])
 	t.PromptMS, t.PromptMSPresent = parseTimingsFloat(fields["prompt_ms"])
 	t.PredictedMS, t.PredictedMSPresent = parseTimingsFloat(fields["predicted_ms"])
+	t.PromptPerTokenMS, t.PromptPerTokenMSPresent = parseTimingsFloat(fields["prompt_per_token_ms"])
+	t.PredictedPerTokenMS, t.PredictedPerTokenMSPresent = parseTimingsFloat(fields["predicted_per_token_ms"])
 	t.PromptPerSecond, t.PromptPerSecondPresent = parseTimingsFloat(fields["prompt_per_second"])
 	t.PredictedPerSecond, t.PredictedPerSecondPresent = parseTimingsFloat(fields["predicted_per_second"])
-	valid := t.PromptNPresent || t.PredictedNPresent || t.PromptMSPresent || t.PredictedMSPresent ||
-		t.PromptPerSecondPresent || t.PredictedPerSecondPresent
+	valid := t.CacheNPresent || t.PromptNPresent || t.PredictedNPresent || t.PromptMSPresent || t.PredictedMSPresent ||
+		t.PromptPerTokenMSPresent || t.PredictedPerTokenMSPresent || t.PromptPerSecondPresent || t.PredictedPerSecondPresent
 	return t, valid
 }
 
@@ -156,20 +165,35 @@ func ParseTimingsBody(body []byte) (*int64, *int64, *int64, *float64) {
 
 // TokenHarvest 同时保留 Token 计数来源、速度来源和 llama.cpp 原始 timings。
 // Source 为兼容旧调用方保留，后续展示应优先使用 TokenSource / SpeedSource。
+type PromptProgressSample struct {
+	Total     int64 `json:"total"`
+	Cache     int64 `json:"cache"`
+	Processed int64 `json:"processed"`
+	TimeMS    int64 `json:"time_ms"`
+}
+
+const maxPromptProgressSamples = 256
+
 type TokenHarvest struct {
-	InputTokens      *int64
-	OutputTokens     *int64
-	TotalTokens      *int64
-	PredictedPerSec  *float64
-	PredictedPerSecond *float64
-	PromptN          *int64
-	PredictedN       *int64
-	PromptMS         *float64
-	PredictedMS      *float64
-	PromptPerSecond  *float64
-	TokenSource      string
-	SpeedSource      string
-	Source           string // 兼容旧值："usage" | "llama_timings"
+	InputTokens         *int64
+	OutputTokens        *int64
+	TotalTokens         *int64
+	PredictedPerSec     *float64
+	PredictedPerSecond  *float64
+	CacheN              *int64
+	PromptN             *int64
+	PredictedN          *int64
+	TokensCached        *int64
+	TokensEvaluated     *int64
+	PromptMS            *float64
+	PredictedMS         *float64
+	PromptPerTokenMS    *float64
+	PredictedPerTokenMS *float64
+	PromptPerSecond     *float64
+	PromptProgress      []PromptProgressSample
+	TokenSource         string
+	SpeedSource         string
+	Source              string // 兼容旧值："usage" | "llama_timings"
 }
 
 // Empty 表示还没有从 usage 或 timings 读到任何 Token 计数。
@@ -197,7 +221,57 @@ func (h *TokenHarvest) mergeUsage(in, out, total int64) {
 	h.Source = "usage"
 }
 
+func parsePromptProgressJSON(raw string) (PromptProgressSample, bool) {
+	if raw == "" || raw == "[DONE]" {
+		return PromptProgressSample{}, false
+	}
+	var envelope struct {
+		Progress json.RawMessage `json:"prompt_progress"`
+	}
+	if json.Unmarshal([]byte(raw), &envelope) != nil || len(envelope.Progress) == 0 || string(envelope.Progress) == "null" {
+		return PromptProgressSample{}, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(envelope.Progress, &fields) != nil || fields == nil {
+		return PromptProgressSample{}, false
+	}
+	total, totalOK := parseTimingsInt(fields["total"])
+	cache, cacheOK := parseTimingsInt(fields["cache"])
+	processed, processedOK := parseTimingsInt(fields["processed"])
+	timeMS, timeOK := parseTimingsInt(fields["time_ms"])
+	if !totalOK || !cacheOK || !processedOK || !timeOK {
+		return PromptProgressSample{}, false
+	}
+	return PromptProgressSample{Total: total, Cache: cache, Processed: processed, TimeMS: timeMS}, true
+}
+
+func parseTopLevelTokenCount(raw, key string) *int64 {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &fields) != nil || fields == nil {
+		return nil
+	}
+	value, ok := parseTimingsInt(fields[key])
+	if !ok {
+		return nil
+	}
+	return &value
+}
+
+func (h *TokenHarvest) appendPromptProgress(sample PromptProgressSample) {
+	if h == nil || len(h.PromptProgress) >= maxPromptProgressSamples {
+		return
+	}
+	if n := len(h.PromptProgress); n > 0 && h.PromptProgress[n-1] == sample {
+		return
+	}
+	h.PromptProgress = append(h.PromptProgress, sample)
+}
+
 func (h *TokenHarvest) mergeTimings(t Timings) {
+	if t.CacheNPresent {
+		v := t.CacheN
+		h.CacheN = &v
+	}
 	if t.PromptNPresent {
 		v := t.PromptN
 		h.PromptN = &v
@@ -215,6 +289,14 @@ func (h *TokenHarvest) mergeTimings(t Timings) {
 	if t.PromptMSPresent {
 		v := t.PromptMS
 		h.PromptMS = &v
+	}
+	if t.PromptPerTokenMSPresent {
+		v := t.PromptPerTokenMS
+		h.PromptPerTokenMS = &v
+	}
+	if t.PredictedPerTokenMSPresent {
+		v := t.PredictedPerTokenMS
+		h.PredictedPerTokenMS = &v
 	}
 	if t.PredictedMSPresent {
 		v := t.PredictedMS
@@ -251,6 +333,15 @@ func applyStreamDataTokens(h *TokenHarvest, raw string) {
 	}
 	if t, got := parseTimingsJSON(raw); got {
 		h.mergeTimings(t)
+	}
+	if v := parseTopLevelTokenCount(raw, "tokens_cached"); v != nil {
+		h.TokensCached = v
+	}
+	if v := parseTopLevelTokenCount(raw, "tokens_evaluated"); v != nil {
+		h.TokensEvaluated = v
+	}
+	if sample, ok := parsePromptProgressJSON(raw); ok {
+		h.appendPromptProgress(sample)
 	}
 }
 
@@ -318,6 +409,15 @@ func TokensFromResponse(body []byte) TokenHarvest {
 	}
 	if t, ok := parseTimingsJSON(string(body)); ok {
 		h.mergeTimings(t)
+	}
+	if v := parseTopLevelTokenCount(string(body), "tokens_cached"); v != nil {
+		h.TokensCached = v
+	}
+	if v := parseTopLevelTokenCount(string(body), "tokens_evaluated"); v != nil {
+		h.TokensEvaluated = v
+	}
+	if sample, ok := parsePromptProgressJSON(string(body)); ok {
+		h.appendPromptProgress(sample)
 	}
 	return h
 }

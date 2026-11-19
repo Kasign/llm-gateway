@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/whl/llm-gateway/internal/logutil"
 )
 
 func TestBuildRequestAnalysisSeparatesTokenAndSpeedSources(t *testing.T) {
@@ -129,5 +131,36 @@ func TestTimelineOnlyAnalysisDoesNotInventPhaseMetrics(t *testing.T) {
 	}
 	if strings.Contains(encodeRequestAnalysis(a), "phases_ms") || strings.Contains(encodeRequestAnalysis(a), "throughput") {
 		t.Fatalf("timeline-only JSON must omit unavailable phase metrics: %s", encodeRequestAnalysis(a))
+	}
+}
+
+
+func TestRequestModelTimingsPreserveCachePerTokenAndPromptProgress(t *testing.T) {
+	cacheN, promptN, predictedN := int64(80), int64(20), int64(10)
+	promptMS, promptPerTokenMS, predictedPerTokenMS := 100.0, 5.0, 2.5
+	cached, evaluated := int64(80), int64(20)
+	harvest := logutil.TokenHarvest{
+		CacheN: &cacheN, PromptN: &promptN, PredictedN: &predictedN,
+		TokensCached: &cached, TokensEvaluated: &evaluated,
+		PromptMS: &promptMS, PromptPerTokenMS: &promptPerTokenMS, PredictedPerTokenMS: &predictedPerTokenMS,
+		PromptProgress: []logutil.PromptProgressSample{{Total: 100, Cache: 80, Processed: 90, TimeMS: 500}},
+	}
+	got := requestModelTimings(harvest)
+	if got == nil || got.CacheN == nil || *got.CacheN != 80 ||
+		got.PromptPerTokenMS == nil || *got.PromptPerTokenMS != 5 ||
+		got.PredictedPerTokenMS == nil || *got.PredictedPerTokenMS != 2.5 ||
+		got.TokensCached == nil || *got.TokensCached != 80 ||
+		got.TokensEvaluated == nil || *got.TokensEvaluated != 20 ||
+		len(got.PromptProgress) != 1 || got.PromptProgress[0].Processed != 90 {
+		t.Fatalf("extended model timings lost: %+v", got)
+	}
+	raw := encodeRequestAnalysis(buildRequestAnalysis(analysisInput{ModelTimings: got}))
+	var decoded RequestAnalysis
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Throughput.ModelTimings == nil || len(decoded.Throughput.ModelTimings.PromptProgress) != 1 ||
+		decoded.Throughput.ModelTimings.PromptProgress[0].TimeMS != 500 {
+		t.Fatalf("extended model timings did not round-trip: %s", raw)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/whl/llm-gateway/internal/logutil"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -64,12 +65,18 @@ type RequestPhaseMS struct {
 
 // RequestModelTimings 保留 llama.cpp 原始阶段测量；指针 nil 表示上游未提供该字段。
 type RequestModelTimings struct {
-	PromptN           *int64   `json:"prompt_n,omitempty"`
-	PredictedN        *int64   `json:"predicted_n,omitempty"`
-	PromptMS          *float64 `json:"prompt_ms,omitempty"`
-	PredictedMS       *float64 `json:"predicted_ms,omitempty"`
-	PromptPerSecond   *float64 `json:"prompt_per_second,omitempty"`
-	PredictedPerSecond *float64 `json:"predicted_per_second,omitempty"`
+	CacheN              *int64                         `json:"cache_n,omitempty"`
+	PromptN             *int64                         `json:"prompt_n,omitempty"`
+	PredictedN          *int64                         `json:"predicted_n,omitempty"`
+	TokensCached        *int64                         `json:"tokens_cached,omitempty"`
+	TokensEvaluated     *int64                         `json:"tokens_evaluated,omitempty"`
+	PromptMS            *float64                       `json:"prompt_ms,omitempty"`
+	PredictedMS         *float64                       `json:"predicted_ms,omitempty"`
+	PromptPerTokenMS    *float64                       `json:"prompt_per_token_ms,omitempty"`
+	PredictedPerTokenMS *float64                       `json:"predicted_per_token_ms,omitempty"`
+	PromptPerSecond     *float64                       `json:"prompt_per_second,omitempty"`
+	PredictedPerSecond  *float64                       `json:"predicted_per_second,omitempty"`
+	PromptProgress      []logutil.PromptProgressSample `json:"prompt_progress,omitempty"`
 }
 
 type RequestThroughput struct {
@@ -306,14 +313,22 @@ func streamTimingsFromEvents(events []store.StreamEvent) streamTimings {
 }
 
 
-// requestModelTimings 只在至少存在一个有效上游 timings 字段时生成快照。
-func requestModelTimings(promptN, predictedN *int64, promptMS, predictedMS, promptPerSecond, predictedPerSecond *float64) *RequestModelTimings {
-	if promptN == nil && predictedN == nil && promptMS == nil && predictedMS == nil &&
-		promptPerSecond == nil && predictedPerSecond == nil {
+// requestModelTimings 只在至少存在一个有效上游 timing 字段或进度样本时生成快照。
+func requestModelTimings(h logutil.TokenHarvest) *RequestModelTimings {
+	if h.CacheN == nil && h.PromptN == nil && h.PredictedN == nil &&
+		h.TokensCached == nil && h.TokensEvaluated == nil &&
+		h.PromptMS == nil && h.PredictedMS == nil &&
+		h.PromptPerTokenMS == nil && h.PredictedPerTokenMS == nil &&
+		h.PromptPerSecond == nil && h.PredictedPerSecond == nil && len(h.PromptProgress) == 0 {
 		return nil
 	}
+	progress := append([]logutil.PromptProgressSample(nil), h.PromptProgress...)
 	return &RequestModelTimings{
-		PromptN: promptN, PredictedN: predictedN, PromptMS: promptMS, PredictedMS: predictedMS,
-		PromptPerSecond: promptPerSecond, PredictedPerSecond: predictedPerSecond,
+		CacheN: h.CacheN, PromptN: h.PromptN, PredictedN: h.PredictedN,
+		TokensCached: h.TokensCached, TokensEvaluated: h.TokensEvaluated,
+		PromptMS: h.PromptMS, PredictedMS: h.PredictedMS,
+		PromptPerTokenMS: h.PromptPerTokenMS, PredictedPerTokenMS: h.PredictedPerTokenMS,
+		PromptPerSecond: h.PromptPerSecond, PredictedPerSecond: h.PredictedPerSecond,
+		PromptProgress: progress,
 	}
 }

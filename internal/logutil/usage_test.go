@@ -154,3 +154,53 @@ func TestTokenHarvestKeepsTimingFieldsWhenDecodeSpeedIsZero(t *testing.T) {
 		t.Fatalf("zero Decode speed must not be treated as measured speed: %+v", h)
 	}
 }
+
+
+func TestParseTimingsPreservesCacheAndPerTokenMetrics(t *testing.T) {
+	got, ok := parseTimingsJSON(`{"timings":{"cache_n":0,"prompt_n":12,"prompt_ms":4.5,"prompt_per_token_ms":0.375,"predicted_n":3,"predicted_ms":6,"predicted_per_token_ms":2,"predicted_per_second":0}}`)
+	if !ok || !got.CacheNPresent || !got.PromptPerTokenMSPresent || !got.PredictedPerTokenMSPresent {
+		t.Fatalf("timings fields missing: %+v ok=%v", got, ok)
+	}
+	if got.CacheN != 0 || got.PromptPerTokenMS != 0.375 || got.PredictedPerTokenMS != 2 {
+		t.Fatalf("timings values changed: %+v", got)
+	}
+}
+
+func TestTokensFromResponseKeepsCacheAndEvaluatedCountsSeparate(t *testing.T) {
+	h := TokensFromResponse([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":10},"tokens_cached":80,"tokens_evaluated":20,"timings":{"cache_n":80,"prompt_n":20,"predicted_n":10}}`))
+	if h.InputTokens == nil || *h.InputTokens != 100 || h.CacheN == nil || *h.CacheN != 80 ||
+		h.TokensCached == nil || *h.TokensCached != 80 || h.TokensEvaluated == nil || *h.TokensEvaluated != 20 {
+		t.Fatalf("cache/evaluated counts conflated or lost: %+v", h)
+	}
+}
+
+func TestPromptProgressSplitSSEAndBounded(t *testing.T) {
+	var h TokenHarvest
+	var carry string
+	ApplyStreamChunkTokens(&h, []byte(`data: {"prompt_progress":{"total":100,"cache":60,"processed":70,"time_ms":250}}`), &carry)
+	if len(h.PromptProgress) != 0 {
+		t.Fatalf("partial line must wait for delimiter: %+v", h.PromptProgress)
+	}
+	ApplyStreamChunkTokens(&h, []byte("\n"), &carry)
+	if len(h.PromptProgress) != 1 || h.PromptProgress[0] != (PromptProgressSample{Total: 100, Cache: 60, Processed: 70, TimeMS: 250}) {
+		t.Fatalf("progress sample missing: %+v", h.PromptProgress)
+	}
+	for i := 0; i < maxPromptProgressSamples+10; i++ {
+		h.appendPromptProgress(PromptProgressSample{Total: 100, Cache: 60, Processed: int64(i), TimeMS: int64(i)})
+	}
+	if len(h.PromptProgress) != maxPromptProgressSamples {
+		t.Fatalf("progress sample cap violated: %d", len(h.PromptProgress))
+	}
+}
+
+func TestPromptProgressRejectsIncompleteAndInvalidValues(t *testing.T) {
+	for _, raw := range []string{
+		`{"prompt_progress":{"total":100,"cache":10,"processed":20}}`,
+		`{"prompt_progress":{"total":-1,"cache":0,"processed":0,"time_ms":0}}`,
+		`{"prompt_progress":null}`,
+	} {
+		if _, ok := parsePromptProgressJSON(raw); ok {
+			t.Fatalf("invalid progress accepted: %s", raw)
+		}
+	}
+}

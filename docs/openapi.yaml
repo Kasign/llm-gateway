@@ -2981,14 +2981,32 @@ components:
       additionalProperties: false
     RequestModelTimings:
       type: object
-      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。缓存 Token 与本次实际 Eval Token 分开记录。
       properties:
+        cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
+        prompt_per_token_ms: { type: number, minimum: 0 }
+        predicted_per_token_ms: { type: number, minimum: 0 }
         prompt_per_second: { type: number, minimum: 0 }
         predicted_per_second: { type: number, minimum: 0 }
+        prompt_progress:
+          type: array
+          maxItems: 256
+          description: 流式 Prompt 处理进度采样；只保存数值，不包含 Prompt 正文。
+          items:
+            type: object
+            required: [total, cache, processed, time_ms]
+            properties:
+              total: { type: integer, format: int64, minimum: 0 }
+              cache: { type: integer, format: int64, minimum: 0 }
+              processed: { type: integer, format: int64, minimum: 0 }
+              time_ms: { type: integer, format: int64, minimum: 0 }
+            additionalProperties: false
       additionalProperties: false
     ToolCallEvent:
       type: object
@@ -4178,14 +4196,32 @@ components:
       additionalProperties: false
     RequestModelTimings:
       type: object
-      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。缓存 Token 与本次实际 Eval Token 分开记录。
       properties:
+        cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
+        prompt_per_token_ms: { type: number, minimum: 0 }
+        predicted_per_token_ms: { type: number, minimum: 0 }
         prompt_per_second: { type: number, minimum: 0 }
         predicted_per_second: { type: number, minimum: 0 }
+        prompt_progress:
+          type: array
+          maxItems: 256
+          description: 流式 Prompt 处理进度采样；只保存数值，不包含 Prompt 正文。
+          items:
+            type: object
+            required: [total, cache, processed, time_ms]
+            properties:
+              total: { type: integer, format: int64, minimum: 0 }
+              cache: { type: integer, format: int64, minimum: 0 }
+              processed: { type: integer, format: int64, minimum: 0 }
+              time_ms: { type: integer, format: int64, minimum: 0 }
+            additionalProperties: false
       additionalProperties: false
     StreamEvent:
       type: object
@@ -5262,14 +5298,32 @@ components:
       additionalProperties: false
     RequestModelTimings:
       type: object
-      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。缓存 Token 与本次实际 Eval Token 分开记录。
       properties:
+        cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
+        prompt_per_token_ms: { type: number, minimum: 0 }
+        predicted_per_token_ms: { type: number, minimum: 0 }
         prompt_per_second: { type: number, minimum: 0 }
         predicted_per_second: { type: number, minimum: 0 }
+        prompt_progress:
+          type: array
+          maxItems: 256
+          description: 流式 Prompt 处理进度采样；只保存数值，不包含 Prompt 正文。
+          items:
+            type: object
+            required: [total, cache, processed, time_ms]
+            properties:
+              total: { type: integer, format: int64, minimum: 0 }
+              cache: { type: integer, format: int64, minimum: 0 }
+              processed: { type: integer, format: int64, minimum: 0 }
+              time_ms: { type: integer, format: int64, minimum: 0 }
+            additionalProperties: false
       additionalProperties: false
     StreamEvent:
       type: object
@@ -6380,14 +6434,32 @@ components:
       additionalProperties: false
     RequestModelTimings:
       type: object
-      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。
+      description: llama.cpp 原始 Prompt Eval / Decode 指标；未提供的字段省略，合法零值保留。缓存 Token 与本次实际 Eval Token 分开记录。
       properties:
+        cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
+        prompt_per_token_ms: { type: number, minimum: 0 }
+        predicted_per_token_ms: { type: number, minimum: 0 }
         prompt_per_second: { type: number, minimum: 0 }
         predicted_per_second: { type: number, minimum: 0 }
+        prompt_progress:
+          type: array
+          maxItems: 256
+          description: 流式 Prompt 处理进度采样；只保存数值，不包含 Prompt 正文。
+          items:
+            type: object
+            required: [total, cache, processed, time_ms]
+            properties:
+              total: { type: integer, format: int64, minimum: 0 }
+              cache: { type: integer, format: int64, minimum: 0 }
+              processed: { type: integer, format: int64, minimum: 0 }
+              time_ms: { type: integer, format: int64, minimum: 0 }
+            additionalProperties: false
       additionalProperties: false
     StreamEvent:
       type: object
