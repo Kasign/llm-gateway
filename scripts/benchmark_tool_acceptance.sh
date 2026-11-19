@@ -10,6 +10,7 @@ umask 077
 : "${GATEWAY_CLIENT_API_KEY:?请设置 GATEWAY_CLIENT_API_KEY（独立客户端服务 API Key）}"
 
 SCENARIO="${SCENARIO:-tool_performance_auto}"
+ACCEPTANCE_CASE_ID="${ACCEPTANCE_CASE_ID:-}"
 MODEL_ID="${MODEL_ID:-}"
 MAX_TOKENS="${MAX_TOKENS:-384}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-2}"
@@ -51,6 +52,29 @@ if ! [[ "$POLL_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || ! [[ "$POLL_TIMEOUT_SECO
 fi
 
 BASE_URL="${GATEWAY_URL%/}"
+if [[ -n "$ACCEPTANCE_CASE_ID" ]]; then
+  case "$ACCEPTANCE_CASE_ID" in TM-01|TM-02|TM-03|TM-04|TM-05) ;; *) echo "未知验收用例 ID：$ACCEPTANCE_CASE_ID" >&2; exit 2 ;; esac
+  CATALOG_STATUS="$(request GET "$BASE_URL/api/benchmark/acceptance-cases" "$RESPONSE_FILE")"
+  if [[ "$CATALOG_STATUS" != "200" ]]; then
+    echo "读取验收用例目录失败，HTTP $CATALOG_STATUS" >&2
+    jq . "$RESPONSE_FILE" >&2 2>/dev/null || cat "$RESPONSE_FILE" >&2
+    exit 1
+  fi
+  CASE_META="$(jq -c --arg id "$ACCEPTANCE_CASE_ID" '.items[] | select(.id == $id)' "$RESPONSE_FILE")"
+  if [[ -z "$CASE_META" ]]; then
+    echo "Gateway 未提供验收用例：$ACCEPTANCE_CASE_ID" >&2
+    exit 2
+  fi
+  if [[ "$(jq -r '.manual_only' <<<"$CASE_META")" == "true" ]]; then
+    echo "$ACCEPTANCE_CASE_ID 需要隔离环境；当前 Gateway 尚未开放自动执行。" >&2
+    exit 2
+  fi
+  EXPECTED_SCENARIO="$(jq -r '.scenario' <<<"$CASE_META")"
+  if [[ "$SCENARIO" != "$EXPECTED_SCENARIO" ]]; then
+    echo "$ACCEPTANCE_CASE_ID 要求 SCENARIO=$EXPECTED_SCENARIO，当前为 $SCENARIO" >&2
+    exit 2
+  fi
+fi
 mkdir -p "$OUTPUT_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESPONSE_FILE="$(mktemp)"
@@ -76,9 +100,11 @@ PAYLOAD="$(jq -n \
   --arg scenario "$SCENARIO" \
   --arg prompt "$PROMPT" \
   --arg model_id "$MODEL_ID" \
+  --arg acceptance_case_id "$ACCEPTANCE_CASE_ID" \
   --argjson max_tokens "$MAX_TOKENS" \
   '{scenario:$scenario,prompt:$prompt,max_tokens:$max_tokens,use_active:($model_id == "")}
-   + (if $model_id == "" then {} else {model_id:$model_id} end)')"
+   + (if $model_id == "" then {} else {model_id:$model_id} end)
+   + (if $acceptance_case_id == "" then {} else {acceptance_case_id:$acceptance_case_id} end)')"
 
 echo "创建 Benchmark：scenario=$SCENARIO max_tokens=$MAX_TOKENS"
 HTTP_STATUS="$(request POST "$BASE_URL/api/benchmark" "$RESPONSE_FILE" "$PAYLOAD")"
@@ -137,6 +163,7 @@ jq '{
   job_id: (.job.id // .job.job_id // null),
   status: .job.status,
   scenario: .job.scenario,
+  acceptance: .acceptance,
   model_key: .job.model_key,
   request_id: .request_id,
   tool_metrics: .tool_metrics,
