@@ -12,12 +12,14 @@ import (
 // TestStreamProxyStopsReadingWhenClientCancels 验证观察器触发客户端取消后，代理不再读取后续数据。
 func TestStreamProxyStopsReadingWhenClientCancels(t *testing.T) {
 	const firstChunk = "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n"
+	upstreamCanceled := make(chan struct{})
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(firstChunk))
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
+		close(upstreamCanceled)
 	}))
 	defer upstream.Close()
 
@@ -53,5 +55,10 @@ func TestStreamProxyStopsReadingWhenClientCancels(t *testing.T) {
 	}
 	if got := writer.body.String(); got != firstChunk {
 		t.Fatalf("client body = %q, want first flushed chunk %q", got, firstChunk)
+	}
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("upstream request context was not canceled promptly")
 	}
 }
