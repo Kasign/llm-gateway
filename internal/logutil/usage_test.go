@@ -204,3 +204,26 @@ func TestPromptProgressRejectsIncompleteAndInvalidValues(t *testing.T) {
 		}
 	}
 }
+
+
+func TestTokensFromResponseKeepsUsageCachedTokensDistinct(t *testing.T) {
+	h := TokensFromResponse([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":80}},"timings":{"cache_n":75,"prompt_n":25,"predicted_n":10}}`))
+	if h.UsageCachedTokens == nil || *h.UsageCachedTokens != 80 || h.CacheN == nil || *h.CacheN != 75 {
+		t.Fatalf("usage cache and llama timings cache should remain separate: %+v", h)
+	}
+}
+
+func TestTimingsTokenCountsIncludeCachedPromptTokens(t *testing.T) {
+	got, ok := parseTimingsJSON(`{"timings":{"cache_n":80,"prompt_n":20,"predicted_n":10}}`)
+	if !ok {
+		t.Fatal("timings should parse")
+	}
+	in, out, total := TimingsTokenCounts(got)
+	if in != 100 || out != 10 || total != 110 {
+		t.Fatalf("cache tokens were not included in prompt total: in=%d out=%d total=%d", in, out, total)
+	}
+	h := TokensFromResponse([]byte(`{"timings":{"cache_n":80,"prompt_n":20,"predicted_n":10}}`))
+	if h.InputTokens == nil || *h.InputTokens != 100 || h.TotalTokens == nil || *h.TotalTokens != 110 {
+		t.Fatalf("TokenHarvest did not include cache tokens: %+v", h)
+	}
+}

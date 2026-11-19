@@ -64,12 +64,28 @@ func WantsEventStream(accept string) bool {
 }
 
 // usageFields 同时兼容 chat 的 prompt/completion 和 Responses 的 input/output。
+type usageTokenDetails struct {
+	CachedTokens *int64 `json:"cached_tokens"`
+}
+
 type usageFields struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
-	InputTokens      int64 `json:"input_tokens"`
-	OutputTokens     int64 `json:"output_tokens"`
+	PromptTokens        int64              `json:"prompt_tokens"`
+	CompletionTokens    int64              `json:"completion_tokens"`
+	TotalTokens         int64              `json:"total_tokens"`
+	InputTokens         int64              `json:"input_tokens"`
+	OutputTokens        int64              `json:"output_tokens"`
+	PromptTokensDetails *usageTokenDetails `json:"prompt_tokens_details"`
+	InputTokensDetails  *usageTokenDetails `json:"input_tokens_details"`
+}
+
+func (u usageFields) cachedTokens() *int64 {
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil {
+		return u.PromptTokensDetails.CachedTokens
+	}
+	if u.InputTokensDetails != nil {
+		return u.InputTokensDetails.CachedTokens
+	}
+	return nil
 }
 
 func (u usageFields) counts() (in, out, total int64, ok bool) {
@@ -91,6 +107,29 @@ func (u usageFields) counts() (in, out, total int64, ok bool) {
 }
 
 // parseUsageJSON 从一条 JSON 里取 usage：顶层或 response.usage（response.completed）。
+func parseUsageCachedTokens(raw string) *int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[DONE]" {
+		return nil
+	}
+	var v struct {
+		Usage *usageFields `json:"usage"`
+		Response *struct {
+			Usage *usageFields `json:"usage"`
+		} `json:"response"`
+	}
+	if json.Unmarshal([]byte(raw), &v) != nil {
+		return nil
+	}
+	if v.Usage != nil && v.Usage.cachedTokens() != nil {
+		return v.Usage.cachedTokens()
+	}
+	if v.Response != nil && v.Response.Usage != nil {
+		return v.Response.Usage.cachedTokens()
+	}
+	return nil
+}
+
 func parseUsageJSON(raw string) (in, out, total int64, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "[DONE]" {

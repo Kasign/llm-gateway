@@ -69,6 +69,7 @@ type RequestModelTimings struct {
 	PromptN             *int64                         `json:"prompt_n,omitempty"`
 	PredictedN          *int64                         `json:"predicted_n,omitempty"`
 	TokensCached        *int64                         `json:"tokens_cached,omitempty"`
+	UsageCachedTokens   *int64                         `json:"usage_cached_tokens,omitempty"`
 	TokensEvaluated     *int64                         `json:"tokens_evaluated,omitempty"`
 	PromptMS            *float64                       `json:"prompt_ms,omitempty"`
 	PredictedMS         *float64                       `json:"predicted_ms,omitempty"`
@@ -316,7 +317,7 @@ func streamTimingsFromEvents(events []store.StreamEvent) streamTimings {
 // requestModelTimings 只在至少存在一个有效上游 timing 字段或进度样本时生成快照。
 func requestModelTimings(h logutil.TokenHarvest) *RequestModelTimings {
 	if h.CacheN == nil && h.PromptN == nil && h.PredictedN == nil &&
-		h.TokensCached == nil && h.TokensEvaluated == nil &&
+		h.TokensCached == nil && h.UsageCachedTokens == nil && h.TokensEvaluated == nil &&
 		h.PromptMS == nil && h.PredictedMS == nil &&
 		h.PromptPerTokenMS == nil && h.PredictedPerTokenMS == nil &&
 		h.PromptPerSecond == nil && h.PredictedPerSecond == nil && len(h.PromptProgress) == 0 {
@@ -325,7 +326,7 @@ func requestModelTimings(h logutil.TokenHarvest) *RequestModelTimings {
 	progress := append([]logutil.PromptProgressSample(nil), h.PromptProgress...)
 	return &RequestModelTimings{
 		CacheN: h.CacheN, PromptN: h.PromptN, PredictedN: h.PredictedN,
-		TokensCached: h.TokensCached, TokensEvaluated: h.TokensEvaluated,
+		TokensCached: h.TokensCached, UsageCachedTokens: h.UsageCachedTokens, TokensEvaluated: h.TokensEvaluated,
 		PromptMS: h.PromptMS, PredictedMS: h.PredictedMS,
 		PromptPerTokenMS: h.PromptPerTokenMS, PredictedPerTokenMS: h.PredictedPerTokenMS,
 		PromptPerSecond: h.PromptPerSecond, PredictedPerSecond: h.PredictedPerSecond,

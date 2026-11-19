@@ -70,6 +70,10 @@ func (t *requestTrace) recordStreamChunk(chunk []byte) {
 			applog.Debugf("[%s] stream usage: in=%d out=%d total=%d", t.id, in, out, total)
 			return
 		}
+		if _, ok := logutil.ParsePromptProgress(raw); ok {
+			t.appendStreamEvent("prompt_progress", "progress", 0, "", "")
+			return
+		}
 		d, ok := logutil.ParseStreamDelta(raw)
 		if !ok {
 			if strings.TrimSpace(raw) != "" {

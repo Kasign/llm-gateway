@@ -122,6 +122,9 @@ func splitChunkDataLines(chunk []byte) []string {
 // TimingsTokenCounts 将 timings 映射为 OpenAI 风格的 in/out/total。
 func TimingsTokenCounts(t Timings) (in, out, total int64) {
 	in = t.PromptN
+	if t.PromptNPresent && t.CacheNPresent {
+		in += t.CacheN
+	}
 	out = t.PredictedN
 	total = in + out
 	return in, out, total
@@ -144,6 +147,9 @@ func ParseTimingsBody(body []byte) (*int64, *int64, *int64, *float64) {
 	var in, out, total *int64
 	if t.PromptNPresent {
 		v := t.PromptN
+		if t.CacheNPresent {
+			v += t.CacheN
+		}
 		in = &v
 	}
 	if t.PredictedNPresent {
@@ -184,6 +190,7 @@ type TokenHarvest struct {
 	PromptN             *int64
 	PredictedN          *int64
 	TokensCached        *int64
+	UsageCachedTokens   *int64
 	TokensEvaluated     *int64
 	PromptMS            *float64
 	PredictedMS         *float64
@@ -219,6 +226,10 @@ func (h *TokenHarvest) mergeUsage(in, out, total int64) {
 	}
 	h.TokenSource = "upstream_usage"
 	h.Source = "usage"
+}
+
+func ParsePromptProgress(raw string) (PromptProgressSample, bool) {
+	return parsePromptProgressJSON(raw)
 }
 
 func parsePromptProgressJSON(raw string) (PromptProgressSample, bool) {
@@ -275,9 +286,6 @@ func (h *TokenHarvest) mergeTimings(t Timings) {
 	if t.PromptNPresent {
 		v := t.PromptN
 		h.PromptN = &v
-		if h.InputTokens == nil && h.TokenSource != "upstream_usage" {
-			h.InputTokens = &v
-		}
 	}
 	if t.PredictedNPresent {
 		v := t.PredictedN
@@ -306,9 +314,16 @@ func (h *TokenHarvest) mergeTimings(t Timings) {
 		v := t.PromptPerSecond
 		h.PromptPerSecond = &v
 	}
+	if h.TokenSource != "upstream_usage" && (t.CacheNPresent || t.PromptNPresent) && h.PromptN != nil {
+		input := *h.PromptN
+		if h.CacheN != nil {
+			input += *h.CacheN
+		}
+		h.InputTokens = &input
+	}
 	if h.TokenSource != "upstream_usage" && (t.PromptNPresent || t.PredictedNPresent) {
-		if h.PromptN != nil && h.PredictedN != nil {
-			v := *h.PromptN + *h.PredictedN
+		if h.InputTokens != nil && h.OutputTokens != nil {
+			v := *h.InputTokens + *h.OutputTokens
 			h.TotalTokens = &v
 		}
 		h.TokenSource = "llama_timings"
@@ -336,6 +351,9 @@ func applyStreamDataTokens(h *TokenHarvest, raw string) {
 	}
 	if v := parseTopLevelTokenCount(raw, "tokens_cached"); v != nil {
 		h.TokensCached = v
+	}
+	if v := parseUsageCachedTokens(raw); v != nil {
+		h.UsageCachedTokens = v
 	}
 	if v := parseTopLevelTokenCount(raw, "tokens_evaluated"); v != nil {
 		h.TokensEvaluated = v
@@ -412,6 +430,9 @@ func TokensFromResponse(body []byte) TokenHarvest {
 	}
 	if v := parseTopLevelTokenCount(string(body), "tokens_cached"); v != nil {
 		h.TokensCached = v
+	}
+	if v := parseUsageCachedTokens(string(body)); v != nil {
+		h.UsageCachedTokens = v
 	}
 	if v := parseTopLevelTokenCount(string(body), "tokens_evaluated"); v != nil {
 		h.TokensEvaluated = v

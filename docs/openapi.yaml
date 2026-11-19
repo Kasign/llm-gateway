@@ -2986,7 +2986,8 @@ components:
         cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
-        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0, description: /completion 顶层缓存 Token 计数 }
+        usage_cached_tokens: { type: integer, format: int64, minimum: 0, description: Chat/Responses usage.prompt_tokens_details.cached_tokens 或 input_tokens_details.cached_tokens }
         tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
@@ -4201,7 +4202,8 @@ components:
         cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
-        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0, description: /completion 顶层缓存 Token 计数 }
+        usage_cached_tokens: { type: integer, format: int64, minimum: 0, description: Chat/Responses usage.prompt_tokens_details.cached_tokens 或 input_tokens_details.cached_tokens }
         tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
@@ -5303,7 +5305,8 @@ components:
         cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
-        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0, description: /completion 顶层缓存 Token 计数 }
+        usage_cached_tokens: { type: integer, format: int64, minimum: 0, description: Chat/Responses usage.prompt_tokens_details.cached_tokens 或 input_tokens_details.cached_tokens }
         tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }
@@ -6439,7 +6442,8 @@ components:
         cache_n: { type: integer, format: int64, minimum: 0 }
         prompt_n: { type: integer, format: int64, minimum: 0 }
         predicted_n: { type: integer, format: int64, minimum: 0 }
-        tokens_cached: { type: integer, format: int64, minimum: 0 }
+        tokens_cached: { type: integer, format: int64, minimum: 0, description: /completion 顶层缓存 Token 计数 }
+        usage_cached_tokens: { type: integer, format: int64, minimum: 0, description: Chat/Responses usage.prompt_tokens_details.cached_tokens 或 input_tokens_details.cached_tokens }
         tokens_evaluated: { type: integer, format: int64, minimum: 0 }
         prompt_ms: { type: number, minimum: 0 }
         predicted_ms: { type: number, minimum: 0 }

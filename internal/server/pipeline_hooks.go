@@ -423,6 +423,7 @@ func mergeModelTimingHarvest(dst, src logutil.TokenHarvest) logutil.TokenHarvest
 	if dst.PromptN == nil { dst.PromptN = src.PromptN }
 	if dst.PredictedN == nil { dst.PredictedN = src.PredictedN }
 	if dst.TokensCached == nil { dst.TokensCached = src.TokensCached }
+	if dst.UsageCachedTokens == nil { dst.UsageCachedTokens = src.UsageCachedTokens }
 	if dst.TokensEvaluated == nil { dst.TokensEvaluated = src.TokensEvaluated }
 	if dst.PromptMS == nil { dst.PromptMS = src.PromptMS }
 	if dst.PredictedMS == nil { dst.PredictedMS = src.PredictedMS }

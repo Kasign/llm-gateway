@@ -141,7 +141,7 @@ func TestRequestModelTimingsPreserveCachePerTokenAndPromptProgress(t *testing.T)
 	cached, evaluated := int64(80), int64(20)
 	harvest := logutil.TokenHarvest{
 		CacheN: &cacheN, PromptN: &promptN, PredictedN: &predictedN,
-		TokensCached: &cached, TokensEvaluated: &evaluated,
+		TokensCached: &cached, UsageCachedTokens: &cached, TokensEvaluated: &evaluated,
 		PromptMS: &promptMS, PromptPerTokenMS: &promptPerTokenMS, PredictedPerTokenMS: &predictedPerTokenMS,
 		PromptProgress: []logutil.PromptProgressSample{{Total: 100, Cache: 80, Processed: 90, TimeMS: 500}},
 	}
@@ -150,6 +150,7 @@ func TestRequestModelTimingsPreserveCachePerTokenAndPromptProgress(t *testing.T)
 		got.PromptPerTokenMS == nil || *got.PromptPerTokenMS != 5 ||
 		got.PredictedPerTokenMS == nil || *got.PredictedPerTokenMS != 2.5 ||
 		got.TokensCached == nil || *got.TokensCached != 80 ||
+		got.UsageCachedTokens == nil || *got.UsageCachedTokens != 80 ||
 		got.TokensEvaluated == nil || *got.TokensEvaluated != 20 ||
 		len(got.PromptProgress) != 1 || got.PromptProgress[0].Processed != 90 {
 		t.Fatalf("extended model timings lost: %+v", got)
