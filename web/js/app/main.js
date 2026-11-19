@@ -1772,7 +1772,7 @@ function applyBenchParams(p){
   }
   if($('benchStop'))$('benchStop').value=(m.stop&&m.stop.length)?m.stop.join('\n'):'';
 }
-function benchPayloadForApi(target,scenario='performance',promptOverride=''){
+function benchPayloadForApi(target,scenario='performance',promptOverride='',acceptanceCaseID=''){
   const upstream=typeof target==='string'?target:(target?.upstream||'');
   const gatewayKey=(typeof target==='string'?'':(target?.gatewayKey||'')).trim();
   const p=collectBenchParams();
@@ -1783,6 +1783,7 @@ function benchPayloadForApi(target,scenario='performance',promptOverride=''){
     ?{model_key:gatewayKey,prompt:p.prompt,max_tokens:p.max_tokens}
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
   if(scenario==='tool_performance'||scenario==='tool_performance_auto')body.scenario=scenario;
+  if(acceptanceCaseID)body.acceptance_case_id=acceptanceCaseID;
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
@@ -1796,10 +1797,11 @@ function benchPayloadForApi(target,scenario='performance',promptOverride=''){
   return body;
 }
 function setBenchRunning(running){
-  const run=$('benchRunBtn'),toolRun=$('benchToolRunBtn'),toolForceRun=$('benchToolForceRunBtn'),stop=$('benchStopBtn');
+  const run=$('benchRunBtn'),toolRun=$('benchToolRunBtn'),toolForceRun=$('benchToolForceRunBtn'),acceptanceRun=$('benchAcceptanceRunBtn'),stop=$('benchStopBtn');
   if(run)run.disabled=!!running;
   if(toolRun)toolRun.disabled=!!running;
   if(toolForceRun)toolForceRun.disabled=!!running;
+  if(acceptanceRun)acceptanceRun.disabled=!!running;
   if(stop)stop.disabled=!running;
 }
 
@@ -2305,6 +2307,7 @@ function renderBenchResult(wrap){
   const tps=wrap.analysis?.throughput?.output_tokens_per_sec;
   met.innerHTML=[
     statusPill(j.status==='completed'?'success':j.status==='failed'?'error':j.status==='cancelled'?'cancelled':j.status),
+    wrap.acceptance?('<span class="pill">验收 '+esc(wrap.acceptance.case_id)+' · '+esc(wrap.acceptance.status)+'</span><span class="pill">'+esc(wrap.acceptance.message)+'</span>'):'',
     j.stream?`<span class="pill">流式</span>`:'',
     j.max_tokens?`<span class="pill">max_tokens ${j.max_tokens}</span>`:'',
     j.prompt_len?`<span class="pill">提示 ${j.prompt_len} 字符</span>`:'',
@@ -2322,7 +2325,7 @@ function renderBenchResult(wrap){
     j.request_id?`<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">完整调用记录</button>`:'',
   ].filter(Boolean).join('');
   const rawBody=j.response||'';
-  $('benchRaw').textContent=rawBody.trim().startsWith('data:')?rawBody:JSON.stringify({analysis:wrap.analysis,job:j,stream_events:evs,response:tryParse(rawBody)||rawBody},null,2);
+  $('benchRaw').textContent=rawBody.trim().startsWith('data:')?rawBody:JSON.stringify({analysis:wrap.analysis,job:j,acceptance:wrap.acceptance,stream_events:evs,response:tryParse(rawBody)||rawBody},null,2);
   const ef=$('benchEventsFold');if(ef&&evs.length)ef.open=evs.length<=80;
 }
 function tryParse(s){try{return JSON.parse(s)}catch{return s}}
@@ -2398,6 +2401,11 @@ async function stopBenchmark(){
 }
 
 async function runBenchmark(scenario='performance'){
+  const acceptanceCaseID=scenario==='acceptance'?($('benchAcceptanceCase')?.value||''):'';
+  if(scenario==='acceptance'){
+    if(!acceptanceCaseID){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='请先选择验收用例。';}return;}
+    scenario=acceptanceCaseID==='TM-05'?'tool_performance':'tool_performance_auto';
+  }
   const toolScenario=scenario==='tool_performance'||scenario==='tool_performance_auto';
   const promptOverride=toolScenario?($('benchToolPrompt')?.value||'').trim():'';
   if(toolScenario&&!promptOverride){const answer=$('benchAnswer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
@@ -2424,7 +2432,7 @@ async function runBenchmark(scenario='performance'){
       throw new Error('当前 API 推理后端无已加载模型，请先在「模型管理」加载');
     }
     updateBenchReqPreview(upstream,scenario,promptOverride);
-    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget,scenario,promptOverride))});
+    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget,scenario,promptOverride,acceptanceCaseID))});
     if(token!==benchPollToken)return;
     const jobId=start.job_id,t0=Date.now();
     writeBenchStore({jobId});
@@ -2439,6 +2447,38 @@ async function runBenchmark(scenario='performance'){
   }
 }
 
+async function loadBenchmarkAcceptanceCases(){
+  const select=$('benchAcceptanceCase');
+  if(!select||select.dataset.loaded==='true')return;
+  try{
+    const result=await api('/api/benchmark/acceptance-cases');
+    const items=Array.isArray(result.items)?result.items:[];
+    select.innerHTML=items.map(item=>{
+      const suffix=item.manual_only?'（仅隔离环境，暂不可自动执行）':'';
+      return '<option value="'+esc(item.id)+'" '+(item.manual_only?'disabled':'')+'>'+esc(item.id)+' · '+esc(item.title)+suffix+'</option>';
+    }).join('');
+    select.dataset.loaded='true';
+    select.value='TM-01';
+    updateBenchmarkAcceptancePrompt();
+  }catch(e){
+    select.innerHTML='<option value="">验收用例加载失败：'+esc(e.message)+'</option>';
+  }
+}
+function updateBenchmarkAcceptancePrompt(){
+  const id=$('benchAcceptanceCase')?.value;
+  const prompts={
+    'TM-01':'Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。',
+    'TM-02':'请计算 17×23，并只给出结果。',
+    'TM-03':'Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。',
+    'TM-04':'Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。',
+    'TM-05':'请搜索 Go 官方发布信息，并总结最新稳定版本。'
+  };
+  if(prompts[id]&&$('benchToolPrompt'))$('benchToolPrompt').value=prompts[id];
+}
+$('benchToolPerformanceConfig')?.addEventListener('toggle',()=>{
+  if($('benchToolPerformanceConfig')?.open)loadBenchmarkAcceptanceCases();
+});
+$('benchAcceptanceCase')?.addEventListener('change',updateBenchmarkAcceptancePrompt);
 $('benchHistoryCompareBtn')?.addEventListener('click',()=>openBenchmarkComparison());
 $('benchHistoryList')?.addEventListener('change',event=>{
   const input=event.target.closest('[data-bench-compare-id]');
