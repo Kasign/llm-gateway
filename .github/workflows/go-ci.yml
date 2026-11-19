@@ -132,6 +132,205 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: MariaDB Benchmark 决策迁移集成验收
+        run: go test -count=1 -run '^TestMariaDBBenchmarkDecisionMigration
+      - name: 并发与数据竞态测试
+        run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live ./internal/tools/...
+
+      - name: 静态检查
+        run: go vet ./...
+
+  gateway-steady-load:
+    name: Gateway 稳态负载与审计持久化
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REDIS_TEST_ADDR: 127.0.0.1:6379
+      MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-test-password
+          MARIADB_DATABASE: llm_gateway_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: MariaDB 审计积压集成测试
+        run: go test -count=1 -run TestWriterDrainsMariaDBBacklogAndPreservesAcceptedWrites -v ./internal/audit
+
+      - name: Gateway 并发请求与真实审计负载
+        run: |
+          set -o pipefail
+          GATEWAY_LOAD_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-request-load.txt
+
+      - name: 保存 Gateway 请求负载产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-request-load-${{ github.sha }}
+          path: /tmp/gateway-request-load.txt
+          if-no-files-found: error
+          retention-days: 30
+
+
+  gateway-faults:
+    name: Gateway 故障注入与恢复验证
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REDIS_TEST_ADDR: 127.0.0.1:6379
+      MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: gateway-test-password
+          MARIADB_DATABASE: llm_gateway_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Gateway 上游延迟与 429/503 故障注入
+        run: |
+          set -o pipefail
+          GATEWAY_LOAD_TEST=1 GATEWAY_FAULT_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-fault-injection.txt
+
+      - name: 保存 Gateway 故障注入产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-fault-injection-${{ github.sha }}
+          path: /tmp/gateway-fault-injection.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Gateway TCP 连接拒绝与恢复验证
+        run: |
+          set -o pipefail
+          GATEWAY_LOAD_TEST=1 GATEWAY_TRANSPORT_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-transport-recovery.txt
+
+      - name: 保存 Gateway 传输恢复产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-transport-recovery-${{ github.sha }}
+          path: /tmp/gateway-transport-recovery.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Gateway DNS 解析失败与审计状态验证
+        run: |
+          set -o pipefail
+          GATEWAY_DNS_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-dns-failure.txt
+
+      - name: 保存 Gateway DNS 故障产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-dns-failure-${{ github.sha }}
+          path: /tmp/gateway-dns-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Gateway 已提交响应头后的流式正文中断验证
+        run: |
+          set -o pipefail
+          GATEWAY_STREAM_FAILURE_TEST=1 /usr/bin/time -v go test -count=1 -run TestGatewayConcurrentRequestLoadWithMariaDBAudit -v ./internal/server 2>&1 | tee /tmp/gateway-stream-failure.txt
+
+      - name: 保存 Gateway 流式中断产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-stream-failure-${{ github.sha }}
+          path: /tmp/gateway-stream-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Provider TLS 握手中断故障验证
+        run: |
+          set -o pipefail
+          go test -count=1 -run TestOpenAICompatibleProviderMapsTLSHandshakeInterruptionWithoutUpstreamStatus -v ./internal/provider 2>&1 | tee /tmp/provider-tls-handshake-failure.txt
+
+      - name: 保存 Provider TLS 握手故障产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-tls-handshake-failure-${{ github.sha }}
+          path: /tmp/provider-tls-handshake-failure.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  build:
+    name: 编译与 Docker 镜像
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建 Gateway
+        run: go build -o /tmp/llm-gateway ./cmd/gateway
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建 Docker 部署镜像（启用 GitHub Actions 层缓存）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: release
+          tags: llm-gateway:ci
+          push: false
+          cache-from: type=gha,scope=llm-gateway-release
+          cache-to: type=gha,scope=llm-gateway-release,mode=max
+ -v ./internal/db
+
       - name: 单元与集成测试
         run: go test ./...
 
