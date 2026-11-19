@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 const benchmarkAcceptanceRulesVersion = "1"
@@ -84,6 +86,10 @@ func benchmarkAcceptanceCatalog() []benchmarkAcceptanceCase {
 // evaluateBenchmarkAcceptance 只根据服务端采集的请求级证据与工具指标判定，不读取客户端结论。
 // 证据不足统一返回 inconclusive；任务未进入终态则返回 not_run。
 func evaluateBenchmarkAcceptance(caseID string, job benchmarkJobSnapshot, metrics benchmarkToolMetrics) benchmarkAcceptanceResult {
+	return evaluateBenchmarkAcceptanceWithEvents(caseID, job, metrics, nil)
+}
+
+func evaluateBenchmarkAcceptanceWithEvents(caseID string, job benchmarkJobSnapshot, metrics benchmarkToolMetrics, events []store.ToolCallEvent) benchmarkAcceptanceResult {
 	result := benchmarkAcceptanceResult{
 		CaseID: strings.ToUpper(strings.TrimSpace(caseID)),
 		Status: "inconclusive",
@@ -163,8 +169,15 @@ func evaluateBenchmarkAcceptance(caseID string, job benchmarkJobSnapshot, metric
 		if metrics.ToolExecutionAttempts < 1 {
 			return result
 		}
-		if metrics.ToolExecutionFailures < 1 {
-			result.Status, result.ReasonCode, result.Message = "fail", "tool_failure_not_observed", "未观察到工具执行失败或超时。"
+		failureObserved := false
+		for _, event := range events {
+			if event.Status == "failed" || event.Status == "timed_out" {
+				failureObserved = true
+				break
+			}
+		}
+		if !failureObserved {
+			result.Status, result.ReasonCode, result.Message = "fail", "tool_failure_not_observed", "未观察到工具执行失败或超时；取消事件不计为工具故障。"
 			return result
 		}
 		result.Status, result.ReasonCode, result.Message = "pass", "tool_failure_observed", "模型发起了工具调用，且审计证据确认工具执行失败或超时。"
