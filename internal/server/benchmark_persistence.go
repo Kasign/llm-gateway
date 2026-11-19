@@ -107,7 +107,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	run := runs[len(runs)-1]
 	conditionSHA256, conditionStatus, conditionMissing := benchmarkConditionFromConfigJSON(task.ConfigJSON)
 	snap := benchmarkJobSnapshot{
-		ID: task.TaskID, Scenario: task.Scenario, Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
+		ID: task.TaskID, Scenario: task.Scenario, AcceptanceCaseID: benchmarkAcceptanceCaseIDFromConfigJSON(task.ConfigJSON), Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: conditionMissing,
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
