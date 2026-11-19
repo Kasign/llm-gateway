@@ -114,7 +114,7 @@
 ### 真实模型验收采集脚本（2026-11-19）
 
 - 新增 `scripts/benchmark_tool_acceptance.sh`，复用现有 `POST /api/benchmark` 与 `GET /api/benchmark/{job_id}`，不新增服务端接口或平行执行链路。
-- 脚本每次只创建一个任务，轮询到终态后保存完整脱敏任务响应 JSON，并在终端摘要展示决策、执行统计和工具事件状态；它负责采集证据，不自动把模型行为判为通过，最终仍按 TM-01～TM-05 的矩阵人工判读。
+- 脚本每次只创建一个任务，轮询到终态后保存完整任务响应 JSON，并在终端摘要展示决策、执行统计和工具事件状态；它负责采集证据，不自动把模型行为判为通过，最终仍按 TM-01～TM-05 的矩阵人工判读。结果文件不包含请求认证头，但可能包含 Prompt 和模型输出；分享前必须人工检查并按需脱敏。
 - 认证明确分离：`GATEWAY_ADMIN_SESSION` 是网页登录会话 Token，放在 `Authorization: Bearer`；`GATEWAY_CLIENT_API_KEY` 是具有模型及 `web.search` 授权的客户端服务 Key，放在 `X-Client-API-Key`。二者不可互换。脚本不会把凭据写入证据文件。
 - 运行依赖 Bash、curl、jq。示例：
   ```bash
