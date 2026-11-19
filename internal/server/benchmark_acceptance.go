@@ -141,7 +141,10 @@ func evaluateBenchmarkAcceptanceWithEvents(caseID string, job benchmarkJobSnapsh
 			result.Status, result.ReasonCode, result.Message = "fail", "tool_execution_not_successful", "工具调用已发起，但没有成功执行。"
 			return result
 		}
-		result.Status, result.ReasonCode, result.Message = "pass", "tool_call_succeeded", "模型发起工具调用，工具执行成功，任务完成。"
+		if metrics.ModelRounds < 2 || metrics.ModelFinalGenerationStatus != "measured" {
+			return result
+		}
+		result.Status, result.ReasonCode, result.Message = "pass", "tool_call_succeeded", "模型发起工具调用，工具执行成功，并在后续模型轮次完成最终回答。"
 	case "TM-02":
 		if job.Status != "completed" {
 			result.Status, result.ReasonCode, result.Message = "fail", "task_not_completed", "任务未成功完成。"
