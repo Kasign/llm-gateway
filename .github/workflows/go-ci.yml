@@ -98,6 +98,8 @@ jobs:
     env:
       REDIS_TEST_ADDR: 127.0.0.1:6379
       MYSQL_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
+      # 迁移集成测试在服务容器中创建/删除随机隔离 schema，不触碰默认测试库。
+      MARIADB_TEST_DSN: "root:gateway-test-password@tcp(127.0.0.1:3306)/llm_gateway_test?parseTime=true&charset=utf8mb4&loc=UTC"
     services:
       redis:
         image: redis:7-alpine
