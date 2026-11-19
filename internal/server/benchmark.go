@@ -675,6 +675,7 @@ func (s *Server) benchmarkList(w http.ResponseWriter, r *http.Request) {
 		if snapshot.ConditionMissing == nil {
 			snapshot.ConditionMissing = []string{}
 		}
+		item["acceptance_case_id"] = benchmarkAcceptanceCaseIDFromConfigJSON(task.ConfigJSON)
 		item["condition_sha256"] = snapshot.ConditionSHA256
 		item["condition_status"] = snapshot.ConditionStatus
 		item["condition_missing"] = snapshot.ConditionMissing
@@ -1230,6 +1231,9 @@ func (s *Server) benchmarkGet(w http.ResponseWriter, r *http.Request, id string)
 	out := map[string]interface{}{
 		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "tool_metrics": toolMetrics, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": payloadPersisted,
+	}
+	if snap.AcceptanceCaseID != "" {
+		out["acceptance"] = evaluateBenchmarkAcceptance(snap.AcceptanceCaseID, snap, toolMetrics)
 	}
 	if snap.Status != "running" && snap.Status != "cancelling" {
 		if raw, err := s.logs.GetRequestAnalysis(r.Context(), id); err == nil {
