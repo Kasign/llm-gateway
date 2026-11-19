@@ -2687,7 +2687,7 @@ function renderBenchStreamEvents(evs) {
     const box = $("benchAcceptanceResult");
     if (!box) return;
     const acceptance = wrap?.acceptance;
-    if (!acceptance) { box.className = "bench-acceptance-result msg muted"; box.textContent = "尚未执行项目验收。"; return; }
+    if (!acceptance) return;
     const labels = { pass: "通过", fail: "失败", inconclusive: "证据不足", not_run: "未执行" };
     const status = acceptance.status || "inconclusive";
     box.className = "bench-acceptance-result msg " + (status === "pass" ? "ok" : status === "fail" ? "err" : "warn");
