@@ -509,8 +509,14 @@
               <label for="benchToolPrompt">测试问题</label>
               <textarea id="benchToolPrompt" rows="3">Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。</textarea>
             </div>
+            <div class="field">
+              <label for="benchAcceptanceCase">项目验收用例</label>
+              <select id="benchAcceptanceCase"><option value="">正在加载验收用例…</option></select>
+              <p class="small muted">验收结果由服务端根据请求级决策和完整审计证据判定。TM-03 仅允许在隔离验收环境执行。</p>
+            </div>
             <div class="bench-actions">
-              <button type="button" class="btn primary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">开始自然工具调用测试</button>
+              <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
+              <button type="button" class="btn secondary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">开始自然工具调用测试</button>
               <button type="button" class="btn secondary" id="benchToolForceRunBtn" onclick="runBenchmark('tool_performance')">强制工具调用诊断</button>
             </div>
           </details>
