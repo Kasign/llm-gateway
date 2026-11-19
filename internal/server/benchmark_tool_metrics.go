@@ -51,6 +51,8 @@ type benchmarkToolMetrics struct {
 
 func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCallEvent) benchmarkToolMetrics {
 	metrics := benchmarkToolMetrics{
+		ToolChoiceMode: "not_applicable",
+		ToolCallDecision: "not_applicable",
 		ModelDecisionStatus: "not_applicable",
 		ToolExecutionStatus: "not_applicable",
 		ModelFinalGenerationStatus: "not_applicable",
