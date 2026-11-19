@@ -221,8 +221,8 @@ func TestRecordBenchmarkToolCallDecisionStoresRequestEvidence(t *testing.T) {
 	ctx := withBenchmarkToolMetrics(context.Background(), job)
 
 	recordBenchmarkToolCallDecision(ctx, "called", 2)
-	if got := job.snapshot().ToolCallDecision; got != "called" {
-		t.Fatalf("decision after called = %q, want called", got)
+	if snapshot := job.snapshot(); snapshot.ToolCallDecision != "called" || snapshot.ToolCallEventCount != 2 {
+		t.Fatalf("request evidence after called = %q/%d, want called/2", snapshot.ToolCallDecision, snapshot.ToolCallEventCount)
 	}
 	recordBenchmarkToolCallDecision(ctx, "not_called", 0)
 	if got := job.snapshot().ToolCallDecision; got != "not_called" {
@@ -246,11 +246,12 @@ func TestRecordBenchmarkToolCallDecisionIgnoresInvalidAndNonBenchmarkContexts(t 
 func TestBenchmarkPersistenceRecordsIncludeToolCallDecision(t *testing.T) {
 	job := &benchmarkJob{
 		ToolCallDecision: "called",
+		ToolCallEventCount: 2,
 		taskRecord: store.BenchmarkTask{TaskID: "task"},
 		runRecord: store.BenchmarkRun{RunID: "run", TaskID: "task"},
 	}
 	_, run := job.persistenceRecords()
-	if run.ToolCallDecision != "called" || run.ToolCallEventCount != 0 {
+	if run.ToolCallDecision != "called" || run.ToolCallEventCount != 2 {
 		t.Fatalf("persisted tool call decision = %q, want called", run.ToolCallDecision)
 	}
 }
