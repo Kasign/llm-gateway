@@ -125,13 +125,13 @@
   # TM-01：自然决策并调用（服务端自动给出验收判定）
   ACCEPTANCE_CASE_ID=TM-01 SCENARIO=tool_performance_auto bash scripts/benchmark_tool_acceptance.sh
 
-  # TM-02：自然决策不调用
-  SCENARIO=tool_performance_auto \
+  # TM-02：自然决策不调用（服务端判定）
+  ACCEPTANCE_CASE_ID=TM-02 SCENARIO=tool_performance_auto \
     PROMPT="请计算 17×23，并只给出结果。" \
     bash scripts/benchmark_tool_acceptance.sh
 
-  # TM-04：工具结果回传后生成最终回答
-  SCENARIO=tool_performance_auto \
+  # TM-04：工具结果回传后生成最终回答（服务端判定）
+  ACCEPTANCE_CASE_ID=TM-04 SCENARIO=tool_performance_auto \
     PROMPT="Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。" \
     bash scripts/benchmark_tool_acceptance.sh
 
