@@ -187,7 +187,8 @@ func TestMariaDBBenchmarkDecisionMigration(t *testing.T) {
 		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='benchmark_runs' AND COLUMN_NAME='tool_call_event_count'`).Scan(&eventDefault); err != nil {
 		t.Fatalf("read event count column default: %v", err)
 	}
-	if decisionDefault != "unknown" || !eventDefault.Valid || eventDefault.String != "0" {
+	// MariaDB 的 information_schema 会将字符串默认值表示为带引号的 SQL 字面量。
+	if strings.Trim(decisionDefault, "'") != "unknown" || !eventDefault.Valid || eventDefault.String != "0" {
 		t.Fatalf("unexpected migrated column defaults: decision=%q event_count=%q", decisionDefault, eventDefault.String)
 	}
 }
