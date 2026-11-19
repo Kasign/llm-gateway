@@ -1,0 +1,76 @@
+name: PERF-08 llama.cpp CPU build baseline
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - ".github/workflows/perf08-llama-cpu.yml"
+      - "tools/perf08/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf08-llama-cpu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-build:
+    name: 固定上游 commit 的 CPU-only Server 构建
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Gateway
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: aa75ff3239f9cc675b081697deda9e1b112345c6
+          path: llama.cpp
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config libcurl4-openssl-dev
+
+      - name: Verify upstream pin
+        run: |
+          actual="$(git -C llama.cpp rev-parse HEAD)"
+          test "$actual" = "aa75ff3239f9cc675b081697deda9e1b112345c6"
+          git -C llama.cpp submodule status
+
+      - name: Configure CPU-only build
+        run: |
+          cmake -S llama.cpp -B build/llama-cpp -G Ninja \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU=ON \
+            -DGGML_CPU_ALL_VARIANTS=OFF \
+            -DGGML_CUDA=OFF \
+            -DGGML_METAL=OFF \
+            -DGGML_VULKAN=OFF \
+            -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_COMMON=ON \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_BUILD_UI=OFF \
+            -DLLAMA_USE_PREBUILT_UI=OFF
+
+      - name: Build llama-server
+        run: cmake --build build/llama-cpp --target llama-server --parallel 2
+
+      - name: Record build identity
+        run: |
+          git -C llama.cpp rev-parse HEAD
+          cmake --version
+          c++ --version
+          test -x build/llama-cpp/bin/llama-server || find build/llama-cpp -type f -name llama-server -print
