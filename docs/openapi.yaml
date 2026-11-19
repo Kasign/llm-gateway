@@ -1212,7 +1212,7 @@ paths:
       operationId: postApiBenchmark
       tags: [Admin]
       summary: 启动异步模型 Benchmark
-      description: 创建任务需要管理员 Web Session，并通过 X-Client-API-Key 提供独立的调用方服务密钥。服务密钥按自身 RPM 限流，并在 Pipeline 中执行模型 ACL；后台任务轮询仍只接受管理员 Web Session。Benchmark Task/Run 元数据持久化到 MariaDB；Gateway 重启时活动任务标记为 interrupted，不自动重放。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。model_id 优先于 model_key；model 是 model_id 的兼容别名，仅在 model_id 为空时使用。use_active=true 时忽略 model_key；未指定 model_id/model_key 时使用当前活动模型。max_tokens 缺省、非正数或大于 8192 时统一归一化为 4000。未知请求字段由当前 JSON 解码器忽略。
+      description: 创建任务需要管理员 Web Session，并通过 X-Client-API-Key 提供独立的调用方服务密钥。服务密钥按自身 RPM 限流，并在 Pipeline 中执行模型 ACL；后台任务轮询仍只接受管理员 Web Session。Benchmark Task/Run 元数据持久化到 MariaDB；Gateway 重启时活动任务标记为 interrupted，不自动重放。结果通过返回的 poll URL 查询。整体请求时限由服务端 llama.request_timeout_seconds 控制；设为 0 不添加整体 Deadline，但主动停止和父请求取消仍然生效。model_id 优先于 model_key；model 是 model_id 的兼容别名，仅在 model_id 为空时使用。use_active=true 时忽略 model_key；未指定 model_id/model_key 时使用当前活动模型。max_tokens 缺省、非正数或大于 8192 时统一归一化为 4000。scenario=tool_performance_auto 表示模型自主决策是否调用已授权的 web.search（tool_choice=auto）；scenario=tool_performance 保留兼容旧版的强制 web.search 诊断语义。未知请求字段由当前 JSON 解码器忽略。
       security:
         - AdminSessionBearer: []
       parameters:
