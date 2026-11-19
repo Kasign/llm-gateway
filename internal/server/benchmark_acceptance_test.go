@@ -155,7 +155,7 @@ func TestEvaluateBenchmarkAcceptanceTM04RequiresSecondModelRound(t *testing.T) {
 
 func TestEvaluateBenchmarkAcceptanceTM03RequiresObservedFailure(t *testing.T) {
 	job, metrics := acceptanceEvidence("TM-03")
-	got := evaluateBenchmarkAcceptanceWithEvents("TM-03", job, metrics, []store.ToolCallEvent{{Status: "failed"}})
+	got := evaluateBenchmarkAcceptanceWithEvents("TM-03", job, metrics, []store.ToolCallEvent{{Status: "succeeded"}})
 	if got.Status != "fail" || got.ReasonCode != "tool_failure_not_observed" {
 		t.Fatalf("result = %+v, want tool_failure_not_observed", got)
 	}
