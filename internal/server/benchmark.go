@@ -1053,6 +1053,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		"backend": target.Backend, "provider_id": target.Backend, "model_key": modelKey, "tool_names": toolNames,
 		"model_id": taskModelID, "scenario": scenario, "tool_choice_mode": toolChoiceMode,
 		"acceptance_case_id": acceptanceCaseID,
+		"benchmark_isolated_environment": s.cfg != nil && s.cfg.Benchmark.IsolatedEnvironment,
 		"max_tokens": in.MaxTokens, "stream": !isBenchmarkToolScenario(scenario),
 		"temperature": in.Temperature, "top_p": in.TopP, "top_k": in.TopK, "min_p": in.MinP,
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
