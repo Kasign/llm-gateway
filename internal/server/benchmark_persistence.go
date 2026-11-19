@@ -138,6 +138,9 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		"job": snap, "stream_events": events, "tool_call_events": toolEvents, "tool_metrics": toolMetrics, "request_id": snap.RequestID,
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": false,
 	}
+	if snap.AcceptanceCaseID != "" {
+		out["acceptance"] = evaluateBenchmarkAcceptance(snap.AcceptanceCaseID, snap, toolMetrics)
+	}
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil {
 		if payload, err := s.logs.GetPayload(r.Context(), run.RequestID); err == nil {
 			if response := payload["response_body"]; response != "" {
