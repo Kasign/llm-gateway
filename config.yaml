@@ -72,6 +72,10 @@ tools:
     default_language: ""
     categories: [general]
 
+# 真实工具故障验收只能在独立 Gateway 启用；生产环境必须保持 false。
+benchmark:
+  isolated_environment: false
+
 storage:
   models_dir: /data/models
 
