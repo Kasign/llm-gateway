@@ -80,7 +80,7 @@ func TestBuildBenchmarkToolMetricsNaturalDecisionWithoutToolCall(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125},
 		ToolCallDecision: "not_called",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, true)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolChoiceMode != "auto" {
 		t.Fatalf("tool_choice_mode = %q, want auto", metrics.ToolChoiceMode)
 	}
@@ -108,7 +108,7 @@ func TestBuildBenchmarkToolMetricsIncludesActualToolExecution(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
 	events := []store.ToolCallEvent{{Round: 1, Status: "succeeded", DurationMS: 55}}
-	metrics := buildBenchmarkToolMetrics(job, events, true)
+	metrics := buildBenchmarkToolMetrics(job, events)
 	if metrics.ToolExecutionStatus != "measured" || metrics.ToolExecutionTotalMS == nil || *metrics.ToolExecutionTotalMS != 55 {
 		t.Fatalf("tool execution metric = %#v, want measured 55ms", metrics)
 	}
@@ -133,7 +133,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 		ModelRoundDurationsMS: []int64{125},
 		ToolCallDecision: "unknown",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolChoiceMode != "required" {
 		t.Fatalf("tool_choice_mode = %q, want required", metrics.ToolChoiceMode)
 	}
@@ -146,7 +146,7 @@ func TestBuildBenchmarkToolMetricsForcedNoCallRemainsUnknown(t *testing.T) {
 }
 
 func TestBuildBenchmarkToolMetricsOrdinaryScenarioIsNotApplicable(t *testing.T) {
-	metrics := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance", Status: "completed"}, nil, true)
+	metrics := buildBenchmarkToolMetrics(benchmarkJobSnapshot{Scenario: "performance", Status: "completed"}, nil)
 	if metrics.ToolChoiceMode != "not_applicable" || metrics.ToolCallDecision != "not_applicable" {
 		t.Fatalf("ordinary scenario tool mode/decision = %q/%q, want not_applicable", metrics.ToolChoiceMode, metrics.ToolCallDecision)
 	}
