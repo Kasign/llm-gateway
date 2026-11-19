@@ -87,7 +87,12 @@ func (s *Server) runtimeAPI(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 502, "runtime_error", err.Error())
 		return
 	}
-	attachRuntimeServerMetrics(snap, s.effectiveUpstream().Backend, s.runtimeMetricsOverview())
+	backend := s.effectiveUpstream().Backend
+	var metrics interface{}
+	if strings.EqualFold(strings.TrimSpace(backend), "llamacpp") {
+		metrics = s.runtimeMetricsOverview()
+	}
+	attachRuntimeServerMetrics(snap, backend, metrics)
 	json.NewEncoder(w).Encode(snap)
 }
 
