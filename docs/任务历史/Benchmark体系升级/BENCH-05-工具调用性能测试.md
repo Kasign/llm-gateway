@@ -194,6 +194,6 @@
 
 ### 当前验证状态
 
-- 代码已推送至 `dev`。最新提交：`5fb8d89ef82fd385c8d4887eb88025c5fe6c9736`。
-- 对应 Go CI 尚未取得最终运行结果；此前中间 SHA 的工作流因后续提交触发而被取消，不视为通过。
-- Browser Smoke 对较早的本阶段代码 SHA `30384d3dc0041ab59795e24023c66080e1a5db86` 仍在执行；该 SHA 的前端 Bundle 构建、Gateway 启动步骤已通过，但浏览器安装与交互验收尚未结束。最终仍以最新代码 SHA 的 CI/Browser Smoke 结果为准。
+- 最新代码提交：`b74834f7b161cff6a651ca499a10420415a0f961`。Go CI Run [44472774248](https://github.com/Kasign/llm-gateway/actions/runs/44472774248) 最终 `success`，5/5 Job 全部通过；MariaDB 迁移集成、完整 Go 测试、竞态测试、静态检查、API 契约、前端、Docker、故障注入和稳态审计负载均通过。
+- Browser Smoke Run [44472288039](https://github.com/Kasign/llm-gateway/actions/runs/44472288039) 对本阶段管理台改动完成，桌面、窄屏和核心交互验收成功。该次验证的前端代码与当前版本一致；后续提交只调整服务端判定边界、脚本和文档。
+- 随后的文档更新仍有独立 Go CI 在执行；不改变上述代码 SHA 的验证结论。
