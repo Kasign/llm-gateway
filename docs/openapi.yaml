@@ -1276,11 +1276,7 @@ paths:
         "404":
           $ref: "#/components/responses/AdminError"
         "409":
-          description: 验收用例要求隔离环境，当前 Gateway 未开放自动执行
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/AdminError"
         "405":
           $ref: "#/components/responses/AdminError"
   /api/benchmark/compare:
