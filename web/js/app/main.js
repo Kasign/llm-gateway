@@ -1796,9 +1796,10 @@ function benchPayloadForApi(target,scenario='performance',promptOverride=''){
   return body;
 }
 function setBenchRunning(running){
-  const run=$('benchRunBtn'),toolRun=$('benchToolRunBtn'),stop=$('benchStopBtn');
+  const run=$('benchRunBtn'),toolRun=$('benchToolRunBtn'),toolForceRun=$('benchToolForceRunBtn'),stop=$('benchStopBtn');
   if(run)run.disabled=!!running;
   if(toolRun)toolRun.disabled=!!running;
+  if(toolForceRun)toolForceRun.disabled=!!running;
   if(stop)stop.disabled=!running;
 }
 
