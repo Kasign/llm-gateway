@@ -673,8 +673,7 @@ function renderServerMetricsPanel(snapshot){
     cancelled:'采样已取消',invalid_response:'响应格式异常',stale:'数据已过期'
   };
   const samples=Array.isArray(snapshot.samples)?snapshot.samples:[];
-  const processStart=Number(snapshot.process_start_time_unix);
-  const processStartText=Number.isFinite(processStart)&&processStart>0?new Date(processStart*1000).toLocaleString():'';
+  const processInstanceText=String(snapshot.process_instance_id||'').trim();
   const age=Number(snapshot.age_ms);
   const ageText=Number.isFinite(age)&&age>=0?' · '+Math.round(age/1000)+' 秒前':'';
   const sampled=snapshot.sampled_at?new Date(snapshot.sampled_at).toLocaleString():'';
@@ -701,7 +700,7 @@ function renderServerMetricsPanel(snapshot){
     '<strong>llama.cpp Server Metrics</strong><span class="pill '+(status==='complete'?'pill-loaded':'pill-warn')+'">'+esc(labels[status]||status)+'</span>'+
     '<span class="runtime-server-metrics-meta">'+esc(samples.length+' 项指标'+ageText+(sampled?' · '+sampled:''))+'</span></div>'+
     (reason?'<p class="runtime-server-metrics-reason">诊断状态：<code>'+esc(reason)+'</code></p>':'')+
-    (processStartText?'<p class="runtime-server-metrics-meta">进程启动时间：'+esc(processStartText)+'</p>':'<p class="runtime-server-metrics-meta">进程身份不可用；Counter 窗口增量不会跨采样计算</p>')+
+    (processInstanceText?'<p class="runtime-server-metrics-meta">进程实例标识：<code>'+esc(processInstanceText)+'</code></p>':'<p class="runtime-server-metrics-meta">进程身份不可用；Counter 窗口增量不会跨采样计算</p>')+
     '<details><summary>查看动态发现的指标</summary>'+table+'</details></section>';
 }
 function renderRuntimeOverview(){
