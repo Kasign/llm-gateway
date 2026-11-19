@@ -471,7 +471,7 @@ func TestBuildBenchmarkToolChatBodyUsesNonStreamingRequiredToolIntent(t *testing
 
 // TestBuildBenchmarkToolMetricsSeparatesModelAndToolStages 验证模型决策、工具执行和最终生成指标分别来自对应事件。
 func TestBuildBenchmarkToolMetricsSeparatesModelAndToolStages(t *testing.T) {
-	job := benchmarkJobSnapshot{Scenario: "tool_performance", Status: "completed", ModelRoundDurationsMS: []int64{120, 45, 300}}
+	job := benchmarkJobSnapshot{Scenario: "tool_performance", Status: "completed", ModelRoundDurationsMS: []int64{120, 45, 300}, ToolCallDecision: "called", ToolCallEventCount: 3}
 	events := []store.ToolCallEvent{{Round: 1, Status: "succeeded", DurationMS: 20}, {Round: 1, Status: "succeeded", DurationMS: 30}, {Round: 2, Status: "succeeded", DurationMS: 50}}
 	got := buildBenchmarkToolMetrics(job, events, true)
 	if got.ModelRounds != 3 || got.ToolRounds != 2 || got.ToolCalls != 3 { t.Fatalf("stage counts = %+v", got) }
