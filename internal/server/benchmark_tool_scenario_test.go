@@ -155,13 +155,13 @@ func TestBuildBenchmarkToolMetricsOrdinaryScenarioIsNotApplicable(t *testing.T) 
 	}
 }
 
-func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWhenEventsUnavailable(t *testing.T) {
+func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWithoutDecisionEvidence(t *testing.T) {
 	job := benchmarkJobSnapshot{
 		Scenario: "tool_performance_auto",
 		Status:   "completed",
 		ModelRoundDurationsMS: []int64{125},
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolCallDecision != "unknown" {
 		t.Fatalf("tool call decision = %q, want unknown without event evidence", metrics.ToolCallDecision)
 	}
@@ -177,7 +177,7 @@ func TestBuildBenchmarkToolMetricsDoesNotInferNoCallFromMissingEvents(t *testing
 		ModelRoundDurationsMS: []int64{125, 230},
 		ToolCallDecision: "unknown",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, true)
+	metrics := buildBenchmarkToolMetrics(job, nil)
 	if metrics.ToolCallDecision != "unknown" || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("metrics without tool events but multiple model rounds = %#v, want unknown decision/execution", metrics)
 	}
