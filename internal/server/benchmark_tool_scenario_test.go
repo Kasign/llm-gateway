@@ -105,6 +105,8 @@ func TestBuildBenchmarkToolMetricsIncludesActualToolExecution(t *testing.T) {
 	job := benchmarkJobSnapshot{
 		Scenario:              "tool_performance_auto",
 		Status:                "completed",
+		ToolCallDecision:      "called",
+		ToolCallEventCount:    1,
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
 	events := []store.ToolCallEvent{{Round: 1, Status: "succeeded", DurationMS: 55}}
@@ -189,7 +191,6 @@ func TestBuildBenchmarkToolMetricsCalledDecisionWithoutAuditEventsKeepsExecution
 		Scenario: "tool_performance_auto",
 		Status: "completed",
 		ToolCallDecision: "called",
-		ToolCallEventCount: 1,
 		ToolCallEventCount: 1,
 		ModelRoundDurationsMS: []int64{125, 230},
 	}
