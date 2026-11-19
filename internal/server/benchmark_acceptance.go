@@ -22,7 +22,7 @@ func (s *Server) benchmarkAcceptanceCasesAPI(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"items": benchmarkAcceptanceCatalog(),
+		"items": benchmarkAcceptanceCatalog(s.cfg != nil && s.cfg.Benchmark.IsolatedEnvironment),
 		"rules_version": benchmarkAcceptanceRulesVersion,
 	})
 }
@@ -35,13 +35,14 @@ type benchmarkAcceptanceCase struct {
 	Description    string `json:"description"`
 	Scenario       string `json:"scenario"`
 	ToolChoiceMode string `json:"tool_choice_mode"`
-	ManualOnly     bool   `json:"manual_only"`
+	RequiresIsolation bool `json:"requires_isolation"`
+	ManualOnly         bool `json:"manual_only"`
 }
 
 var benchmarkAcceptanceCases = []benchmarkAcceptanceCase{
 	{ID: "TM-01", Title: "自然决策并调用", Description: "模型自主判断后发起工具调用，工具成功执行并完成回答。", Scenario: "tool_performance_auto", ToolChoiceMode: "auto"},
 	{ID: "TM-02", Title: "自然决策不调用", Description: "面对无需外部信息的问题，模型不调用工具并直接完成回答。", Scenario: "tool_performance_auto", ToolChoiceMode: "auto"},
-	{ID: "TM-03", Title: "工具执行失败", Description: "隔离验收环境中模型发起工具调用，工具执行失败或超时。", Scenario: "tool_performance_auto", ToolChoiceMode: "auto", ManualOnly: true},
+	{ID: "TM-03", Title: "工具执行失败", Description: "隔离验收环境中模型发起工具调用，工具执行失败或超时。", Scenario: "tool_performance_auto", ToolChoiceMode: "auto", RequiresIsolation: true},
 	{ID: "TM-04", Title: "工具结果回传后生成回答", Description: "工具成功执行，模型收到工具结果后再次生成最终回答。", Scenario: "tool_performance_auto", ToolChoiceMode: "auto"},
 	{ID: "TM-05", Title: "强制调用诊断", Description: "强制工具调用模式下，模型按协议调用工具并完成回答。", Scenario: "tool_performance", ToolChoiceMode: "required"},
 }
@@ -77,10 +78,22 @@ func benchmarkAcceptanceCaseIDFromConfigJSON(raw string) string {
 	return strings.ToUpper(strings.TrimSpace(snapshot.AcceptanceCaseID))
 }
 
-func benchmarkAcceptanceCatalog() []benchmarkAcceptanceCase {
+func benchmarkAcceptanceCatalog(isolatedEnvironment bool) []benchmarkAcceptanceCase {
 	out := make([]benchmarkAcceptanceCase, len(benchmarkAcceptanceCases))
 	copy(out, benchmarkAcceptanceCases)
+	for i := range out {
+		out[i].ManualOnly = out[i].RequiresIsolation && !isolatedEnvironment
+	}
 	return out
+}
+
+func benchmarkAcceptanceCaseForEnvironment(id string, isolatedEnvironment bool) (benchmarkAcceptanceCase, bool) {
+	item, ok := benchmarkAcceptanceCaseByID(id)
+	if !ok {
+		return benchmarkAcceptanceCase{}, false
+	}
+	item.ManualOnly = item.RequiresIsolation && !isolatedEnvironment
+	return item, true
 }
 
 // evaluateBenchmarkAcceptance 只根据服务端采集的请求级证据与工具指标判定，不读取客户端结论。
