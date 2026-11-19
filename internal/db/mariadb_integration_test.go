@@ -21,6 +21,9 @@ import (
 func TestMariaDBBenchmarkDecisionMigration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("MARIADB_TEST_DSN"))
 	if dsn == "" {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("CI")), "true") {
+			t.Fatal("MARIADB_TEST_DSN is required in CI; refusing to skip MariaDB migration integration test")
+		}
 		t.Skip("set MARIADB_TEST_DSN to run isolated MariaDB migration integration test")
 	}
 
