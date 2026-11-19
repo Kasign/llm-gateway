@@ -172,14 +172,14 @@ func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWithoutDecisionEvidence(t *t
 	}
 }
 
-func TestBuildBenchmarkToolMetricsDoesNotInferNoCallFromMissingEvents(t *testing.T) {
+func TestBuildBenchmarkToolMetricsDoesNotInferNoCallWhenAuditReadFails(t *testing.T) {
 	job := benchmarkJobSnapshot{
 		Scenario:              "tool_performance_auto",
 		Status:                "completed",
 		ModelRoundDurationsMS: []int64{125, 230},
 		ToolCallDecision: "unknown",
 	}
-	metrics := buildBenchmarkToolMetrics(job, nil, true)
+	metrics := buildBenchmarkToolMetrics(job, nil, false)
 	if metrics.ToolCallDecision != "unknown" || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("metrics without tool events but multiple model rounds = %#v, want unknown decision/execution", metrics)
 	}
@@ -324,5 +324,23 @@ func TestBuildBenchmarkToolMetricsPartialAuditLossKeepsExecutionUnknown(t *testi
 	}
 	if metrics.ToolExecutionAttempts != 0 || metrics.ToolExecutionSuccessRate != nil || metrics.ToolExecutionStatus != "unknown" {
 		t.Fatalf("execution metrics = %#v, want unknown when persisted audit count is incomplete", metrics)
+	}
+}
+
+
+func TestBuildBenchmarkToolMetricsCalledDecisionWithAuditReadFailureKeepsExecutionUnknown(t *testing.T) {
+	job := benchmarkJobSnapshot{
+		Scenario: "tool_performance_auto",
+		Status: "completed",
+		ToolCallDecision: "called",
+		ToolCallEventCount: 2,
+		ModelRoundDurationsMS: []int64{125, 230},
+	}
+	metrics := buildBenchmarkToolMetrics(job, nil, false)
+	if metrics.ToolCallDecision != "called" || metrics.ToolCalls != 2 {
+		t.Fatalf("decision/call count = %q/%d, want called/2", metrics.ToolCallDecision, metrics.ToolCalls)
+	}
+	if metrics.ToolExecutionAttempts != 0 || metrics.ToolExecutionSuccessRate != nil || metrics.ToolExecutionTotalMS != nil || metrics.ToolExecutionStatus != "unknown" {
+		t.Fatalf("execution metrics = %#v, want unknown when audit read fails", metrics)
 	}
 }
