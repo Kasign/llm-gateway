@@ -22,6 +22,19 @@ func benchmarkToolRoundObserver(ctx context.Context) func(time.Duration) {
 	return job.recordModelRoundDuration
 }
 
+func recordBenchmarkToolCallDecision(ctx context.Context, decision string) {
+	if ctx == nil || (decision != "called" && decision != "not_called" && decision != "unknown") {
+		return
+	}
+	job, _ := ctx.Value(benchmarkToolMetricsContextKey{}).(*benchmarkJob)
+	if job == nil {
+		return
+	}
+	job.mu.Lock()
+	job.ToolCallDecision = decision
+	job.mu.Unlock()
+}
+
 func decodeBenchmarkRoundDurations(raw string) []int64 {
 	if raw == "" { return nil }
 	var values []int64
@@ -91,10 +104,13 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 			}
 		}
 	}
-	if len(events) > 0 {
+	switch {
+	case len(events) > 0 || job.ToolCallDecision == "called":
 		metrics.ToolCallDecision = "called"
-	} else if job.Status == "completed" && eventsAvailable && len(job.ModelRoundDurationsMS) == 1 {
+	case job.Status == "completed" && job.ToolCallDecision == "not_called":
 		metrics.ToolCallDecision = "not_called"
+	default:
+		metrics.ToolCallDecision = "unknown"
 	}
 	if metrics.ToolExecutionAttempts > 0 {
 		rate := float64(metrics.ToolExecutionSuccesses) / float64(metrics.ToolExecutionAttempts) * 100
@@ -106,7 +122,7 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 		v := total
 		metrics.ToolExecutionTotalMS = &v
 		metrics.ToolExecutionStatus = "measured"
-	} else if job.Status == "completed" && eventsAvailable && len(job.ModelRoundDurationsMS) == 1 && metrics.ToolChoiceMode == "auto" && len(events) == 0 {
+	} else if job.Status == "completed" && job.ToolCallDecision == "not_called" && metrics.ToolChoiceMode == "auto" {
 		// 自然决策模式下模型可以合理地选择不调用工具；第一轮响应同时包含决策与最终回答，
 		// 无法从单次模型请求中拆分两段耗时，因此显式标记为合并测量，而不是不适用或重复计时。
 		metrics.ToolExecutionStatus = "not_applicable"
