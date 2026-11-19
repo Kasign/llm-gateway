@@ -823,7 +823,7 @@ func (s *Server) benchmarkCompareAPI(w http.ResponseWriter, r *http.Request) {
 	deltas := map[string]benchmarkComparisonMetric{}
 	if comparable {
 		keys := []string{"latency_ms", "inference_latency_ms", "model_load_ms", "ttft_ms", "input_tokens", "output_tokens", "total_tokens"}
-		if left.Scenario == "tool_performance" {
+		if isBenchmarkToolScenario(left.Scenario) {
 			keys = append(keys, "model_decision_ms", "tool_execution_total_ms", "model_final_generation_ms")
 		}
 		for _, key := range keys {
