@@ -32,7 +32,7 @@ func acceptanceEvidence(caseID string) (benchmarkJobSnapshot, benchmarkToolMetri
 }
 
 func TestBenchmarkAcceptanceCatalog(t *testing.T) {
-	catalog := benchmarkAcceptanceCatalog()
+	catalog := benchmarkAcceptanceCatalog(false)
 	if len(catalog) != 5 {
 		t.Fatalf("catalog size = %d, want 5", len(catalog))
 	}
@@ -41,9 +41,18 @@ func TestBenchmarkAcceptanceCatalog(t *testing.T) {
 			t.Errorf("case %s is missing", id)
 		}
 	}
-	tm03, _ := benchmarkAcceptanceCaseByID("tm-03")
-	if !tm03.ManualOnly {
-		t.Fatal("TM-03 must be marked as manual/isolated-environment only")
+	tm03, ok := benchmarkAcceptanceCaseForEnvironment("tm-03", false)
+	if !ok || !tm03.ManualOnly || !tm03.RequiresIsolation {
+		t.Fatal("TM-03 must be manual-only when the server is not isolated")
+	}
+	enabled, ok := benchmarkAcceptanceCaseForEnvironment("TM-03", true)
+	if !ok || enabled.ManualOnly || !enabled.RequiresIsolation {
+		t.Fatal("TM-03 must be executable only when the server-side isolated flag is enabled")
+	}
+	for _, item := range benchmarkAcceptanceCatalog(true) {
+		if item.ID == "TM-03" && item.ManualOnly {
+			t.Fatal("isolated catalog must expose TM-03 as executable")
+		}
 	}
 }
 
