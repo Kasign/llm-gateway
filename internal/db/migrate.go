@@ -183,6 +183,7 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
   ttft_status VARCHAR(24) NOT NULL DEFAULT 'unknown',
   model_round_durations_json LONGTEXT NULL,
   tool_call_decision VARCHAR(16) NOT NULL DEFAULT 'unknown',
+  tool_call_event_count INT UNSIGNED NOT NULL DEFAULT 0,
   http_status SMALLINT UNSIGNED NULL,
   response_bytes BIGINT UNSIGNED NULL,
   input_tokens BIGINT UNSIGNED NULL,
@@ -235,6 +236,7 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE benchmark_runs ADD COLUMN ttft_status VARCHAR(24) NOT NULL DEFAULT 'unknown'`,
 		`ALTER TABLE benchmark_runs ADD COLUMN model_round_durations_json LONGTEXT NULL`,
 		`ALTER TABLE benchmark_runs ADD COLUMN tool_call_decision VARCHAR(16) NOT NULL DEFAULT 'unknown'`,
+		`ALTER TABLE benchmark_runs ADD COLUMN tool_call_event_count INT UNSIGNED NOT NULL DEFAULT 0`,
 	}
 	for _, sqlText := range alters {
 		if _, err := db.ExecContext(ctx, sqlText); err != nil {
