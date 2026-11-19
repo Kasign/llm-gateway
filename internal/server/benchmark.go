@@ -747,16 +747,14 @@ func (s *Server) benchmarkComparisonSide(r *http.Request, taskID string) (benchm
 		ToolCallDecision: run.ToolCallDecision,
 	}
 	toolEvents := []store.ToolCallEvent{}
-	toolEventsAvailable := false
 	if s.logs != nil {
 		var eventsErr error
 		toolEvents, eventsErr = s.logs.ListToolCallEvents(r.Context(), run.RequestID, 9)
-		toolEventsAvailable = eventsErr == nil
 		if eventsErr != nil {
 			toolEvents = nil
 		}
 	}
-	toolMetrics := buildBenchmarkToolMetrics(snapshot, toolEvents, toolEventsAvailable)
+	toolMetrics := buildBenchmarkToolMetrics(snapshot, toolEvents)
 	metrics := map[string]*int64{
 		"latency_ms": nil,
 		"inference_latency_ms": nil,
