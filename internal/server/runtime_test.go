@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/whl/llm-gateway/internal/config"
@@ -43,5 +45,22 @@ func TestBuildAdminRuntimeOverviewRemoteDoesNotExposeLocalModelState(t *testing.
 	}
 	if _, ok := got["loaded"].([]interface{}); !ok {
 		t.Fatalf("remote runtime should not expose stale local loaded model records: %#v", got)
+	}
+}
+
+
+// 管理 Runtime API 必须使用 Web Session；部署 Admin API Key 不能读取运行时状态。
+func TestRuntimeAPIRejectsAdminAPIKey(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Auth.AdminAPIKey = "test-admin-api-key"
+	s := &Server{cfg: cfg}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/runtime", nil)
+	req.Header.Set("X-Admin-Key", "test-admin-api-key")
+	rec := httptest.NewRecorder()
+	s.runtimeAPI(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("runtimeAPI with Admin API Key returned %d, want 401; body=%s", rec.Code, rec.Body.String())
 	}
 }
