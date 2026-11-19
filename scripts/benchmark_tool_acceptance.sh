@@ -52,6 +52,27 @@ if ! [[ "$POLL_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || ! [[ "$POLL_TIMEOUT_SECO
 fi
 
 BASE_URL="${GATEWAY_URL%/}"
+mkdir -p "$OUTPUT_DIR"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+RESPONSE_FILE="$(mktemp)"
+trap 'rm -f "$RESPONSE_FILE"' EXIT
+
+request() {
+  local method="$1"
+  local url="$2"
+  local body_file="$3"
+  local payload="${4:-}"
+  local -a args
+  args=(-sS -X "$method" "$url"
+    -H "Authorization: Bearer $GATEWAY_ADMIN_SESSION"
+    -H "X-Client-API-Key: $GATEWAY_CLIENT_API_KEY"
+    -H "Accept: application/json")
+  if [[ -n "$payload" ]]; then
+    args+=(-H "Content-Type: application/json" --data-binary "$payload")
+  fi
+  curl "${args[@]}" -o "$body_file" -w '%{http_code}'
+}
+
 if [[ -n "$ACCEPTANCE_CASE_ID" ]]; then
   case "$ACCEPTANCE_CASE_ID" in TM-01|TM-02|TM-03|TM-04|TM-05) ;; *) echo "未知验收用例 ID：$ACCEPTANCE_CASE_ID" >&2; exit 2 ;; esac
   CATALOG_STATUS="$(request GET "$BASE_URL/api/benchmark/acceptance-cases" "$RESPONSE_FILE")"
@@ -75,26 +96,6 @@ if [[ -n "$ACCEPTANCE_CASE_ID" ]]; then
     exit 2
   fi
 fi
-mkdir -p "$OUTPUT_DIR"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RESPONSE_FILE="$(mktemp)"
-trap 'rm -f "$RESPONSE_FILE"' EXIT
-
-request() {
-  local method="$1"
-  local url="$2"
-  local body_file="$3"
-  local payload="${4:-}"
-  local -a args
-  args=(-sS -X "$method" "$url"
-    -H "Authorization: Bearer $GATEWAY_ADMIN_SESSION"
-    -H "X-Client-API-Key: $GATEWAY_CLIENT_API_KEY"
-    -H "Accept: application/json")
-  if [[ -n "$payload" ]]; then
-    args+=(-H "Content-Type: application/json" --data-binary "$payload")
-  fi
-  curl "${args[@]}" -o "$body_file" -w '%{http_code}'
-}
 
 PAYLOAD="$(jq -n \
   --arg scenario "$SCENARIO" \
