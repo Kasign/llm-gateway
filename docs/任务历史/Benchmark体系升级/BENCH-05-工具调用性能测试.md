@@ -116,27 +116,27 @@
 - 新增 `scripts/benchmark_tool_acceptance.sh`，复用现有 `POST /api/benchmark` 与 `GET /api/benchmark/{job_id}`，不新增服务端接口或平行执行链路。
 - 脚本每次只创建一个任务，轮询到终态后保存完整任务响应 JSON，并在终端摘要展示决策、执行统计和工具事件状态；它负责采集证据，不自动把模型行为判为通过，最终仍按 TM-01～TM-05 的矩阵人工判读。结果文件不包含请求认证头，但可能包含 Prompt 和模型输出；分享前必须人工检查并按需脱敏。
 - 认证明确分离：`GATEWAY_ADMIN_SESSION` 是网页登录会话 Token，放在 `Authorization: Bearer`；`GATEWAY_CLIENT_API_KEY` 是具有模型及 `web.search` 授权的客户端服务 Key，放在 `X-Client-API-Key`。二者不可互换。脚本不会把凭据写入证据文件。
-- 运行依赖 Bash、curl、jq。示例：
+- 运行依赖 Bash、curl、jq。脚本按普通文件提交，使用 `bash` 执行。示例：
   ```bash
   export GATEWAY_URL="https://你的Gateway地址"
   export GATEWAY_ADMIN_SESSION="网页登录会话Token"
   export GATEWAY_CLIENT_API_KEY="客户端服务API Key"
 
   # TM-01：自然决策并调用（需按结果判读）
-  SCENARIO=tool_performance_auto ./scripts/benchmark_tool_acceptance.sh
+  SCENARIO=tool_performance_auto bash scripts/benchmark_tool_acceptance.sh
 
   # TM-02：自然决策不调用
   SCENARIO=tool_performance_auto \
     PROMPT="请计算 17×23，并只给出结果。" \
-    ./scripts/benchmark_tool_acceptance.sh
+    bash scripts/benchmark_tool_acceptance.sh
 
   # TM-04：工具结果回传后生成最终回答
   SCENARIO=tool_performance_auto \
     PROMPT="Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。" \
-    ./scripts/benchmark_tool_acceptance.sh
+    bash scripts/benchmark_tool_acceptance.sh
 
   # TM-05：强制调用诊断
-  SCENARIO=tool_performance ./scripts/benchmark_tool_acceptance.sh
+  SCENARIO=tool_performance bash scripts/benchmark_tool_acceptance.sh
   ```
 - 可通过 `MODEL_ID` 固定上游模型 ID；未设置时使用当前活动模型。默认最大输出 384 Token，默认轮询超时 1800 秒，可通过 `MAX_TOKENS`、`POLL_INTERVAL_SECONDS`、`POLL_TIMEOUT_SECONDS` 调整。输出目录默认为当前目录下 `benchmark-tool-evidence/`，文件权限受 `umask 077` 保护。
 - TM-03 仍须在独立验收 Gateway 中预先将 SearXNG 指向专用故障响应端点，再运行自然决策场景；脚本不会修改服务端工具配置，也不会触碰生产环境。超时退出时脚本报告 Job ID 和查询地址，不会伪造终态结果。
