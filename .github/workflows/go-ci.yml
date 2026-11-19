@@ -133,7 +133,7 @@ jobs:
           cache: true
 
       - name: MariaDB Benchmark 决策迁移集成验收
-        run: go test -count=1 -run TestMariaDBBenchmarkDecisionMigration -v ./internal/db
+        run: go test -count=1 -run '^TestMariaDBBenchmarkDecisionMigration
 
       - name: 并发与数据竞态测试
         run: go test -race ./internal/provider ./internal/server ./internal/core ./internal/audit ./internal/live ./internal/tools/...
