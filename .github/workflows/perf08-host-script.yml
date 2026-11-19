@@ -1,0 +1,102 @@
+name: PERF-08 host perf script
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "tools/perf08/host-perf-stat.sh"
+      - ".github/workflows/perf08-host-script.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf08-host-script-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  script-smoke:
+    name: 宿主机采集脚本语法与目标进程解析
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bash syntax
+        run: bash -n tools/perf08/host-perf-stat.sh
+
+      - name: Router child discovery smoke test
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmpdir="$(mktemp -d)"
+          cleanup() {
+            pkill -x llama-server 2>/dev/null || true
+            rm -rf "$tmpdir"
+          }
+          trap cleanup EXIT
+
+          mkdir -p "$tmpdir/bin"
+          cat > "$tmpdir/llama-server.c" <<'EOF'
+          #include <sys/types.h>
+          #include <unistd.h>
+          #include <stdlib.h>
+          int main(void) {
+              pid_t child = fork();
+              if (child < 0) return 1;
+              for (;;) pause();
+          }
+          EOF
+          cc "$tmpdir/llama-server.c" -o "$tmpdir/bin/llama-server"
+          "$tmpdir/bin/llama-server" &
+          router_pid="$!"
+          sleep 0.2
+
+          cat > "$tmpdir/bin/docker" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          [[ "${1:-}" == "top" ]] || exit 2
+          exec ps -eo pid,ppid,comm
+          EOF
+          chmod 755 "$tmpdir/bin/docker"
+
+          cat > "$tmpdir/bin/perf" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "--version" ]]; then
+            echo "perf version mock"
+            exit 0
+          fi
+          output=""
+          while (($#)); do
+            if [[ "$1" == "-o" ]]; then
+              output="$2"
+              shift 2
+            else
+              shift
+            fi
+          done
+          [[ -n "$output" ]]
+          printf 'mock,1,1,1\n' > "$output"
+          EOF
+          chmod 755 "$tmpdir/bin/perf"
+
+          output_dir="$tmpdir/output"
+          PATH="$tmpdir/bin:$PATH" bash tools/perf08/host-perf-stat.sh mock-container 1 "$output_dir"
+
+          grep -Fxq "scope=process_window" "$output_dir/metadata.txt"
+          grep -Fxq "request_correlation=none" "$output_dir/metadata.txt"
+          grep -Fxq "container_name=mock-container" "$output_dir/metadata.txt"
+          grep -Fxq "process_identity_after_sample=stable" "$output_dir/metadata.txt"
+          test -s "$output_dir/perf-stat.csv"
+          test "$(stat -c '%a' "$output_dir")" = "700"
+          test "$(stat -c '%a' "$output_dir/metadata.txt")" = "600"
+          test "$(stat -c '%a' "$output_dir/perf-stat.csv")" = "600"
+
+          sampled_pid="$(awk -F= '$1 == "host_pid" { print $2 }' "$output_dir/metadata.txt")"
+          sampled_parent="$(awk -F= '$1 == "parent_pid" { print $2 }' "$output_dir/metadata.txt")"
+          test "$sampled_pid" != "$router_pid"
+          test "$sampled_parent" = "$router_pid"

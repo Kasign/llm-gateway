@@ -50,3 +50,14 @@ tools/perf08/host-perf-stat.sh <host-pid|container-name> [duration-seconds] [out
 6. 不把 patch 混入 Gateway Dockerfile，也不触碰生产容器。
 
 在用户明确确认 patch 范围之前，不修改 llama.cpp 上游 C++ 源码。
+
+
+## 脚本自动化验证
+
+`.github/workflows/perf08-host-script.yml` 对脚本执行 `bash -n`，并使用 mock Docker/perf 与临时 `llama-server` 父子进程验证：
+
+- 容器名能唯一解析 Router 的模型 child PID。
+- 不会把 Router 父进程作为采样目标。
+- PID / PPID / executable 绑定正确。
+- metadata 与 CSV 生成，目录和文件权限符合 0700/0600。
+- 测试不启动真实 llama.cpp 服务、不运行真实 perf、不接触模型文件。
