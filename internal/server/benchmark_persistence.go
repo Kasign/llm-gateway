@@ -39,6 +39,7 @@ func (j *benchmarkJob) persistenceRecords() (store.BenchmarkTask, store.Benchmar
 	run.InferenceLatencyStatus = j.InferenceLatencyStatus
 	run.TTFTStatus = j.TTFTStatus
 	run.ToolCallDecision = j.ToolCallDecision
+	run.ToolCallEventCount = j.ToolCallEventCount
 	if len(j.ModelRoundDurationsMS) > 0 {
 		if encoded, err := json.Marshal(j.ModelRoundDurationsMS); err == nil { run.ModelRoundDurationsJSON = string(encoded) }
 	}
@@ -119,7 +120,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		TTFTMS: run.TTFTMS, StreamEvents: run.StreamEvents, ReasoningChars: run.ReasoningChars,
 		ContentChars: run.ContentChars,
 		ModelRoundDurationsMS: decodeBenchmarkRoundDurations(run.ModelRoundDurationsJSON),
-		ToolCallDecision: run.ToolCallDecision,
+		ToolCallDecision: run.ToolCallDecision, ToolCallEventCount: run.ToolCallEventCount,
 		Stream: task.Scenario != "tool_performance",
 	}
 	events := []store.StreamEvent{}
