@@ -252,3 +252,28 @@ func TestBenchmarkPersistenceRecordsIncludeToolCallDecision(t *testing.T) {
 		t.Fatalf("persisted tool call decision = %q, want called", run.ToolCallDecision)
 	}
 }
+
+
+func TestBenchmarkToolCallDecisionRequiresSuccessfulFinalResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		modelRounds int
+		responseStatus int
+		eventCount int
+		runErr error
+		want string
+	}{
+		{name: "successful no-call response", modelRounds: 1, responseStatus: 200, want: "not_called"},
+		{name: "upstream rejection", modelRounds: 1, responseStatus: 401, want: "unknown"},
+		{name: "missing response status", modelRounds: 1, want: "unknown"},
+		{name: "coordinator failure", modelRounds: 1, responseStatus: 200, runErr: context.Canceled, want: "unknown"},
+		{name: "tool event despite execution failure", modelRounds: 1, responseStatus: 502, eventCount: 1, runErr: context.DeadlineExceeded, want: "called"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := benchmarkToolCallDecision(tt.modelRounds, tt.responseStatus, tt.eventCount, tt.runErr); got != tt.want {
+				t.Fatalf("benchmarkToolCallDecision() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
