@@ -3330,7 +3330,7 @@ components:
             tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
             tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
             model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
-            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_status: { type: string, enum: [measured, combined_with_decision, not_applicable, unknown], description: "combined_with_decision 表示自然决策未调用工具时，模型决策与最终回答由同一次模型请求合并测量；不得将两项耗时相加" }
           additionalProperties: false
         request_id: { type: string }
         request_log: { type: string }
@@ -4437,7 +4437,7 @@ components:
             tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
             tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
             model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
-            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_status: { type: string, enum: [measured, combined_with_decision, not_applicable, unknown], description: "combined_with_decision 表示自然决策未调用工具时，模型决策与最终回答由同一次模型请求合并测量；不得将两项耗时相加" }
           additionalProperties: false
         request_id: { type: string }
         request_log: { type: string }
@@ -5509,7 +5509,7 @@ components:
             tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
             tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
             model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
-            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_status: { type: string, enum: [measured, combined_with_decision, not_applicable, unknown], description: "combined_with_decision 表示自然决策未调用工具时，模型决策与最终回答由同一次模型请求合并测量；不得将两项耗时相加" }
           additionalProperties: false
         request_id: { type: string }
         request_log: { type: string }
@@ -6615,7 +6615,7 @@ components:
             tool_execution_total_ms: { type: integer, format: int64, minimum: 0, nullable: true }
             tool_execution_status: { type: string, enum: [measured, not_applicable, unknown] }
             model_final_generation_ms: { type: integer, format: int64, minimum: 0, nullable: true }
-            model_final_generation_status: { type: string, enum: [measured, not_applicable, unknown] }
+            model_final_generation_status: { type: string, enum: [measured, combined_with_decision, not_applicable, unknown], description: "combined_with_decision 表示自然决策未调用工具时，模型决策与最终回答由同一次模型请求合并测量；不得将两项耗时相加" }
           additionalProperties: false
         request_id: { type: string }
         request_log: { type: string }
