@@ -133,8 +133,11 @@ func buildBenchmarkToolMetrics(job benchmarkJobSnapshot, events []store.ToolCall
 	if eventsComplete {
 		metrics.ToolCalls = len(events)
 		metrics.ToolRounds = len(seenRounds)
-	} else if job.ToolCallDecision == "called" {
+	} else if job.ToolCallDecision == "called" || len(events) > 0 {
 		metrics.ToolCalls = job.ToolCallEventCount
+		if metrics.ToolCalls == 0 {
+			metrics.ToolCalls = len(events)
+		}
 	}
 	if metrics.ToolExecutionAttempts > 0 {
 		v := total
