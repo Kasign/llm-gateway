@@ -139,7 +139,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 		"request_log": "/api/requests/" + snap.RequestID, "payload_persisted": false,
 	}
 	if snap.AcceptanceCaseID != "" {
-		out["acceptance"] = evaluateBenchmarkAcceptance(snap.AcceptanceCaseID, snap, toolMetrics)
+		out["acceptance"] = evaluateBenchmarkAcceptanceWithEvents(snap.AcceptanceCaseID, snap, toolMetrics, toolEvents)
 	}
 	if s.cfg != nil && s.cfg.Logging.StorePayload && s.logs != nil {
 		if payload, err := s.logs.GetPayload(r.Context(), run.RequestID); err == nil {
