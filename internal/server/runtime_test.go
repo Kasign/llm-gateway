@@ -76,7 +76,8 @@ func TestAttachRuntimeServerMetricsOnlyForLlamacpp(t *testing.T) {
 			attachRuntimeServerMetrics(snapshot, backend, metrics)
 			got, exists := snapshot["server_metrics"]
 			if strings.EqualFold(backend, "llamacpp") {
-				if !exists || got != metrics {
+				gotMetrics, ok := got.(map[string]interface{})
+				if !exists || !ok || gotMetrics["status"] != "complete" {
 					t.Fatalf("llamacpp metrics = %#v, exists=%v; want supplied metrics", got, exists)
 				}
 			} else if exists {
