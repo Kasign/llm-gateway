@@ -3113,8 +3113,9 @@ async function runBenchmarkSuite(){
       if(!timingComplete){
         validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       }
+      const cancelled=token!==benchPollToken||benchSuiteCancelRequested;
       const record={
-        case_id:item.case_id,status:job.status||(failure?'failed':'unknown'),
+        case_id:item.case_id,status:cancelled?'cancelled':(job.status||(failure?'failed':'unknown')),
         job_id:job.job_id||readBenchStore().jobId||null,
         prompt_version:prompts.version,prompt_sha256:promptSHA,
         input_target:item.input_target,output_target:item.output_target,
@@ -3122,7 +3123,7 @@ async function runBenchmarkSuite(){
         analysis:sanitizeBenchmarkToolArguments(wrap?.analysis||{}),
         acceptance:wrap?.acceptance||null,
         runtime_before:runtimeBefore,runtime_after:runtimeAfter,
-        validation,failure
+        validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':null)
       };
       suite.cases.push(record);
       saveBenchmarkSuiteState(suite);
