@@ -2772,28 +2772,35 @@ async function pollBenchmarkJob(jobId, t0, token) {
       if (token === benchPollToken) setBenchRunning(false);
     }
   }
-  async function stopBenchmark() {
-    if (benchSuiteActive) benchSuiteCancelRequested = true;
-    const st = readBenchStore();
-    if (!st.jobId) {
-      setBenchRunning(false);
-      return;
-    }
+async function stopBenchmark(){
+  if(benchSuiteActive){
+    benchSuiteCancelRequested=true;
+    const activeJobId=benchSuiteCurrentJobId;
     benchPollToken++;
     setBenchRunning(false);
-    try {
-      await api("/api/benchmark/" + encodeURIComponent(st.jobId), { method: "DELETE" });
-      const wrap = await api("/api/benchmark/" + encodeURIComponent(st.jobId));
+    if(!activeJobId)return;
+    try{
+      await api('/api/benchmark/'+encodeURIComponent(activeJobId),{method:'DELETE'});
+      const wrap=await api('/api/benchmark/'+encodeURIComponent(activeJobId));
       renderBenchResult(wrap);
-    } catch (e) {
-      const ansE = benchResultElement('answer');
-      if (ansE) {
-        ansE.className = "bench-answer err";
-        ansE.textContent = e.message;
-      }
+    }catch(e){
+      const ansE=benchResultElement('answer');if(ansE){ansE.className='bench-answer err';ansE.textContent=e.message}
     }
+    return;
   }
-  const BENCH_SUITE_STORAGE_KEY='llm-gateway.bench-suite.v1';
+  const st=readBenchStore();
+  if(!st.jobId){setBenchRunning(false);return}
+  benchPollToken++;
+  setBenchRunning(false);
+  try{
+    await api('/api/benchmark/'+encodeURIComponent(st.jobId),{method:'DELETE'});
+    const wrap=await api('/api/benchmark/'+encodeURIComponent(st.jobId));
+    renderBenchResult(wrap);
+  }catch(e){
+    const ansE=benchResultElement('answer');if(ansE){ansE.className='bench-answer err';ansE.textContent=e.message}
+  }
+}
+const BENCH_SUITE_STORAGE_KEY='llm-gateway.bench-suite.v1';
 let benchSuiteActive=false;
 let benchSuiteCancelRequested=false;
 let benchSuiteCurrentJobId=null;
@@ -3102,79 +3109,58 @@ async function runBenchmarkSuite(){
     else if(status)status.textContent='四组测试流程结束。请复制 Markdown 报告或原始 JSON 发送。';
   }
 }
-
-
-async function runBenchmark(scenario = "performance") {
-    const isAcceptance = scenario === "acceptance";
-    const acceptanceCaseID = isAcceptance ? $("benchAcceptanceCase")?.value || "" : "";
-    if (isAcceptance) {
-      benchResultScope = 'acceptance';
-      if (!acceptanceCaseID) {
-        const answer = benchResultElement('answer');
-        if (answer) { answer.className = "bench-acceptance-result msg err"; answer.textContent = "请先选择验收用例。"; }
-        return;
-      }
-      scenario = acceptanceCaseID === "TM-05" ? "tool_performance" : "tool_performance_auto";
-    }
-    const toolScenario = scenario === "tool_performance" || scenario === "tool_performance_auto";
-    if (!isAcceptance) benchResultScope = toolScenario ? 'tools' : 'performance';
-    const promptOverride = toolScenario ? ($(isAcceptance ? "benchAcceptancePrompt" : "benchToolPrompt")?.value || "").trim() : "";
-    if (toolScenario && !promptOverride) {
-      const answer = benchResultElement('answer');
-      if (answer) { answer.className = "bench-answer err"; answer.textContent = "测试提示词不能为空。"; }
-      return;
-    }
-    const clientKey = ($("modelTestApiKey")?.value || "").trim();
-    if (!clientKey) {
-      const answer = benchResultElement('answer');
-      if (answer) { answer.className = "bench-answer err"; answer.textContent = "请先在模型测试页面输入客户端服务密钥。"; }
-      $("modelTestApiKey")?.focus();
-      return;
-    }
-    benchPollToken++;
-    const token = benchPollToken;
-    setBenchRunning(true);
-    const ans0 = benchResultElement('answer');
-    if (ans0) { ans0.className = "bench-answer muted"; ans0.textContent = "正在连接上游…"; }
-    if (isAcceptance) {
-      const box = $("benchAcceptanceResult");
-      if (box) { box.className = "bench-acceptance-result msg muted"; box.textContent = "正在提交验收任务…"; }
-    }
-    benchResultElement('reasoningWrap') && (benchResultElement('reasoningWrap').style.display = "none");
-    benchResultElement('analysis') && (benchResultElement('analysis').style.display = "none", benchResultElement('analysis').innerHTML = "");
-    benchResultElement('eventsFold') && (benchResultElement('eventsFold').style.display = "none");
-    const met0 = benchResultElement('metrics');
-    if (met0) met0.innerHTML = statusPill("running");
-    try {
-      const benchTarget = await loadBenchPanel({ resume: false });
-      if (token !== benchPollToken) return;
-      const upstream = typeof benchTarget === "string" ? benchTarget : benchTarget?.upstream || "";
-      if (!upstream) throw new Error("当前 API 推理后端无已加载模型，请先在「模型管理」加载");
-      updateBenchReqPreview(upstream, scenario, promptOverride);
-      const start = await api("/api/benchmark", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Client-API-Key": clientKey },
-        body: JSON.stringify(benchPayloadForApi(benchTarget, scenario, promptOverride, acceptanceCaseID))
-      });
-      if (token !== benchPollToken) return;
-      const jobId = start.job_id, t0 = Date.now();
-      writeBenchStore({ jobId });
-      persistBenchParams();
-      await pollBenchmarkJob(jobId, t0, token);
-    } catch (e) {
-      if (token !== benchPollToken) return;
-      const ansE = $(isAcceptance ? "benchAcceptanceResult" : "benchAnswer");
-      if (ansE) {
-        ansE.className = isAcceptance ? "bench-acceptance-result msg err" : "bench-answer err";
-        ansE.textContent = e.message;
-      }
-      const metE = benchResultElement('metrics');
-      if (metE) metE.innerHTML = "";
-    } finally {
-      if (token === benchPollToken) setBenchRunning(false);
-    }
+async function runBenchmark(scenario='performance'){
+  const isAcceptance=scenario==='acceptance';
+  const acceptanceCaseID=isAcceptance?($('benchAcceptanceCase')?.value||''):'';
+  if(isAcceptance){
+    benchResultScope='acceptance';
+    if(!acceptanceCaseID){const answer=benchResultElement('answer');if(answer){answer.className='bench-answer err';answer.textContent='请先选择验收用例。';}return;}
+    scenario=acceptanceCaseID==='TM-05'?'tool_performance':'tool_performance_auto';
   }
-  async function loadBenchmarkAcceptanceCases() {
+  const toolScenario=scenario==='tool_performance'||scenario==='tool_performance_auto';
+  if(!isAcceptance)benchResultScope=toolScenario?'tools':'performance';
+  const promptOverride=toolScenario?($(isAcceptance?'benchAcceptancePrompt':'benchToolPrompt')?.value||'').trim():'';
+  if(toolScenario&&!promptOverride){const answer=benchResultElement('answer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
+  const clientKey=($('modelTestApiKey')?.value||'').trim();
+  if(!clientKey){
+    const answer=benchResultElement('answer');
+    if(answer){answer.className='bench-answer err';answer.textContent='请先在模型测试页面输入客户端服务密钥。';}
+    $('modelTestApiKey')?.focus();
+    return;
+  }
+  benchPollToken++;
+  const token=benchPollToken;
+  setBenchRunning(true);
+  const ans0=benchResultElement('answer');if(ans0){ans0.className='bench-answer muted';ans0.textContent='正在连接上游…'}
+  if(isAcceptance){const box=$('benchAcceptanceResult');if(box){box.className='bench-acceptance-result msg muted';box.textContent='正在提交验收任务…';}}
+  benchResultElement('reasoningWrap')&&( benchResultElement('reasoningWrap').style.display='none');
+  benchResultElement('analysis')&&(benchResultElement('analysis').style.display='none',benchResultElement('analysis').innerHTML='');
+  benchResultElement('eventsFold')&&(benchResultElement('eventsFold').style.display='none');
+  const met0=benchResultElement('metrics');if(met0)met0.innerHTML=statusPill('running');
+  try{
+    const benchTarget=await loadBenchPanel({resume:false});
+    if(token!==benchPollToken)return;
+    const upstream=typeof benchTarget==='string'?benchTarget:(benchTarget?.upstream||'');
+    if(!upstream){
+      throw new Error('当前 API 推理后端无已加载模型，请先在「模型管理」加载');
+    }
+    updateBenchReqPreview(upstream,scenario,promptOverride);
+    const start=await api('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json','X-Client-API-Key':clientKey},body:JSON.stringify(benchPayloadForApi(benchTarget,scenario,promptOverride,acceptanceCaseID))});
+    if(token!==benchPollToken)return;
+    const jobId=start.job_id,t0=Date.now();
+    writeBenchStore({jobId});
+    persistBenchParams();
+    await pollBenchmarkJob(jobId,t0,token);
+  }catch(e){
+    if(token!==benchPollToken)return;
+    const ansE=benchResultElement('answer');if(ansE){ansE.className='bench-answer err';ansE.textContent=e.message}
+    const metE=benchResultElement('metrics');if(metE)metE.innerHTML='';
+    if(isAcceptance){const box=$('benchAcceptanceResult');if(box){box.className='bench-acceptance-result msg err';box.textContent=e.message||'验收任务提交失败';}}
+  }finally{
+    if(token===benchPollToken)setBenchRunning(false);
+  }
+}
+async function loadBenchmarkAcceptanceCases() {
     const select = $("benchAcceptanceCase");
     if (!select || select.dataset.loaded === "true") return;
     try {
