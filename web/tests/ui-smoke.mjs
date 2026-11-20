@@ -270,6 +270,21 @@ try {
     !(await page.locator('#modelTestPanelTools').isVisible()) &&
     !(await page.locator('#modelTestPanelAcceptance').isVisible()) &&
     !(await page.locator('#modelTestPanelHistory').isVisible()));
+  check('未完成组续跑入口默认隐藏，且只在存在可续跑报告时显示',
+    await page.locator('#benchSuiteResumeBtn').count() === 1 &&
+    !(await page.locator('#benchSuiteResumeBtn').isVisible()));
+  await page.evaluate(() => localStorage.setItem('llm-gateway.bench-suite.v1', JSON.stringify({
+    suite_version:'perf12-four-case-v2',status:'partial',prompt_version:'perf12-synthetic-dataset-v2',
+    prompts:{short:'short prompt',long:'long prompt'},warmup:{status:'completed'},
+    cases:[{case_id:'S-P / S-O',status:'completed'},{case_id:'L-P / S-O',status:'cancelled'}]
+  })));
+  await clickTab(page, 'model-test', '模型测试');
+  check('部分完成报告显示续跑入口',
+    await page.locator('#benchSuiteResumeBtn').isVisible());
+  await page.evaluate(() => localStorage.removeItem('llm-gateway.bench-suite.v1'));
+  await clickTab(page, 'model-test', '模型测试');
+  check('清除部分报告后隐藏续跑入口',
+    !(await page.locator('#benchSuiteResumeBtn').isVisible()));
   check('性能测试区只包含普通性能与四组基线入口',
     await page.locator('#benchSuiteRunBtn').count() === 1 &&
     await page.locator('#benchRunBtn').count() === 1 &&
