@@ -83,6 +83,9 @@ func (s *Server) upstreamRuntimeSnapshotScoped(ctx context.Context, backend stri
 	} else {
 		snap, err = client.RuntimeSnapshot(ctx, active)
 	}
+	if err == nil && snap != nil {
+		snap.SampledAt = time.Now()
+	}
 
 	s.runtimeSnapMu.Lock()
 	s.runtimeSnapCache[key] = upstreamRuntimeSnapEntry{at: time.Now(), snap: snap, err: err}
@@ -196,7 +199,11 @@ func (s *Server) setRuntimeSnapshotSample(snap *llama.RuntimeSnapshot, status, s
 	}
 	// RuntimeSnapshot 每轮先更新；保留上一轮 Metrics，供紧接着的 Metrics 采样计算窗口增量。
 	previous := s.runtimeSnapshotSample
-	next := &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: time.Now()}
+	sampledAt := time.Now()
+	if snap != nil && !snap.SampledAt.IsZero() {
+		sampledAt = snap.SampledAt
+	}
+	next := &runtimeSnapshotSample{Snapshot: copySnap, Status: status, Source: source, SampledAt: sampledAt}
 	if previous != nil {
 		next.Metrics = previous.Metrics
 		next.MetricsStatus = previous.MetricsStatus
