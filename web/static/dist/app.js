@@ -3061,10 +3061,6 @@ async function runBenchmarkSuite(resumeExisting=false){
     renderBenchmarkSuiteReport();
     return;
   }
-  const confirmMessage=resumeExisting
-    ?'只补跑尚未取得 completed 结果的测试组；已完成的样本会保留，不重复执行。要求当前后端和模型与原测试一致。继续？'
-    :'将创建一轮新的测试，先预热再串行执行四组性能测试。长输出最多生成 512 tokens，整个流程可能持续数分钟。新报告会替换当前报告。测试期间请勿发送其他推理请求。继续？';
-  if(!confirm(confirmMessage))return;
   const clientKey=($('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const status=$('benchSuiteStatus');
@@ -3072,6 +3068,10 @@ async function runBenchmarkSuite(resumeExisting=false){
     $('modelTestApiKey')?.focus();
     return;
   }
+  const confirmMessage=resumeExisting
+    ?'只补跑尚未取得 completed 结果的测试组；已完成的样本会保留，不重复执行。要求当前后端和模型与原测试一致。继续？'
+    :'将创建一轮新的测试，先预热再串行执行四组性能测试。长输出最多生成 512 tokens，整个流程可能持续数分钟。新报告会替换当前报告。测试期间请勿发送其他推理请求。继续？';
+  if(!confirm(confirmMessage))return;
   let restoreParams=collectBenchParams();
   let suiteParams=null;
   const token=++benchPollToken;
