@@ -2702,6 +2702,27 @@ async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params){
     if(benchSuiteCurrentJobId===start.job_id)benchSuiteCurrentJobId=null;
   }
 }
+function benchmarkSuiteQualification(suite){
+  const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
+  const cases=Array.isArray(suite?.cases)?suite.cases:[];
+  const allCasesRecorded=caseOrder.every(id=>cases.some(item=>item.case_id===id));
+  if(!allCasesRecorded)return 'baseline_not_qualified';
+  const allTargetsMet=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
+  });
+  const allCold=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
+  });
+  const allConditionsComplete=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    const job=item.job||{};
+    return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
+  });
+  return allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+}
+
 function benchmarkSuiteCanResume(suite){
   if(!suite||suite.suite_version!=='perf12-four-case-v2'||suite.prompt_version!=='perf12-synthetic-dataset-v2')return false;
   if(suite.status==='completed'||suite.status==='running')return false;
@@ -2876,20 +2897,7 @@ async function runBenchmarkSuite(resumeExisting=false){
     suite.cases.sort((a,b)=>caseOrder.indexOf(a.case_id)-caseOrder.indexOf(b.case_id));
     const allCasesRecorded=caseOrder.every(id=>suite.cases.some(item=>item.case_id===id));
     suite.status=allCasesRecorded?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
-    const allTargetsMet=allCasesRecorded&&caseOrder.every(id=>{
-      const item=suite.cases.find(entry=>entry.case_id===id);
-      return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
-    });
-    const allCold=allCasesRecorded&&caseOrder.every(id=>{
-      const item=suite.cases.find(entry=>entry.case_id===id);
-      return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
-    });
-    const allConditionsComplete=allCasesRecorded&&caseOrder.every(id=>{
-      const item=suite.cases.find(entry=>entry.case_id===id);
-      const job=item.job||{};
-      return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
-    });
-    suite.qualification_status=allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+    suite.qualification_status=benchmarkSuiteQualification(suite);
   }catch(error){
     suite.status=suite.cases.length?'partial':'failed';
     suite.error=error?.message||'四组测试执行失败';
@@ -3130,6 +3138,7 @@ exposeGlobals({
   runBenchmarkSuite,
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
+  benchmarkSuiteQualification,
   copyBenchmarkSuiteReport,
   renderBenchmarkSuiteReport,
   saveBackend,
