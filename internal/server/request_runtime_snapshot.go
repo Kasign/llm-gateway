@@ -13,8 +13,8 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	sample := s.runtimeSnapshotSampleLatest()
 	now := time.Now()
 	out := &RequestRuntimeSnapshot{Status: "unavailable", Source: "runtime_sampler"}
-	s.applyHostCPUSnapshot(out, now)
 	if sample == nil {
+		s.applyHostCPUSnapshot(out, now)
 		return out
 	}
 	age := now.Sub(sample.SampledAt)
@@ -28,6 +28,7 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	if age > runtimeSnapshotMaxAge {
 		out.Status = "unavailable"
 		out.Source = "stale_runtime_sampler"
+		s.applyHostCPUSnapshot(out, now)
 		return out
 	}
 	if sample.Snapshot != nil {
@@ -61,6 +62,8 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	if out.Status == "" {
 		out.Status = "partial"
 	}
+	// Host CPU availability contributes to the aggregate status, but retains its own source and timestamp.
+	s.applyHostCPUSnapshot(out, now)
 	return out
 }
 
