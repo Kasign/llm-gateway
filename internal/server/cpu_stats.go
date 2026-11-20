@@ -90,3 +90,28 @@ func readProcStatJiffies() (total, idle uint64, ok bool) {
 	}
 	return 0, 0, false
 }
+
+
+func readCPUModel() (string, error) {
+	b, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil { return "", err }
+	return parseCPUModel(string(b)), nil
+}
+
+func parseCPUModel(raw string) string {
+	var fallback string
+	for _, line := range strings.Split(raw, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok { continue }
+		key, value = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(value)
+		if value == "" { continue }
+		switch key {
+		case "model name", "hardware": return value
+		case "processor":
+			if fallback == "" {
+				if _, err := strconv.Atoi(value); err != nil { fallback = value }
+			}
+		}
+	}
+	return fallback
+}

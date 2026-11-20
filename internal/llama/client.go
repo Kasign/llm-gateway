@@ -53,6 +53,25 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.Reachable(ctx)
 }
 
+// BuildVersion reads the backend's read-only version endpoint.
+func (c *Client) BuildVersion(ctx context.Context) (string, string, error) {
+	path, source := "/props", "llama_cpp_props.build_info"
+	if c.IsOllama() { path, source = "/api/version", "ollama_api.version" }
+	status, body, err := c.rawGet(ctx, path)
+	if err != nil { return "", source, err }
+	if status >= 300 { return "", source, formatHTTPError("GET", path, status, body) }
+	if c.IsOllama() {
+		version, ok := parseOllamaVersion(body)
+		if !ok || version == "" || version == "0.0.0" { return "", source, fmt.Errorf("Ollama version response did not contain a valid daemon version") }
+		return version, source, nil
+	}
+	var props struct { BuildInfo string `json:"build_info"` }
+	if err := json.Unmarshal(body, &props); err != nil { return "", source, fmt.Errorf("parse llama.cpp /props build_info: %w", err) }
+	version := strings.TrimSpace(props.BuildInfo)
+	if version == "" { return "", source, fmt.Errorf("llama.cpp /props did not expose build_info") }
+	return version, source, nil
+}
+
 func isUpstreamAuthError(status int, body []byte) bool {
 	if status == 401 {
 		return true

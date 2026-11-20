@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/whl/llm-gateway/internal/llama"
 )
 
 func TestDecodeBenchmarkRequestBodyAcceptsSingleJSONValue(t *testing.T) {
@@ -101,4 +104,24 @@ func TestBenchmarkConditionSnapshotFromConfigJSONDoesNotInventLegacySnapshot(t *
 	for _, raw := range []string{"", "{}", "not-json"} {
 		if got := benchmarkConditionSnapshotFromConfigJSON(raw); got != nil { t.Errorf("snapshot for %q = %#v, want nil", raw, got) }
 	}
+}
+
+
+func TestBenchmarkModelLoadStateUsesFreshMatchingRuntimeEvidence(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	fresh := &runtimeSnapshotSample{
+		Status: "complete", SampledAt: now.Add(-5 * time.Second),
+		Snapshot: &llama.RuntimeSnapshot{
+			Backend: "llamacpp",
+			Loaded: []llama.CatalogItem{{ID: "Qwen3.5-4B-IQ4_NL", Loaded: true}},
+			Catalog: []llama.CatalogItem{{ID: "other-model", Status: "unloaded"}},
+		},
+	}
+	if got := benchmarkModelLoadState(fresh, "llama.cpp", "Qwen3.5-4B-IQ4_NL", now); got != "loaded" { t.Fatalf("loaded state = %q", got) }
+	fresh.Snapshot.Loaded = nil
+	fresh.Snapshot.Catalog = []llama.CatalogItem{{ID: "Qwen3.5-4B-IQ4_NL", Status: "unloaded"}}
+	if got := benchmarkModelLoadState(fresh, "llamacpp", "Qwen3.5-4B-IQ4_NL", now); got != "not_loaded" { t.Fatalf("unloaded state = %q", got) }
+	if got := benchmarkModelLoadState(fresh, "ollama", "Qwen3.5-4B-IQ4_NL", now); got != "unknown" { t.Fatalf("mismatched backend state = %q", got) }
+	fresh.SampledAt = now.Add(-runtimeSnapshotMaxAge - time.Second)
+	if got := benchmarkModelLoadState(fresh, "llamacpp", "Qwen3.5-4B-IQ4_NL", now); got != "unknown" { t.Fatalf("stale state = %q", got) }
 }

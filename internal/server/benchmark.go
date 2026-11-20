@@ -26,7 +26,9 @@ import (
 
 	"github.com/whl/llm-gateway/internal/applog"
 	"github.com/whl/llm-gateway/internal/auth"
+	"github.com/whl/llm-gateway/internal/buildinfo"
 	"github.com/whl/llm-gateway/internal/core"
+	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/logutil"
 	"github.com/whl/llm-gateway/internal/model"
 	"github.com/whl/llm-gateway/internal/store"
@@ -448,27 +450,84 @@ func (s *Server) authenticateBenchmarkKey(r *http.Request) (*auth.Key, string) {
 
 // benchmarkEnvironmentSnapshot 记录进程可直接读取的构建与运行环境信息；不探测硬件或增加上游请求。
 func benchmarkEnvironmentSnapshot() map[string]interface{} {
+	revision := strings.TrimSpace(buildinfo.Revision)
+	modified := strings.TrimSpace(buildinfo.Modified)
+	revisionSource, modifiedSource := "", ""
+	if revision != "" { revisionSource = "build_argument" }
+	if modified != "" { modifiedSource = "build_argument" }
 	out := map[string]interface{}{
-		"go_version": runtime.Version(),
-		"goos": runtime.GOOS,
-		"goarch": runtime.GOARCH,
-		"logical_cpu_count": runtime.NumCPU(),
-		"vcs_revision": "",
-		"vcs_modified": "",
-		"module_version": "",
+		"go_version": runtime.Version(), "goos": runtime.GOOS, "goarch": runtime.GOARCH,
+		"logical_cpu_count": runtime.NumCPU(), "vcs_revision": revision, "vcs_modified": modified,
+		"vcs_revision_source": revisionSource, "vcs_modified_source": modifiedSource, "module_version": "",
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		out["module_version"] = info.Main.Version
 		for _, setting := range info.Settings {
 			switch setting.Key {
 			case "vcs.revision":
-				out["vcs_revision"] = setting.Value
+				if revision == "" { out["vcs_revision"] = setting.Value; out["vcs_revision_source"] = "go_build_info" }
 			case "vcs.modified":
-				out["vcs_modified"] = setting.Value
+				if modified == "" { out["vcs_modified"] = setting.Value; out["vcs_modified_source"] = "go_build_info" }
 			}
 		}
 	}
 	return out
+}
+
+func benchmarkHardwareSnapshot(s *Server) map[string]interface{} {
+	cpuModel, cpuErr := readCPUModel()
+	mem := containerMemoryStats()
+	if s != nil && s.cfg != nil { mem, _ = s.systemHostStatsCached() }
+	var memoryBytes interface{}
+	if mem.Limit > 0 { memoryBytes = mem.Limit }
+	cpuSource := "/proc/cpuinfo"
+	if cpuErr != nil || strings.TrimSpace(cpuModel) == "" { cpuSource = "unavailable" }
+	memorySource := mem.Source
+	if mem.Limit == 0 { memorySource = "unavailable" }
+	return map[string]interface{}{
+		"cpu_model": cpuModel, "cpu_model_source": cpuSource,
+		"memory_bytes": memoryBytes, "memory_source": memorySource,
+		"logical_cpu_count": runtime.NumCPU(), "logical_cpu_count_source": "runtime.NumCPU",
+	}
+}
+
+func benchmarkModelLoadState(sample *runtimeSnapshotSample, backend, modelID string, now time.Time) string {
+	if sample == nil || sample.Snapshot == nil || sample.Status != "complete" ||
+		sample.SampledAt.IsZero() || now.Before(sample.SampledAt) || now.Sub(sample.SampledAt) > runtimeSnapshotMaxAge {
+		return "unknown"
+	}
+	normalizeBackend := func(value string) string {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "llama.cpp", "llama_cpp", "llamacpp": return "llamacpp"
+		case "ollama": return "ollama"
+		default: return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if normalizeBackend(sample.Snapshot.Backend) != normalizeBackend(backend) || strings.TrimSpace(modelID) == "" { return "unknown" }
+	for _, item := range sample.Snapshot.Loaded {
+		if llama.ModelIDMatch(item.ID, modelID) && item.Loaded { return "loaded" }
+	}
+	for _, item := range sample.Snapshot.Catalog {
+		if !llama.ModelIDMatch(item.ID, modelID) { continue }
+		if item.Loaded { return "loaded" }
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "loaded", "sleeping": return "loaded"
+		case "unloaded": return "not_loaded"
+		default: return "unknown"
+		}
+	}
+	return "unknown"
+}
+
+func benchmarkBackendVersion(parent context.Context, s *Server, backend string) (string, string, string) {
+	if s == nil || !isLocalInferenceBackend(backend) { return "", "", "unsupported" }
+	client, err := s.localClientForBackend(backend)
+	if err != nil { return "", "", "unavailable" }
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	version, source, err := client.BuildVersion(ctx)
+	if err != nil { return "", source, "unavailable" }
+	return version, source, "observed"
 }
 
 // benchmarkConditionMetadata 计算条件指纹。信息不完整时保留部分指纹，但禁止自动视为严格可比较。
@@ -1046,6 +1105,10 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		modelIdentity["quantization"] = m.Quantization
 		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
 	}
+	modelLoadSample := s.runtimeSnapshotSampleLatest()
+	modelLoadState := benchmarkModelLoadState(modelLoadSample, target.Backend, taskModelID, time.Now())
+	backendVersion, backendVersionSource, backendVersionStatus := benchmarkBackendVersion(r.Context(), s, target.Backend)
+
 	toolNames := []string{}
 	toolChoiceMode := "not_applicable"
 	if isBenchmarkToolScenario(scenario) {
@@ -1062,10 +1125,13 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		"frequency_penalty": in.FrequencyPenalty, "presence_penalty": in.PresencePenalty,
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
 		"model_identity": modelIdentity,
-		"model_load_state_before": "unknown",
+		"model_load_state_before": modelLoadState,
+		"model_load_state_source": "runtime_snapshot_cache",
 		"environment": benchmarkEnvironmentSnapshot(),
-		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil, "logical_cpu_count": runtime.NumCPU()},
-		"backend_version": "",
+		"hardware": benchmarkHardwareSnapshot(s),
+		"backend_version": backendVersion,
+		"backend_version_source": backendVersionSource,
+		"backend_version_status": backendVersionStatus,
 		"runtime_config": map[string]interface{}{
 			"warm_start": s.cfg.Llama.WarmStart,
 			"warm_start_interval_seconds": s.cfg.Llama.WarmStartInterval,
