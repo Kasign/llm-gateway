@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // CatalogItem describes one upstream model (installed or loaded).
@@ -32,6 +33,9 @@ type CatalogItem struct {
 // RuntimeSnapshot 是当前上游的一次快照：目录列表 + 已加载列表 + 合计显存/内存。
 // RuntimeSnapshot summarizes upstream model catalog and memory usage.
 type RuntimeSnapshot struct {
+	// SampledAt 是 Gateway 最近一次成功向上游读取该快照的时间；不参与 JSON API 序列化。
+	// 缓存命中必须保留原始时间，不能把缓存读取时间伪装成上游采样时间。
+	SampledAt   time.Time     `json:"-"`
 	Backend      string        `json:"backend"`
 	ActiveModel  string        `json:"active_model"`
 	Loaded       []CatalogItem `json:"loaded"`
