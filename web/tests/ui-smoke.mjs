@@ -274,7 +274,7 @@ try {
     await page.locator('#benchSuiteRunBtn').count() === 1 &&
     await page.locator('#benchRunBtn').count() === 1 &&
     await page.locator('#benchSuiteReport').count() === 1 &&
-    await page.locator('#benchToolRunBtn').count() === 1 === false);
+    !(await page.locator('#benchToolRunBtn').isVisible()));
   const suitePrompts = await page.evaluate(() => {
     const prompts = buildBenchmarkSuitePrompts();
     const shortPrefix = prompts.short.split('\\n\\n合成记录：')[0];
