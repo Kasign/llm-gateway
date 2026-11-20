@@ -1058,7 +1058,7 @@ body.auth-locked{overflow:hidden}
   color:var(--text);background:var(--surface);
   border-color:var(--border);box-shadow:0 1px 3px rgba(0,0,0,.12);
 }
-.model-test-tab:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.model-test-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .model-test-subpanel[hidden]{display:none!important}
 .model-test-subpanel{min-width:0}
 .model-test-subpanel>.card,.model-test-subpanel #modelTestPerformance>.card{margin-bottom:14px}
