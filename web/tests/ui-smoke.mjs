@@ -278,19 +278,23 @@ try {
   const suitePrompts = await page.evaluate(() => {
     const prompts = buildBenchmarkSuitePrompts();
     const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
-    const longPrefix = prompts.long.split('\n\n合成记录（共88条）：')[0];
+    const longPrefix = prompts.long.split('\n\n合成记录（共50条）：')[0];
+    const first = benchmarkSuitePromptForCase(prompts.short,'smoke-suite','SP_SO');
+    const second = benchmarkSuitePromptForCase(prompts.short,'smoke-suite','SP_LO');
     return {
       version: prompts.version,
       shortChars: prompts.short.length,
       longChars: prompts.long.length,
       sameTask: shortPrefix === longPrefix,
-      recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length
+      shortRecordCount: (prompts.short.match(/^R\d{3} /gm) || []).length,
+      recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length,
+      casePromptsDiffer: first !== second && first.startsWith('PERF12_RUN_') && second.startsWith('PERF12_RUN_')
     };
   });
   check('四组测试使用同一分析任务和固定版本提示词',
-    suitePrompts.version === 'perf12-synthetic-dataset-v1' && suitePrompts.sameTask);
-  check('短长提示词分别使用固定短样本与88条长样本',
-    suitePrompts.shortChars > 300 && suitePrompts.longChars > 10000 && suitePrompts.recordCount === 88,
+    suitePrompts.version === 'perf12-synthetic-dataset-v2' && suitePrompts.sameTask);
+  check('短长提示词分别使用1条与50条固定合成记录，并为每组加入独立缓存隔离标记',
+    suitePrompts.shortRecordCount === 1 && suitePrompts.recordCount === 50 && suitePrompts.casePromptsDiffer,
     suitePrompts);
   await page.locator('#benchSuiteRunBtn').click();
   check('四组测试缺少客户端 Key 时在本地阻断',
