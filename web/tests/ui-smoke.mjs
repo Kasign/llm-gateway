@@ -315,6 +315,7 @@ try {
     !(await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
 
   await page.locator('#modelTestTabAcceptance').click();
+  await page.waitForFunction(() => document.getElementById('benchAcceptanceCase')?.value === 'TM-01', null, { timeout: 5000 });
   check('验收测试 Tab 独立显示项目验收表单',
     await page.locator('#modelTestPanelAcceptance').isVisible() &&
     await page.locator('#benchAcceptanceCase').count() === 1 &&
