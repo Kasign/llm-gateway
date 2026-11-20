@@ -44,6 +44,21 @@ func TestUpstreamRuntimeSnapshotCacheInvalidatesWhenUpstreamStops(t *testing.T) 
 	if snap1 == nil || len(snap1.Catalog) != 1 {
 		t.Fatalf("expected 1 catalog row, got %#v err=%v", snap1, err)
 	}
+	if snap1.SampledAt.IsZero() {
+		t.Fatal("fresh upstream snapshot must retain its actual sample time")
+	}
+	firstSampledAt := snap1.SampledAt
+	time.Sleep(5 * time.Millisecond)
+	cached, err := s.upstreamRuntimeSnapshot(ctx, "ollama", client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.SampledAt.Equal(firstSampledAt) {
+		t.Fatalf("cache hit must preserve original upstream sample time: first=%v cached=%v", firstSampledAt, cached.SampledAt)
+	}
+	if got := tagsHits.Load(); got != 1 {
+		t.Fatalf("expected cache hit without another upstream fetch, got %d tag requests", got)
+	}
 
 	// 保留测试服务以便统计刷新请求；通过返回 503 模拟上游已不可用。
 	upstreamStopped.Store(true)
