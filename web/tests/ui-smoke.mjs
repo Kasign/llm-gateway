@@ -277,14 +277,14 @@ try {
     !(await page.locator('#benchToolRunBtn').isVisible()));
   const suitePrompts = await page.evaluate(() => {
     const prompts = buildBenchmarkSuitePrompts();
-    const shortPrefix = prompts.short.split('\\n\\n合成记录：')[0];
-    const longPrefix = prompts.long.split('\\n\\n合成记录（共88条）：')[0];
+    const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
+    const longPrefix = prompts.long.split('\n\n合成记录（共88条）：')[0];
     return {
       version: prompts.version,
       shortChars: prompts.short.length,
       longChars: prompts.long.length,
       sameTask: shortPrefix === longPrefix,
-      recordCount: (prompts.long.match(/^R\\d{3} /gm) || []).length
+      recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length
     };
   });
   check('四组测试使用同一分析任务和固定版本提示词',
