@@ -476,8 +476,12 @@ func benchmarkEnvironmentSnapshot() map[string]interface{} {
 
 func benchmarkHardwareSnapshot(s *Server) map[string]interface{} {
 	cpuModel, cpuErr := readCPUModel()
-	mem := containerMemoryStats()
-	if s != nil && s.cfg != nil { mem, _ = s.systemHostStatsCached() }
+	var mem containerMemory
+	if s != nil && s.cfg != nil {
+		mem, _ = s.systemHostStatsCached()
+	} else {
+		mem = containerMemoryStats()
+	}
 	var memoryBytes interface{}
 	if mem.Limit > 0 { memoryBytes = mem.Limit }
 	cpuSource := "/proc/cpuinfo"
