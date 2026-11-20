@@ -140,7 +140,6 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 	ctx, cancel := context.WithTimeout(parent, llamaMetricsSamplingTimeout)
 	defer cancel()
 
-	sampledAt := time.Now().UTC()
 	statusCode, body, processInstanceID, err := client.FetchMetrics(ctx, modelID, llama.DefaultMetricsResponseLimit)
 	if err != nil {
 		status := "unavailable"
@@ -156,6 +155,9 @@ func (s *Server) sampleLlamaMetrics(parent context.Context, client *llama.Client
 		s.setRuntimeMetricsSampleForTarget(nil, status, code, client.BaseURL())
 		return
 	}
+	// SampledAt is the client observation time after the complete response body has been read.
+	// It is an upper-bound observation timestamp, not an upstream atomic scrape timestamp.
+	sampledAt := time.Now().UTC()
 	if statusCode < 200 || statusCode >= 300 {
 		switch statusCode {
 		case 501:

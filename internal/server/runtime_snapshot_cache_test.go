@@ -11,6 +11,39 @@ import (
 	"github.com/whl/llm-gateway/internal/llama"
 )
 
+func TestSampleLlamaMetricsUsesResponseObservationTime(t *testing.T) {
+	requestStarted := time.Now()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+		w.Header().Set("Process-Start-Time-Unix", "12345")
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte("# HELP llamacpp:requests_processing Number of requests processing\n# TYPE llamacpp:requests_processing gauge\nllamacpp:requests_processing 0\n"))
+	}))
+	defer srv.Close()
+
+	s := &Server{}
+	client := llama.New(srv.URL, time.Second, "llamacpp", "")
+	s.sampleLlamaMetrics(context.Background(), client, "model-a")
+
+	s.runtimeSnapshotSampleMu.RLock()
+	sample := s.runtimeSnapshotSample
+	s.runtimeSnapshotSampleMu.RUnlock()
+	if sample == nil || sample.Metrics == nil {
+		t.Fatalf("expected metrics sample, got %#v", sample)
+	}
+	observedAt := sample.Metrics.SampledAt
+	if !observedAt.After(requestStarted.Add(30 * time.Millisecond)) {
+		t.Fatalf("sampled_at must reflect response observation, not request start: started=%v observed=%v", requestStarted, observedAt)
+	}
+	if observedAt.After(time.Now()) {
+		t.Fatalf("sampled_at cannot be in the future: %v", observedAt)
+	}
+}
+
 func TestUpstreamRuntimeSnapshotCacheInvalidatesWhenUpstreamStops(t *testing.T) {
 	var tagsHits atomic.Int32
 	var upstreamStopped atomic.Bool
