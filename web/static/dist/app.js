@@ -2809,7 +2809,7 @@ function buildBenchmarkSuitePrompts(){
   const regions=['North','South','East','West','Central','Coastal','Highland','Metro'];
   const categories=['hardware','software','accessories','storage','network','display','audio','service'];
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug'];
-  const rows=Array.from({length:88},(_,index)=>{
+  const rows=Array.from({length:50},(_,index)=>{
     const n=index+1;
     const region=regions[index%regions.length];
     const category=categories[(index*3+Math.floor(index/8))%categories.length];
@@ -2825,10 +2825,23 @@ function buildBenchmarkSuitePrompts(){
   });
   const instruction='以下记录均为性能测试专门构造的合成数据，不代表真实业务。请阅读全部记录，按区域和品类分析销量、退货、交付、缺货、毛利与质量之间的关系；指出值得关注的异常，给出有记录编号依据的结论和可执行建议。不要编造记录中不存在的数据。请用中文按“总体结论、区域对比、品类差异、异常记录、运营建议”结构输出，每部分至少两句。';
   return {
-    short:instruction+'\n\n合成记录：\n'+rows.slice(0,2).join('\n'),
-    long:instruction+'\n\n合成记录（共88条）：\n'+rows.join('\n'),
-    version:'perf12-synthetic-dataset-v1'
+    short:instruction+'\n\n合成记录：\n'+rows.slice(0,1).join('\n'),
+    long:instruction+'\n\n合成记录（共50条）：\n'+rows.join('\n'),
+    version:'perf12-synthetic-dataset-v2'
   };
+}
+function benchmarkSuitePromptForCase(prompt, suiteNonce, caseID){
+  // 每个样本在 Prompt 首部加入不同标记，避免 llama.cpp 复用前一组的公共 Prompt 前缀缓存。
+  return 'PERF12_RUN_'+suiteNonce+'_CASE_'+String(caseID).replace(/[^A-Z0-9]/gi,'_')+'\\n'+prompt;
+}
+function createBenchmarkSuiteNonce(){
+  try{
+    const bytes=new Uint8Array(12);
+    globalThis.crypto.getRandomValues(bytes);
+    return [...bytes].map(value=>value.toString(16).padStart(2,'0')).join('');
+  }catch{
+    return Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,14);
+  }
 }
 async function benchmarkTextSHA256(value){
   try{
@@ -2910,6 +2923,7 @@ function buildBenchmarkSuiteMarkdown(suite){
     '',
     '- 报告版本：'+benchmarkEvidenceValue(suite.suite_version),
     '- 执行状态：'+benchmarkEvidenceValue(suite.status),
+    '- 基线资格：'+benchmarkEvidenceValue(suite.qualification_status||'not_evaluated'),
     '- 开始时间：'+benchmarkEvidenceValue(suite.started_at),
     '- 完成时间：'+benchmarkEvidenceValue(suite.finished_at),
     '- Backend / 模型：'+benchmarkEvidenceValue(suite.backend)+' / '+benchmarkEvidenceValue(suite.model_id),
@@ -2932,6 +2946,8 @@ function buildBenchmarkSuiteMarkdown(suite){
     '- 短输入目标范围为 96–180 tokens，长输入目标范围为 1800–2400 tokens。',
     '- 短输出至少 32 tokens、长输出至少 256 tokens；未达到时保留样本但不用于对应吞吐结论。',
     '- Prompt Eval / Decode 只读取上游原生 timings；缺失不从总耗时反推。',
+    '- 每组 Prompt 首部使用独立批次/组别标记，降低前序请求 Prompt Cache 前缀复用；仍以 llama.cpp 返回的 cache_n 实测判断是否为冷缓存。',
+    '- Prompt Cache 命中样本保留为 observed，但不纳入冷缓存 Prompt Eval 基线。',
     '- 四组 Prompt 内容不同，条件指纹不同；四组是交叉场景观察，不是严格同条件历史比较。',
     '- Runtime / Server Metrics 是快照或进程窗口证据，不归属单个请求；不得据此虚构请求级 CPU 或内存值。',
     '- 首轮结果只建立 observed 基线，不自动判定主瓶颈。',
@@ -3043,11 +3059,12 @@ async function runBenchmarkSuite(){
     suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
     if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
     if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
+    const suiteNonce=createBenchmarkSuiteNonce();
     const cases=[
-      {case_id:'S-P / S-O',prompt:prompts.short,max_tokens:64,input_target:'short',output_target:'short'},
-      {case_id:'L-P / S-O',prompt:prompts.long,max_tokens:64,input_target:'long',output_target:'short'},
-      {case_id:'S-P / L-O',prompt:prompts.short,max_tokens:512,input_target:'short',output_target:'long'},
-      {case_id:'L-P / L-O',prompt:prompts.long,max_tokens:512,input_target:'long',output_target:'long'}
+      {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,suiteNonce,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
+      {case_id:'L-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.long,suiteNonce,'LP_SO'),max_tokens:64,input_target:'long',output_target:'short'},
+      {case_id:'S-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.short,suiteNonce,'SP_LO'),max_tokens:512,input_target:'short',output_target:'long'},
+      {case_id:'L-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.long,suiteNonce,'LP_LO'),max_tokens:512,input_target:'long',output_target:'long'}
     ];
     for(let index=0;index<cases.length;index++){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
@@ -3074,6 +3091,23 @@ async function runBenchmarkSuite(){
         validation.push('输出目标 '+(output>=min?'达标':'未达标')+'（'+output+' tokens；最低 '+min+'）');
       }else validation.push('输出 Token 缺失，无法验证目标长度');
       if(job.status!=='completed')validation.push('任务状态不是 completed，不纳入性能比较');
+      const modelTimings=wrap?.analysis?.throughput?.llama_timings||wrap?.analysis?.llama_timings||{};
+      const cacheN=modelTimings.cache_n==null?null:Number(modelTimings.cache_n);
+      const promptN=modelTimings.prompt_n==null?null:Number(modelTimings.prompt_n);
+      const coldPrompt=cacheN===0&&Number.isFinite(input)&&promptN===input;
+      if(cacheN!=null){
+        validation.push('Prompt Cache '+(cacheN===0?'未报告命中':'命中 '+cacheN+' tokens'));
+      }else{
+        validation.push('Prompt Cache 状态未知');
+      }
+      if(promptN!=null&&Number.isFinite(input)){
+        validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
+      }else{
+        validation.push('Prompt Eval Token 覆盖情况未知');
+      }
+      if(!coldPrompt){
+        validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
+      }
       const record={
         case_id:item.case_id,status:job.status||(failure?'failed':'unknown'),
         job_id:job.job_id||readBenchStore().jobId||null,
@@ -3091,6 +3125,9 @@ async function runBenchmarkSuite(){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
     }
     suite.status=suite.cases.length===4?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
+    const allTargetsMet=suite.cases.length===4&&suite.cases.every(item=>item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标')));
+    const allCold=suite.cases.length===4&&suite.cases.every(item=>item.validation?.some(v=>v.startsWith('Prompt Cache 未报告命中'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件')));
+    suite.qualification_status=allTargetsMet&&allCold?'baseline_candidate':'baseline_not_qualified';
   }catch(error){
     suite.status=suite.cases.length?'partial':'failed';
     suite.error=error?.message||'四组测试执行失败';
