@@ -10,7 +10,9 @@ var testRuntimeSnapshotSample = &llama.RuntimeSnapshot{Backend:"ollama", ActiveM
 func TestLatestRequestRuntimeSnapshotStale(t *testing.T) {
  s:=&Server{}; s.setRuntimeSnapshotSample(testRuntimeSnapshotSample,"complete","upstream_runtime")
  s.runtimeSnapshotSampleMu.Lock(); s.runtimeSnapshotSample.SampledAt=time.Now().Add(-runtimeSnapshotMaxAge-time.Second); s.runtimeSnapshotSampleMu.Unlock()
+ s.cpuSampleMu.Lock(); s.cpuCachedPercent=21; s.cpuProcLastSample=time.Now(); s.cpuSampleMu.Unlock()
  got:=s.latestRequestRuntimeSnapshot(); if got==nil||got.Status!="unavailable"||got.Source!="stale_runtime_sampler"{t.Fatalf("unexpected: %#v",got)}
+ if got.HostCPUStatus!="available" || got.HostCPUPercent==nil || *got.HostCPUPercent!=21 { t.Fatalf("fresh host CPU evidence must survive stale upstream snapshot: %#v",got) }
 }
 func TestLatestRequestRuntimeSnapshotPartialWithoutCPU(t *testing.T) {
  s:=&Server{}; s.setRuntimeSnapshotSample(testRuntimeSnapshotSample,"complete","upstream_runtime")
@@ -70,5 +72,21 @@ func TestLatestRequestRuntimeSnapshotIncludesIndependentCPUFreshness(t *testing.
  }
  if *got.HostCPUAgeMS < 200 || *got.HostCPUAgeMS > 2000 {
   t.Fatalf("unexpected CPU sample age: %dms", *got.HostCPUAgeMS)
+ }
+}
+
+
+func TestLatestRequestRuntimeSnapshotKeepsCPUWhenUpstreamUnavailable(t *testing.T) {
+ s := &Server{}
+ s.cpuSampleMu.Lock()
+ s.cpuCachedPercent = 18
+ s.cpuProcLastSample = time.Now()
+ s.cpuSampleMu.Unlock()
+ got := s.latestRequestRuntimeSnapshot()
+ if got == nil || got.Status != "unavailable" || got.Source != "runtime_sampler" {
+  t.Fatalf("expected unavailable upstream snapshot, got %#v", got)
+ }
+ if got.HostCPUStatus != "available" || got.HostCPUPercent == nil || *got.HostCPUPercent != 18 {
+  t.Fatalf("CPU sample must be independently reported, got %#v", got)
  }
 }
