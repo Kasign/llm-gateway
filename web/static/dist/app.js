@@ -3201,8 +3201,12 @@ async function runBenchmarkSuite(resumeExisting=false){
           });
         }
       }catch(error){failure=error?.message||'任务执行失败'}
-      const runtimeAfter=await captureBenchmarkRuntime();
       const job=benchJobPayload(wrap||{});
+      const cancelled=benchSuiteCancelRequested;
+      const resultStatus=benchmarkSuiteTaskStatus(job.status,observedJobId,cancelled);
+      const runtimeAfter=resultStatus==='running'
+        ?{status:'not_sampled',observed_at:new Date().toISOString(),error:'任务尚未取得终态，未采集完成后 Runtime Snapshot'}
+        :await captureBenchmarkRuntime();
       const validation=[];
       const input=job.input_tokens==null?NaN:Number(job.input_tokens);
       const output=job.output_tokens==null?NaN:Number(job.output_tokens);
@@ -3228,8 +3232,6 @@ async function runBenchmarkSuite(resumeExisting=false){
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
       if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
-      const cancelled=benchSuiteCancelRequested;
-      const resultStatus=benchmarkSuiteTaskStatus(job.status,observedJobId,cancelled);
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
       if(previous&&!(previous.status==='running'&&previous.job_id&&previous.job_id===(job.job_id||previous.job_id)))previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
       const record={
