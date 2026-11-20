@@ -1797,13 +1797,9 @@ function benchPayloadForApi(target,scenario='performance',promptOverride='',acce
   return body;
 }
 function setBenchRunning(running){
-  const run=$('benchRunBtn'),suite=$('benchSuiteRunBtn'),toolRun=$('benchToolRunBtn'),toolForceRun=$('benchToolForceRunBtn'),acceptanceRun=$('benchAcceptanceRunBtn'),stop=$('benchStopBtn');
-  if(suite)suite.disabled=!!running;
-  if(run)run.disabled=!!running;
-  if(toolRun)toolRun.disabled=!!running;
-  if(toolForceRun)toolForceRun.disabled=!!running;
-  if(acceptanceRun)acceptanceRun.disabled=!!running;
-  if(stop)stop.disabled=!running;
+  const ids=['benchRunBtn','benchSuiteRunBtn','benchToolRunBtn','benchToolForceRunBtn','benchAcceptanceRunBtn'];
+  ids.forEach(id=>{const button=$(id);if(button)button.disabled=!!running;});
+  ['benchStopBtn','toolBenchStopBtn','acceptanceBenchStopBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!running;});
 }
 
 
@@ -2966,6 +2962,8 @@ exposeGlobals({
   loadBackendForm,
   probeUpstream,
   loadBenchPanel,
+  loadBenchHistory,
+  loadBenchmarkAcceptanceCases,
   loadDashboardRecent,
   loadDashboardStats,
   loadDownloads,
