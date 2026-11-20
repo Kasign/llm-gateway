@@ -2832,7 +2832,8 @@ async function runBenchmarkSuite(resumeExisting=false){
         suite.warmup={job_id:jobId,status:'running',started_at:new Date().toISOString()};
         saveBenchmarkSuiteState(suite);
       });
-      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup?.job_id||null,status:benchJobPayload(warmup||{}).status||'unknown'};
+      const warmupStatus=benchJobPayload(warmup||{}).status;
+      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup?.job_id||null,status:warmupStatus||(benchSuiteCancelRequested?'cancelled':(suite.warmup?.job_id?'running':'unknown'))};
       saveBenchmarkSuiteState(suite);
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
@@ -2859,7 +2860,7 @@ async function runBenchmarkSuite(resumeExisting=false){
         saveBenchmarkSuiteState(suite);
       });
       const warmupStatus=benchJobPayload(warmup||{}).status;
-      suite.warmup={...suite.warmup,job_id:warmupStatus?benchJobPayload(warmup||{}).job_id||suite.warmup.job_id:null,status:warmupStatus||'unknown'};
+      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup.job_id||null,status:warmupStatus||(benchSuiteCancelRequested?'cancelled':(suite.warmup.job_id?'running':'unknown'))};
       saveBenchmarkSuiteState(suite);
       if(!warmup||suite.warmup.status!=='completed')throw new Error('重新预热未成功完成，停止正式测试。');
     }
