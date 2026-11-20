@@ -3331,6 +3331,10 @@ components:
         condition_sha256: { type: string, description: "测试条件快照指纹；partial 状态不可作为严格可比较依据" }
         condition_status: { type: string, enum: [complete, partial, unknown] }
         condition_missing: { type: array, items: { type: string } }
+        condition_snapshot:
+          type: object
+          description: "任务创建时持久化的完整运行条件快照；字段按实际可观测来源提供，缺失证据不补造"
+          additionalProperties: true
         input_tokens: { type: integer, format: int64, minimum: 0 }
         output_tokens: { type: integer, format: int64, minimum: 0 }
         total_tokens: { type: integer, format: int64, minimum: 0 }
