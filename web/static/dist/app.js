@@ -3163,7 +3163,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       const cancelled=token!==benchPollToken||benchSuiteCancelRequested;
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
-      if(previous)previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null});
+      if(previous)previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
       const record={
         case_id:item.case_id,status:cancelled?'cancelled':(job.status||(failure?'failed':'unknown')),
         job_id:job.job_id||readBenchStore().jobId||null,
@@ -3174,7 +3174,7 @@ async function runBenchmarkSuite(resumeExisting=false){
         acceptance:wrap?.acceptance||null,
         runtime_before:runtimeBefore,runtime_after:runtimeAfter,
         validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':null),
-        attempts:previousAttempts
+        finished_at:new Date().toISOString(),attempts:previousAttempts
       };
       if(previousIndex>=0)suite.cases[previousIndex]=record;
       else suite.cases.push(record);
