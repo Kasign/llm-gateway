@@ -3058,6 +3058,7 @@ exposeGlobals({
   runBenchmark,
   runBenchmarkSuite,
   buildBenchmarkSuitePrompts,
+  benchmarkSuitePromptForCase,
   copyBenchmarkSuiteReport,
   renderBenchmarkSuiteReport,
   saveBackend,
