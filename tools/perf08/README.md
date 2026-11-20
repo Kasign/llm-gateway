@@ -27,9 +27,9 @@ bash tools/perf08/host-perf-stat.sh Llama-cpp 10
 - 不使用全系统 `-a`，不执行 `perf record`，不生成 `perf.data`。
 - 基础采集 task-clock、context-switches、cpu-migrations、page-faults。只有当前为 root、持有 CAP_PERFMON，或 `perf_event_paranoid <= 0` 时，才在检测到 Intel Hybrid PMU 后加入 cpu_core / cpu_atom 的 cycles 和 instructions；否则仅采软件事件，并在 metadata 标记 `not_sampled_permissions`。
 - 输出 `metadata.txt` 和 `perf-stat.csv`，目录权限 0700、文件权限 0600。
-- 元数据绑定 PID、进程启动 ticks 和 binary build-id，防止 PID 复用导致错误归因。
+- 元数据绑定宿主机 PID、父 PID、`/proc/PID/comm` 和进程启动 ticks；不依赖读取 `/proc/PID/exe`，因为 root-owned 模型进程对普通用户可能不可读。Binary Build ID 仅在权限允许时采集，缺失时明确标记 `unavailable_permission_or_tool`，不能把 `comm` 单独视为二进制强身份认证。
 - 输出明确为 `scope=process_window`、`request_correlation=none`，不能写入请求级 RequestAnalysis 或作为 request-native profile。
-- 不自动安装 perf、不提权、不修改 `perf_event_paranoid`。权限失败应保留诊断结果并停止，不扩大权限。
+- 不自动安装 perf、不提权、不修改 `perf_event_paranoid`。目标进程属于 root 时，普通用户仍可能因 perf 权限策略无法附加；权限失败应保留诊断结果并停止，不扩大权限。
 - 原始输出不进入 Gateway 数据库或长期备份；分析完成后由操作者按需删除。
 
 首轮不启用 DWARF callchain、寄存器、内存地址、全系统采样或 perf.data。硬件事件若显示 not-counted / not-supported / multiplexed，必须在结论中标记不可比较，不能用软件事件替代后仍宣称硬件计数有效。
