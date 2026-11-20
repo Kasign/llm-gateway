@@ -299,10 +299,13 @@ try {
       {case_id:'S-P / S-O',status:'completed'},
       {case_id:'L-P / S-O',status:'submitting',job_id:null}
     ]});
-    const runningWarmup = benchmarkSuiteCanResume({
+    const runningWarmupSuite = {
       ...base,status:'running',warmup:{status:'running',job_id:'warmup-inflight-456'},cases:[]
-    });
-    return {runningJob,missingJob,runningWarmup};
+    };
+    const runningWarmup = benchmarkSuiteCanResume(runningWarmupSuite);
+    const warmupGateAllowsRunning = benchmarkSuiteWarmupCanResume(runningWarmupSuite);
+    const warmupGateRejectsUnknown = !benchmarkSuiteWarmupCanResume({...runningWarmupSuite,warmup:{status:'unknown',job_id:'warmup-inflight-456'}});
+    return {runningJob,missingJob,runningWarmup,warmupGateAllowsRunning,warmupGateRejectsUnknown};
   });
   const recoveredTaskStates = await page.evaluate(() => ({
     transientPollFailure: benchmarkSuiteTaskStatus(null,'job-inflight-123',false),
@@ -319,7 +322,9 @@ try {
   check('刷新后可恢复已有 Job ID 的在途组，不会自动重提不确定的任务',
     recoveryEligibility.runningJob === true &&
     recoveryEligibility.missingJob === false &&
-    recoveryEligibility.runningWarmup === true,
+    recoveryEligibility.runningWarmup === true &&
+    recoveryEligibility.warmupGateAllowsRunning === true &&
+    recoveryEligibility.warmupGateRejectsUnknown === true,
     recoveryEligibility);
   check('清除部分报告后隐藏续跑入口',
     !(await page.locator('#benchSuiteResumeBtn').isVisible()));
