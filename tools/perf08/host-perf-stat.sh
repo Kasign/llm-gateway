@@ -67,10 +67,11 @@ fi
 [[ "$duration" =~ ^[0-9]+$ ]] || fail "采样时长必须是整数秒"
 (( duration >= 1 && duration <= 10 )) || fail "首轮采样时长限制为 1..10 秒"
 command -v perf >/dev/null 2>&1 || fail "未找到 perf；脚本不会自动安装或提权"
-command -v readlink >/dev/null 2>&1 || fail "未找到 readlink"
-
 proc_dir="/proc/$pid"
-[[ -r "$proc_dir/stat" && -e "$proc_dir/exe" ]] || fail "PID $pid 不存在或不可读取；必须传入宿主机 PID"
+[[ -r "$proc_dir/stat" && -r "$proc_dir/status" && -r "$proc_dir/comm" ]] || fail "PID $pid 不存在或基础进程信息不可读取；必须传入宿主机 PID"
+
+process_comm="$(<"$proc_dir/comm")"
+[[ "$process_comm" == "llama-server" ]] || fail "目标进程 comm 是 '${process_comm:-unknown}'，不是 llama-server；不会按 PID 猜测模型实例"
 
 proc_start_ticks() {
   local stat_line
@@ -79,11 +80,6 @@ proc_start_ticks() {
   stat_line="${stat_line##*) }"
   awk '{print $20}' <<<"$stat_line"
 }
-
-exe_path="$(readlink -f "$proc_dir/exe" 2>/dev/null || true)"
-exe_name="${exe_path##*/}"
-exe_name="${exe_name% (deleted)}"
-[[ "$exe_name" == "llama-server" ]] || fail "目标可执行文件是 '${exe_name:-unknown}'，不是 llama-server；不会按进程名猜测模型实例"
 
 parent_pid="$(awk '/^PPid:/ { print $2 }' "$proc_dir/status")"
 [[ "$parent_pid" =~ ^[1-9][0-9]*$ ]] || fail "无法读取目标进程的父 PID"
@@ -102,8 +98,11 @@ fi
 chmod 700 "$output_dir"
 
 build_id=""
-if command -v readelf >/dev/null 2>&1; then
+build_id_status="unavailable_permission_or_tool"
+# /proc/PID/exe 可能因目标进程属于 root 而不可读；Build ID 是可选证据，不作为进程识别前提。
+if [[ -r "$proc_dir/exe" ]] && command -v readelf >/dev/null 2>&1; then
   build_id="$(readelf -n "$proc_dir/exe" 2>/dev/null | awk '/Build ID:/ { print $3; exit }' || true)"
+  [[ -n "$build_id" ]] && build_id_status="read"
 fi
 
 cpu_model="$(awk -F: '/model name[[:space:]]*:/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || true)"
@@ -128,8 +127,10 @@ fi
   printf 'parent_pid=%s\n' "$parent_pid"
   printf 'parent_executable_comm=llama-server\n'
   printf 'process_start_ticks=%s\n' "$start_ticks"
-  printf 'executable=llama-server\n'
+  printf 'process_comm=%s\n' "$process_comm"
+  printf 'process_identity_basis=proc_comm_and_parent\n'
   printf 'binary_build_id=%s\n' "${build_id:-unavailable}"
+  printf 'binary_build_id_status=%s\n' "$build_id_status"
   printf 'host_kernel=%s\n' "$(uname -r)"
   printf 'cpu_model=%s\n' "${cpu_model:-unavailable}"
   printf 'perf_version=%s\n' "$perf_version"
@@ -165,7 +166,7 @@ if (( allow_hardware )) && [[ -d /sys/bus/event_source/devices/cpu_atom ]]; then
   event_args+=(-e cpu_atom/cycles/ -e cpu_atom/instructions/)
 fi
 
-printf '采样目标: pid=%s executable=%s duration=%ss\n' "$pid" "$exe_name" "$duration"
+printf '采样目标: pid=%s comm=%s duration=%ss\n' "$pid" "$process_comm" "$duration"
 printf '输出目录: %s\n' "$output_dir"
 printf '采集范围: process_window；不具备 request ID 关联\n'
 
