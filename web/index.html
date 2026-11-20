@@ -756,7 +756,7 @@
     acceptance: document.getElementById('modelTestPanelAcceptance'),
     history: document.getElementById('modelTestPanelHistory')
   };
-  const setModelTestTab = key => {
+  const setModelTestTab = (key, loadData = true) => {
     for (const button of modelTestTabs) {
       const active = button.dataset.modelTestTab === key;
       button.classList.toggle('active', active);
@@ -766,9 +766,9 @@
     for (const [name, panel] of Object.entries(modelTestPanels)) {
       if (panel) panel.hidden = name !== key;
     }
-    if (key === 'performance' && typeof globalThis.loadBenchPanel === 'function') globalThis.loadBenchPanel().catch(() => {});
-    if (key === 'history' && typeof globalThis.loadBenchHistory === 'function') globalThis.loadBenchHistory().catch(() => {});
-    if (key === 'acceptance' && typeof globalThis.loadBenchmarkAcceptanceCases === 'function') globalThis.loadBenchmarkAcceptanceCases().catch(() => {});
+    if (loadData && key === 'performance' && typeof globalThis.loadBenchPanel === 'function') globalThis.loadBenchPanel().catch(() => {});
+    if (loadData && key === 'history' && typeof globalThis.loadBenchHistory === 'function') globalThis.loadBenchHistory().catch(() => {});
+    if (loadData && key === 'acceptance' && typeof globalThis.loadBenchmarkAcceptanceCases === 'function') globalThis.loadBenchmarkAcceptanceCases().catch(() => {});
   };
   modelTestTabs.forEach((button, index) => {
     button.addEventListener('click', () => setModelTestTab(button.dataset.modelTestTab));
@@ -781,7 +781,7 @@
       modelTestTabs[next].click();
     });
   });
-  setModelTestTab('performance');
+  setModelTestTab('performance', false);
 
   clearButton?.addEventListener('click', () => {
     if (keyInput) keyInput.value = '';
