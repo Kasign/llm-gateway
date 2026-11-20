@@ -449,7 +449,7 @@
         </div>
       </section>
 
-      <!-- 模型测试：共用客户端服务密钥，测试模式分别执行。 -->
+      <!-- 模型测试工作区：共享客户端密钥，各测试类型独立展示结果。 -->
       <section id="model-test" class="panel">
         <div class="card">
           <div class="card-head"><div><h2>模型测试</h2><p>统一使用客户端服务密钥；性能测试与工具测试保留各自的请求协议和指标。</p></div></div>
@@ -464,25 +464,15 @@
             <button type="button" class="btn ghost" id="modelTestClearKeyBtn">清除密钥</button>
           </div>
         </div>
-        <div class="card" id="benchAcceptanceCard">
-          <div class="card-head">
-            <div><h2>项目验收</h2><p>按服务端定义的 TM-01～TM-05 用例执行真实模型验收；判定依据为请求级决策与完整审计证据。</p></div>
-          </div>
-          <div class="field">
-            <label for="benchAcceptanceCase">验收用例</label>
-            <select id="benchAcceptanceCase"><option value="">正在加载验收用例…</option></select>
-            <p class="small muted">TM-03 需要服务端启用隔离验收环境；未满足隔离条件时不能执行。验收结果不会因工具单次成功而自动判定通过。</p>
-          </div>
-          <div class="field">
-            <label for="benchAcceptancePrompt">验收提示词</label>
-            <textarea id="benchAcceptancePrompt" rows="3">Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。</textarea>
-          </div>
-          <div class="bench-actions">
-            <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
-          </div>
-          <div id="benchAcceptanceResult" class="bench-acceptance-result msg muted" role="status" aria-live="polite">尚未执行项目验收。</div>
-        </div>
-                <div id="modelTestPerformance">
+        <nav class="model-test-tabs" role="tablist" aria-label="模型测试类型">
+          <button type="button" class="model-test-tab active" id="modelTestTabPerformance" role="tab" aria-selected="true" aria-controls="modelTestPanelPerformance" data-model-test-tab="performance">性能测试</button>
+          <button type="button" class="model-test-tab" id="modelTestTabTools" role="tab" aria-selected="false" aria-controls="modelTestPanelTools" data-model-test-tab="tools">工具测试</button>
+          <button type="button" class="model-test-tab" id="modelTestTabAcceptance" role="tab" aria-selected="false" aria-controls="modelTestPanelAcceptance" data-model-test-tab="acceptance">验收测试</button>
+          <button type="button" class="model-test-tab" id="modelTestTabHistory" role="tab" aria-selected="false" aria-controls="modelTestPanelHistory" data-model-test-tab="history">测试历史</button>
+        </nav>
+
+        <section id="modelTestPanelPerformance" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabPerformance">
+        <div id="modelTestPerformance">
         <div class="card">
           <div class="card-head">
             <div>
@@ -531,18 +521,7 @@
             <summary>请求入参</summary>
             <div class="fold-body"><pre id="benchReqPreview" class="bench-out">—</pre></div>
           </details>
-          <details class="bench-fold" id="benchToolPerformanceConfig">
-            <summary>工具调用性能测试</summary>
-            <p class="small muted">默认采用自然决策：工具定义会提供给模型，由模型自行判断是否调用 web.search；不在问题中要求必须调用。另提供强制调用诊断，用于验证工具执行链路。两种模式都需要客户端 Key 具备当前模型访问权限和 web.search 权限。</p>
-            <div class="field">
-              <label for="benchToolPrompt">测试问题</label>
-              <textarea id="benchToolPrompt" rows="3">Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。</textarea>
-            </div>
-            <div class="bench-actions">
-              <button type="button" class="btn secondary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">开始自然工具调用测试</button>
-              <button type="button" class="btn secondary" id="benchToolForceRunBtn" onclick="runBenchmark('tool_performance')">强制工具调用诊断</button>
-            </div>
-          </details>
+
           <details class="bench-fold">
             <summary>原始 SSE / JSON 响应</summary>
             <div class="fold-body"><pre id="benchRaw" class="bench-out">—</pre></div>
@@ -561,6 +540,96 @@
         </div>
         <pre id="benchSuiteReport" class="bench-out" style="max-height:520px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">尚未执行四组测试。</pre>
       </div>
+
+        </div>
+
+
+        </section>
+        <section id="modelTestPanelTools" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabTools" hidden>
+        <div class="card" id="toolBenchmarkCard">
+          <div class="card-head"><div><h2>工具调用性能基准</h2><p>使用 Benchmark API 测量工具选择、工具执行和模型最终生成阶段。与下方工具链路功能测试分开记录。</p></div></div>
+          <p class="small muted">自然决策模式允许模型自行决定是否调用 web.search；强制调用模式用于诊断工具执行链路。两种模式都要求客户端 Key 具备当前模型访问权限和 web.search 权限。</p>
+          <div class="field"><label for="benchToolPrompt">测试问题</label><textarea id="benchToolPrompt" rows="3">Go 语言当前最新稳定版本是什么？请给出版本号和发布日期，并简要说明依据。</textarea></div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="benchToolRunBtn" onclick="runBenchmark('tool_performance_auto')">自然决策测试</button>
+            <button type="button" class="btn secondary" id="benchToolForceRunBtn" onclick="runBenchmark('tool_performance')">强制调用诊断</button>
+            <button type="button" class="btn danger" id="toolBenchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
+          </div>
+        </div>
+      <div id="modelTestTools">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>工具调用测试</h2>
+              <p>通过真实服务密钥调用当前活动模型，验证 Gateway → 模型 → web.search → 模型的非流式完整链路。</p>
+            </div>
+          </div>
+          <div class="msg muted">
+            使用已授予当前模型访问范围和 web.search 权限的客户端 Key。
+          </div>
+          <p class="small muted">本模式使用上方共用的客户端服务密钥，要求该 Key 已获准访问当前模型并授予 web.search。</p>
+          <div class="field">
+            <label for="toolTestPrompt">测试提示词</label>
+            <textarea id="toolTestPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果简要说明版本号和发布日期。必须实际调用搜索工具，不要只凭已有知识回答。</textarea>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="toolTestRunBtn">开始工具调用测试</button>
+          </div>
+          <div id="toolTestStatus" class="msg muted" role="status" aria-live="polite">尚未执行测试。</div>
+          <div id="toolTestRequest" class="small muted"></div>
+          <div id="toolTestAnswer" class="bench-answer" style="white-space:pre-wrap"></div>
+          <div id="toolTestAuditHint" class="req-note" hidden>
+            请求已结束。请使用上方 Request ID 打开「调用记录」详情，确认工具事件为 web.search 且状态成功；仅有模型文本回复不代表工具确实执行。
+            <button type="button" class="btn sm ghost" id="toolTestOpenDetailBtn">查看请求详情</button>
+          </div>
+        </div>
+      </div>
+
+          <div class="card bench-result-card" id="toolBenchResultCard">
+            <div class="card-head"><div><h3>工具调用性能结果</h3><p>本测试类型独立展示指标、模型回复、阶段分析与原始响应，不与其他测试共用结果区域。</p></div></div>
+            <div id="toolBenchMetrics" class="bench-metrics"></div>
+            <div id="toolBenchAnalysis" class="bench-analysis" style="display:none"></div>
+            <h4 class="bench-result-heading">模型回复</h4>
+            <div id="toolBenchAnswer" class="bench-answer muted">执行测试后，结果会显示在这里。</div>
+            <div id="toolBenchReasoningWrap" style="display:none"><h4 class="bench-result-heading">思考过程</h4><div id="toolBenchReasoning" class="bench-answer bench-reasoning muted"></div></div>
+            <details class="bench-fold" id="toolBenchEventsFold" style="display:none"><summary>流式事件 <span id="toolBenchEventsCount" class="small muted"></span></summary><div class="fold-body" id="toolBenchEventsTable"></div></details>
+            <details class="bench-fold"><summary>请求入参</summary><div class="fold-body"><pre id="toolBenchReqPreview" class="bench-out">—</pre></div></details>
+            <details class="bench-fold"><summary>原始 SSE / JSON 响应</summary><div class="fold-body"><pre id="toolBenchRaw" class="bench-out">—</pre></div></details>
+          </div>
+        </section>
+        <section id="modelTestPanelAcceptance" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabAcceptance" hidden>
+        <div class="card" id="benchAcceptanceCard">
+          <div class="card-head">
+            <div><h2>项目验收</h2><p>按服务端定义的 TM-01～TM-05 用例执行真实模型验收；判定依据为请求级决策与完整审计证据。</p></div>
+          </div>
+          <div class="field">
+            <label for="benchAcceptanceCase">验收用例</label>
+            <select id="benchAcceptanceCase"><option value="">正在加载验收用例…</option></select>
+            <p class="small muted">TM-03 需要服务端启用隔离验收环境；未满足隔离条件时不能执行。验收结果不会因工具单次成功而自动判定通过。</p>
+          </div>
+          <div class="field">
+            <label for="benchAcceptancePrompt">验收提示词</label>
+            <textarea id="benchAcceptancePrompt" rows="3">Go 语言当前最新正式稳定版的版本号和发布日期是什么？请说明依据并给出来源链接。</textarea>
+          </div>
+          <div class="bench-actions">
+            <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
+          </div>
+          <div id="benchAcceptanceResult" class="bench-acceptance-result msg muted" role="status" aria-live="polite">尚未执行项目验收。</div>
+        </div>
+        
+          <div class="card bench-result-card" id="acceptanceBenchResultCard">
+            <div class="card-head"><div><h3>项目验收结果</h3><p>本测试类型独立展示指标、模型回复、阶段分析与原始响应，不与其他测试共用结果区域。</p></div></div>
+            <div id="acceptanceBenchMetrics" class="bench-metrics"></div>
+            <div id="acceptanceBenchAnalysis" class="bench-analysis" style="display:none"></div>
+            <h4 class="bench-result-heading">模型回复</h4>
+            <div id="acceptanceBenchAnswer" class="bench-answer muted">执行测试后，结果会显示在这里。</div>
+            <div id="acceptanceBenchReasoningWrap" style="display:none"><h4 class="bench-result-heading">思考过程</h4><div id="acceptanceBenchReasoning" class="bench-answer bench-reasoning muted"></div></div>
+            <details class="bench-fold" id="acceptanceBenchEventsFold" style="display:none"><summary>流式事件 <span id="acceptanceBenchEventsCount" class="small muted"></span></summary><div class="fold-body" id="acceptanceBenchEventsTable"></div></details>
+            <details class="bench-fold"><summary>请求入参</summary><div class="fold-body"><pre id="acceptanceBenchReqPreview" class="bench-out">—</pre></div></details>
+            <details class="bench-fold"><summary>原始 SSE / JSON 响应</summary><div class="fold-body"><pre id="acceptanceBenchRaw" class="bench-out">—</pre></div></details>
+          </div>
+        </section>
+        <section id="modelTestPanelHistory" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabHistory" hidden>
       <div class="card" id="benchHistoryCard">
         <div class="card-head">
           <div><h2>Benchmark 历史任务</h2><p>只显示任务摘要和条件可比性，不保存或展示客户端 Key、Prompt 正文。</p></div>
@@ -598,37 +667,7 @@
           <button type="button" class="btn sm" id="benchHistoryNext" disabled>下一页</button>
         </div>
       </div>
-        </div>
-
-      <!-- 工具调用模式 -->
-      <div id="modelTestTools" hidden>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>工具调用测试</h2>
-              <p>通过真实服务密钥调用当前活动模型，验证 Gateway → 模型 → web.search → 模型的非流式完整链路。</p>
-            </div>
-          </div>
-          <div class="msg muted">
-            使用已授予当前模型访问范围和 web.search 权限的客户端 Key。
-          </div>
-          <p class="small muted">本模式使用上方共用的客户端服务密钥，要求该 Key 已获准访问当前模型并授予 web.search。</p>
-          <div class="field">
-            <label for="toolTestPrompt">测试提示词</label>
-            <textarea id="toolTestPrompt" rows="3">请使用 web.search 搜索 Go 语言当前最新稳定版本，并根据搜索结果简要说明版本号和发布日期。必须实际调用搜索工具，不要只凭已有知识回答。</textarea>
-          </div>
-          <div class="bench-actions">
-            <button type="button" class="btn primary" id="toolTestRunBtn">开始工具调用测试</button>
-          </div>
-          <div id="toolTestStatus" class="msg muted" role="status" aria-live="polite">尚未执行测试。</div>
-          <div id="toolTestRequest" class="small muted"></div>
-          <div id="toolTestAnswer" class="bench-answer" style="white-space:pre-wrap"></div>
-          <div id="toolTestAuditHint" class="req-note" hidden>
-            请求已结束。请使用上方 Request ID 打开「调用记录」详情，确认工具事件为 web.search 且状态成功；仅有模型文本回复不代表工具确实执行。
-            <button type="button" class="btn sm ghost" id="toolTestOpenDetailBtn">查看请求详情</button>
-          </div>
-        </div>
-      </div>
+        </section>
       </section>
     </div>
   </div>
@@ -711,24 +750,39 @@
   const detailButton = document.getElementById('toolTestOpenDetailBtn');
   let lastRequestId = '';
 
-  const performanceModeButton = document.getElementById('modelTestModePerformance');
-  const toolsModeButton = document.getElementById('modelTestModeTools');
-  const performancePanel = document.getElementById('modelTestPerformance');
-  const toolsPanel = document.getElementById('modelTestTools');
-  const setModelTestMode = mode => {
-    const toolsMode = mode === 'tools';
-    if (performancePanel) performancePanel.hidden = toolsMode;
-    if (toolsPanel) toolsPanel.hidden = !toolsMode;
-    performanceModeButton?.classList.toggle('primary', !toolsMode);
-    performanceModeButton?.classList.toggle('ghost', toolsMode);
-    performanceModeButton?.setAttribute('aria-pressed', String(!toolsMode));
-    toolsModeButton?.classList.toggle('primary', toolsMode);
-    toolsModeButton?.classList.toggle('ghost', !toolsMode);
-    toolsModeButton?.setAttribute('aria-pressed', String(toolsMode));
+  const modelTestTabs = Array.from(document.querySelectorAll('[data-model-test-tab]'));
+  const modelTestPanels = {
+    performance: document.getElementById('modelTestPanelPerformance'),
+    tools: document.getElementById('modelTestPanelTools'),
+    acceptance: document.getElementById('modelTestPanelAcceptance'),
+    history: document.getElementById('modelTestPanelHistory')
   };
-  performanceModeButton?.addEventListener('click', () => setModelTestMode('performance'));
-  toolsModeButton?.addEventListener('click', () => setModelTestMode('tools'));
-  setModelTestMode('performance');
+  const setModelTestTab = key => {
+    for (const button of modelTestTabs) {
+      const active = button.dataset.modelTestTab === key;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    }
+    for (const [name, panel] of Object.entries(modelTestPanels)) {
+      if (panel) panel.hidden = name !== key;
+    }
+    if (key === 'performance' && typeof globalThis.loadBenchPanel === 'function') globalThis.loadBenchPanel().catch(() => {});
+    if (key === 'history' && typeof globalThis.loadBenchHistory === 'function') globalThis.loadBenchHistory().catch(() => {});
+    if (key === 'acceptance' && typeof globalThis.loadBenchmarkAcceptanceCases === 'function') globalThis.loadBenchmarkAcceptanceCases().catch(() => {});
+  };
+  modelTestTabs.forEach((button, index) => {
+    button.addEventListener('click', () => setModelTestTab(button.dataset.modelTestTab));
+    button.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? modelTestTabs.length - 1 :
+        (index + (event.key === 'ArrowRight' ? 1 : -1) + modelTestTabs.length) % modelTestTabs.length;
+      modelTestTabs[next].focus();
+      modelTestTabs[next].click();
+    });
+  });
+  setModelTestTab('performance');
 
   clearButton?.addEventListener('click', () => {
     if (keyInput) keyInput.value = '';
