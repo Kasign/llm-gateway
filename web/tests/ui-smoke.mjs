@@ -260,38 +260,31 @@ try {
 
   await clickTab(page, 'model-test', '模型测试');
   const modelTestKey = page.locator('#modelTestApiKey');
-  check('模型测试共用密码输入框接收客户端服务密钥',
+  check('模型测试统一使用密码型客户端服务密钥',
     await modelTestKey.count() === 1 && await modelTestKey.evaluate(el => el.type === 'password'));
-  await page.locator('#modelTestModeTools').click();
-  check('工具测试模式切换后只显示工具测试面板',
-    await page.locator('#modelTestTools').isVisible() && !(await page.locator('#modelTestPerformance').isVisible()));
-  check('工具测试模式不显示 Benchmark 历史任务',
-    !(await page.locator('#benchHistoryCard').isVisible()));
-
-  await page.locator('#toolTestRunBtn').click();
-  check('工具测试缺少客户端 Key 时在本地拒绝且不发起请求',
-    (await page.locator('#toolTestStatus').textContent()).includes('请先输入'));
-  await page.locator('#modelTestModePerformance').click();
-  check('性能测试模式切换后只显示性能测试面板',
-    await page.locator('#modelTestPerformance').isVisible() && !(await page.locator('#modelTestTools').isVisible()));
-  check('性能测试模式显示唯一的 Benchmark 历史任务区域',
-    await page.locator('#benchHistoryCard').isVisible() &&
-    await page.locator('#benchHistoryDetail').count() === 1);
-  check('四组性能测试入口与双格式报告复制控件已显示',
+  check('模型测试显示四个横向测试类型 Tab',
+    await page.locator('[data-model-test-tab]').count() === 4 &&
+    await page.locator('#modelTestTabPerformance').getAttribute('aria-selected') === 'true');
+  check('默认只显示性能测试面板',
+    await page.locator('#modelTestPanelPerformance').isVisible() &&
+    !(await page.locator('#modelTestPanelTools').isVisible()) &&
+    !(await page.locator('#modelTestPanelAcceptance').isVisible()) &&
+    !(await page.locator('#modelTestPanelHistory').isVisible()));
+  check('性能测试区只包含普通性能与四组基线入口',
     await page.locator('#benchSuiteRunBtn').count() === 1 &&
-    await page.locator('#benchSuiteCopyMarkdown').isDisabled() &&
-    await page.locator('#benchSuiteCopyJSON').isDisabled() &&
-    await page.locator('#benchSuiteReport').count() === 1);
+    await page.locator('#benchRunBtn').count() === 1 &&
+    await page.locator('#benchSuiteReport').count() === 1 &&
+    await page.locator('#benchToolRunBtn').count() === 1 === false);
   const suitePrompts = await page.evaluate(() => {
     const prompts = buildBenchmarkSuitePrompts();
-    const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
-    const longPrefix = prompts.long.split('\n\n合成记录（共88条）：')[0];
+    const shortPrefix = prompts.short.split('\\n\\n合成记录：')[0];
+    const longPrefix = prompts.long.split('\\n\\n合成记录（共88条）：')[0];
     return {
       version: prompts.version,
       shortChars: prompts.short.length,
       longChars: prompts.long.length,
       sameTask: shortPrefix === longPrefix,
-      recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length
+      recordCount: (prompts.long.match(/^R\\d{3} /gm) || []).length
     };
   });
   check('四组测试使用同一分析任务和固定版本提示词',
@@ -302,13 +295,48 @@ try {
   await page.locator('#benchSuiteRunBtn').click();
   check('四组测试缺少客户端 Key 时在本地阻断',
     (await page.locator('#benchSuiteStatus').textContent()).includes('请先输入客户端服务密钥'));
+
+  await page.locator('#modelTestTabTools').click();
+  check('工具测试 Tab 独立显示工具测试面板',
+    await page.locator('#modelTestPanelTools').isVisible() &&
+    !(await page.locator('#modelTestPanelPerformance').isVisible()));
+  check('工具调用性能测试与普通性能结果区分离',
+    await page.locator('#benchToolRunBtn').count() === 1 &&
+    await page.locator('#toolBenchAnswer').count() === 1 &&
+    await page.locator('#toolBenchMetrics').count() === 1 &&
+    await page.locator('#toolTestAnswer').count() === 1);
+  await page.locator('#toolTestRunBtn').click();
+  check('工具链路功能测试缺少客户端 Key 时本地拒绝',
+    (await page.locator('#toolTestStatus').textContent()).includes('请先输入'));
+  await page.locator('#benchToolRunBtn').click();
+  check('工具调用性能缺少客户端 Key 时写入工具专属回复区',
+    (await page.locator('#toolBenchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
+  check('工具测试不会污染性能测试回复区',
+    !(await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
+
+  await page.locator('#modelTestTabAcceptance').click();
+  check('验收测试 Tab 独立显示项目验收表单',
+    await page.locator('#modelTestPanelAcceptance').isVisible() &&
+    await page.locator('#benchAcceptanceCase').count() === 1 &&
+    await page.locator('#acceptanceBenchAnswer').count() === 1);
+  await page.locator('#benchAcceptanceRunBtn').click();
+  check('验收测试缺少客户端 Key 时写入验收专属结果区',
+    (await page.locator('#acceptanceBenchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
+
+  await page.locator('#modelTestTabHistory').click();
+  check('测试历史独立显示 Benchmark 历史任务与比较区域',
+    await page.locator('#modelTestPanelHistory').isVisible() &&
+    await page.locator('#benchHistoryCard').isVisible() &&
+    await page.locator('#benchHistoryDetail').count() === 1 &&
+    await page.locator('#benchHistoryCompareBtn').count() === 1 &&
+    await page.locator('#benchCompareResult').count() === 1);
   await page.locator('#benchHistoryList [data-bench-history-id="benchmark-history-smoke-1"]').click();
   await page.locator('#benchHistoryDetail').waitFor({ state: 'visible', timeout: 5000 });
   await page.waitForFunction(() => {
     const detail = document.getElementById('benchHistoryDetail')?.textContent || '';
     return detail.includes('历史任务详情正文') && detail.includes('smoke-model');
   }, null, { timeout: 5000 });
-  check('点击历史任务详情后在历史区域展示任务内容',
+  check('历史任务详情在测试历史 Tab 内展示',
     (await page.locator('#benchHistoryDetail').textContent()).includes('历史任务详情正文') &&
     (await page.locator('#benchHistoryDetail').textContent()).includes('smoke-model'));
   const benchmarkTimingDetail = await page.locator('#benchHistoryDetail').textContent();
@@ -318,23 +346,11 @@ try {
     benchmarkTimingDetail.includes('Decode 每 Token') &&
     benchmarkTimingDetail.includes('Prompt progress') &&
     benchmarkTimingDetail.includes('50.0%'));
-  check('查看历史详情不会覆盖当前性能测试输出',
-    !(await page.locator('#benchAnswer').textContent()).includes('历史任务详情正文'));
 
-
-  check('工具调用性能场景与历史任务区域已提供',
-    await page.locator('#benchToolPrompt').count() === 1 &&
-    await page.locator('#benchToolRunBtn').count() === 1 &&
-    await page.locator('#benchHistoryList').count() === 1 &&
-    await page.locator('#benchHistoryCompareBtn').count() === 1 &&
-    await page.locator('#benchCompareResult').count() === 1);
-  await page.locator('#benchToolPerformanceConfig > summary').click();
-  await page.locator('#benchToolRunBtn').click();
-  check('工具性能测试缺少客户端 Key 时在本地拒绝',
-    (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
-  await page.locator('#benchRunBtn').click();
-  check('性能测试缺少客户端 Key 时在本地拒绝',
-    (await page.locator('#benchAnswer').textContent()).includes('请先在模型测试页面输入客户端服务密钥'));
+  await page.locator('#modelTestTabPerformance').click();
+  check('横向 Tab 可返回性能测试，且历史区域不再混排',
+    await page.locator('#modelTestPanelPerformance').isVisible() &&
+    !(await page.locator('#benchHistoryCard').isVisible()));
   await modelTestKey.fill('sk-browser-smoke-not-a-real-secret');
   check('模型测试密钥只保留在页面内存，不写入浏览器存储',
     await page.evaluate(() => localStorage.getItem('llm_gateway_model_test_key')) === null &&
