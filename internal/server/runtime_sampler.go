@@ -124,14 +124,14 @@ func (s *Server) sampleCPU() {
 }
 
 // cpuSnapshotPercent 返回最近一次后台采样值，不触发新的采样或等待。
-func (s *Server) cpuSnapshotPercent() (float64, bool) {
+func (s *Server) cpuSnapshotPercent() (float64, time.Time, bool) {
 	if s == nil {
-		return 0, false
+		return 0, time.Time{}, false
 	}
 	s.cpuSampleMu.Lock()
 	defer s.cpuSampleMu.Unlock()
 	if s.cpuProcLastSample.IsZero() || time.Since(s.cpuProcLastSample) > runtimeSnapshotMaxAge {
-		return 0, false
+		return 0, time.Time{}, false
 	}
-	return s.cpuCachedPercent, true
+	return s.cpuCachedPercent, s.cpuProcLastSample, true
 }
