@@ -2458,13 +2458,8 @@
     return body;
   }
   function setBenchRunning(running) {
-    const run = $("benchRunBtn"), suite = $("benchSuiteRunBtn"), toolRun = $("benchToolRunBtn"), toolForceRun = $("benchToolForceRunBtn"), acceptanceRun = $("benchAcceptanceRunBtn"), stop = $("benchStopBtn");
-    if (suite) suite.disabled = !!running;
-    if (run) run.disabled = !!running;
-    if (toolRun) toolRun.disabled = !!running;
-    if (toolForceRun) toolForceRun.disabled = !!running;
-    if (acceptanceRun) acceptanceRun.disabled = !!running;
-    if (stop) stop.disabled = !running;
+    ['benchRunBtn','benchSuiteRunBtn','benchToolRunBtn','benchToolForceRunBtn','benchAcceptanceRunBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!!running;});
+    ['benchStopBtn','toolBenchStopBtn','acceptanceBenchStopBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!running;});
   }
   function benchDrawerFocusable(root) {
     const panel = root?.querySelector(".drawer-panel");
@@ -2527,26 +2522,15 @@
       return "";
     }
   }
-  function updateBenchReqPreview(upstreamModel) {
-    const p = collectBenchParams();
-    const body = {
-      model: upstreamModel || "\uFF08\u5F53\u524D\u4E0A\u6E38\uFF09",
-      messages: [{ role: "user", content: p.prompt }],
-      stream: true,
-      max_tokens: p.max_tokens
-    };
-    if (p.temperature != null) body.temperature = p.temperature;
-    if (p.top_p != null) body.top_p = p.top_p;
-    if (p.top_k != null) body.top_k = p.top_k;
-    if (p.min_p != null) body.min_p = p.min_p;
-    if (p.frequency_penalty != null) body.frequency_penalty = p.frequency_penalty;
-    if (p.presence_penalty != null) body.presence_penalty = p.presence_penalty;
-    if (p.repeat_penalty != null) body.repeat_penalty = p.repeat_penalty;
-    if (p.seed != null) body.seed = p.seed;
-    if (p.enable_thinking != null) body.enable_thinking = p.enable_thinking;
-    if (p.stop?.length) body.stop = p.stop;
-    $("benchReqPreview").textContent = JSON.stringify(body, null, 2);
-    persistBenchParams();
+  function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverride=''){
+    const p=collectBenchParams();if(promptOverride.trim())p.prompt=promptOverride.trim();
+    const body={model:upstreamModel||'（当前上游）',messages:[{role:'user',content:p.prompt}],stream:scenario!=='tool_performance'&&scenario!=='tool_performance_auto',max_tokens:p.max_tokens};
+    if(scenario==='tool_performance_auto')body.tool_choice='auto';
+    if(scenario==='tool_performance')body.tool_choice={type:'function',function:{name:'web.search'}};
+    if(p.temperature!=null)body.temperature=p.temperature;if(p.top_p!=null)body.top_p=p.top_p;if(p.top_k!=null)body.top_k=p.top_k;if(p.min_p!=null)body.min_p=p.min_p;
+    if(p.frequency_penalty!=null)body.frequency_penalty=p.frequency_penalty;if(p.presence_penalty!=null)body.presence_penalty=p.presence_penalty;if(p.repeat_penalty!=null)body.repeat_penalty=p.repeat_penalty;
+    if(p.seed!=null)body.seed=p.seed;if(p.enable_thinking!=null)body.enable_thinking=p.enable_thinking;if(p.stop?.length)body.stop=p.stop;
+    const preview=benchResultElement('reqPreview');if(preview)preview.textContent=JSON.stringify(body,null,2);persistBenchParams();
   }
   function benchJobPayload(j) {
     return j.job || j;
@@ -2587,8 +2571,21 @@ function renderBenchCondition(j) {
   const fingerprint = typeof j.condition_sha256 === "string" ? j.condition_sha256 : "";
   return '<section class="bench-condition"><h3 style="margin:0 0 6px;font-size:13px">\u6D4B\u8BD5\u6761\u4EF6\uFF1A' + esc(labels[status] || labels.unknown) + "</h3>" + '<p class="req-note" style="margin:0">' + esc(detail) + "</p>" + (fingerprint ? '<p class="req-note mono" style="margin:4px 0 0">\u6761\u4EF6\u6307\u7EB9\uFF1A' + esc(fingerprint.slice(0, 16)) + "</p>" : "") + "</section>";
 }
+let benchResultScope='performance';
+const BENCH_RESULT_IDS={
+ performance:{answer:'benchAnswer',reasoningWrap:'benchReasoningWrap',reasoning:'benchReasoning',analysis:'benchAnalysis',eventsFold:'benchEventsFold',eventsTable:'benchEventsTable',eventsCount:'benchEventsCount',metrics:'benchMetrics',raw:'benchRaw',reqPreview:'benchReqPreview'},
+ tools:{answer:'toolBenchAnswer',reasoningWrap:'toolBenchReasoningWrap',reasoning:'toolBenchReasoning',analysis:'toolBenchAnalysis',eventsFold:'toolBenchEventsFold',eventsTable:'toolBenchEventsTable',eventsCount:'toolBenchEventsCount',metrics:'toolBenchMetrics',raw:'toolBenchRaw',reqPreview:'toolBenchReqPreview'},
+ acceptance:{answer:'acceptanceBenchAnswer',reasoningWrap:'acceptanceBenchReasoningWrap',reasoning:'acceptanceBenchReasoning',analysis:'acceptanceBenchAnalysis',eventsFold:'acceptanceBenchEventsFold',eventsTable:'acceptanceBenchEventsTable',eventsCount:'acceptanceBenchEventsCount',metrics:'acceptanceBenchMetrics',raw:'acceptanceBenchRaw',reqPreview:'acceptanceBenchReqPreview'}
+};
+function benchResultElement(key){return $(BENCH_RESULT_IDS[benchResultScope]?.[key]||BENCH_RESULT_IDS.performance[key]);}
+function setBenchResultScopeFromJob(wrap){
+ const job=benchJobPayload(wrap);
+ if(wrap?.acceptance||job.acceptance_case_id)benchResultScope='acceptance';
+ else if(job.scenario==='tool_performance'||job.scenario==='tool_performance_auto')benchResultScope='tools';
+ else benchResultScope='performance';
+}
 function renderBenchAnalysis(wrap) {
-  const box = $("benchAnalysis");
+  const box = benchResultElement('analysis');
   if (!box) return;
   const a = wrap.analysis;
   const hasPhases = Boolean(a && a.phases_ms);
@@ -2617,7 +2614,7 @@ function renderBenchAnalysis(wrap) {
   box.innerHTML = html;
 }
 function renderBenchStreamEvents(evs) {
-    const fold = $("benchEventsFold"), tbl = $("benchEventsTable"), cnt = $("benchEventsCount");
+    const fold = benchResultElement('eventsFold'), tbl = benchResultElement('eventsTable'), cnt = benchResultElement('eventsCount');
     if (!fold || !tbl) return;
     if (!evs?.length) {
       fold.style.display = "none";
@@ -2635,13 +2632,13 @@ function renderBenchStreamEvents(evs) {
     const ok = j.status === "completed";
     const failed = j.status === "failed" || j.status === "cancelled";
     const { content, reasoning } = benchTextsFromJob(j);
-    const ans = $("benchAnswer");
+    const ans = benchResultElement('answer');
     if (ans) {
       if (failed) ans.className = "bench-answer err", ans.textContent = j.error || (j.status === "cancelled" ? "\u4EFB\u52A1\u5DF2\u505C\u6B62" : "\u6D4B\u8BD5\u5931\u8D25");
       else if (running && !content && !reasoning) ans.className = "bench-answer muted", ans.textContent = "\u63A8\u7406\u4E2D\u2026";
       else ans.className = "bench-answer", ans.textContent = content || "\uFF08\u5C1A\u65E0\u6B63\u6587 content\uFF09";
     }
-    const rw = $("benchReasoningWrap"), rb = $("benchReasoning");
+    const rw = benchResultElement('reasoningWrap'), rb = benchResultElement('reasoning');
     if (rw && rb) {
       if (reasoning) {
         rw.style.display = "block";
@@ -2657,7 +2654,7 @@ function renderBenchStreamEvents(evs) {
     const j = benchJobPayload(wrap);
     const evs = wrap.stream_events || [];
     const ok = j.status === "completed";
-    const met = $("benchMetrics");
+    const met = benchResultElement('metrics');
     if (!met) return;
     const tps = wrap.analysis?.throughput?.output_tokens_per_sec;
     met.innerHTML = [
@@ -2679,8 +2676,8 @@ function renderBenchStreamEvents(evs) {
       j.request_id ? `<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">\u5B8C\u6574\u8C03\u7528\u8BB0\u5F55</button>` : ""
     ].filter(Boolean).join("");
     const rawBody = j.response || "";
-    $("benchRaw").textContent = rawBody.trim().startsWith("data:") ? rawBody : JSON.stringify({ analysis: wrap.analysis, job: j, stream_events: evs, response: tryParse(rawBody) || rawBody }, null, 2);
-    const ef = $("benchEventsFold");
+    benchResultElement('raw').textContent = rawBody.trim().startsWith("data:") ? rawBody : JSON.stringify({ analysis: wrap.analysis, job: j, stream_events: evs, response: tryParse(rawBody) || rawBody }, null, 2);
+    const ef = benchResultElement('eventsFold');
     if (ef && evs.length) ef.open = evs.length <= 80;
     renderBenchmarkAcceptanceResult(wrap);
   }
@@ -2705,7 +2702,7 @@ function renderBenchStreamEvents(evs) {
   }
   function renderBenchRunningMetrics(wrap, t0) {
     const j = benchJobPayload(wrap);
-    const metR = $("benchMetrics");
+    const metR = benchResultElement('metrics');
     if (!metR) return;
     metR.innerHTML = [
       statusPill("running"),
@@ -2720,6 +2717,7 @@ function renderBenchStreamEvents(evs) {
     while (true) {
       if (token !== benchPollToken) return null;
       const wrap = await api("/api/benchmark/" + encodeURIComponent(jobId));
+      setBenchResultScopeFromJob(wrap);
       const j = benchJobPayload(wrap);
       if (j.status === "running") {
         renderBenchLive(wrap, true);
@@ -2739,12 +2737,13 @@ function renderBenchStreamEvents(evs) {
     const token = ++benchPollToken;
     try {
       const wrap = await api("/api/benchmark/" + encodeURIComponent(st.jobId));
+      setBenchResultScopeFromJob(wrap);
       if (token !== benchPollToken) return;
       const j = benchJobPayload(wrap);
       if (j.status === "running") {
         setBenchRunning(true);
         const t0 = Date.parse(j.started_at) || Date.now();
-        const ans0 = $("benchAnswer");
+        const ans0 = benchResultElement('answer');
         if (ans0) {
           ans0.className = "bench-answer muted";
           ans0.textContent = "\u6062\u590D\u8F6E\u8BE2\u4E2D\u2026";
@@ -2773,7 +2772,7 @@ function renderBenchStreamEvents(evs) {
       const wrap = await api("/api/benchmark/" + encodeURIComponent(st.jobId));
       renderBenchResult(wrap);
     } catch (e) {
-      const ansE = $("benchAnswer");
+      const ansE = benchResultElement('answer');
       if (ansE) {
         ansE.className = "bench-answer err";
         ansE.textContent = e.message;
@@ -3095,17 +3094,19 @@ async function runBenchmark(scenario = "performance") {
     const isAcceptance = scenario === "acceptance";
     const acceptanceCaseID = isAcceptance ? $("benchAcceptanceCase")?.value || "" : "";
     if (isAcceptance) {
+      benchResultScope = 'acceptance';
       if (!acceptanceCaseID) {
-        const answer = $("benchAcceptanceResult");
+        const answer = benchResultElement('answer');
         if (answer) { answer.className = "bench-acceptance-result msg err"; answer.textContent = "请先选择验收用例。"; }
         return;
       }
       scenario = acceptanceCaseID === "TM-05" ? "tool_performance" : "tool_performance_auto";
     }
     const toolScenario = scenario === "tool_performance" || scenario === "tool_performance_auto";
+    if (!isAcceptance) benchResultScope = toolScenario ? 'tools' : 'performance';
     const promptOverride = toolScenario ? ($(isAcceptance ? "benchAcceptancePrompt" : "benchToolPrompt")?.value || "").trim() : "";
     if (toolScenario && !promptOverride) {
-      const answer = $(isAcceptance ? "benchAcceptanceResult" : "benchAnswer");
+      const answer = benchResultElement('answer');
       if (answer) { answer.className = isAcceptance ? "bench-acceptance-result msg err" : "bench-answer err"; answer.textContent = "测试提示词不能为空。"; }
       return;
     }
@@ -3119,16 +3120,16 @@ async function runBenchmark(scenario = "performance") {
     benchPollToken++;
     const token = benchPollToken;
     setBenchRunning(true);
-    const ans0 = $("benchAnswer");
+    const ans0 = benchResultElement('answer');
     if (ans0) { ans0.className = "bench-answer muted"; ans0.textContent = "正在连接上游…"; }
     if (isAcceptance) {
       const box = $("benchAcceptanceResult");
       if (box) { box.className = "bench-acceptance-result msg muted"; box.textContent = "正在提交验收任务…"; }
     }
-    $("benchReasoningWrap") && ($("benchReasoningWrap").style.display = "none");
-    $("benchAnalysis") && ($("benchAnalysis").style.display = "none", $("benchAnalysis").innerHTML = "");
-    $("benchEventsFold") && ($("benchEventsFold").style.display = "none");
-    const met0 = $("benchMetrics");
+    benchResultElement('reasoningWrap') && (benchResultElement('reasoningWrap').style.display = "none");
+    benchResultElement('analysis') && (benchResultElement('analysis').style.display = "none", benchResultElement('analysis').innerHTML = "");
+    benchResultElement('eventsFold') && (benchResultElement('eventsFold').style.display = "none");
+    const met0 = benchResultElement('metrics');
     if (met0) met0.innerHTML = statusPill("running");
     try {
       const benchTarget = await loadBenchPanel({ resume: false });
@@ -3153,7 +3154,7 @@ async function runBenchmark(scenario = "performance") {
         ansE.className = isAcceptance ? "bench-acceptance-result msg err" : "bench-answer err";
         ansE.textContent = e.message;
       }
-      const metE = $("benchMetrics");
+      const metE = benchResultElement('metrics');
       if (metE) metE.innerHTML = "";
     } finally {
       if (token === benchPollToken) setBenchRunning(false);
