@@ -3701,6 +3701,7 @@ async function loadBenchmarkAcceptanceCases() {
         runBenchmark,
         runBenchmarkSuite,
         buildBenchmarkSuitePrompts,
+        benchmarkSuitePromptForCase,
         copyBenchmarkSuiteReport,
         renderBenchmarkSuiteReport,
         saveBackend,
