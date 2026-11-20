@@ -3198,7 +3198,12 @@ async function runBenchmarkSuite(resumeExisting=false){
       const item=suite.cases.find(entry=>entry.case_id===id);
       return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
     });
-    suite.qualification_status=allTargetsMet&&allCold&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+    const allConditionsComplete=allCasesRecorded&&caseOrder.every(id=>{
+      const item=suite.cases.find(entry=>entry.case_id===id);
+      const job=item.job||{};
+      return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
+    });
+    suite.qualification_status=allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
   }catch(error){
     suite.status=suite.cases.length?'partial':'failed';
     suite.error=error?.message||'四组测试执行失败';
