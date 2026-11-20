@@ -3251,6 +3251,7 @@ exposeGlobals({
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
+  readBenchmarkSuiteState,
   normalizeBenchmarkSuiteCases,
   benchmarkSuiteCanResume,
   benchmarkSuiteWarmupCanResume,
