@@ -2996,7 +2996,7 @@ async function captureBenchmarkRuntime(){
     return {status:'unavailable',observed_at:new Date().toISOString(),error:error?.message||'Runtime Snapshot 获取失败'};
   }
 }
-async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params){
+async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onCreated=null){
   applyBenchParams({...params,prompt,max_tokens:maxTokens});
   updateBenchReqPreview(target.upstream,'performance',prompt);
   const start=await api('/api/benchmark',{
@@ -3006,6 +3006,7 @@ async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params){
   });
   benchSuiteCurrentJobId=start.job_id;
   writeBenchStore({jobId:start.job_id});
+  if(typeof onCreated==='function')onCreated(start.job_id);
   try{
     if(token!==benchPollToken||benchSuiteCancelRequested){
       await api('/api/benchmark/'+encodeURIComponent(start.job_id),{method:'DELETE'}).catch(()=>{});
@@ -3039,10 +3040,15 @@ function benchmarkSuiteQualification(suite){
 
 function benchmarkSuiteCanResume(suite){
   if(!suite||suite.suite_version!=='perf12-four-case-v2'||suite.prompt_version!=='perf12-synthetic-dataset-v2')return false;
-  if(suite.status==='completed'||suite.status==='running')return false;
-  if(suite.warmup?.status!=='completed'||!suite.prompts?.short||!suite.prompts?.long)return false;
+  if(!suite.prompts?.short||!suite.prompts?.long)return false;
+  const cases=Array.isArray(suite.cases)?suite.cases:[];
+  const warmupReady=suite.warmup?.status==='completed'||(suite.warmup?.status==='running'&&suite.warmup?.job_id);
+  if(!warmupReady)return false;
+  if(cases.some(item=>item.status==='submitting'&&!item.job_id))return false;
+  if(suite.status==='running'&&suite.warmup?.status!=='running'&&!cases.some(item=>item.status==='running'&&item.job_id))return false;
+  if(suite.status==='completed')return false;
   const ids=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
-  return ids.some(id=>!(suite.cases||[]).some(item=>item.case_id===id&&item.status==='completed'));
+  return ids.some(id=>!cases.some(item=>item.case_id===id&&item.status==='completed'));
 }
 
 async function runBenchmarkSuite(resumeExisting=false){
@@ -3092,7 +3098,7 @@ async function runBenchmarkSuite(resumeExisting=false){
     cases:[]
   };
   suite.status='running';
-  suite.current_case_id=null;
+  if(!resumeExisting)suite.current_case_id=null;
   if(resumeExisting){
     suite.resumed_at=new Date().toISOString();
     suite.resume_count=(Number(suite.resume_count)||0)+1;
@@ -3128,11 +3134,20 @@ async function runBenchmarkSuite(resumeExisting=false){
     if(!resumeExisting){
       applyBenchParams({...suiteParams,prompt:prompts.short,max_tokens:8});
       if(status)status.textContent='正在执行预热请求（不计入四组结果）…';
-      const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams);
-      suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
+      const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams,jobId=>{
+        suite.warmup={job_id:jobId,status:'running',started_at:new Date().toISOString()};
+        saveBenchmarkSuiteState(suite);
+      });
+      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup?.job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
       saveBenchmarkSuiteState(suite);
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
+    }else if(suite.warmup?.status==='running'&&suite.warmup?.job_id){
+      if(status)status.textContent='正在恢复预热任务 '+suite.warmup.job_id+'…';
+      const warmup=await pollBenchmarkJob(suite.warmup.job_id,Date.parse(suite.warmup.started_at)||Date.now(),token);
+      suite.warmup={...suite.warmup,status:benchJobPayload(warmup||{}).status||'unknown'};
+      saveBenchmarkSuiteState(suite);
+      if(!warmup||suite.warmup.status!=='completed')throw new Error('恢复的预热任务未成功完成，停止正式测试。');
     }
     const cases=[
       {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
@@ -3149,12 +3164,36 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(status)status.textContent=(resumeExisting?'补跑':'正在执行')+'第 '+(index+1)+'/4 组：'+item.case_id+'…';
       suite.current_case_id=item.case_id;
       saveBenchmarkSuiteState(suite);
-      const promptSHA=await benchmarkTextSHA256(item.prompt);
-      const runtimeBefore=await captureBenchmarkRuntime();
+      const promptSHA=previous?.prompt_sha256||await benchmarkTextSHA256(item.prompt);
+      const runtimeBefore=previous?.runtime_before||await captureBenchmarkRuntime();
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       let wrap=null;
       let failure=null;
-      try{wrap=await submitBenchmarkSuiteTask(target,item.prompt,item.max_tokens,token,suiteParams)}catch(error){failure=error?.message||'任务执行失败'}
+      try{
+        if(previous?.status==='running'&&previous.job_id){
+          if(status)status.textContent='正在恢复第 '+(index+1)+'/4 组任务 '+previous.job_id+'…';
+          benchSuiteCurrentJobId=previous.job_id;
+          try{wrap=await pollBenchmarkJob(previous.job_id,Date.parse(previous.started_at)||Date.now(),token)}
+          finally{if(benchSuiteCurrentJobId===previous.job_id)benchSuiteCurrentJobId=null}
+        }else if(previous?.status==='submitting'&&!previous.job_id){
+          throw new Error('上次提交尚未保存 Job ID，状态不确定。为避免重复推理，请先在任务历史中核对该时间段的任务，再决定是否重建本组。');
+        }else{
+          const pending={
+            case_id:item.case_id,status:'submitting',job_id:null,prompt_version:prompts.version,
+            prompt_sha256:promptSHA,input_target:item.input_target,output_target:item.output_target,
+            max_tokens:item.max_tokens,runtime_before:runtimeBefore,started_at:new Date().toISOString(),
+            attempts:Array.isArray(previous?.attempts)?previous.attempts.slice():[]
+          };
+          if(previousIndex>=0)suite.cases[previousIndex]=pending;
+          else suite.cases.push(pending);
+          saveBenchmarkSuiteState(suite);
+          wrap=await submitBenchmarkSuiteTask(target,item.prompt,item.max_tokens,token,suiteParams,jobId=>{
+            const currentIndex=suite.cases.findIndex(entry=>entry.case_id===item.case_id);
+            if(currentIndex>=0)suite.cases[currentIndex]={...suite.cases[currentIndex],status:'running',job_id:jobId,job:{job_id:jobId,status:'running'}};
+            saveBenchmarkSuiteState(suite);
+          });
+        }
+      }catch(error){failure=error?.message||'任务执行失败'}
       const runtimeAfter=await captureBenchmarkRuntime();
       const job=benchJobPayload(wrap||{});
       const validation=[];
@@ -3186,8 +3225,8 @@ async function runBenchmarkSuite(resumeExisting=false){
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
       if(previous)previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
       const record={
-        case_id:item.case_id,status:cancelled?'cancelled':(job.status||(failure?'failed':'unknown')),
-        job_id:job.job_id||readBenchStore().jobId||null,
+        case_id:item.case_id,status:cancelled?'cancelled':(wrap?(job.status||'unknown'):(failure?'failed':'unknown')),
+        job_id:job.job_id||previous?.job_id||readBenchStore().jobId||null,
         prompt_version:prompts.version,prompt_sha256:promptSHA,
         input_target:item.input_target,output_target:item.output_target,
         max_tokens:item.max_tokens,job:sanitizeBenchmarkToolArguments(job),
@@ -3784,6 +3823,7 @@ async function loadBenchmarkAcceptanceCases() {
         buildBenchmarkSuitePrompts,
         benchmarkSuitePromptForCase,
         benchmarkSuiteQualification,
+        benchmarkSuiteCanResume,
         copyBenchmarkSuiteReport,
         renderBenchmarkSuiteReport,
         saveBackend,
