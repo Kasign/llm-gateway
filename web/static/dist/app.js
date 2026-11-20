@@ -2584,34 +2584,53 @@ function setBenchResultScopeFromJob(wrap){
  else if(job.scenario==='tool_performance'||job.scenario==='tool_performance_auto')benchResultScope='tools';
  else benchResultScope='performance';
 }
-function renderBenchAnalysis(wrap) {
-  const box = benchResultElement('analysis');
-  if (!box) return;
-  const a = wrap.analysis;
-  const hasPhases = Boolean(a && a.phases_ms);
-  const conditionHTML = renderBenchCondition(benchJobPayload(wrap));
-  if (!hasPhases && !conditionHTML) {
-    box.style.display = "none";
-    box.innerHTML = "";
-    return;
+function renderBenchAnalysis(wrap){
+  const box=benchResultElement('analysis');if(!box)return;
+  const a=wrap.analysis||{};
+  const p=a.phases_ms||{};
+  const hasPhases=Object.keys(p).some(key=>!['total_ms','ttft_ms'].includes(key)&&p[key]!=null);
+  const conditionHTML=renderBenchCondition(benchJobPayload(wrap));
+  const toolScenario=['tool_performance','tool_performance_auto'].includes(benchJobPayload(wrap).scenario);
+  const toolMetrics=toolScenario?(wrap.tool_metrics||null):null;
+  const toolEvents=Array.isArray(wrap.tool_call_events)?wrap.tool_call_events:[];
+  let html=conditionHTML;
+  if(toolMetrics){
+    const metricValue=(value,status)=>status==='measured'&&value!=null?value+' ms':(status==='combined_with_decision'&&value!=null?value+' ms（与决策合并测量）':(status==='not_applicable'?'不适用':'未知'));
+    const rows=[
+      ['工具选择策略',toolMetrics.tool_choice_mode==='auto'?'自然决策（auto）':'强制调用（web.search）'],
+      ['模型工具决策',toolMetrics.tool_call_decision==='called'?'调用了工具':(toolMetrics.tool_call_decision==='not_called'?'未调用工具':'未知')],
+      ['执行尝试 / 成功 / 失败',(toolMetrics.tool_execution_attempts??0)+' / '+(toolMetrics.tool_execution_successes??0)+' / '+(toolMetrics.tool_execution_failures??0)],
+      ['执行成功率',toolMetrics.tool_execution_success_rate!=null?Number(toolMetrics.tool_execution_success_rate).toFixed(1)+'%':'未知'],
+      ['模型决策',metricValue(toolMetrics.model_decision_ms,toolMetrics.model_decision_status)],
+      ['工具执行合计',metricValue(toolMetrics.tool_execution_total_ms,toolMetrics.tool_execution_status)],
+      ['模型最终生成',metricValue(toolMetrics.model_final_generation_ms,toolMetrics.model_final_generation_status)],
+      ['模型轮数',toolMetrics.model_rounds??0],['工具轮数',toolMetrics.tool_rounds??0],['工具调用数',toolMetrics.tool_calls??0],
+    ];
+    html+='<h3 style="margin:12px 0 8px;font-size:14px">工具调用阶段</h3><dl>'+
+      rows.map(([label,value])=>'<dt>'+esc(label)+'</dt><dd>'+esc(String(value))+'</dd>').join('')+'</dl>';
+    if(toolEvents.length){
+      html+='<details class="bench-detail-fold"><summary>工具执行事件（'+toolEvents.length+' 条）</summary><div class="bench-detail-fold-body">'+
+        wrapTable('<tr><th>#</th><th>轮次</th><th>工具</th><th>状态</th><th>耗时</th><th>结果字节</th><th>错误码</th></tr>'+
+        toolEvents.map(event=>'<tr><td>'+esc(String(event.seq??''))+'</td><td>'+esc(String(event.round??''))+'</td><td>'+esc(event.tool_name||'—')+'</td><td>'+esc(event.status||'—')+'</td><td>'+esc(String(event.duration_ms??'—'))+(event.duration_ms!=null?' ms':'')+'</td><td>'+esc(String(event.result_bytes??'—'))+'</td><td>'+esc(event.error_code||'—')+'</td></tr>').join(''))+
+        '</div></details>';
+    }
   }
-  box.style.display = "block";
-  let html = conditionHTML;
-  if (hasPhases) {
-    const p = a.phases_ms, tp = a.throughput || {};
-    html += '<h3 style="margin:12px 0 10px;font-size:14px">\u8BF7\u6C42\u5206\u6790</h3><dl>' + [
-      ["\u603B\u8017\u65F6", p.total_ms != null ? p.total_ms + " ms" : null],
-      ["Gateway \u51C6\u5907", p.prep_ms + " ms"],
-      ["\u6A21\u578B\u52A0\u8F7D", p.model_load_ms + " ms"],
-      ["\u4E0A\u6E38\u63A8\u7406", p.upstream_ms + " ms"],
-      ["\u9996 token", p.ttft_ms != null ? p.ttft_ms + " ms" : null],
-      ["\u9996\u6761\u6B63\u6587", p.ttft_content_ms != null ? p.ttft_content_ms + " ms" : null],
-      ["\u601D\u8003\u9636\u6BB5", p.thinking_ms != null ? p.thinking_ms + " ms" : null],
-      ["\u6B63\u6587\u751F\u6210", p.content_generation_ms != null ? p.content_generation_ms + " ms" : null],
-      ["\u8F93\u51FA\u901F\u5EA6", tp.output_tokens_per_sec != null ? tp.output_tokens_per_sec.toFixed(2) + " tok/s" : null]
-    ].filter((x) => x[1] != null).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") + "</dl>" + (a.summary?.length ? `<ul class="req-hints" style="margin:10px 0 0">${a.summary.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "") + (tp.note ? `<p class="req-note">${esc(tp.note)}</p>` : "");
+  if(hasPhases){
+    const labels={
+      prep_ms:'Gateway 准备',model_load_ms:'模型加载',upstream_ms:'上游推理',
+      time_to_upstream_headers_ms:'上游响应头',time_to_first_byte_ms:'上游首字节',
+      ttft_content_ms:'首条正文',thinking_ms:'思考阶段',content_generation_ms:'正文生成',
+      prefill_until_first_ms:'首 Token 前 Prompt 处理',gateway_before_infer_ms:'Gateway 推理前'
+    };
+    const rows=Object.entries(p).filter(([key,value])=>value!=null&&!['total_ms','ttft_ms'].includes(key));
+    html+='<h3 style="margin:12px 0 10px;font-size:14px">阶段耗时分解</h3><dl>'+
+      rows.map(([key,value])=>'<dt>'+esc(labels[key]||key)+'</dt><dd>'+esc(String(value))+' ms</dd>').join('')+'</dl>';
   }
-  box.innerHTML = html;
+  html+=renderBenchmarkModelTimings(a);
+  if(a.summary?.length)html+='<ul class="req-hints" style="margin:10px 0 0">'+a.summary.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>';
+  if(a.throughput?.note)html+='<p class="req-note">'+esc(a.throughput.note)+'</p>';
+  box.style.display='block';
+  box.innerHTML=html;
 }
 function renderBenchStreamEvents(evs) {
     const fold = benchResultElement('eventsFold'), tbl = benchResultElement('eventsTable'), cnt = benchResultElement('eventsCount');
@@ -2626,62 +2645,58 @@ function renderBenchStreamEvents(evs) {
     const note = evs.length > 200 ? `<p class="req-note">\u4EC5\u5C55\u793A\u6700\u8FD1 ${show.length} \u6761</p>` : "";
     tbl.innerHTML = note + wrapTable("<tr><th>#</th><th>ms</th><th>\u7C7B\u578B</th><th>\u5B57\u6BB5</th><th>+\u5B57\u7B26</th><th>\u9884\u89C8</th></tr>" + show.map((e) => `<tr><td>${e.seq}</td><td>${e.at_ms}</td><td>${esc(e.kind)}</td><td>${esc(e.field || "\u2014")}</td><td>${e.delta_len ?? "\u2014"}</td><td class="small">${esc(e.preview || "\u2014")}</td></tr>`).join(""));
   }
-  function renderBenchLive(wrap, running) {
-    const j = benchJobPayload(wrap);
-    const evs = wrap.stream_events || [];
-    const ok = j.status === "completed";
-    const failed = j.status === "failed" || j.status === "cancelled";
-    const { content, reasoning } = benchTextsFromJob(j);
-    const ans = benchResultElement('answer');
-    if (ans) {
-      if (failed) ans.className = "bench-answer err", ans.textContent = j.error || (j.status === "cancelled" ? "\u4EFB\u52A1\u5DF2\u505C\u6B62" : "\u6D4B\u8BD5\u5931\u8D25");
-      else if (running && !content && !reasoning) ans.className = "bench-answer muted", ans.textContent = "\u63A8\u7406\u4E2D\u2026";
-      else ans.className = "bench-answer", ans.textContent = content || "\uFF08\u5C1A\u65E0\u6B63\u6587 content\uFF09";
-    }
-    const rw = benchResultElement('reasoningWrap'), rb = benchResultElement('reasoning');
-    if (rw && rb) {
-      if (reasoning) {
-        rw.style.display = "block";
-        rb.className = "bench-answer bench-reasoning";
-        rb.textContent = reasoning;
-      } else rw.style.display = "none", rb.textContent = "";
-    }
-    renderBenchAnalysis(wrap);
-    renderBenchStreamEvents(evs);
+function renderBenchLive(wrap,running){
+  const j=benchJobPayload(wrap);
+  const evs=wrap.stream_events||[];
+  const ok=j.status==='completed';
+  const failed=j.status==='failed'||j.status==='cancelled';
+  const {content,reasoning}=benchTextsFromJob(j);
+  const ans=benchResultElement('answer');
+  if(ans){
+    if(failed)ans.className='bench-answer err',ans.textContent=j.error||(j.status==='cancelled'?'任务已停止':'测试失败');
+    else if(running&&!content&&!reasoning)ans.className='bench-answer muted',ans.textContent='推理中…';
+    else ans.className='bench-answer',ans.textContent=content||'（尚无正文 content）';
   }
-  function renderBenchResult(wrap) {
-    renderBenchLive(wrap, false);
-    const j = benchJobPayload(wrap);
-    const evs = wrap.stream_events || [];
-    const ok = j.status === "completed";
-    const met = benchResultElement('metrics');
-    if (!met) return;
-    const tps = wrap.analysis?.throughput?.output_tokens_per_sec;
-    met.innerHTML = [
-      statusPill(j.status === "completed" ? "success" : j.status === "failed" ? "error" : j.status === "cancelled" ? "cancelled" : j.status),
-      j.stream ? `<span class="pill">\u6D41\u5F0F</span>` : "",
-      j.max_tokens ? `<span class="pill">max_tokens ${j.max_tokens}</span>` : "",
-      j.prompt_len ? `<span class="pill">\u63D0\u793A ${j.prompt_len} \u5B57\u7B26</span>` : "",
-      j.latency_ms != null ? `<span class="pill">\u603B\u8017\u65F6 ${j.latency_ms} ms</span>` : "",
-      j.ttft_ms != null ? `<span class="pill">TTFT ${j.ttft_ms} ms</span>` : "",
-      j.input_tokens ? `<span class="pill">\u8F93\u5165 ${j.input_tokens} tok</span>` : "",
-      j.output_tokens ? `<span class="pill">\u8F93\u51FA ${j.output_tokens} tok</span>` : "",
-      tps != null ? `<span class="pill">${tps.toFixed(2)} tok/s</span>` : "",
-      j.content_chars ? `<span class="pill">\u6B63\u6587 ${j.content_chars} \u5B57</span>` : "",
-      j.reasoning_chars ? `<span class="pill">\u601D\u8003 ${j.reasoning_chars} \u5B57</span>` : "",
-      j.response_bytes ? `<span class="pill">\u54CD\u5E94 ${(j.response_bytes / 1024).toFixed(1)} KB</span>` : "",
-      j.stream_event_count ? `<span class="pill">\u4E8B\u4EF6 ${j.stream_event_count}</span>` : "",
-      j.http_status ? `<span class="pill">HTTP ${j.http_status}</span>` : "",
-      j.llama_model ? `<span class="pill mono small">${esc(j.llama_model)}</span>` : "",
-      j.request_id ? `<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">\u5B8C\u6574\u8C03\u7528\u8BB0\u5F55</button>` : ""
-    ].filter(Boolean).join("");
-    const rawBody = j.response || "";
-    benchResultElement('raw').textContent = rawBody.trim().startsWith("data:") ? rawBody : JSON.stringify({ analysis: wrap.analysis, job: j, stream_events: evs, response: tryParse(rawBody) || rawBody }, null, 2);
-    const ef = benchResultElement('eventsFold');
-    if (ef && evs.length) ef.open = evs.length <= 80;
-    renderBenchmarkAcceptanceResult(wrap);
+  const rw=benchResultElement('reasoningWrap'),rb=benchResultElement('reasoning');
+  if(rw&&rb){
+    if(reasoning){rw.style.display='block';rb.className='bench-answer bench-reasoning';rb.textContent=reasoning}
+    else rw.style.display='none',rb.textContent='';
   }
-  function renderBenchmarkAcceptanceResult(wrap) {
+  renderBenchAnalysis(wrap);
+  renderBenchStreamEvents(evs);
+}
+function renderBenchResult(wrap){
+  renderBenchLive(wrap,false);
+  const j=benchJobPayload(wrap);
+  const evs=wrap.stream_events||[];
+  const ok=j.status==='completed';
+  const met=benchResultElement('metrics');if(!met)return;
+  const tps=wrap.analysis?.throughput?.output_tokens_per_sec;
+  met.innerHTML=[
+    statusPill(j.status==='completed'?'success':j.status==='failed'?'error':j.status==='cancelled'?'cancelled':j.status),
+    wrap.acceptance?('<span class="pill">验收 '+esc(wrap.acceptance.case_id)+' · '+esc(wrap.acceptance.status)+'</span><span class="pill">'+esc(wrap.acceptance.message)+'</span>'):'',
+    j.stream?`<span class="pill">流式</span>`:'',
+    j.max_tokens?`<span class="pill">max_tokens ${j.max_tokens}</span>`:'',
+    j.prompt_len?`<span class="pill">提示 ${j.prompt_len} 字符</span>`:'',
+    j.latency_ms!=null?`<span class="pill">总耗时 ${j.latency_ms} ms</span>`:'',
+    j.ttft_ms!=null?`<span class="pill">TTFT ${j.ttft_ms} ms</span>`:'',
+    j.input_tokens?`<span class="pill">输入 ${j.input_tokens} tok</span>`:'',
+    j.output_tokens?`<span class="pill">输出 ${j.output_tokens} tok</span>`:'',
+    tps!=null?`<span class="pill">${tps.toFixed(2)} tok/s</span>`:'',
+    j.content_chars?`<span class="pill">正文 ${j.content_chars} 字</span>`:'',
+    j.reasoning_chars?`<span class="pill">思考 ${j.reasoning_chars} 字</span>`:'',
+    j.response_bytes?`<span class="pill">响应 ${(j.response_bytes/1024).toFixed(1)} KB</span>`:'',
+    j.stream_event_count?`<span class="pill">事件 ${j.stream_event_count}</span>`:'',
+    j.http_status?`<span class="pill">HTTP ${j.http_status}</span>`:'',
+    j.llama_model?`<span class="pill mono small">${esc(j.llama_model)}</span>`:'',
+    j.request_id?`<button type="button" class="btn sm ghost" onclick="showDetail('${encodeURIComponent(j.request_id).replace(/'/g, "%27")}')">完整调用记录</button>`:'',
+  ].filter(Boolean).join('');
+  const rawBody=j.response||'';
+  benchResultElement('raw').textContent=rawBody.trim().startsWith('data:')?rawBody:JSON.stringify({analysis:wrap.analysis,job:j,acceptance:wrap.acceptance,stream_events:evs,response:tryParse(rawBody)||rawBody},null,2);
+  const ef=benchResultElement('eventsFold');if(ef&&evs.length)ef.open=evs.length<=80;
+  renderBenchmarkAcceptanceResult(wrap);
+}
+function renderBenchmarkAcceptanceResult(wrap) {
     const box = $("benchAcceptanceResult");
     if (!box) return;
     const acceptance = wrap?.acceptance;
@@ -2700,20 +2715,19 @@ function renderBenchStreamEvents(evs) {
       return s;
     }
   }
-  function renderBenchRunningMetrics(wrap, t0) {
-    const j = benchJobPayload(wrap);
-    const metR = benchResultElement('metrics');
-    if (!metR) return;
-    metR.innerHTML = [
-      statusPill("running"),
-      j.ttft_ms != null ? `<span class="pill">TTFT ${j.ttft_ms} ms</span>` : "",
-      wrap.stream_events?.length ? `<span class="pill">\u4E8B\u4EF6 ${wrap.stream_events.length}</span>` : "",
-      j.content_chars ? `<span class="pill">\u6B63\u6587 ${j.content_chars} \u5B57</span>` : "",
-      j.reasoning_chars ? `<span class="pill">\u601D\u8003 ${j.reasoning_chars} \u5B57</span>` : "",
-      `<span class="pill">\u5DF2\u7B49\u5F85 ${Math.round((Date.now() - t0) / 1e3)} s</span>`
-    ].filter(Boolean).join("");
-  }
-  async function pollBenchmarkJob(jobId, t0, token) {
+function renderBenchRunningMetrics(wrap,t0){
+  const j=benchJobPayload(wrap);
+  const metR=benchResultElement('metrics');
+  if(!metR)return;
+  metR.innerHTML=[statusPill('running'),
+    j.ttft_ms!=null?`<span class="pill">TTFT ${j.ttft_ms} ms</span>`:'',
+    wrap.stream_events?.length?`<span class="pill">事件 ${wrap.stream_events.length}</span>`:'',
+    j.content_chars?`<span class="pill">正文 ${j.content_chars} 字</span>`:'',
+    j.reasoning_chars?`<span class="pill">思考 ${j.reasoning_chars} 字</span>`:'',
+    `<span class="pill">已等待 ${Math.round((Date.now()-t0)/1000)} s</span>`,
+  ].filter(Boolean).join('');
+}
+async function pollBenchmarkJob(jobId, t0, token) {
     while (true) {
       if (token !== benchPollToken) return null;
       const wrap = await api("/api/benchmark/" + encodeURIComponent(jobId));
