@@ -4,6 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
       target: release
+      args:
+        GATEWAY_BUILD_REVISION: ${GATEWAY_BUILD_REVISION:-}
+        GATEWAY_BUILD_MODIFIED: ${GATEWAY_BUILD_MODIFIED:-}
     container_name: llm-gateway
     restart: unless-stopped
 

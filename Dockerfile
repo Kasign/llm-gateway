@@ -13,6 +13,8 @@ RUN npm run build
 FROM golang:1.23-bookworm AS builder
 WORKDIR /src
 ARG GOPROXY=https://goproxy.cn,direct
+ARG GATEWAY_BUILD_REVISION=
+ARG GATEWAY_BUILD_MODIFIED=
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=sum.golang.google.cn
 COPY go.mod go.sum ./
@@ -24,7 +26,7 @@ COPY internal ./internal
 # 与 go mod download 共用 /go/pkg/mod 的 BuildKit cache mount。
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/llm-gateway ./cmd/gateway
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X=github.com/whl/llm-gateway/internal/buildinfo.Revision=${GATEWAY_BUILD_REVISION} -X=github.com/whl/llm-gateway/internal/buildinfo.Modified=${GATEWAY_BUILD_MODIFIED}" -o /out/llm-gateway ./cmd/gateway
 
 FROM alpine:3.22 AS release-base
 RUN apk add --no-cache ca-certificates tzdata

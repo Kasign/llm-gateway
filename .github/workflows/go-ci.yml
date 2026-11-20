@@ -330,6 +330,9 @@ jobs:
           context: .
           target: release
           tags: llm-gateway:ci
+          build-args: |
+            GATEWAY_BUILD_REVISION=${{ github.sha }}
+            GATEWAY_BUILD_MODIFIED=false
           push: false
           cache-from: type=gha,scope=llm-gateway-release
           cache-to: type=gha,scope=llm-gateway-release,mode=max
