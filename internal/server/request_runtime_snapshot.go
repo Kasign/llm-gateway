@@ -67,22 +67,22 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 
 
 func (s *Server) applyHostCPUSnapshot(out *RequestRuntimeSnapshot, now time.Time) {
- if s == nil || out == nil {
-  return
- }
- if cpu, sampledAt, ok := s.cpuSnapshotPercent(); ok {
-  out.HostCPUPercent = &cpu
-  out.HostCPUStatus = "available"
-  out.HostCPUSampledAt = sampledAt.UTC().Format(time.RFC3339Nano)
-  ageMS := now.Sub(sampledAt).Milliseconds()
-  if ageMS < 0 {
-   ageMS = 0
-  }
-  out.HostCPUAgeMS = &ageMS
-  return
- }
- out.HostCPUStatus = "unavailable"
- if out.Status == "complete" {
-  out.Status = "partial"
- }
+	if s == nil || out == nil {
+		return
+	}
+	if cpu, sampledAt, ok := s.cpuSnapshotPercent(); ok {
+		out.HostCPUPercent = &cpu
+		out.HostCPUStatus = "available"
+		out.HostCPUSampledAt = sampledAt.UTC().Format(time.RFC3339Nano)
+		ageMS := now.Sub(sampledAt).Milliseconds()
+		if ageMS < 0 {
+			ageMS = 0
+		}
+		out.HostCPUAgeMS = &ageMS
+		return
+	}
+	out.HostCPUStatus = "unavailable"
+	if out.Status == "complete" {
+		out.Status = "partial"
+	}
 }

@@ -254,6 +254,75 @@ func TestApplyCounterDeltasRequiresComparableProcessAndScope(t *testing.T) {
 	}
 }
 
+func TestApplyCounterDeltasUsesExactSampleWindow(t *testing.T) {
+	start := time.Date(2026, 11, 20, 2, 0, 0, 123000000, time.UTC)
+	end := start.Add(5*time.Second + 987*time.Millisecond)
+	processID := "process-1"
+	previous := &llama.MetricsSnapshot{
+		SampledAt: start, ProcessInstanceID: &processID, ModelScope: "model-a",
+		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "10"}},
+	}
+	current := &llama.MetricsSnapshot{
+		SampledAt: end, ProcessInstanceID: &processID, ModelScope: "model-a",
+		Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: "15"}},
+	}
+
+	applyCounterDeltas(current, previous, "http://llama", "http://llama")
+	got := current.Samples[0]
+	if got.DeltaStatus != "comparable" {
+		t.Fatalf("expected comparable delta, got %#v", got)
+	}
+	windowStart, err := time.Parse(time.RFC3339Nano, got.WindowStart)
+	if err != nil {
+		t.Fatalf("parse window_start: %v", err)
+	}
+	windowEnd, err := time.Parse(time.RFC3339Nano, got.WindowEnd)
+	if err != nil {
+		t.Fatalf("parse window_end: %v", err)
+	}
+	if !windowStart.Equal(start) || !windowEnd.Equal(end) {
+		t.Fatalf("counter window must use exact successful sample timestamps: want [%s,%s], got [%s,%s]",
+			start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), got.WindowStart, got.WindowEnd)
+	}
+	if want := end.Sub(start).Milliseconds(); got.WindowMS != want {
+		t.Fatalf("window_ms must match sample timestamp difference: want %d, got %d", want, got.WindowMS)
+	}
+}
+
+func TestMetricsSamplingFailureResetsCounterDeltaBaseline(t *testing.T) {
+	s := &Server{}
+	processID := "process-1"
+	target := "http://llama"
+	makeSnapshot := func(at time.Time, value string) *llama.MetricsSnapshot {
+		return &llama.MetricsSnapshot{
+			SampledAt: at, ProcessInstanceID: &processID, ModelScope: "model-a",
+			Samples: []llama.MetricSample{{Name: "requests_total", Type: llama.MetricTypeCounter, Value: value}},
+		}
+	}
+
+	firstAt := time.Date(2026, 11, 20, 2, 0, 0, 0, time.UTC)
+	s.setRuntimeMetricsSampleForTarget(makeSnapshot(firstAt, "10"), "complete", "", target)
+	s.setRuntimeMetricsSampleForTarget(nil, "unavailable", "request_failed", target)
+	s.setRuntimeMetricsSampleForTarget(makeSnapshot(firstAt.Add(5*time.Second), "20"), "complete", "", target)
+
+	recovered := s.runtimeSnapshotSampleLatest()
+	if recovered == nil || recovered.Metrics == nil || len(recovered.Metrics.Samples) != 1 {
+		t.Fatalf("expected recovered metrics sample, got %#v", recovered)
+	}
+	if got := recovered.Metrics.Samples[0]; got.DeltaStatus != "not_comparable" || got.DeltaReason != "no_previous_sample" {
+		t.Fatalf("first successful sample after failure must establish a new baseline, got %#v", got)
+	}
+
+	s.setRuntimeMetricsSampleForTarget(makeSnapshot(firstAt.Add(10*time.Second), "25"), "complete", "", target)
+	next := s.runtimeSnapshotSampleLatest()
+	if next == nil || next.Metrics == nil || len(next.Metrics.Samples) != 1 {
+		t.Fatalf("expected next metrics sample, got %#v", next)
+	}
+	if got := next.Metrics.Samples[0]; got.DeltaStatus != "comparable" || got.DeltaValue != "5" {
+		t.Fatalf("second successful sample after recovery should be comparable to the new baseline, got %#v", got)
+	}
+}
+
 func TestSampleLlamaMetricsCancellationIsIsolated(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
