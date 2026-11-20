@@ -305,7 +305,9 @@ try {
     const runningWarmup = benchmarkSuiteCanResume(runningWarmupSuite);
     const warmupGateAllowsRunning = benchmarkSuiteWarmupCanResume(runningWarmupSuite);
     const warmupGateRejectsUnknown = !benchmarkSuiteWarmupCanResume({...runningWarmupSuite,warmup:{status:'unknown',job_id:'warmup-inflight-456'}});
-    return {runningJob,missingJob,runningWarmup,warmupGateAllowsRunning,warmupGateRejectsUnknown};
+    const warmupCanRetryCancelled = benchmarkSuiteWarmupCanResume({...runningWarmupSuite,warmup:{status:'cancelled',job_id:'warmup-cancelled-789'}});
+    const warmupCanRetryFailed = benchmarkSuiteWarmupCanResume({...runningWarmupSuite,warmup:{status:'failed',job_id:null}});
+    return {runningJob,missingJob,runningWarmup,warmupGateAllowsRunning,warmupGateRejectsUnknown,warmupCanRetryCancelled,warmupCanRetryFailed};
   });
   const recoveredTaskStates = await page.evaluate(() => ({
     transientPollFailure: benchmarkSuiteTaskStatus(null,'job-inflight-123',false),
@@ -324,7 +326,9 @@ try {
     recoveryEligibility.missingJob === false &&
     recoveryEligibility.runningWarmup === true &&
     recoveryEligibility.warmupGateAllowsRunning === true &&
-    recoveryEligibility.warmupGateRejectsUnknown === true,
+    recoveryEligibility.warmupGateRejectsUnknown === true &&
+    recoveryEligibility.warmupCanRetryCancelled === true &&
+    recoveryEligibility.warmupCanRetryFailed === true,
     recoveryEligibility);
   check('清除部分报告后隐藏续跑入口',
     !(await page.locator('#benchSuiteResumeBtn').isVisible()));
