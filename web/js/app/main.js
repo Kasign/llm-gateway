@@ -2829,7 +2829,7 @@ async function runBenchmarkSuite(resumeExisting=false){
         suite.warmup={job_id:jobId,status:'running',started_at:new Date().toISOString()};
         saveBenchmarkSuiteState(suite);
       });
-      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup?.job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
+      suite.warmup={...suite.warmup,job_id:benchJobPayload(warmup||{}).job_id||suite.warmup?.job_id||null,status:benchJobPayload(warmup||{}).status||'unknown'};
       saveBenchmarkSuiteState(suite);
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
@@ -2922,7 +2922,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(previous&&!(previous.status==='running'&&previous.job_id&&previous.job_id===(job.job_id||previous.job_id)))previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
       const record={
         case_id:item.case_id,status:resultStatus,
-        job_id:job.job_id||observedJobId||previous?.job_id||readBenchStore().jobId||null,
+        job_id:job.job_id||observedJobId||previous?.job_id||null,
         prompt_version:prompts.version,prompt_sha256:promptSHA,
         input_target:item.input_target,output_target:item.output_target,
         max_tokens:item.max_tokens,job:sanitizeBenchmarkToolArguments(job),
