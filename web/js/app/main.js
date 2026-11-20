@@ -2729,12 +2729,14 @@ function benchmarkSuiteQualification(suite){
   return allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
 }
 
+function benchmarkSuiteWarmupCanResume(suite){
+  return suite?.warmup?.status==='completed'||(suite?.warmup?.status==='running'&&!!suite?.warmup?.job_id);
+}
 function benchmarkSuiteCanResume(suite){
   if(!suite||suite.suite_version!=='perf12-four-case-v2'||suite.prompt_version!=='perf12-synthetic-dataset-v2')return false;
   if(!suite.prompts?.short||!suite.prompts?.long)return false;
   const cases=Array.isArray(suite.cases)?suite.cases:[];
-  const warmupReady=suite.warmup?.status==='completed'||(suite.warmup?.status==='running'&&suite.warmup?.job_id);
-  if(!warmupReady)return false;
+  if(!benchmarkSuiteWarmupCanResume(suite))return false;
   if(cases.some(item=>item.status==='submitting'&&!item.job_id))return false;
   if(suite.status==='running'&&suite.warmup?.status!=='running'&&!cases.some(item=>item.status==='running'&&item.job_id))return false;
   if(suite.status==='completed')return false;
@@ -2805,7 +2807,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(suite.backend!==benchCurrentBackend||suite.model_id!==target.upstream){
         throw new Error('续跑条件不一致：当前后端或模型与原测试不同。请恢复原后端和模型，或开始一轮全新的测试。');
       }
-      if(suite.warmup?.status!=='completed')throw new Error('原测试预热未成功，不能跳过预热续跑。');
+      if(!benchmarkSuiteWarmupCanResume(suite))throw new Error('原测试预热未成功，不能跳过预热续跑。');
       if(suite.execution_parameters&&typeof suite.execution_parameters==='object'){
         suiteParams={...restoreParams,...suite.execution_parameters};
         suite.resume_parameter_status='complete_snapshot';
@@ -2836,7 +2838,8 @@ async function runBenchmarkSuite(resumeExisting=false){
     }else if(suite.warmup?.status==='running'&&suite.warmup?.job_id){
       if(status)status.textContent='正在恢复预热任务 '+suite.warmup.job_id+'…';
       const warmup=await pollBenchmarkJob(suite.warmup.job_id,Date.parse(suite.warmup.started_at)||Date.now(),token);
-      suite.warmup={...suite.warmup,status:benchJobPayload(warmup||{}).status||'unknown'};
+      const warmupStatus=benchJobPayload(warmup||{}).status;
+      suite.warmup={...suite.warmup,status:warmupStatus||(warmup?'unknown':(benchSuiteCancelRequested?'cancelled':'running'))};
       saveBenchmarkSuiteState(suite);
       if(!warmup||suite.warmup.status!=='completed')throw new Error('恢复的预热任务未成功完成，停止正式测试。');
     }
@@ -3190,6 +3193,7 @@ exposeGlobals({
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
   benchmarkSuiteCanResume,
+  benchmarkSuiteWarmupCanResume,
   benchmarkSuiteTaskStatus,
   copyBenchmarkSuiteReport,
   renderBenchmarkSuiteReport,
