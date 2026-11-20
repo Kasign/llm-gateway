@@ -2516,9 +2516,10 @@ function buildBenchmarkSuitePrompts(){
     version:'perf12-synthetic-dataset-v2'
   };
 }
-function benchmarkSuitePromptForCase(prompt, suiteNonce, caseID){
-  // 每个样本在 Prompt 首部加入不同标记，避免 llama.cpp 复用前一组的公共 Prompt 前缀缓存。
-  return suiteNonce+'_PERF12_CASE_'+String(caseID).replace(/[^A-Z0-9]/gi,'_')+'\n'+prompt;
+function benchmarkSuitePromptForCase(prompt, caseID){
+  // 每个样本使用独立随机前缀，避免四组之间共享可复用的 Prompt Cache 前缀。
+  const caseNonce=createBenchmarkSuiteNonce();
+  return caseNonce+'_PERF12_CASE_'+String(caseID).replace(/[^A-Z0-9]/gi,'_')+'\n'+prompt;
 }
 function createBenchmarkSuiteNonce(){
   try{
@@ -2746,12 +2747,11 @@ async function runBenchmarkSuite(){
     suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
     if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
     if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
-    const suiteNonce=createBenchmarkSuiteNonce();
     const cases=[
-      {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,suiteNonce,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
-      {case_id:'L-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.long,suiteNonce,'LP_SO'),max_tokens:64,input_target:'long',output_target:'short'},
-      {case_id:'S-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.short,suiteNonce,'SP_LO'),max_tokens:512,input_target:'short',output_target:'long'},
-      {case_id:'L-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.long,suiteNonce,'LP_LO'),max_tokens:512,input_target:'long',output_target:'long'}
+      {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
+      {case_id:'L-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.long,'LP_SO'),max_tokens:64,input_target:'long',output_target:'short'},
+      {case_id:'S-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.short,'SP_LO'),max_tokens:512,input_target:'short',output_target:'long'},
+      {case_id:'L-P / L-O',prompt:benchmarkSuitePromptForCase(prompts.long,'LP_LO'),max_tokens:512,input_target:'long',output_target:'long'}
     ];
     for(let index=0;index<cases.length;index++){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
