@@ -3096,7 +3096,7 @@ async function runBenchmarkSuite(){
       const promptN=modelTimings.prompt_n==null?null:Number(modelTimings.prompt_n);
       const coldPrompt=cacheN===0&&Number.isFinite(input)&&promptN===input;
       if(cacheN!=null){
-        validation.push('Prompt Cache '+(cacheN===0?'未报告命中':'命中 '+cacheN+' tokens'));
+        validation.push('Prompt Cache '+(cacheN===0?'未命中（cache_n=0）':'命中 '+cacheN+' tokens'));
       }else{
         validation.push('Prompt Cache 状态未知');
       }
@@ -3107,6 +3107,11 @@ async function runBenchmarkSuite(){
       }
       if(!coldPrompt){
         validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
+      }
+      const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
+      const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
+      if(!timingComplete){
+        validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       }
       const record={
         case_id:item.case_id,status:job.status||(failure?'failed':'unknown'),
@@ -3126,7 +3131,7 @@ async function runBenchmarkSuite(){
     }
     suite.status=suite.cases.length===4?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
     const allTargetsMet=suite.cases.length===4&&suite.cases.every(item=>item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标')));
-    const allCold=suite.cases.length===4&&suite.cases.every(item=>item.validation?.some(v=>v.startsWith('Prompt Cache 未报告命中'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件')));
+    const allCold=suite.cases.length===4&&suite.cases.every(item=>item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整')));
     suite.qualification_status=allTargetsMet&&allCold?'baseline_candidate':'baseline_not_qualified';
   }catch(error){
     suite.status=suite.cases.length?'partial':'failed';
