@@ -76,8 +76,8 @@ func TestCPUSnapshotPercentReturnsFreshSample(t *testing.T) {
  s.cpuCachedPercent = 42
  s.cpuProcLastSample = time.Now()
  s.cpuSampleMu.Unlock()
- value, ok := s.cpuSnapshotPercent()
- if !ok || value != 42 {
-  t.Fatalf("expected fresh CPU snapshot 42, got value=%v ok=%v", value, ok)
+ value, sampledAt, ok := s.cpuSnapshotPercent()
+ if !ok || value != 42 || sampledAt.IsZero() {
+  t.Fatalf("expected fresh CPU snapshot 42 with timestamp, got value=%v sampled_at=%v ok=%v", value, sampledAt, ok)
  }
 }
