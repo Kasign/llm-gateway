@@ -487,7 +487,7 @@
                 <h3 id="benchSuiteTitle">PERF-12 四组基线测试</h3>
                 <p>自动预热后串行执行四组固定提示词。短输入目标约 128 tokens，长输入目标约 2,048 tokens；输出上限分别为 64 / 512 tokens。</p>
               </div>
-              <button type="button" class="btn primary" id="benchSuiteRunBtn" onclick="runBenchmarkSuite()">一键执行四组测试</button>
+              <div class="btn-row"><button type="button" class="btn primary" id="benchSuiteRunBtn" onclick="runBenchmarkSuite()">一键执行四组测试</button><button type="button" class="btn ghost sm" id="benchSuiteResumeBtn" onclick="runBenchmarkSuite(true)" hidden>继续未完成组</button></div>
             </div>
             <p class="small muted">测试期间请勿发送其他推理请求。自动固定 temperature=0、top_p=1、top_k=40、seed=42、关闭 thinking；每组保留实际 Token 数和条件指纹。目标长度以服务端实际 Token 数校验，不达标不会伪装成合格样本。</p>
             <div id="benchSuiteStatus" class="msg muted" role="status" aria-live="polite">固定提示词和四组顺序已就绪。</div>
