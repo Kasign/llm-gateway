@@ -2682,6 +2682,11 @@ async function captureBenchmarkRuntime(){
     return {status:'unavailable',observed_at:new Date().toISOString(),error:error?.message||'Runtime Snapshot 获取失败'};
   }
 }
+function benchmarkSuiteTaskStatus(status,jobID,cancelled){
+  if(cancelled)return 'cancelled';
+  return status|| (jobID?'running':'failed');
+}
+
 async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onCreated=null){
   applyBenchParams({...params,prompt,max_tokens:maxTokens});
   updateBenchReqPreview(target.upstream,'performance',prompt);
@@ -2855,6 +2860,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       let wrap=null;
       let failure=null;
+      let observedJobId=previous?.status==='running'&&previous.job_id?previous.job_id:null;
       try{
         if(previous?.status==='running'&&previous.job_id){
           if(status)status.textContent='正在恢复第 '+(index+1)+'/4 组任务 '+previous.job_id+'…';
@@ -2874,6 +2880,7 @@ async function runBenchmarkSuite(resumeExisting=false){
           else suite.cases.push(pending);
           saveBenchmarkSuiteState(suite);
           wrap=await submitBenchmarkSuiteTask(target,item.prompt,item.max_tokens,token,suiteParams,jobId=>{
+            observedJobId=jobId;
             const currentIndex=suite.cases.findIndex(entry=>entry.case_id===item.case_id);
             if(currentIndex>=0)suite.cases[currentIndex]={...suite.cases[currentIndex],status:'running',job_id:jobId,job:{job_id:jobId,status:'running'}};
             saveBenchmarkSuiteState(suite);
@@ -2907,20 +2914,21 @@ async function runBenchmarkSuite(resumeExisting=false){
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
       if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
-      const cancelled=token!==benchPollToken||benchSuiteCancelRequested;
+      const cancelled=benchSuiteCancelRequested;
+      const resultStatus=benchmarkSuiteTaskStatus(job.status,observedJobId,cancelled);
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
       if(previous&&!(previous.status==='running'&&previous.job_id&&previous.job_id===(job.job_id||previous.job_id)))previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
       const record={
-        case_id:item.case_id,status:cancelled?'cancelled':(wrap?(job.status||'unknown'):(failure?'failed':'unknown')),
-        job_id:job.job_id||previous?.job_id||readBenchStore().jobId||null,
+        case_id:item.case_id,status:resultStatus,
+        job_id:job.job_id||observedJobId||previous?.job_id||readBenchStore().jobId||null,
         prompt_version:prompts.version,prompt_sha256:promptSHA,
         input_target:item.input_target,output_target:item.output_target,
         max_tokens:item.max_tokens,job:sanitizeBenchmarkToolArguments(job),
         analysis:sanitizeBenchmarkToolArguments(wrap?.analysis||{}),
         acceptance:wrap?.acceptance||null,
         runtime_before:runtimeBefore,runtime_after:runtimeAfter,
-        validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':null),
-        finished_at:new Date().toISOString(),attempts:previousAttempts
+        validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':(resultStatus==='running'?'轮询中断，服务端任务状态未确认，保留 Job ID 供恢复':null)),
+        finished_at:resultStatus==='running'?null:new Date().toISOString(),attempts:previousAttempts
       };
       if(previousIndex>=0)suite.cases[previousIndex]=record;
       else suite.cases.push(record);
@@ -2929,6 +2937,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       suite.current_case_id=null;
       saveBenchmarkSuiteState(suite);
       renderBenchmarkSuiteReport();
+      if(resultStatus==='running')throw new Error('原任务可能仍在服务端运行，已保留 Job ID 并暂停后续测试组；恢复时将继续轮询原任务。');
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
     }
     suite.current_case_id=null;
@@ -3179,6 +3188,7 @@ exposeGlobals({
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
   benchmarkSuiteCanResume,
+  benchmarkSuiteTaskStatus,
   copyBenchmarkSuiteReport,
   renderBenchmarkSuiteReport,
   saveBackend,

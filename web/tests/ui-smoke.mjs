@@ -304,6 +304,18 @@ try {
     });
     return {runningJob,missingJob,runningWarmup};
   });
+  const recoveredTaskStates = await page.evaluate(() => ({
+    transientPollFailure: benchmarkSuiteTaskStatus(null,'job-inflight-123',false),
+    explicitCancellation: benchmarkSuiteTaskStatus(null,'job-inflight-123',true),
+    submitFailureWithoutJob: benchmarkSuiteTaskStatus(null,null,false),
+    terminalCompletion: benchmarkSuiteTaskStatus('completed','job-inflight-123',false)
+  }));
+  check('轮询异常保留原 Job 并暂停后续组，只有明确取消才标记 cancelled',
+    recoveredTaskStates.transientPollFailure === 'running' &&
+    recoveredTaskStates.explicitCancellation === 'cancelled' &&
+    recoveredTaskStates.submitFailureWithoutJob === 'failed' &&
+    recoveredTaskStates.terminalCompletion === 'completed',
+    recoveredTaskStates);
   check('刷新后可恢复已有 Job ID 的在途组，不会自动重提不确定的任务',
     recoveryEligibility.runningJob === true &&
     recoveryEligibility.missingJob === false &&
