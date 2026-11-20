@@ -2645,6 +2645,7 @@ function buildBenchmarkSuiteJSON(suite){
   return JSON.stringify(suite?sanitizeBenchmarkToolArguments(suite):{},null,2);
 }
 function renderBenchmarkSuiteReport(){
+  const resumeButton=$('benchSuiteResumeBtn');
   const suite=readBenchmarkSuiteState();
   const output=$('benchSuiteReport');
   const status=$('benchSuiteStatus');
@@ -2652,12 +2653,14 @@ function renderBenchmarkSuiteReport(){
   const copyJSON=$('benchSuiteCopyJSON');
   if(!output)return;
   if(!suite){
+    if(resumeButton)resumeButton.hidden=true;
     output.textContent='尚未执行四组测试。';
     if(status)status.textContent='固定提示词和四组顺序已就绪。';
     if(copyMD)copyMD.disabled=true;
     if(copyJSON)copyJSON.disabled=true;
     return;
   }
+  if(resumeButton)resumeButton.hidden=!benchmarkSuiteCanResume(suite);
   output.textContent=buildBenchmarkSuiteMarkdown(suite);
   if(status)status.textContent='报告状态：'+(suite.status||'unknown')+' · 已记录 '+(suite.cases?.length||0)+'/4 组结果。';
   if(copyMD)copyMD.disabled=false;
@@ -2699,9 +2702,28 @@ async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params){
     if(benchSuiteCurrentJobId===start.job_id)benchSuiteCurrentJobId=null;
   }
 }
-async function runBenchmarkSuite(){
+function benchmarkSuiteCanResume(suite){
+  if(!suite||suite.suite_version!=='perf12-four-case-v2'||suite.prompt_version!=='perf12-synthetic-dataset-v2')return false;
+  if(suite.status==='completed'||suite.status==='running')return false;
+  if(suite.warmup?.status!=='completed'||!suite.prompts?.short||!suite.prompts?.long)return false;
+  const ids=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
+  return ids.some(id=>!(suite.cases||[]).some(item=>item.case_id===id&&item.status==='completed'));
+}
+
+async function runBenchmarkSuite(resumeExisting=false){
   benchResultScope='performance';
   if(benchSuiteActive||$('benchSuiteRunBtn')?.disabled)return;
+  const previousSuite=readBenchmarkSuiteState();
+  if(resumeExisting&&!benchmarkSuiteCanResume(previousSuite)){
+    const status=$('benchSuiteStatus');
+    if(status)status.textContent='当前没有满足条件的未完成测试组，不能续跑。';
+    renderBenchmarkSuiteReport();
+    return;
+  }
+  const confirmMessage=resumeExisting
+    ?'只补跑尚未取得 completed 结果的测试组；已完成的样本会保留，不重复执行。要求当前后端和模型与原测试一致。继续？'
+    :'将创建一轮新的测试，先预热再串行执行四组性能测试。长输出最多生成 512 tokens，整个流程可能持续数分钟。新报告会替换当前报告。测试期间请勿发送其他推理请求。继续？';
+  if(!confirm(confirmMessage))return;
   const clientKey=($('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const status=$('benchSuiteStatus');
@@ -2709,19 +2731,22 @@ async function runBenchmarkSuite(){
     $('modelTestApiKey')?.focus();
     return;
   }
-  if(!confirm('将先执行一次预热，再串行执行四组性能测试。长输出最多生成 512 tokens，整个流程可能持续数分钟。测试期间请勿发送其他推理请求。继续？'))return;
   let restoreParams=collectBenchParams();
   let suiteParams=null;
   const token=++benchPollToken;
-  const prompts=buildBenchmarkSuitePrompts();
+  const prompts=resumeExisting
+    ?{...previousSuite.prompts,version:previousSuite.prompt_version}
+    :buildBenchmarkSuitePrompts();
   benchSuiteActive=true;
   benchSuiteCancelRequested=false;
   setBenchRunning(true);
   const runButton=$('benchSuiteRunBtn');
+  const resumeButton=$('benchSuiteResumeBtn');
   if(runButton)runButton.disabled=true;
+  if(resumeButton)resumeButton.disabled=true;
   const status=$('benchSuiteStatus');
-  if(status)status.textContent='正在检查模型并准备预热…';
-  const suite={
+  if(status)status.textContent=resumeExisting?'正在校验原测试条件，准备补跑未完成组…':'正在检查模型并准备预热…';
+  const suite=resumeExisting?previousSuite:{
     suite_version:'perf12-four-case-v2',
     status:'running',
     started_at:new Date().toISOString(),
@@ -2731,22 +2756,49 @@ async function runBenchmarkSuite(){
     prompts:{short:prompts.short,long:prompts.long},
     cases:[]
   };
+  suite.status='running';
+  suite.current_case_id=null;
+  if(resumeExisting){
+    suite.resumed_at=new Date().toISOString();
+    suite.resume_count=(Number(suite.resume_count)||0)+1;
+    delete suite.finished_at;
+    delete suite.error;
+  }
   saveBenchmarkSuiteState(suite);
   renderBenchmarkSuiteReport();
   try{
     const target=await loadBenchPanel({resume:false});
-    if(token!==benchPollToken||!target?.upstream)throw new Error('当前 API 推理后端没有已加载模型，无法执行四组测试。');
-    suite.backend=benchCurrentBackend;
-    suite.model_id=target.upstream;
-    restoreParams=collectBenchParams();
-    suiteParams={...restoreParams,temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:benchCurrentBackend==='ollama'?1.15:1.1,seed:42,enable_thinking:false,stop:[]};
-    suite.parameters={temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:suiteParams.repeat_penalty,seed:42,enable_thinking:false,stop:[]};
-    applyBenchParams({...suiteParams,prompt:prompts.short,max_tokens:8});
-    if(status)status.textContent='正在执行预热请求（不计入四组结果）…';
-    const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams);
-    suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
-    if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
-    if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
+    if(token!==benchPollToken||!target?.upstream)throw new Error('当前 API 推理后端没有已加载模型，无法执行性能测试。');
+    if(resumeExisting){
+      if(suite.backend!==benchCurrentBackend||suite.model_id!==target.upstream){
+        throw new Error('续跑条件不一致：当前后端或模型与原测试不同。请恢复原后端和模型，或开始一轮全新的测试。');
+      }
+      if(suite.warmup?.status!=='completed')throw new Error('原测试预热未成功，不能跳过预热续跑。');
+      if(suite.execution_parameters&&typeof suite.execution_parameters==='object'){
+        suiteParams={...restoreParams,...suite.execution_parameters};
+        suite.resume_parameter_status='complete_snapshot';
+      }else{
+        suiteParams={...restoreParams,...(suite.parameters||{})};
+        suite.resume_parameter_status='reconstructed_from_current_saved_ui_settings';
+      }
+    }else{
+      suite.backend=benchCurrentBackend;
+      suite.model_id=target.upstream;
+      restoreParams=collectBenchParams();
+      suiteParams={...restoreParams,temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:benchCurrentBackend==='ollama'?1.15:1.1,seed:42,enable_thinking:false,stop:[]};
+      suite.parameters={temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:suiteParams.repeat_penalty,seed:42,enable_thinking:false,stop:[]};
+      suite.resume_parameter_status='complete_snapshot';
+    }
+    suite.execution_parameters=sanitizeBenchmarkToolArguments(suiteParams);
+    if(!resumeExisting){
+      applyBenchParams({...suiteParams,prompt:prompts.short,max_tokens:8});
+      if(status)status.textContent='正在执行预热请求（不计入四组结果）…';
+      const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams);
+      suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
+      saveBenchmarkSuiteState(suite);
+      if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
+      if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
+    }
     const cases=[
       {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
       {case_id:'L-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.long,'LP_SO'),max_tokens:64,input_target:'long',output_target:'short'},
@@ -2756,7 +2808,12 @@ async function runBenchmarkSuite(){
     for(let index=0;index<cases.length;index++){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       const item=cases[index];
-      if(status)status.textContent='正在执行第 '+(index+1)+'/4 组：'+item.case_id+'…';
+      const previousIndex=(suite.cases||[]).findIndex(entry=>entry.case_id===item.case_id);
+      const previous=previousIndex>=0?suite.cases[previousIndex]:null;
+      if(previous?.status==='completed')continue;
+      if(status)status.textContent=(resumeExisting?'补跑':'正在执行')+'第 '+(index+1)+'/4 组：'+item.case_id+'…';
+      suite.current_case_id=item.case_id;
+      saveBenchmarkSuiteState(suite);
       const promptSHA=await benchmarkTextSHA256(item.prompt);
       const runtimeBefore=await captureBenchmarkRuntime();
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
@@ -2782,25 +2839,17 @@ async function runBenchmarkSuite(){
       const cacheN=modelTimings.cache_n==null?null:Number(modelTimings.cache_n);
       const promptN=modelTimings.prompt_n==null?null:Number(modelTimings.prompt_n);
       const coldPrompt=cacheN===0&&Number.isFinite(input)&&promptN===input;
-      if(cacheN!=null){
-        validation.push('Prompt Cache '+(cacheN===0?'未命中（cache_n=0）':'命中 '+cacheN+' tokens'));
-      }else{
-        validation.push('Prompt Cache 状态未知');
-      }
-      if(promptN!=null&&Number.isFinite(input)){
-        validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
-      }else{
-        validation.push('Prompt Eval Token 覆盖情况未知');
-      }
-      if(!coldPrompt){
-        validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
-      }
+      if(cacheN!=null)validation.push('Prompt Cache '+(cacheN===0?'未命中（cache_n=0）':'命中 '+cacheN+' tokens'));
+      else validation.push('Prompt Cache 状态未知');
+      if(promptN!=null&&Number.isFinite(input))validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
+      else validation.push('Prompt Eval Token 覆盖情况未知');
+      if(!coldPrompt)validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
-      if(!timingComplete){
-        validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
-      }
+      if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       const cancelled=token!==benchPollToken||benchSuiteCancelRequested;
+      const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
+      if(previous)previousAttempts.push({status:previous.status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null});
       const record={
         case_id:item.case_id,status:cancelled?'cancelled':(job.status||(failure?'failed':'unknown')),
         job_id:job.job_id||readBenchStore().jobId||null,
@@ -2810,21 +2859,37 @@ async function runBenchmarkSuite(){
         analysis:sanitizeBenchmarkToolArguments(wrap?.analysis||{}),
         acceptance:wrap?.acceptance||null,
         runtime_before:runtimeBefore,runtime_after:runtimeAfter,
-        validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':null)
+        validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':null),
+        attempts:previousAttempts
       };
-      suite.cases.push(record);
+      if(previousIndex>=0)suite.cases[previousIndex]=record;
+      else suite.cases.push(record);
+      const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
+      suite.cases.sort((a,b)=>caseOrder.indexOf(a.case_id)-caseOrder.indexOf(b.case_id));
+      suite.current_case_id=null;
       saveBenchmarkSuiteState(suite);
       renderBenchmarkSuiteReport();
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
     }
-    suite.status=suite.cases.length===4?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
-    const allTargetsMet=suite.cases.length===4&&suite.cases.every(item=>item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标')));
-    const allCold=suite.cases.length===4&&suite.cases.every(item=>item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整')));
-    suite.qualification_status=allTargetsMet&&allCold?'baseline_candidate':'baseline_not_qualified';
+    suite.current_case_id=null;
+    const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
+    suite.cases.sort((a,b)=>caseOrder.indexOf(a.case_id)-caseOrder.indexOf(b.case_id));
+    const allCasesRecorded=caseOrder.every(id=>suite.cases.some(item=>item.case_id===id));
+    suite.status=allCasesRecorded?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
+    const allTargetsMet=allCasesRecorded&&caseOrder.every(id=>{
+      const item=suite.cases.find(entry=>entry.case_id===id);
+      return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
+    });
+    const allCold=allCasesRecorded&&caseOrder.every(id=>{
+      const item=suite.cases.find(entry=>entry.case_id===id);
+      return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
+    });
+    suite.qualification_status=allTargetsMet&&allCold&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
   }catch(error){
     suite.status=suite.cases.length?'partial':'failed';
     suite.error=error?.message||'四组测试执行失败';
   }finally{
+    suite.current_case_id=null;
     suite.finished_at=new Date().toISOString();
     saveBenchmarkSuiteState(suite);
     renderBenchmarkSuiteReport();
@@ -2835,11 +2900,11 @@ async function runBenchmarkSuite(){
     benchSuiteCancelRequested=false;
     setBenchRunning(false);
     if(runButton)runButton.disabled=false;
+    if(resumeButton)resumeButton.disabled=false;
     if(status&&suite.error)status.textContent='执行未完整结束：'+suite.error+'。已保留当前已完成结果。';
-    else if(status)status.textContent='四组测试流程结束。请复制 Markdown 报告或原始 JSON 发送。';
+    else if(status)status.textContent=suite.status==='completed'?'四组测试全部完成。请复制 Markdown 报告或原始 JSON 发送。':'测试流程结束，仍有未完成或不合格组；可以继续补跑未完成组。';
   }
 }
-
 async function runBenchmark(scenario='performance'){
   const isAcceptance=scenario==='acceptance';
   const acceptanceCaseID=isAcceptance?($('benchAcceptanceCase')?.value||''):'';
