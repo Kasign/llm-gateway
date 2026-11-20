@@ -2518,7 +2518,7 @@ function buildBenchmarkSuitePrompts(){
 }
 function benchmarkSuitePromptForCase(prompt, suiteNonce, caseID){
   // 每个样本在 Prompt 首部加入不同标记，避免 llama.cpp 复用前一组的公共 Prompt 前缀缓存。
-  return 'PERF12_RUN_'+suiteNonce+'_CASE_'+String(caseID).replace(/[^A-Z0-9]/gi,'_')+'\n'+prompt;
+  return suiteNonce+'_PERF12_CASE_'+String(caseID).replace(/[^A-Z0-9]/gi,'_')+'\n'+prompt;
 }
 function createBenchmarkSuiteNonce(){
   try{
