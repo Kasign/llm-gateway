@@ -2730,7 +2730,8 @@ function benchmarkSuiteQualification(suite){
 }
 
 function benchmarkSuiteWarmupCanResume(suite){
-  return suite?.warmup?.status==='completed'||(suite?.warmup?.status==='running'&&!!suite?.warmup?.job_id);
+  const status=suite?.warmup?.status;
+  return status==='completed'||(status==='running'&&!!suite?.warmup?.job_id)||status==='cancelled'||status==='failed';
 }
 function benchmarkSuiteCanResume(suite){
   if(!suite||suite.suite_version!=='perf12-four-case-v2'||suite.prompt_version!=='perf12-synthetic-dataset-v2')return false;
@@ -2836,12 +2837,31 @@ async function runBenchmarkSuite(resumeExisting=false){
       if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
       if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
     }else if(suite.warmup?.status==='running'&&suite.warmup?.job_id){
-      if(status)status.textContent='正在恢复预热任务 '+suite.warmup.job_id+'…';
-      const warmup=await pollBenchmarkJob(suite.warmup.job_id,Date.parse(suite.warmup.started_at)||Date.now(),token);
+      const warmupJobId=suite.warmup.job_id;
+      if(status)status.textContent='正在恢复预热任务 '+warmupJobId+'…';
+      benchSuiteCurrentJobId=warmupJobId;
+      let warmup=null;
+      try{warmup=await pollBenchmarkJob(warmupJobId,Date.parse(suite.warmup.started_at)||Date.now(),token)}
+      finally{if(benchSuiteCurrentJobId===warmupJobId)benchSuiteCurrentJobId=null}
       const warmupStatus=benchJobPayload(warmup||{}).status;
       suite.warmup={...suite.warmup,status:warmupStatus||(warmup?'unknown':(benchSuiteCancelRequested?'cancelled':'running'))};
       saveBenchmarkSuiteState(suite);
       if(!warmup||suite.warmup.status!=='completed')throw new Error('恢复的预热任务未成功完成，停止正式测试。');
+    }else if(suite.warmup?.status!=='completed'){
+      const previousWarmup=suite.warmup||{};
+      const warmupAttempts=Array.isArray(previousWarmup.attempts)?previousWarmup.attempts.slice():[];
+      if(previousWarmup.status)warmupAttempts.push({status:previousWarmup.status,job_id:previousWarmup.job_id||null,started_at:previousWarmup.started_at||null});
+      suite.warmup={status:'submitting',job_id:null,started_at:new Date().toISOString(),attempts:warmupAttempts};
+      saveBenchmarkSuiteState(suite);
+      if(status)status.textContent='重新执行未完成的预热请求（不计入四组结果）…';
+      const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams,jobId=>{
+        suite.warmup={...suite.warmup,job_id:jobId,status:'running'};
+        saveBenchmarkSuiteState(suite);
+      });
+      const warmupStatus=benchJobPayload(warmup||{}).status;
+      suite.warmup={...suite.warmup,job_id:warmupStatus?benchJobPayload(warmup||{}).job_id||suite.warmup.job_id:null,status:warmupStatus||'unknown'};
+      saveBenchmarkSuiteState(suite);
+      if(!warmup||suite.warmup.status!=='completed')throw new Error('重新预热未成功完成，停止正式测试。');
     }
     const cases=[
       {case_id:'S-P / S-O',prompt:benchmarkSuitePromptForCase(prompts.short,'SP_SO'),max_tokens:64,input_target:'short',output_target:'short'},
