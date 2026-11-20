@@ -281,6 +281,29 @@ try {
   await clickTab(page, 'model-test', '模型测试');
   check('部分完成报告显示续跑入口',
     await page.locator('#benchSuiteResumeBtn').isVisible());
+  const duplicateRecovery = await page.evaluate(() => {
+    const suite = {
+      suite_version:'perf12-four-case-v2',status:'partial',prompt_version:'perf12-synthetic-dataset-v2',
+      prompts:{short:'short prompt',long:'long prompt'},warmup:{status:'completed'},
+      cases:[
+        {case_id:'S-P / S-O',status:'running',job_id:'perf12-job-1'},
+        {case_id:'S-P / S-O',status:'completed',job_id:'perf12-job-1',finished_at:'2026-11-20T10:00:00Z',job:{status:'completed'}}
+      ]
+    };
+    localStorage.setItem('llm-gateway.bench-suite.v1',JSON.stringify(suite));
+    const normalized=readBenchmarkSuiteState();
+    const persisted=JSON.parse(localStorage.getItem('llm-gateway.bench-suite.v1'));
+    return {
+      count:normalized.cases.length,
+      status:normalized.cases[0]?.status,
+      jobId:normalized.cases[0]?.job_id,
+      persistedCount:persisted.cases.length
+    };
+  });
+  check('旧报告同一组 running/completed 重复记录自动合并，保留 completed 证据',
+    duplicateRecovery.count===1&&duplicateRecovery.status==='completed'&&
+    duplicateRecovery.jobId==='perf12-job-1'&&duplicateRecovery.persistedCount===1,
+    duplicateRecovery);
   await page.evaluate(() => localStorage.removeItem('llm-gateway.bench-suite.v1'));
   await clickTab(page, 'model-test', '模型测试');
   const recoveryEligibility = await page.evaluate(() => {

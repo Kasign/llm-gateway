@@ -2538,8 +2538,44 @@ async function benchmarkTextSHA256(value){
     return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   }catch{return null}
 }
+function benchmarkSuiteCaseStatusRank(item){
+  const status=String(item?.status||item?.job?.status||'').toLowerCase();
+  return status==='completed'?4:(status==='failed'||status==='cancelled'?3:status==='running'?2:status==='submitting'?1:0);
+}
+function normalizeBenchmarkSuiteCases(cases){
+  const byID=new Map();
+  for(const item of Array.isArray(cases)?cases:[]){
+    if(!item||typeof item!=='object'||!item.case_id)continue;
+    const id=String(item.case_id);
+    const current=byID.get(id);
+    if(!current){byID.set(id,item);continue}
+    const currentRank=benchmarkSuiteCaseStatusRank(current);
+    const nextRank=benchmarkSuiteCaseStatusRank(item);
+    const currentTime=Date.parse(current.finished_at||current.started_at||'')||0;
+    const nextTime=Date.parse(item.finished_at||item.started_at||'')||0;
+    const winner=nextRank>currentRank||(nextRank===currentRank&&nextTime>currentTime)?item:current;
+    const other=winner===item?current:item;
+    const attempts=[...(winner.attempts||[])];
+    if(other.job_id&&other.job_id!==winner.job_id){
+      attempts.push({status:other.status||'unknown',job_id:other.job_id,finished_at:other.finished_at||null,failure:other.failure||null});
+    }
+    byID.set(id,{...winner,attempts});
+  }
+  return [...byID.values()];
+}
 function readBenchmarkSuiteState(){
-  try{return JSON.parse(localStorage.getItem(BENCH_SUITE_STORAGE_KEY)||'null')}catch{return null}
+  try{
+    const raw=localStorage.getItem(BENCH_SUITE_STORAGE_KEY);
+    if(!raw)return null;
+    const suite=JSON.parse(raw);
+    if(!suite||typeof suite!=='object')return null;
+    const cases=normalizeBenchmarkSuiteCases(suite.cases);
+    if(JSON.stringify(cases)!==JSON.stringify(suite.cases||[])){
+      suite.cases=cases;
+      localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
+    }
+    return suite;
+  }catch{return null}
 }
 function saveBenchmarkSuiteState(value){
   try{localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(value));return true}catch{return false}
@@ -2710,7 +2746,7 @@ async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onC
 }
 function benchmarkSuiteQualification(suite){
   const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
-  const cases=Array.isArray(suite?.cases)?suite.cases:[];
+  const cases=normalizeBenchmarkSuiteCases(suite?.cases);
   const allCasesRecorded=caseOrder.every(id=>cases.some(item=>item.case_id===id));
   if(!allCasesRecorded)return 'baseline_not_qualified';
   const allTargetsMet=caseOrder.every(id=>{
@@ -2956,8 +2992,10 @@ async function runBenchmarkSuite(resumeExisting=false){
         validation,failure:failure||(cancelled?'轮询被取消，未取得任务最终结果':(resultStatus==='running'?'轮询中断，服务端任务状态未确认，保留 Job ID 供恢复':null)),
         finished_at:resultStatus==='running'?null:new Date().toISOString(),attempts:previousAttempts
       };
-      if(previousIndex>=0)suite.cases[previousIndex]=record;
+      const completedIndex=suite.cases.findIndex(entry=>entry.case_id===item.case_id);
+      if(completedIndex>=0)suite.cases[completedIndex]=record;
       else suite.cases.push(record);
+      suite.cases=normalizeBenchmarkSuiteCases(suite.cases);
       const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
       suite.cases.sort((a,b)=>caseOrder.indexOf(a.case_id)-caseOrder.indexOf(b.case_id));
       suite.current_case_id=null;
@@ -3213,6 +3251,7 @@ exposeGlobals({
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
+  normalizeBenchmarkSuiteCases,
   benchmarkSuiteCanResume,
   benchmarkSuiteWarmupCanResume,
   benchmarkSuiteTaskStatus,
