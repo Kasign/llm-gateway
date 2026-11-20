@@ -168,3 +168,17 @@ func TestRequestModelTimingsPreserveCachePerTokenAndPromptProgress(t *testing.T)
 		t.Fatalf("extended model timings did not round-trip: %s", raw)
 	}
 }
+
+
+func TestBuildRequestAnalysisReasoningOnlyDoesNotReportContentGeneration(t *testing.T) {
+	firstReasoning := int64(120)
+	firstAny := int64(120)
+	a := buildRequestAnalysis(analysisInput{TotalMS: 5000, Stream: true,
+		StreamTiming: streamTimings{FirstAnyMS: &firstAny, FirstReasoningMS: &firstReasoning, LastEventMS: 4800}})
+	if a.Phases.ThinkingMS == nil || *a.Phases.ThinkingMS != 4880 {
+		t.Fatalf("reasoning-only duration should remain observable: %+v", a.Phases)
+	}
+	if a.Phases.ContentGenerationMS != nil {
+		t.Fatalf("reasoning duration must not be mislabeled as content generation: %+v", a.Phases)
+	}
+}

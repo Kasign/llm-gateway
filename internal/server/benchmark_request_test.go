@@ -84,3 +84,21 @@ func containsBenchmarkComparisonReason(values []string, target string) bool {
 	}
 	return false
 }
+
+
+func TestBenchmarkConditionSnapshotFromConfigJSON(t *testing.T) {
+	raw := `{"backend":"llamacpp","condition_status":"partial","environment":{"vcs_revision":"abc123"},"model_identity":{"sha256":"deadbeef"},"runtime_config":{"warm_start":true}}`
+	got := benchmarkConditionSnapshotFromConfigJSON(raw)
+	if got == nil { t.Fatal("saved condition snapshot should be restored") }
+	environment, ok := got["environment"].(map[string]interface{})
+	if !ok || environment["vcs_revision"] != "abc123" { t.Fatalf("environment evidence lost: %#v", got["environment"]) }
+	identity, ok := got["model_identity"].(map[string]interface{})
+	if !ok || identity["sha256"] != "deadbeef" { t.Fatalf("model identity evidence lost: %#v", got["model_identity"]) }
+	if _, ok := got["runtime_config"].(map[string]interface{}); !ok { t.Fatalf("runtime config evidence lost: %#v", got["runtime_config"]) }
+}
+
+func TestBenchmarkConditionSnapshotFromConfigJSONDoesNotInventLegacySnapshot(t *testing.T) {
+	for _, raw := range []string{"", "{}", "not-json"} {
+		if got := benchmarkConditionSnapshotFromConfigJSON(raw); got != nil { t.Errorf("snapshot for %q = %#v, want nil", raw, got) }
+	}
+}

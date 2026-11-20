@@ -109,6 +109,7 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 	snap := benchmarkJobSnapshot{
 		ID: task.TaskID, Scenario: task.Scenario, AcceptanceCaseID: benchmarkAcceptanceCaseIDFromConfigJSON(task.ConfigJSON), Status: task.Status, ModelKey: task.ModelKey, LlamaModel: run.ModelID,
 		ConditionSHA256: conditionSHA256, ConditionStatus: conditionStatus, ConditionMissing: conditionMissing,
+		ConditionSnapshot: benchmarkConditionSnapshotFromConfigJSON(task.ConfigJSON),
 		PromptLen: int(task.PromptLength), MaxTokens: task.MaxTokens, StartedAt: task.StartedAt,
 		FinishedAt: task.FinishedAt, LatencyMS: task.LatencyMS, HTTPStatus: run.HTTPStatus,
 		ResponseBytes: run.ResponseBytes, ResponseTruncated: task.ErrorCode == "benchmark_response_too_large",
@@ -185,4 +186,14 @@ func benchmarkConditionFromConfigJSON(raw string) (string, string, []string) {
 func valueOrZero(value *int64) int64 {
 	if value == nil { return 0 }
 	return *value
+}
+
+
+// benchmarkConditionSnapshotFromConfigJSON 恢复创建任务时保存的完整条件快照；无效或旧格式记录不伪造字段。
+func benchmarkConditionSnapshotFromConfigJSON(raw string) map[string]interface{} {
+	var snapshot map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &snapshot); err != nil || len(snapshot) == 0 {
+		return nil
+	}
+	return snapshot
 }

@@ -79,6 +79,7 @@ type benchmarkJob struct {
 	ConditionSHA256 string `json:"condition_sha256,omitempty"`
 	ConditionStatus string `json:"condition_status"`
 	ConditionMissing []string `json:"condition_missing,omitempty"`
+	ConditionSnapshot map[string]interface{} `json:"condition_snapshot,omitempty"`
 	ModelRoundDurationsMS []int64 `json:"model_round_durations_ms,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
@@ -183,6 +184,7 @@ type benchmarkJobSnapshot struct {
 	ConditionSHA256 string `json:"condition_sha256,omitempty"`
 	ConditionStatus string `json:"condition_status"`
 	ConditionMissing []string `json:"condition_missing,omitempty"`
+	ConditionSnapshot map[string]interface{} `json:"condition_snapshot,omitempty"`
 	ModelRoundDurationsMS []int64 `json:"model_round_durations_ms,omitempty"`
 	InputTokens    int64      `json:"input_tokens,omitempty"`
 	OutputTokens   int64      `json:"output_tokens,omitempty"`
@@ -215,6 +217,7 @@ func (j *benchmarkJob) snapshot() benchmarkJobSnapshot {
 		ModelLoadMS: j.ModelLoadMS, ModelLoadStatus: j.ModelLoadStatus,
 		InferenceLatencyMS: j.InferenceLatencyMS, InferenceLatencyStatus: j.InferenceLatencyStatus, TTFTStatus: j.TTFTStatus,
 		ConditionSHA256: j.ConditionSHA256, ConditionStatus: j.ConditionStatus, ConditionMissing: append([]string(nil), j.ConditionMissing...),
+		ConditionSnapshot: benchmarkConditionSnapshotFromConfigJSON(j.taskRecord.ConfigJSON),
 		ModelRoundDurationsMS: append([]int64(nil), j.ModelRoundDurationsMS...),
 		InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
 		TotalTokens: j.TotalTokens, Response: j.Response, Answer: j.Answer, Error: j.Error,

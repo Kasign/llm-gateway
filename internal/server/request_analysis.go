@@ -170,9 +170,6 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 			speedWindowMS = genMS
 			ph.ContentGenerationMS = &genMS
 		}
-	} else if ph.TTFTMS != nil && in.TotalMS > *ph.TTFTMS {
-		genMS = in.TotalMS - *ph.TTFTMS
-		ph.ContentGenerationMS = &genMS
 	}
 
 	tp := RequestThroughput{
