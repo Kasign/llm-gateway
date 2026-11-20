@@ -308,6 +308,30 @@ try {
       casePromptsDiffer: first !== second && firstNonce.length===24 && secondNonce.length===24 && firstNonce!==secondNonce && first.startsWith(firstNonce+'_PERF12_CASE_SP_SO') && second.startsWith(secondNonce+'_PERF12_CASE_SP_LO')
     };
   });
+  const qualification = await page.evaluate(() => {
+    const ids = ['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
+    const suite = {
+      resume_parameter_status:'complete_snapshot',
+      cases:ids.map(case_id => ({
+        case_id,status:'completed',
+        job:{condition_status:'partial',condition_missing:['hardware_model']},
+        validation:[
+          '输入目标 达标（128 tokens）',
+          '输出目标 达标（64 tokens）',
+          'Prompt Cache 未命中（cache_n=0）',
+          'Prompt Eval Token 覆盖 128/128 tokens'
+        ]
+      }))
+    };
+    const partial = benchmarkSuiteQualification(suite);
+    suite.cases.forEach(item => { item.job.condition_status='complete'; item.job.condition_missing=[]; });
+    const complete = benchmarkSuiteQualification(suite);
+    return {partial,complete};
+  });
+  check('环境条件不完整时禁止将四组样本升级为合格基线',
+    qualification.partial === 'baseline_not_qualified' &&
+    qualification.complete === 'baseline_candidate',
+    qualification);
   check('四组测试使用同一分析任务和固定版本提示词',
     suitePrompts.version === 'perf12-synthetic-dataset-v2' && suitePrompts.sameTask);
   check('短长提示词分别使用1条与50条固定合成记录，并为每组加入独立缓存隔离标记',
