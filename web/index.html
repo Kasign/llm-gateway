@@ -459,8 +459,6 @@
             <p class="small muted">密钥仅保留在当前页面内存；仅在发起测试时作为请求凭据发送给 Gateway，不写入 localStorage / sessionStorage，也不会发送给模型上游。性能测试要求模型访问权限；工具测试还要求 web.search 权限。</p>
           </div>
           <div class="bench-actions">
-            <button type="button" class="btn primary" id="modelTestModePerformance" aria-pressed="true">性能测试</button>
-            <button type="button" class="btn ghost" id="modelTestModeTools" aria-pressed="false">工具测试</button>
             <button type="button" class="btn ghost" id="modelTestClearKeyBtn">清除密钥</button>
           </div>
         </div>
@@ -613,6 +611,7 @@
           </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="benchAcceptanceRunBtn" onclick="runBenchmark('acceptance')">执行所选验收用例</button>
+            <button type="button" class="btn danger" id="acceptanceBenchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
           </div>
           <div id="benchAcceptanceResult" class="bench-acceptance-result msg muted" role="status" aria-live="polite">尚未执行项目验收。</div>
         </div>
@@ -733,7 +732,7 @@
 
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261120-perf12-suite-3"></script>
+<script src="/static/dist/app.js?v=20261120-model-test-tabs-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-key-contrast-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
