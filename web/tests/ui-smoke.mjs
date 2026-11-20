@@ -277,6 +277,31 @@ try {
   check('性能测试模式显示唯一的 Benchmark 历史任务区域',
     await page.locator('#benchHistoryCard').isVisible() &&
     await page.locator('#benchHistoryDetail').count() === 1);
+  check('四组性能测试入口与双格式报告复制控件已显示',
+    await page.locator('#benchSuiteRunBtn').count() === 1 &&
+    await page.locator('#benchSuiteCopyMarkdown').isDisabled() &&
+    await page.locator('#benchSuiteCopyJSON').isDisabled() &&
+    await page.locator('#benchSuiteReport').count() === 1);
+  const suitePrompts = await page.evaluate(() => {
+    const prompts = buildBenchmarkSuitePrompts();
+    const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
+    const longPrefix = prompts.long.split('\n\n合成记录（共88条）：')[0];
+    return {
+      version: prompts.version,
+      shortChars: prompts.short.length,
+      longChars: prompts.long.length,
+      sameTask: shortPrefix === longPrefix,
+      recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length
+    };
+  });
+  check('四组测试使用同一分析任务和固定版本提示词',
+    suitePrompts.version === 'perf12-synthetic-dataset-v1' && suitePrompts.sameTask);
+  check('短长提示词分别使用固定短样本与88条长样本',
+    suitePrompts.shortChars > 300 && suitePrompts.longChars > 10000 && suitePrompts.recordCount === 88,
+    suitePrompts);
+  await page.locator('#benchSuiteRunBtn').click();
+  check('四组测试缺少客户端 Key 时在本地阻断',
+    (await page.locator('#benchSuiteStatus').textContent()).includes('请先输入客户端服务密钥'));
   await page.locator('#benchHistoryList [data-bench-history-id="benchmark-history-smoke-1"]').click();
   await page.locator('#benchHistoryDetail').waitFor({ state: 'visible', timeout: 5000 });
   await page.waitForFunction(() => {

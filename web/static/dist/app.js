@@ -2458,7 +2458,8 @@
     return body;
   }
   function setBenchRunning(running) {
-    const run = $("benchRunBtn"), toolRun = $("benchToolRunBtn"), toolForceRun = $("benchToolForceRunBtn"), acceptanceRun = $("benchAcceptanceRunBtn"), stop = $("benchStopBtn");
+    const run = $("benchRunBtn"), suite = $("benchSuiteRunBtn"), toolRun = $("benchToolRunBtn"), toolForceRun = $("benchToolForceRunBtn"), acceptanceRun = $("benchAcceptanceRunBtn"), stop = $("benchStopBtn");
+    if (suite) suite.disabled = !!running;
     if (run) run.disabled = !!running;
     if (toolRun) toolRun.disabled = !!running;
     if (toolForceRun) toolForceRun.disabled = !!running;
@@ -2759,6 +2760,7 @@ function renderBenchStreamEvents(evs) {
     }
   }
   async function stopBenchmark() {
+    if (benchSuiteActive) benchSuiteCancelRequested = true;
     const st = readBenchStore();
     if (!st.jobId) {
       setBenchRunning(false);
@@ -2778,7 +2780,318 @@ function renderBenchStreamEvents(evs) {
       }
     }
   }
-  async function runBenchmark(scenario = "performance") {
+  const BENCH_SUITE_STORAGE_KEY='llm-gateway.bench-suite.v1';
+let benchSuiteActive=false;
+let benchSuiteCancelRequested=false;
+let benchSuiteCurrentJobId=null;
+
+function buildBenchmarkSuitePrompts(){
+  const regions=['North','South','East','West','Central','Coastal','Highland','Metro'];
+  const categories=['hardware','software','accessories','storage','network','display','audio','service'];
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug'];
+  const rows=Array.from({length:88},(_,index)=>{
+    const n=index+1;
+    const region=regions[index%regions.length];
+    const category=categories[(index*3+Math.floor(index/8))%categories.length];
+    const units=80+((index*37)%420);
+    const returns=(index*7+3)%19;
+    const delivery=2+((index*5)%9);
+    const stockout=index%11===0?'yes':'no';
+    const margin=(8+((index*13)%190)/10).toFixed(1);
+    const quality=82+((index*11)%19);
+    const month=months[index%months.length];
+    const trend=['stable demand','rising demand','seasonal demand','volatile demand'][(index*5)%4];
+    return 'R'+String(n).padStart(3,'0')+' region '+region+' category '+category+' units '+units+' returns '+returns+' delivery '+delivery+'d stockout '+stockout+' margin '+margin+' quality '+quality+' month '+month+' trend '+trend;
+  });
+  const instruction='以下记录均为性能测试专门构造的合成数据，不代表真实业务。请阅读全部记录，按区域和品类分析销量、退货、交付、缺货、毛利与质量之间的关系；指出值得关注的异常，给出有记录编号依据的结论和可执行建议。不要编造记录中不存在的数据。请用中文按“总体结论、区域对比、品类差异、异常记录、运营建议”结构输出，每部分至少两句。';
+  return {
+    short:instruction+'\n\n合成记录：\n'+rows.slice(0,2).join('\n'),
+    long:instruction+'\n\n合成记录（共88条）：\n'+rows.join('\n'),
+    version:'perf12-synthetic-dataset-v1'
+  };
+}
+async function benchmarkTextSHA256(value){
+  try{
+    if(!globalThis.crypto?.subtle)return null;
+    const bytes=new TextEncoder().encode(String(value));
+    const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
+    return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+  }catch{return null}
+}
+function readBenchmarkSuiteState(){
+  try{return JSON.parse(localStorage.getItem(BENCH_SUITE_STORAGE_KEY)||'null')}catch{return null}
+}
+function saveBenchmarkSuiteState(value){
+  try{localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(value));return true}catch{return false}
+}
+function benchmarkEvidenceValue(value){
+  if(value===undefined||value===null||value==='')return '缺失';
+  return String(value);
+}
+function benchmarkRuntimeEvidence(snapshot){
+  if(!snapshot)return '不可用';
+  if(snapshot.status!=='observed')return snapshot.error||snapshot.status||'不可用';
+  const value=snapshot.value||{};
+  const metrics=value.server_metrics||value.metrics||null;
+  const cpu=value.host_cpu_percent??value.cpu_percent??value.host?.cpu_percent;
+  const memory=value.memory_used_bytes??value.memory_used??value.host?.memory_used_bytes;
+  const bits=[];
+  if(cpu!=null)bits.push('CPU '+cpu);
+  if(memory!=null)bits.push('内存 '+memory);
+  if(metrics)bits.push('Server Metrics 已采集');
+  return bits.join('；')||'已采集快照，具体字段见原始 JSON';
+}
+function buildBenchmarkSuiteMarkdown(suite){
+  if(!suite)return '尚无四组性能测试报告。';
+  const cases=Array.isArray(suite.cases)?suite.cases:[];
+  const rows=cases.map(item=>{
+    const job=item.job||{};
+    const analysis=item.analysis||{};
+    const timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{};
+    const tps=analysis.throughput?.output_tokens_per_sec;
+    const input=job.input_tokens;
+    const output=job.output_tokens;
+    const inputCheck=input==null?'不可判定':(item.input_target==='short'?(input>=96&&input<=180?'达标':'未达标'):(input>=1800&&input<=2400?'达标':'未达标'));
+    const outputCheck=output==null?'不可判定':(item.output_target==='short'?(output>=32?'达标':'未达标'):(output>=256?'达标':'未达标'));
+    return '| '+item.case_id+' | '+(item.input_target==='short'?'≈128':'≈2048')+' | '+(item.output_target==='short'?'≥32':'≥256')+' | '+benchmarkEvidenceValue(job.status||item.status)+' | '+benchmarkEvidenceValue(input)+' | '+benchmarkEvidenceValue(output)+' | '+benchmarkEvidenceValue(job.max_tokens??item.max_tokens)+' | '+benchmarkEvidenceValue(job.latency_ms)+' | '+benchmarkEvidenceValue(job.ttft_ms)+' | '+benchmarkEvidenceValue(timings.prompt_ms)+' | '+benchmarkEvidenceValue(timings.predicted_ms)+' | '+benchmarkEvidenceValue(tps!=null?Number(tps).toFixed(2):null)+' | '+inputCheck+' / '+outputCheck+' |';
+  }).join('\n');
+  const details=cases.map(item=>{
+    const job=item.job||{};
+    const analysis=item.analysis||{};
+    const phases=analysis.phases_ms||{};
+    const timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{};
+    return [
+      '### '+item.case_id,
+      '- 状态：'+benchmarkEvidenceValue(job.status||item.status),
+      '- Job ID：'+benchmarkEvidenceValue(job.job_id||item.job_id),
+      '- Request ID：'+benchmarkEvidenceValue(job.request_id),
+      '- 模型：'+benchmarkEvidenceValue(job.model_id||job.model_key||suite.model_id),
+      '- 条件：'+benchmarkEvidenceValue(job.condition_status)+'；指纹 '+benchmarkEvidenceValue(job.condition_sha256),
+      '- 输入/输出目标：'+(item.input_target==='short'?'约 128':'约 2,048')+' / '+(item.output_target==='short'?'至少 32':'至少 256')+' tokens',
+      '- Prompt SHA-256：'+benchmarkEvidenceValue(item.prompt_sha256),
+      '- 条件缺失字段：'+JSON.stringify(job.condition_missing||[]),
+      '- 时间：'+benchmarkEvidenceValue(job.started_at)+' → '+benchmarkEvidenceValue(job.finished_at),
+      '- HTTP / TTFT 状态：'+benchmarkEvidenceValue(job.http_status)+' / '+benchmarkEvidenceValue(job.ttft_status),
+      '- 条件快照：'+JSON.stringify(job.condition_snapshot||job.condition||{}),
+      '- 输入/输出 Token：'+benchmarkEvidenceValue(job.input_tokens)+' / '+benchmarkEvidenceValue(job.output_tokens),
+      '- 总耗时 / TTFT：'+benchmarkEvidenceValue(job.latency_ms)+' ms / '+benchmarkEvidenceValue(job.ttft_ms)+' ms',
+      '- Prompt Eval / Decode：'+benchmarkEvidenceValue(timings.prompt_ms)+' ms / '+benchmarkEvidenceValue(timings.predicted_ms)+' ms',
+      '- Prompt/Decode Token 数：'+benchmarkEvidenceValue(timings.prompt_n)+' / '+benchmarkEvidenceValue(timings.predicted_n),
+      '- Gateway 阶段：'+JSON.stringify(phases),
+      '- 吞吐：'+JSON.stringify(analysis.throughput||{}),
+      '- 测试前 Runtime：'+benchmarkRuntimeEvidence(item.runtime_before),
+      '- 测试后 Runtime：'+benchmarkRuntimeEvidence(item.runtime_after),
+      '- 结果校验：'+(item.validation?.join('；')||'未提供'),
+      ''
+    ].join('\n');
+  }).join('\n');
+  return [
+    '# PERF-12 四组真实推理性能基线报告',
+    '',
+    '- 报告版本：'+benchmarkEvidenceValue(suite.suite_version),
+    '- 执行状态：'+benchmarkEvidenceValue(suite.status),
+    '- 开始时间：'+benchmarkEvidenceValue(suite.started_at),
+    '- 完成时间：'+benchmarkEvidenceValue(suite.finished_at),
+    '- Backend / 模型：'+benchmarkEvidenceValue(suite.backend)+' / '+benchmarkEvidenceValue(suite.model_id),
+    '- 提示词版本：'+benchmarkEvidenceValue(suite.prompt_version),
+    '- 固定参数：'+JSON.stringify(suite.parameters||{}),
+    '- 预热任务：'+benchmarkEvidenceValue(suite.warmup?.job_id)+'（'+benchmarkEvidenceValue(suite.warmup?.status)+'）',
+    '',
+    '## 四组结果对比',
+    '',
+    '| 组别 | 输入目标 | 输出目标 | 状态 | 输入 Token | 输出 Token | max_tokens | 总耗时 ms | TTFT ms | Prompt Eval ms | Decode ms | Decode tok/s | 输入/输出目标校验 |',
+    '|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|',
+    rows||'| — | 未执行 | — | — | — | — | — | — | — | — | — |',
+    '',
+    '## 逐组证据',
+    '',
+    details||'尚无组别结果。',
+    '## 判读边界',
+    '',
+    '- 实际 Token 数以服务端返回为准；字符数不替代 Token 数。',
+    '- 短输入目标范围为 96–180 tokens，长输入目标范围为 1800–2400 tokens。',
+    '- 短输出至少 32 tokens、长输出至少 256 tokens；未达到时保留样本但不用于对应吞吐结论。',
+    '- Prompt Eval / Decode 只读取上游原生 timings；缺失不从总耗时反推。',
+    '- 四组 Prompt 内容不同，条件指纹不同；四组是交叉场景观察，不是严格同条件历史比较。',
+    '- Runtime / Server Metrics 是快照或进程窗口证据，不归属单个请求；不得据此虚构请求级 CPU 或内存值。',
+    '- 首轮结果只建立 observed 基线，不自动判定主瓶颈。',
+    ''
+  ].join('\n');
+}
+function buildBenchmarkSuiteJSON(suite){
+  return JSON.stringify(suite?sanitizeBenchmarkToolArguments(suite):{},null,2);
+}
+function renderBenchmarkSuiteReport(){
+  const suite=readBenchmarkSuiteState();
+  const output=$('benchSuiteReport');
+  const status=$('benchSuiteStatus');
+  const copyMD=$('benchSuiteCopyMarkdown');
+  const copyJSON=$('benchSuiteCopyJSON');
+  if(!output)return;
+  if(!suite){
+    output.textContent='尚未执行四组测试。';
+    if(status)status.textContent='固定提示词和四组顺序已就绪。';
+    if(copyMD)copyMD.disabled=true;
+    if(copyJSON)copyJSON.disabled=true;
+    return;
+  }
+  output.textContent=buildBenchmarkSuiteMarkdown(suite);
+  if(status)status.textContent='报告状态：'+(suite.status||'unknown')+' · 已记录 '+(suite.cases?.length||0)+'/4 组结果。';
+  if(copyMD)copyMD.disabled=false;
+  if(copyJSON)copyJSON.disabled=false;
+}
+async function copyBenchmarkSuiteReport(format='markdown'){
+  const suite=readBenchmarkSuiteState();
+  if(!suite){renderBenchmarkSuiteReport();return}
+  const value=format==='json'?buildBenchmarkSuiteJSON(suite):buildBenchmarkSuiteMarkdown(suite);
+  const copied=await writeClipboard(value);
+  const status=$('benchSuiteStatus');
+  if(status)status.textContent=copied?'已复制'+(format==='json'?'原始 JSON':'Markdown 报告')+'，可直接粘贴发送。':'复制失败，请在下方报告区域手动选择复制。';
+}
+async function captureBenchmarkRuntime(){
+  try{
+    const value=await api('/api/admin/runtime');
+    return {status:'observed',observed_at:new Date().toISOString(),value:sanitizeBenchmarkToolArguments(value)};
+  }catch(error){
+    return {status:'unavailable',observed_at:new Date().toISOString(),error:error?.message||'Runtime Snapshot 获取失败'};
+  }
+}
+async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params){
+  applyBenchParams({...params,prompt,max_tokens:maxTokens});
+  updateBenchReqPreview(target.upstream,'performance',prompt);
+  const start=await api('/api/benchmark',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Client-API-Key':($('modelTestApiKey')?.value||'').trim()},
+    body:JSON.stringify(benchPayloadForApi(target,'performance',prompt))
+  });
+  benchSuiteCurrentJobId=start.job_id;
+  writeBenchStore({jobId:start.job_id});
+  try{
+    if(token!==benchPollToken||benchSuiteCancelRequested){
+      await api('/api/benchmark/'+encodeURIComponent(start.job_id),{method:'DELETE'}).catch(()=>{});
+      return null;
+    }
+    return await pollBenchmarkJob(start.job_id,Date.now(),token);
+  }finally{
+    if(benchSuiteCurrentJobId===start.job_id)benchSuiteCurrentJobId=null;
+  }
+}
+async function runBenchmarkSuite(){
+  if(benchSuiteActive||$('benchSuiteRunBtn')?.disabled)return;
+  const clientKey=($('modelTestApiKey')?.value||'').trim();
+  if(!clientKey){
+    const status=$('benchSuiteStatus');
+    if(status)status.textContent='请先输入客户端服务密钥。';
+    $('modelTestApiKey')?.focus();
+    return;
+  }
+  if(!confirm('将先执行一次预热，再串行执行四组性能测试。长输出最多生成 512 tokens，整个流程可能持续数分钟。测试期间请勿发送其他推理请求。继续？'))return;
+  let restoreParams=collectBenchParams();
+  let suiteParams=null;
+  const token=++benchPollToken;
+  const prompts=buildBenchmarkSuitePrompts();
+  benchSuiteActive=true;
+  benchSuiteCancelRequested=false;
+  setBenchRunning(true);
+  const runButton=$('benchSuiteRunBtn');
+  if(runButton)runButton.disabled=true;
+  const status=$('benchSuiteStatus');
+  if(status)status.textContent='正在检查模型并准备预热…';
+  const suite={
+    suite_version:'perf12-four-case-v1',
+    status:'running',
+    started_at:new Date().toISOString(),
+    backend:benchCurrentBackend,
+    parameters:{},
+    prompt_version:prompts.version,
+    prompts:{short:prompts.short,long:prompts.long},
+    cases:[]
+  };
+  saveBenchmarkSuiteState(suite);
+  renderBenchmarkSuiteReport();
+  try{
+    const target=await loadBenchPanel({resume:false});
+    if(token!==benchPollToken||!target?.upstream)throw new Error('当前 API 推理后端没有已加载模型，无法执行四组测试。');
+    suite.backend=benchCurrentBackend;
+    suite.model_id=target.upstream;
+    restoreParams=collectBenchParams();
+    suiteParams={...restoreParams,temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:benchCurrentBackend==='ollama'?1.15:1.1,seed:42,enable_thinking:false,stop:[]};
+    suite.parameters={temperature:0,top_p:1,top_k:40,min_p:null,frequency_penalty:0,presence_penalty:0,repeat_penalty:suiteParams.repeat_penalty,seed:42,enable_thinking:false,stop:[]};
+    applyBenchParams({...suiteParams,prompt:prompts.short,max_tokens:8});
+    if(status)status.textContent='正在执行预热请求（不计入四组结果）…';
+    const warmup=await submitBenchmarkSuiteTask(target,'只回答 READY。',8,token,suiteParams);
+    suite.warmup={job_id:benchJobPayload(warmup||{}).job_id||readBenchStore().jobId,status:benchJobPayload(warmup||{}).status||'unknown'};
+    if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
+    if(suite.warmup.status!=='completed')throw new Error('预热请求未成功，停止正式测试。');
+    const cases=[
+      {case_id:'S-P / S-O',prompt:prompts.short,max_tokens:64,input_target:'short',output_target:'short'},
+      {case_id:'L-P / S-O',prompt:prompts.long,max_tokens:64,input_target:'long',output_target:'short'},
+      {case_id:'S-P / L-O',prompt:prompts.short,max_tokens:512,input_target:'short',output_target:'long'},
+      {case_id:'L-P / L-O',prompt:prompts.long,max_tokens:512,input_target:'long',output_target:'long'}
+    ];
+    for(let index=0;index<cases.length;index++){
+      if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
+      const item=cases[index];
+      if(status)status.textContent='正在执行第 '+(index+1)+'/4 组：'+item.case_id+'…';
+      const promptSHA=await benchmarkTextSHA256(item.prompt);
+      const runtimeBefore=await captureBenchmarkRuntime();
+      if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
+      let wrap=null;
+      let failure=null;
+      try{wrap=await submitBenchmarkSuiteTask(target,item.prompt,item.max_tokens,token,suiteParams)}catch(error){failure=error?.message||'任务执行失败'}
+      const runtimeAfter=await captureBenchmarkRuntime();
+      const job=benchJobPayload(wrap||{});
+      const validation=[];
+      const input=job.input_tokens==null?NaN:Number(job.input_tokens);
+      const output=job.output_tokens==null?NaN:Number(job.output_tokens);
+      if(Number.isFinite(input)&&input>0){
+        const min=item.input_target==='short'?96:1800;
+        const max=item.input_target==='short'?180:2400;
+        validation.push('输入目标 '+(input>=min&&input<=max?'达标':'未达标')+'（'+input+' tokens；目标 '+min+'–'+max+'）');
+      }else validation.push('输入 Token 缺失，无法验证目标长度');
+      if(Number.isFinite(output)&&output>=0){
+        const min=item.output_target==='short'?32:256;
+        validation.push('输出目标 '+(output>=min?'达标':'未达标')+'（'+output+' tokens；最低 '+min+'）');
+      }else validation.push('输出 Token 缺失，无法验证目标长度');
+      if(job.status!=='completed')validation.push('任务状态不是 completed，不纳入性能比较');
+      const record={
+        case_id:item.case_id,status:job.status||(failure?'failed':'unknown'),
+        job_id:job.job_id||readBenchStore().jobId||null,
+        prompt_version:prompts.version,prompt_sha256:promptSHA,
+        input_target:item.input_target,output_target:item.output_target,
+        max_tokens:item.max_tokens,job:sanitizeBenchmarkToolArguments(job),
+        analysis:sanitizeBenchmarkToolArguments(wrap?.analysis||{}),
+        acceptance:wrap?.acceptance||null,
+        runtime_before:runtimeBefore,runtime_after:runtimeAfter,
+        validation,failure
+      };
+      suite.cases.push(record);
+      saveBenchmarkSuiteState(suite);
+      renderBenchmarkSuiteReport();
+      if(token!==benchPollToken||benchSuiteCancelRequested)throw new Error('测试已停止。');
+    }
+    suite.status=suite.cases.length===4?(suite.cases.every(item=>item.status==='completed')?'completed':'completed_with_failures'):'partial';
+  }catch(error){
+    suite.status=suite.cases.length?'partial':'failed';
+    suite.error=error?.message||'四组测试执行失败';
+  }finally{
+    suite.finished_at=new Date().toISOString();
+    saveBenchmarkSuiteState(suite);
+    renderBenchmarkSuiteReport();
+    applyBenchParams(restoreParams);
+    const upstream=$('benchTarget')?.querySelector('code')?.textContent||suite.model_id||'';
+    if(upstream)updateBenchReqPreview(upstream);
+    benchSuiteActive=false;
+    benchSuiteCancelRequested=false;
+    setBenchRunning(false);
+    if(runButton)runButton.disabled=false;
+    if(status&&suite.error)status.textContent='执行未完整结束：'+suite.error+'。已保留当前已完成结果。';
+    else if(status)status.textContent='四组测试流程结束。请复制 Markdown 报告或原始 JSON 发送。';
+  }
+}
+
+
+async function runBenchmark(scenario = "performance") {
     const isAcceptance = scenario === "acceptance";
     const acceptanceCaseID = isAcceptance ? $("benchAcceptanceCase")?.value || "" : "";
     if (isAcceptance) {
@@ -2894,8 +3207,11 @@ function renderBenchStreamEvents(evs) {
         b.classList.add("active");
         const tabPanel = $(b.dataset.tab);
         if (tabPanel) tabPanel.classList.add("active");
-        if (b.dataset.tab === "benchmark") loadBenchPanel().catch(() => {
-        });
+        if (b.dataset.tab === "model-test" || b.dataset.tab === "benchmark") {
+          loadBenchPanel().catch(() => {
+          });
+          renderBenchmarkSuiteReport();
+        }
         if (b.dataset.tab === "models-local") loadLocalModelsPanel().catch(() => {
         });
         if (b.dataset.tab === "models-download") loadDownloadPanel({ refreshCatalog: true }).catch(() => {
@@ -3338,6 +3654,10 @@ function renderBenchStreamEvents(evs) {
         resumeBenchmarkSession,
         rotateKey,
         runBenchmark,
+        runBenchmarkSuite,
+        buildBenchmarkSuitePrompts,
+        copyBenchmarkSuiteReport,
+        renderBenchmarkSuiteReport,
         saveBackend,
         saveKey,
         clearAdminKey,

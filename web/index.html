@@ -493,6 +493,17 @@
           </div>
           <div id="benchTarget" class="bench-target">正在读取当前模型…</div>
           <p id="benchPresetHint" class="req-note" style="margin:8px 0 0"></p>
+          <section class="card bench-suite-card" aria-labelledby="benchSuiteTitle">
+            <div class="card-head">
+              <div>
+                <h3 id="benchSuiteTitle">PERF-12 四组基线测试</h3>
+                <p>自动预热后串行执行四组固定提示词。短输入目标约 128 tokens，长输入目标约 2,048 tokens；输出上限分别为 64 / 512 tokens。</p>
+              </div>
+              <button type="button" class="btn primary" id="benchSuiteRunBtn" onclick="runBenchmarkSuite()">一键执行四组测试</button>
+            </div>
+            <p class="small muted">测试期间请勿发送其他推理请求。自动固定 temperature=0、top_p=1、top_k=40、seed=42、关闭 thinking；每组保留实际 Token 数和条件指纹。目标长度以服务端实际 Token 数校验，不达标不会伪装成合格样本。</p>
+            <div id="benchSuiteStatus" class="msg muted" role="status" aria-live="polite">固定提示词和四组顺序已就绪。</div>
+          </section>
           <div class="field bench-prompt-block" style="margin-top:12px">
             <div class="bench-prompt-head">
               <label for="benchPrompt">提示词</label>
@@ -540,6 +551,16 @@
 
 
 
+      <div class="card bench-suite-report-card" id="benchSuiteReportCard">
+        <div class="card-head">
+          <div><h2>四组测试报告</h2><p>报告包含四组指标、Request ID、条件指纹、阶段耗时和前后 Runtime / Metrics 证据。</p></div>
+          <div class="btn-row">
+            <button type="button" class="btn sm" id="benchSuiteCopyMarkdown" onclick="copyBenchmarkSuiteReport('markdown')" disabled>复制 Markdown 报告</button>
+            <button type="button" class="btn sm ghost" id="benchSuiteCopyJSON" onclick="copyBenchmarkSuiteReport('json')" disabled>复制原始 JSON</button>
+          </div>
+        </div>
+        <pre id="benchSuiteReport" class="bench-out" style="max-height:520px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">尚未执行四组测试。</pre>
+      </div>
       <div class="card" id="benchHistoryCard">
         <div class="card-head">
           <div><h2>Benchmark 历史任务</h2><p>只显示任务摘要和条件可比性，不保存或展示客户端 Key、Prompt 正文。</p></div>
@@ -673,7 +694,7 @@
 
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261119-project-acceptance-2"></script>
+<script src="/static/dist/app.js?v=20261120-perf12-suite-3"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-key-contrast-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
