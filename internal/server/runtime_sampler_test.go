@@ -65,9 +65,9 @@ func TestCPUSnapshotPercentRejectsStaleSample(t *testing.T) {
  s.cpuCachedPercent = 42
  s.cpuProcLastSample = time.Now().Add(-runtimeSnapshotMaxAge - time.Second)
  s.cpuSampleMu.Unlock()
- if value, ok := s.cpuSnapshotPercent(); ok {
-  t.Fatalf("stale CPU snapshot must be unavailable, got %v", value)
- }
+ if value, sampledAt, ok := s.cpuSnapshotPercent(); ok {
+		t.Fatalf("stale CPU snapshot must be unavailable, got value=%v sampled_at=%v", value, sampledAt)
+	}
 }
 
 func TestCPUSnapshotPercentReturnsFreshSample(t *testing.T) {
