@@ -2722,7 +2722,7 @@ async function runBenchmarkSuite(){
   const status=$('benchSuiteStatus');
   if(status)status.textContent='正在检查模型并准备预热…';
   const suite={
-    suite_version:'perf12-four-case-v1',
+    suite_version:'perf12-four-case-v2',
     status:'running',
     started_at:new Date().toISOString(),
     backend:benchCurrentBackend,
