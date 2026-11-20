@@ -170,9 +170,6 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 			speedWindowMS = genMS
 			ph.ContentGenerationMS = &genMS
 		}
-	} else if !in.Stream && in.UpstreamMS > 0 {
-		genMS = in.UpstreamMS
-		ph.ContentGenerationMS = &genMS
 	} else if ph.TTFTMS != nil && in.TotalMS > *ph.TTFTMS {
 		genMS = in.TotalMS - *ph.TTFTMS
 		ph.ContentGenerationMS = &genMS

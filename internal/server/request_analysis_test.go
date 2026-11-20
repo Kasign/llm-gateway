@@ -48,6 +48,9 @@ func TestBuildRequestAnalysisDoesNotUseNonStreamUpstreamAsDecodeWindow(t *testin
 	if a.Throughput.SpeedSource != "" {
 		t.Fatalf("unknown speed source must remain unknown: %+v", a.Throughput)
 	}
+	if a.Phases.ContentGenerationMS != nil {
+		t.Fatalf("non-stream upstream_ms must not be reported as a measured content generation duration: %+v", a.Phases)
+	}
 }
 
 func TestBuildRequestAnalysisDerivesSpeedOnlyFromStreamContentWindow(t *testing.T) {
