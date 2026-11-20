@@ -283,6 +283,32 @@ try {
     await page.locator('#benchSuiteResumeBtn').isVisible());
   await page.evaluate(() => localStorage.removeItem('llm-gateway.bench-suite.v1'));
   await clickTab(page, 'model-test', '模型测试');
+  const recoveryEligibility = await page.evaluate(() => {
+    const base = {
+      suite_version:'perf12-four-case-v2',
+      prompt_version:'perf12-synthetic-dataset-v2',
+      prompts:{short:'short prompt',long:'long prompt'},
+      warmup:{status:'completed'},
+      cases:[
+        {case_id:'S-P / S-O',status:'completed'},
+        {case_id:'L-P / S-O',status:'running',job_id:'job-inflight-123'}
+      ]
+    };
+    const runningJob = benchmarkSuiteCanResume({...base,status:'running'});
+    const missingJob = benchmarkSuiteCanResume({...base,status:'running',cases:[
+      {case_id:'S-P / S-O',status:'completed'},
+      {case_id:'L-P / S-O',status:'submitting',job_id:null}
+    ]});
+    const runningWarmup = benchmarkSuiteCanResume({
+      ...base,status:'running',warmup:{status:'running',job_id:'warmup-inflight-456'},cases:[]
+    });
+    return {runningJob,missingJob,runningWarmup};
+  });
+  check('刷新后可恢复已有 Job ID 的在途组，不会自动重提不确定的任务',
+    recoveryEligibility.runningJob === true &&
+    recoveryEligibility.missingJob === false &&
+    recoveryEligibility.runningWarmup === true,
+    recoveryEligibility);
   check('清除部分报告后隐藏续跑入口',
     !(await page.locator('#benchSuiteResumeBtn').isVisible()));
   check('性能测试区只包含普通性能与四组基线入口',
