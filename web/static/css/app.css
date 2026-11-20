@@ -1036,3 +1036,36 @@ body.auth-locked{overflow:hidden}
 .bench-acceptance-result.ok{color:var(--ok);border-color:rgba(52,211,153,.35)}
 .bench-acceptance-result.err{color:var(--err);border-color:rgba(248,113,113,.35)}
 .bench-acceptance-result.warn{color:var(--warn);border-color:rgba(234,179,8,.3)}
+
+
+/* 模型测试：横向类型导航与独立结果区 */
+.model-test-tabs{
+  display:flex;align-items:center;gap:6px;overflow-x:auto;
+  margin:14px 0 16px;padding:4px;
+  border:1px solid var(--border);border-radius:12px;
+  background:var(--surface-2,rgba(148,163,184,.07));
+  scrollbar-width:thin;
+}
+.model-test-tab{
+  flex:0 0 auto;min-height:38px;padding:8px 18px;
+  border:1px solid transparent;border-radius:8px;
+  background:transparent;color:var(--text-2);
+  font:inherit;font-weight:600;white-space:nowrap;cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+.model-test-tab:hover{background:rgba(148,163,184,.10);color:var(--text)}
+.model-test-tab.active{
+  color:var(--text);background:var(--surface);
+  border-color:var(--border);box-shadow:0 1px 3px rgba(0,0,0,.12);
+}
+.model-test-tab:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.model-test-subpanel[hidden]{display:none!important}
+.model-test-subpanel{min-width:0}
+.model-test-subpanel>.card,.model-test-subpanel #modelTestPerformance>.card{margin-bottom:14px}
+.bench-result-card{margin-top:14px}
+.bench-result-heading{margin:14px 0 7px;font-size:13px;color:var(--text-2)}
+.model-test-subpanel .bench-answer{min-height:64px}
+@media(max-width:600px){
+  .model-test-tabs{gap:3px;margin:10px 0 12px}
+  .model-test-tab{padding:8px 12px;font-size:13px}
+}
