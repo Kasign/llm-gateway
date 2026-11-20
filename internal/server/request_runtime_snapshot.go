@@ -12,19 +12,19 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 	}
 	sample := s.runtimeSnapshotSampleLatest()
 	now := time.Now()
+	out := &RequestRuntimeSnapshot{Status: "unavailable", Source: "runtime_sampler"}
+	s.applyHostCPUSnapshot(out, now)
 	if sample == nil {
-		return &RequestRuntimeSnapshot{Status: "unavailable", Source: "runtime_sampler"}
+		return out
 	}
 	age := now.Sub(sample.SampledAt)
 	if age < 0 {
 		age = 0
 	}
-	out := &RequestRuntimeSnapshot{
-		Status: sample.Status,
-		Source: sample.Source,
-		SampledAt: sample.SampledAt.UTC().Format(time.RFC3339Nano),
-		AgeMS: age.Milliseconds(),
-	}
+	out.Status = sample.Status
+	out.Source = sample.Source
+	out.SampledAt = sample.SampledAt.UTC().Format(time.RFC3339Nano)
+	out.AgeMS = age.Milliseconds()
 	if age > runtimeSnapshotMaxAge {
 		out.Status = "unavailable"
 		out.Source = "stale_runtime_sampler"
@@ -58,24 +58,31 @@ func (s *Server) latestRequestRuntimeSnapshot() *RequestRuntimeSnapshot {
 			}
 		}
 	}
-	if cpu, sampledAt, ok := s.cpuSnapshotPercent(); ok {
-		out.HostCPUPercent = &cpu
-		out.HostCPUStatus = "available"
-		out.HostCPUSampledAt = sampledAt.UTC().Format(time.RFC3339Nano)
-		ageMS := now.Sub(sampledAt).Milliseconds()
-		if ageMS < 0 {
-			ageMS = 0
-		}
-		out.HostCPUAgeMS = &ageMS
-	} else {
-		out.HostCPUStatus = "unavailable"
-		if out.Status == "complete" {
-			out.Status = "partial"
-		}
-	}
 	if out.Status == "" {
 		out.Status = "partial"
 	}
 	return out
 }
 
+
+
+func (s *Server) applyHostCPUSnapshot(out *RequestRuntimeSnapshot, now time.Time) {
+ if s == nil || out == nil {
+  return
+ }
+ if cpu, sampledAt, ok := s.cpuSnapshotPercent(); ok {
+  out.HostCPUPercent = &cpu
+  out.HostCPUStatus = "available"
+  out.HostCPUSampledAt = sampledAt.UTC().Format(time.RFC3339Nano)
+  ageMS := now.Sub(sampledAt).Milliseconds()
+  if ageMS < 0 {
+   ageMS = 0
+  }
+  out.HostCPUAgeMS = &ageMS
+  return
+ }
+ out.HostCPUStatus = "unavailable"
+ if out.Status == "complete" {
+  out.Status = "partial"
+ }
+}
