@@ -40,6 +40,9 @@ type RequestRuntimeSnapshot struct {
 	LoadedRAMBytes     int64    `json:"loaded_ram_bytes,omitempty"`
 	LoadedVRAMBytes    int64    `json:"loaded_vram_bytes,omitempty"`
 	HostCPUPercent     *float64 `json:"host_cpu_percent,omitempty"`
+	HostCPUStatus      string   `json:"host_cpu_status,omitempty"`
+	HostCPUSampledAt   string   `json:"host_cpu_sampled_at,omitempty"`
+	HostCPUAgeMS       *int64   `json:"host_cpu_age_ms,omitempty"`
 	Status             string   `json:"status"`
 	Source             string   `json:"source,omitempty"`
 	SampledAt          string   `json:"sampled_at,omitempty"`
