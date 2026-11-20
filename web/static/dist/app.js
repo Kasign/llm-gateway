@@ -3107,13 +3107,13 @@ async function runBenchmark(scenario = "performance") {
     const promptOverride = toolScenario ? ($(isAcceptance ? "benchAcceptancePrompt" : "benchToolPrompt")?.value || "").trim() : "";
     if (toolScenario && !promptOverride) {
       const answer = benchResultElement('answer');
-      if (answer) { answer.className = isAcceptance ? "bench-acceptance-result msg err" : "bench-answer err"; answer.textContent = "测试提示词不能为空。"; }
+      if (answer) { answer.className = "bench-answer err"; answer.textContent = "测试提示词不能为空。"; }
       return;
     }
     const clientKey = ($("modelTestApiKey")?.value || "").trim();
     if (!clientKey) {
-      const answer = $(isAcceptance ? "benchAcceptanceResult" : "benchAnswer");
-      if (answer) { answer.className = isAcceptance ? "bench-acceptance-result msg err" : "bench-answer err"; answer.textContent = "请先在模型测试页面输入客户端服务密钥。"; }
+      const answer = benchResultElement('answer');
+      if (answer) { answer.className = "bench-answer err"; answer.textContent = "请先在模型测试页面输入客户端服务密钥。"; }
       $("modelTestApiKey")?.focus();
       return;
     }
