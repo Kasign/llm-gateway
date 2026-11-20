@@ -279,8 +279,10 @@ try {
     const prompts = buildBenchmarkSuitePrompts();
     const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
     const longPrefix = prompts.long.split('\n\n合成记录（共50条）：')[0];
-    const first = benchmarkSuitePromptForCase(prompts.short,'smoke-suite','SP_SO');
-    const second = benchmarkSuitePromptForCase(prompts.short,'smoke-suite','SP_LO');
+    const first = benchmarkSuitePromptForCase(prompts.short,'SP_SO');
+    const second = benchmarkSuitePromptForCase(prompts.short,'SP_LO');
+    const firstNonce = first.split('_PERF12_CASE_')[0];
+    const secondNonce = second.split('_PERF12_CASE_')[0];
     return {
       version: prompts.version,
       shortChars: prompts.short.length,
@@ -288,7 +290,7 @@ try {
       sameTask: shortPrefix === longPrefix,
       shortRecordCount: (prompts.short.match(/^R\d{3} /gm) || []).length,
       recordCount: (prompts.long.match(/^R\d{3} /gm) || []).length,
-      casePromptsDiffer: first !== second && first.startsWith('PERF12_RUN_') && second.startsWith('PERF12_RUN_')
+      casePromptsDiffer: first !== second && firstNonce.length===24 && secondNonce.length===24 && firstNonce!==secondNonce && first.startsWith(firstNonce+'_PERF12_CASE_SP_SO') && second.startsWith(secondNonce+'_PERF12_CASE_SP_LO')
     };
   });
   check('四组测试使用同一分析任务和固定版本提示词',
