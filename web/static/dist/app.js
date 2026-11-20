@@ -3605,6 +3605,8 @@ async function runBenchmark(scenario = "performance") {
         loadBackendForm,
         probeUpstream,
         loadBenchPanel,
+        loadBenchHistory,
+        loadBenchmarkAcceptanceCases,
         loadDashboardRecent,
         loadDashboardStats,
         loadDownloads,
