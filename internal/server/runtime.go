@@ -636,7 +636,7 @@ func (s *Server) applyInMemorySync(ctx context.Context, snap *llama.RuntimeSnaps
 	for _, m := range ms {
 		var matchedID string
 		for id := range inMemory {
-			if s.modelMatchesUpstreamID(&m, id) {
+			if s.modelMatchesUpstreamIDForBackend(&m, backend, id) {
 				matchedID = id
 				break
 			}
