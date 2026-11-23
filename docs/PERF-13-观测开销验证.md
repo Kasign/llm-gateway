@@ -178,10 +178,10 @@
 ### 8.1 当前代码可复用的数据入口
 
 1. **Benchmark**：复用管理台现有模型测试/Benchmark 页面和 `/api/benchmark` 创建、`/api/benchmark/{job_id}` 轮询；请求详情使用 `/api/requests/{id}`。不新增压测 API，不要求用户直接调用带密钥的 API。
-2. **Gateway 与容器资源**：管理员首页 bootstrap 已返回 `host.cpu_usage_percent`、`host.memory`（含 total/used/source）和磁盘信息。该 CPU 是 `/proc/stat` 计算的主机级 CPU，不是 Gateway 进程 CPU；memory 是容器/cgroup 视角的内存，不应命名或冒充 Gateway 进程 RSS。
+2. **宿主机资源**：管理员首页 bootstrap 已返回 `host.cpu_usage_percent`、`host.memory`（含 total/used/source）和磁盘信息。CPU 由 `/proc/stat` 计算，是宿主机整体 CPU；内存由 `/proc/meminfo` 的 `MemTotal - MemAvailable` 计算，`source=meminfo`，也是宿主机整体内存。两者都不是 Gateway 容器独占资源或 Gateway 进程 RSS。
 3. **llama.cpp 运行状态**：管理台「本地模型」页面的「运行概览」复用 `/api/admin/runtime`，显示模型加载状态和后台 `/metrics` 进程级样本。Metrics 采样器每 5 秒运行一次，独立于请求热路径；请求分析中的 Runtime Snapshot 只附带最近快照，最多 15 秒新鲜度判定，必须结合 `sampled_at` / `age_ms` 解释。
 4. **版本身份**：本仓库 release build 会注入 Gateway Revision / Modified 构建元数据；但当前已审查的 bootstrap 与 runtime 响应没有提供可直接核对线上 SHA 的字段。仅从 GitHub `dev` SHA 不能推断线上容器版本，部署版本需从实际镜像标签/digest或部署构建记录核实。
-5. **RSS 缺口**：当前管理台 API 没有专门的 Gateway 进程 RSS 字段。首页 memory 是容器级内存，不能替代进程 RSS。后续先评估 1Panel/Docker 已有容器指标是否能提供同一时间窗的 Gateway 容器内存；若只能取得 cgroup usage，就按容器内存 observed 记录，不声称是 RSS，不新增代码采集器。
+5. **RSS 缺口**：当前管理台 API 没有专门的 Gateway 进程 RSS 或 Gateway 容器内存字段。首页 memory 是宿主机整体内存（`/proc/meminfo`），不能替代上述任一指标。后续可查看 1Panel/Docker 是否已有 Gateway 容器内存指标；若能取得，按容器内存 observed 单独记录；没有则标记 `not_collected`。不新增代码采集器，也不把宿主机内存冒充容器内存或进程 RSS。
 
 ### 8.2 采样前固定条件
 
@@ -201,7 +201,7 @@
 
 1. 打开 NUC 当前管理台，确认当前活动 Backend、模型标识和模型已加载状态；部署 revision 无现成证据时记为 `unknown`，不额外取 SHA、不阻塞采样。
 2. 在「本地模型 → 运行概览」查看 llama.cpp Server Metrics，展开动态指标，记录 `sampled_at`、采样状态、进程实例标识和指标值；采样器约每 5 秒刷新一次，读取时必须记录样本时间，不能把页面打开时间当作指标采样时间。
-3. 在首页记录宿主机 CPU 与内存 used/total/source。内存按 API 返回的 `source` 标注为容器/cgroup 口径；没有 Gateway 进程 RSS 时记为 `not_collected`。
+3. 在首页记录宿主机 CPU 与宿主机内存 used/total/source。当前实现的 CPU 来源为 `/proc/stat`，内存来源为 `/proc/meminfo`（`source=meminfo`）；两者均为宿主机口径。Gateway 容器内存和进程 RSS 需从 1Panel/Docker 独立指标取得；拿不到就分别记为 `not_collected`。
 4. 复用「性能测试」普通 Benchmark 入口做单并发 smoke，核对 Request ID、HTTP 状态、TTFT、输入/输出 Token、原生 Prompt/Decode timings 和 RequestAnalysis。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
 5. Smoke 数据完整后，在同一模型、参数、输入长度、输出上限和并发条件下串行采集重复样本；每次记录请求详情和采样前后 Runtime。测试窗口内不发送其它推理请求。若 UI 没有批量重复入口，不新增脚本或 API，先以现有普通 Benchmark 单次任务入口逐次执行。
-6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU 和容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
+6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU/内存；若 1Panel/Docker 提供独立指标，再单独报告 Gateway 容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
