@@ -470,6 +470,18 @@ func TestBenchmarkObserverTTFTStartsAtRunBoundary(t *testing.T) {
 
 
 // TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs 验证条件快照稳定，并显式暴露缺失维度。
+func completeBenchmarkRuntimeProfile(modelID string) map[string]interface{} {
+	return map[string]interface{}{
+		"backend": "llamacpp",
+		"model_id": modelID,
+		"parameters": map[string]interface{}{
+			"threads": 8, "threads_batch": 8, "batch_size": 512, "ubatch_size": 128,
+			"ctx_size": 8192, "n_gpu_layers": 0, "flash_attn": false,
+			"cache_type_k": "q8_0", "cache_type_v": "q8_0",
+		},
+	}
+}
+
 func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *testing.T) {
 	snapshot := map[string]interface{}{
 		"backend": "llamacpp",
@@ -479,6 +491,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 		"backend_version": "1.2.3",
 		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
+		"backend_runtime_profile": completeBenchmarkRuntimeProfile("active-model"),
 		"max_tokens": 256,
 	}
 	first, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
@@ -521,7 +534,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 // TestBenchmarkConditionMetadataHandlesMissingSnapshotFields 验证旧记录和缺失字段不会被误判为完整条件。
 func TestBenchmarkConditionMetadataHandlesMissingSnapshotFields(t *testing.T) {
 	fingerprint, status, missing, err := benchmarkConditionMetadata(map[string]interface{}{}, "prompt-hash")
-	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 9 {
+	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 10 {
 		t.Fatalf("missing snapshot metadata = %q/%q/%v, err=%v", fingerprint, status, missing, err)
 	}
 }
@@ -529,7 +542,7 @@ func TestBenchmarkConditionMetadataHandlesMissingSnapshotFields(t *testing.T) {
 
 // TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords 验证历史配置快照兼容与条件元数据恢复。
 func TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords(t *testing.T) {
-	hash, status, missing := benchmarkConditionFromConfigJSON(`{"condition_sha256":"abc","condition_status":"partial","condition_missing":["backend_version_unknown"]}`)
+	hash, status, missing := benchmarkConditionFromConfigJSON(`{"condition_sha256":"abc","condition_status":"partial","condition_missing":["backend_version_unknown"],"backend_runtime_profile":{"backend":"llamacpp","model_id":"active-model","parameters":{"threads":8,"threads_batch":8,"batch_size":512,"ubatch_size":128,"ctx_size":8192,"n_gpu_layers":0,"flash_attn":false,"cache_type_k":"q8_0","cache_type_v":"q8_0"}}}`)
 	if hash != "abc" || status != "partial" || len(missing) != 1 || missing[0] != "backend_version_unknown" {
 		t.Fatalf("restored condition metadata = %q/%q/%v", hash, status, missing)
 	}
@@ -550,6 +563,7 @@ func TestBenchmarkConditionMetadataAllowsUnknownBuildCleanliness(t *testing.T) {
 		"backend_version": "1.2.3",
 		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
+		"backend_runtime_profile": completeBenchmarkRuntimeProfile("active-model"),
 	}
 	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
 	if err != nil || status != "complete" {
