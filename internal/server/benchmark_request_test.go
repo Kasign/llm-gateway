@@ -91,6 +91,15 @@ func containsBenchmarkComparisonReason(values []string, target string) bool {
 }
 
 
+func hasBenchmarkMissingReason(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBenchmarkConditionMetadataRequiresCompleteBackendRuntimeProfile(t *testing.T) {
 	snapshot := map[string]interface{}{
 		"backend": "llamacpp",
@@ -103,7 +112,7 @@ func TestBenchmarkConditionMetadataRequiresCompleteBackendRuntimeProfile(t *test
 	}
 	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
 	if err != nil { t.Fatal(err) }
-	if status != "partial" || !containsString(missing, "backend_runtime_profile_unknown") {
+	if status != "partial" || !hasBenchmarkMissingReason(missing, "backend_runtime_profile_unknown") {
 		t.Fatalf("missing runtime profile must block strict comparison: status=%s missing=%v", status, missing)
 	}
 }
