@@ -1834,7 +1834,7 @@ async function loadBenchHistory(){
       list.innerHTML=wrapTable('<tr><th>选</th><th>时间</th><th>场景</th><th>验收用例</th><th>模型</th><th>状态</th><th>总耗时</th><th>条件</th><th>详情</th></tr>'+
         items.map(item=>{
           const scenarioLabel=item.scenario==='tool_performance_auto'?'工具调用性能（自然决策）':(item.scenario==='tool_performance'?'工具调用性能（强制调用诊断）':'普通性能');
-          const conditionLabel={complete:'完整',partial:'部分',unknown:'未知'}[item.condition_status]||'未知';
+          const conditionLabel={complete:'核心条件完整',partial:'条件不足',unknown:'未知'}[item.condition_status]||'未知';
           const latency=item.status==='running'||item.status==='cancelling'?'进行中':(item.latency_ms!=null?item.latency_ms+' ms':'未知');
           const model=item.model_id||item.model_key||item.backend||'—';
           return '<tr><td><input type="checkbox" data-bench-compare-id="'+esc(item.job_id)+'" '+(benchHistorySelected.has(item.job_id)?'checked':'')+' '+(item.status!=='completed'?'disabled':'')+' aria-label="选择任务进行比较"></td><td class="small">'+esc(fmtDate(item.started_at))+'</td><td>'+esc(scenarioLabel)+'</td><td>'+(item.acceptance_case_id?'<span class="pill">'+esc(item.acceptance_case_id)+'</span>':'—')+'</td><td class="small">'+esc(model)+'</td><td>'+statusPill(item.status)+'</td><td class="small">'+esc(latency)+'</td><td><span class="pill">'+conditionLabel+'</span></td><td><button type="button" class="btn sm ghost" data-bench-history-id="'+esc(item.job_id)+'" aria-controls="benchHistoryDetail" aria-expanded="false">查看</button></td></tr>';
@@ -2303,6 +2303,9 @@ function benchTextsFromJob(j){
   return {content,reasoning};
 }
 const BENCH_CONDITION_MISSING_LABELS={
+  model_id_unknown:'Backend 模型标识',
+  backend_unknown:'推理 Backend',
+  prompt_sha256_unknown:'测试提示词指纹',
   model_sha256_unknown:'模型文件 SHA-256',
   gateway_revision_unknown:'Gateway 构建版本',
   gateway_build_modified:'Gateway 构建包含未提交修改',

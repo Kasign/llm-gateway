@@ -569,7 +569,6 @@ func benchmarkBackendVersion(parent context.Context, s *Server, backend string) 
 	return version, source, "observed"
 }
 
-// benchmarkConditionMetadata 计算条件指纹。信息不完整时保留部分指纹，但禁止自动视为严格可比较。
 // benchmarkTraceabilityOnlyMissing 判断缺失项是否仅影响制品追溯，不影响本次运行条件识别。
 func benchmarkTraceabilityOnlyMissing(missing []string) bool {
 	if len(missing) == 0 {
