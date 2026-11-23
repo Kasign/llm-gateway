@@ -71,12 +71,12 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 4. 更新 OpenAPI 与管理台仅在接口契约确有变化时同步，不为“Profile”概念另建平行页面。
 5. PERF-10 完成后，PERF-11 只需使用 BenchmarkRun.RequestID 关联该请求分析，不再增加重复关联表。
 
-## 5. 当前阻塞与风险
+## 5. 剩余边界（不阻塞 PERF-10）
 
-- Benchmark 清理已接入现有请求保留后台任务；它与请求日志共用 `logging.retention_days`，避免新增一套调度器和独立配置。
-- 请求详情 API 的分析字段和鉴权范围需要进一步核实，避免误判“没有 Profile API”等同于“没有分析查询能力”。
-- 若请求日志清理任务和 Benchmark 清理任务并发执行，必须以数据库事务/锁定和引用检查确保不会先删掉仍被引用的 RequestLog。
-- 不引入新的配置项，直到默认请求、诊断请求和深度请求的真实采集差异被代码证据证明需要独立配置。
+- Benchmark 清理已接入现有请求保留后台任务，与请求日志共用 `logging.retention_days`，不新增调度器或独立期限配置。
+- 当前数据库未建立 `benchmark_runs.request_id` 到 `request_logs.request_id` 的外键；通过请求清理事务内的引用检查保护关联。PERF-10 不为此引入额外迁移，后续如需强化数据库级约束，应单独评估历史孤儿数据与迁移风险。
+- Deep Profile 数据源仍属于 PERF-08 范围；当前无已验收的 operation/backend 级 per-request 数据，因此本任务不建立空泛字段或采集链路。
+- default/diagnostic/deep 目前是数据范围与保留语义，不强行增加未被现有业务证明需要的配置字段。
 
 ## 6. 验收结果
 
