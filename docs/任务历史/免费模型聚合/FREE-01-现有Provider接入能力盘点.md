@@ -94,6 +94,16 @@
 
 现有 `internal/provider/anthropic_messages_e2e_test.go` 是显式 opt-in 的真实端点测试；`docs/real-provider-e2e-matrix.md` 当前将 Anthropic Messages、OpenAI-compatible Chat Completions 和 Responses 真实端点状态都记录为“未测”。因此，本盘点只确认代码路径存在，不把它升级为真实厂商兼容性验收通过。
 
+### 3.3 BaseURL 路径前缀的实际兼容边界
+
+补充核对 `internal/provider/openai_compatible.go` 的 `buildUpstreamURL` 后，发现现有 Adapter 对 BaseURL 路径前缀有一个具体限制：
+
+- 当 BaseURL 路径以 `/v1` 结尾时，Adapter 会从请求路径中剥离 `/v1`，再与 BaseURL 前缀拼接；Groq 的 `/openai/v1`、OpenRouter 的 `/api/v1`、Cerebras 的 `/v1`、Cloudflare Workers AI 的 `/ai/v1` 都符合这一规则。
+- Google Gemini OpenAI-compatible Base URL 是 `/v1beta/openai/`，并不以 `/v1` 结尾。当前拼接会多追加一段 `/v1`，与官方 `/v1beta/openai/chat/completions` 和 `/v1beta/openai/models` 路径不一致。
+- 这不是 Google API 不兼容，而是当前 Adapter 的 BaseURL 路径拼接规则表达能力不足。后续应评估通用的 API 路径前缀/端点映射配置，不为 Google 单独复制 Adapter。
+
+连接测试也有相同的通用限制：当前固定请求 `/v1/models`。Cloudflare Workers AI 的模型目录使用 `GET /accounts/{account_id}/ai/models/search`，不属于 OpenAI `/v1/models`；因此连接测试失败不能直接判定其 Chat Completions 推理端点不可用。
+
 ## 4. Provider 管理与模型目录现状
 
 ### 4.1 连接测试
