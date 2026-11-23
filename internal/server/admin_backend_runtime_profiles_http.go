@@ -23,6 +23,7 @@ func (s *Server) backendRuntimeProfilesAPI(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
+		w.Header().Set("Cache-Control", "no-store")
 		items, err := s.settings.ListBackendRuntimeProfiles(r.Context(), r.URL.Query().Get("backend"), r.URL.Query().Get("model_id"))
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "settings_read_failed", "failed to read backend runtime profiles")

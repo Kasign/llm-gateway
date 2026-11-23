@@ -1256,6 +1256,17 @@ try {
     await clickTab(page, tab, title);
     await recordLayout(page, title + '-desktop');
 
+    if (tab === 'models-inference') {
+      check('服务参数页包含 Backend 运行参数档案管理入口',
+        await page.locator('#backendRuntimeProfilesRoot').count() === 1 &&
+        await page.locator('#backendRuntimeProfileForm').count() === 1);
+    }
+
+    if (tab === 'model-test') {
+      check('模型测试页包含 Backend 运行参数档案选择器',
+        await page.locator('#benchRuntimeProfile').count() === 1);
+    }
+
     if (tab === 'models-local') {
       const sourceHeaders = await page.locator('#modelTable th').evaluateAll(
         headers => headers.map(header => (header.textContent || '').trim()).filter(label => label === '来源')

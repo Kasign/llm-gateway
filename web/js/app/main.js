@@ -2316,7 +2316,19 @@ const BENCH_CONDITION_MISSING_LABELS={
   backend_version_unknown:'Backend 版本',
   model_load_state_unknown:'测试前模型加载状态',
   hardware_model_unknown:'CPU 型号',
-  hardware_memory_unknown:'物理内存容量'
+  hardware_memory_unknown:'物理内存容量',
+  backend_runtime_profile_unknown:'未关联 Backend 运行参数档案',
+  backend_runtime_profile_identity_unknown:'Backend 运行参数档案身份不完整',
+  backend_runtime_profile_parameters_unknown:'Backend 运行参数值未知',
+  backend_runtime_profile_threads_unknown:'threads 未记录',
+  backend_runtime_profile_threads_batch_unknown:'threads_batch 未记录',
+  backend_runtime_profile_batch_size_unknown:'batch_size 未记录',
+  backend_runtime_profile_ubatch_size_unknown:'ubatch_size 未记录',
+  backend_runtime_profile_ctx_size_unknown:'ctx_size 未记录',
+  backend_runtime_profile_n_gpu_layers_unknown:'n_gpu_layers 未记录',
+  backend_runtime_profile_flash_attn_unknown:'flash_attn 未记录',
+  backend_runtime_profile_cache_type_k_unknown:'cache_type_k 未记录',
+  backend_runtime_profile_cache_type_v_unknown:'cache_type_v 未记录'
 };
 function renderBenchCondition(j){
   const status=j.condition_status||'unknown';
@@ -3247,8 +3259,8 @@ async function runBenchmark(scenario='performance'){
 function readBenchmarkRepeatReport(){try{const raw=localStorage.getItem(BENCH_REPEAT_STORAGE_KEY);return raw?JSON.parse(raw):null;}catch{return null;}}
 function writeBenchmarkRepeatReport(report){localStorage.setItem(BENCH_REPEAT_STORAGE_KEY,JSON.stringify(report));}
 function benchmarkRepeatSampleFromWrap(wrap,index){
- const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens;
- return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
+ const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens,profile=job.condition_snapshot?.backend_runtime_profile||{};
+ return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',runtime_profile_id:profile.profile_id||'',runtime_profile_version:profile.profile_version??null,runtime_profile_source:profile.source||'',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
 }
 function renderBenchmarkRepeatReport(report=readBenchmarkRepeatReport()){
  const output=$('benchRepeatReport'),status=$('benchRepeatStatus'),copy=$('benchRepeatCopyBtn');if(!output)return;

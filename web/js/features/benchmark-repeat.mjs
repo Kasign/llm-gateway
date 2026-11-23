@@ -61,11 +61,12 @@ export function buildBenchmarkRepeatMarkdown(report){
     }
   }
   if(!Object.keys(summary.cache_metrics).length)lines.push('| — | 暂无可比样本 | 0 | — | — | — |');
-  lines.push('','## 单次任务','','| 次数 | 状态 | Job ID | 缓存 | 条件状态 | 输入/输出 Token | 总耗时 ms | TTFT ms | Prompt ms | Decode ms | 输出 tok/s | 错误 |','|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---|');
+  lines.push('','## 单次任务','','| 次数 | 状态 | Job ID | 运行档案 | 缓存 | 条件状态 | 输入/输出 Token | 总耗时 ms | TTFT ms | Prompt ms | Decode ms | 输出 tok/s | 错误 |','|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|');
   for(const sample of samples){
     const error=String(sample.error||'').replace(/\|/g,'\\|');
-    lines.push('| '+sample.index+' | '+(sample.condition_mismatch?'completed（条件变化）':(sample.status||'unknown'))+' | '+(sample.job_id||'—')+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
+    const runtimeProfile=sample.runtime_profile_id?(sample.runtime_profile_id+'@v'+(sample.runtime_profile_version??'?')):'未知';
+    lines.push('| '+sample.index+' | '+(sample.condition_mismatch?'completed（条件变化）':(sample.status||'unknown'))+' | '+(sample.job_id||'—')+' | '+runtimeProfile+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
   }
-  lines.push('','说明：每条记录对应独立 Benchmark Job。指标汇总只纳入服务端状态 completed、运行条件完整或仅缺少模型 SHA / Gateway Revision / 构建洁净状态等追溯信息，且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。模型加载状态、Backend 版本、硬件或模型标识等运行条件缺失时仍不纳入比较。');
+  lines.push('','说明：每条记录对应独立 Benchmark Job。指标汇总只纳入服务端状态 completed、运行条件完整或仅缺少模型 SHA / Gateway Revision / 构建洁净状态等追溯信息，且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。模型加载状态、Backend 版本、硬件、模型标识或完整 Backend 运行参数档案缺失时仍不纳入比较。');
   return lines.join('\n');
 }

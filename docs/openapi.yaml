@@ -2064,7 +2064,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/BackendRuntimeProfileMutation" }
+            schema: { $ref: "#/components/schemas/BackendRuntimeProfileUpdate" }
       responses:
         "200":
           description: 更新后的档案
@@ -3902,6 +3902,13 @@ components:
         parameters: { $ref: "#/components/schemas/BackendRuntimeParameters" }
         notes: { type: string, maxLength: 500 }
       additionalProperties: false
+    BackendRuntimeProfileUpdate:
+      allOf:
+        - $ref: "#/components/schemas/BackendRuntimeProfileMutation"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, minLength: 1, maxLength: 64 }
     BackendRuntimeProfile:
       allOf:
         - $ref: "#/components/schemas/BackendRuntimeProfileMutation"
