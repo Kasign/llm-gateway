@@ -146,7 +146,7 @@ jobs:
       - name: PERF-13 请求观测微基准
         run: |
           mkdir -p artifacts
-          go test -run '^$' -bench '^(BenchmarkConsumeSSEChunk|BenchmarkBuildRequestAnalysis|BenchmarkEncodeRequestAnalysis|BenchmarkRequestTraceRecordStreamChunk|BenchmarkLiveSessionAppendStreamEvent|BenchmarkInferenceObserverOnChunkParallel)$' -benchmem -benchtime=500ms -count=5 ./internal/server | tee artifacts/perf13-observer-bench.txt
+          go test -run '^$' -bench '^(BenchmarkConsumeSSEChunk|BenchmarkBuildRequestAnalysis|BenchmarkEncodeRequestAnalysis|BenchmarkRequestTraceRecordStreamChunk|BenchmarkRequestTraceRecordStreamChunkWithLiveSession|BenchmarkLiveSessionAppendStreamEvent|BenchmarkInferenceObserverOnChunkParallel|BenchmarkLatestRequestRuntimeSnapshot)$' -benchmem -benchtime=500ms -count=5 ./internal/server | tee artifacts/perf13-observer-bench.txt
 
       - name: 上传 PERF-13 微基准原始结果
         if: always()
