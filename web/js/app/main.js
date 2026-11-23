@@ -3284,7 +3284,7 @@ async function runBenchmarkRepeat(){
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
    const sample=benchmarkRepeatSampleFromWrap(wrap,index);
    if(sample.status==='completed'){
-    if(index===1){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
+    if(!baselineModel){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
     else if(sample.model!==baselineModel||(baselineConditionHash&&sample.condition_sha256!==baselineConditionHash)){
      sample.condition_mismatch=true;sample.error=sample.error||'模型或条件指纹与首个样本不同，已停止后续采样。';
      report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='conditions_changed';break;
