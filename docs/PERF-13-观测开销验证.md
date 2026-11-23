@@ -185,7 +185,7 @@
 
 ### 8.2 采样前固定条件
 
-- Gateway 部署 SHA / 镜像 digest / build revision；确认是否为 `8c7d0f210b6f35fb1fc1fdc76747d3d3b7ced5af` 对应构建。不是则单独标注部署版本，不混入当前 SHA 结论。
+- Gateway 部署身份：优先记录管理台/部署记录中已有的镜像标签或 digest；当前管理 API 未暴露可核对的 Gateway Revision。用户现行 ZIP + `docker compose up -d --build` 流程不能假定 ZIP 内含 `.git`；`scripts/build-gateway-image.sh` 也要求 Git 工作区，不能假定实际部署使用了该脚本。因此线上 revision 无证据时标记 `unknown`，不要求用户手工获取 SHA，也不阻塞 observed 采样。不得把 GitHub `dev` 最新 SHA 当成线上版本。
 - NUC 硬件：i5-1340P、32 GB RAM；CPU-only 或实际 backend 必须以运行时证据为准。
 - llama.cpp 镜像 digest、版本、启动参数（尤其线程、ctx、batch/ubatch、metrics），Gateway 活动 Provider 与模型 ID。
 - Qwen3.5-9B-Q4_K_M 实际模型文件身份/量化；SHA 缺失则标 unknown，不阻塞 observed，但不补猜。
@@ -199,8 +199,9 @@
 
 ## 9. 下一步执行顺序
 
-1. 确认 NUC 上 Gateway 的实际部署 SHA / image digest，不假定 `dev` 最新代码已部署。
-2. 核对运行模型、llama.cpp digest/参数、Gateway 配置和 Metrics 状态；只记录必要非敏感字段。
-3. 通过现有 Benchmark UI 进行单并发预热与小样本 smoke，检查 RequestAnalysis、Runtime Snapshot、llama.cpp Metrics 和容器内存来源是否完整。
-4. 条件满足后执行固定样本串行 observed 采集；不修改生产逻辑、不新增总开关、不把容器内存冒充进程 RSS。
-5. 根据 observed 证据判断是否存在值得优化的成本；无法建立严格匹配对照时，结论标记 not_comparable。
+1. 打开 NUC 当前管理台，确认当前活动 Backend、模型标识和模型已加载状态；部署 revision 无现成证据时记为 `unknown`，不额外取 SHA、不阻塞采样。
+2. 在「本地模型 → 运行概览」查看 llama.cpp Server Metrics，展开动态指标，记录 `sampled_at`、采样状态、进程实例标识和指标值；采样器约每 5 秒刷新一次，读取时必须记录样本时间，不能把页面打开时间当作指标采样时间。
+3. 在首页记录宿主机 CPU 与内存 used/total/source。内存按 API 返回的 `source` 标注为容器/cgroup 口径；没有 Gateway 进程 RSS 时记为 `not_collected`。
+4. 复用「性能测试」普通 Benchmark 入口做单并发 smoke，核对 Request ID、HTTP 状态、TTFT、输入/输出 Token、原生 Prompt/Decode timings 和 RequestAnalysis。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
+5. Smoke 数据完整后，在同一模型、参数、输入长度、输出上限和并发条件下串行采集重复样本；每次记录请求详情和采样前后 Runtime。测试窗口内不发送其它推理请求。若 UI 没有批量重复入口，不新增脚本或 API，先以现有普通 Benchmark 单次任务入口逐次执行。
+6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU 和容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
