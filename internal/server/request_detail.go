@@ -35,6 +35,7 @@ func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePay
 	}
 	if a, err := decodeRequestAnalysis(analysisRaw); err == nil && a != nil {
 		out["analysis"] = a
+		out["analysis_status"] = "persisted"
 		src := strings.TrimSpace(a.Throughput.TokenSource)
 		if src == "" {
 			src = strings.TrimSpace(a.Throughput.Source)
@@ -49,7 +50,11 @@ func buildRequestDetail(l *store.RequestLog, payload map[string]string, storePay
 		}
 	} else if rebuilt := rebuildAnalysisFromLog(l, streamEvents); rebuilt != nil {
 		out["analysis"] = rebuilt
+		out["analysis_status"] = "reconstructed"
 		out["analysis_note"] = "由日志字段与 stream_events 推算（未持久化 analysis_json 或旧记录）"
+	} else {
+		out["analysis_status"] = "unavailable"
+		out["analysis_note"] = "当前请求记录没有可用的持久化分析数据，且无法从日志字段与流式事件重建"
 	}
 	if len(streamEvents) > 0 {
 		out["stream_events"] = streamEvents
