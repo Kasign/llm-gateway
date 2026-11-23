@@ -1,6 +1,6 @@
 # PERF-13 观测开销验证方案
 
-> 状态：进行中（A～F 微基准与事件数阶梯已执行；正在补齐事件上限回归测试与结果分析，之后评估真实 NUC observed 采样）
+> 状态：进行中（A～F 微基准、事件数阶梯和事件上限回归测试均已通过；正在准备真实 NUC observed 采样）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -146,12 +146,61 @@
 
 ### 7.4 补充回归测试
 
-已在 `internal/server/request_trace_test.go` 增加 `TestRequestTraceCapsStoredStreamEvents`：尝试追加 2,100 条事件，要求 Trace 计数和 Session 实际保留数量均严格为 2,000，并核对序号边界。该测试待最新 SHA CI 通过后才算验收。
+已在 `internal/server/request_trace_test.go` 增加 `TestRequestTraceCapsStoredStreamEvents`：尝试追加 2,100 条事件，要求 Trace 计数和 Session 实际保留数量均严格为 2,000，并核对序号边界。最新 SHA `8c7d0f210b6f35fb1fc1fdc76747d3d3b7ced5af` 的 Go CI `45137793370` 中，单元/集成、竞态测试和静态检查均通过，该回归测试验收通过。
 
-## 8. 下一步执行顺序
+### 7.5 最新 SHA 微基准复测（2026-11-23）
 
-1. 完成最新 SHA 对事件上限回归测试的 Go CI 验收；失败则按实际日志修复。
-2. 不继续为微基准堆叠更多隔离样本；当前 A～F 和 1/100/2000/2100 阶梯已覆盖主要代码路径与事件边界。
-3. 进入真实 NUC observed 采样准备：先核对部署版本、模型/运行参数、配置、缓存分类、请求样本目标与 RSS 采集来源；固定条件并完成预热。
-4. NUC 样本只报告 TTFT、总延迟分布、Gateway RSS、请求输出规模和并发等 observed 指标。当前没有可用于严格因果归因的生产观测总开关，不新增该开关，不关闭鉴权、错误审计或请求关联。
-5. 根据 NUC observed 分布判断是否有实际瓶颈；若无法建立严格匹配对照，结论标记 not_comparable，不做观测开销因果声明。
+- Go CI：Run `45137793370`，SHA `8c7d0f210b6f35fb1fc1fdc76747d3d3b7ced5af`，6/6 Job success。
+- Artifact：`perf13-observer-bench`，ID `14800626669`，原始文件 `perf13-observer-bench.txt`，已下载并检查，全部 PASS。
+- 环境：GitHub Actions Linux amd64，Go 1.27.4，Intel Xeon Platinum 6975P-C；与此前 Xeon 8370C、AMD EPYC 7763 环境均不同，不能直接按绝对值比较。
+- 命令：`-benchmem -benchtime=500ms -count=5`，测试包耗时 37.122 秒。
+
+本轮五次采样中位数：
+
+| 基准 | ns/op 中位数 | B/op | allocs/op |
+|---|---:|---:|---:|
+| `BenchmarkConsumeSSEChunk` | 0.3760 | 0 | 0 |
+| `BenchmarkRequestTraceRecordStreamChunk` | 1,636 | 616 | 15 |
+| `BenchmarkLiveSessionAppendStreamEvent` | 178.2 | 608 | 2 |
+| `BenchmarkInferenceObserverOnChunkParallel` | 2,297 | 2,194 | 40 |
+| `BenchmarkBuildRequestAnalysis` | 804.4 | 544 | 15 |
+| `BenchmarkEncodeRequestAnalysis` | 4,609 | 3,842 | 7 |
+| `.../events_1` | 1,911 | 1,225 | 17 |
+| `.../events_100` | 171,771（1,718 ns/chunk） | 85,844 | 1,410 |
+| `.../events_2000` | 3,512,709（1,756 ns/chunk） | 1,931,434 | 28,020 |
+| `.../events_2100` | 3,674,088（1,750 ns/chunk） | 1,992,213 | 29,420 |
+| `BenchmarkLatestRequestRuntimeSnapshot` | 863.5 | 2,272 | 9 |
+
+本轮绝对值比此前 Xeon 8370C 样本低，但硬件不同，不能解释为代码性能改善。每个阶梯的 B/op 是 benchmark 迭代累计分配；不是请求完成后保留内存。Consume 仍只是编译器可优化的空消费下界。
+
+## 8. 真实 NUC observed 采样准备
+
+### 8.1 当前代码可复用的数据入口
+
+1. **Benchmark**：复用管理台现有模型测试/Benchmark 页面和 `/api/benchmark` 创建、`/api/benchmark/{job_id}` 轮询；请求详情使用 `/api/requests/{id}`。不新增压测 API，不要求用户直接调用带密钥的 API。
+2. **Gateway 与容器资源**：管理员首页 bootstrap 已返回 `host.cpu_usage_percent`、`host.memory`（含 total/used/source）和磁盘信息。该 CPU 是 `/proc/stat` 计算的主机级 CPU，不是 Gateway 进程 CPU；memory 是容器/cgroup 视角的内存，不应命名或冒充 Gateway 进程 RSS。
+3. **llama.cpp 运行状态**：管理台「本地模型」页面的「运行概览」复用 `/api/admin/runtime`，显示模型加载状态和后台 `/metrics` 进程级样本。Metrics 采样器每 5 秒运行一次，独立于请求热路径；请求分析中的 Runtime Snapshot 只附带最近快照，最多 15 秒新鲜度判定，必须结合 `sampled_at` / `age_ms` 解释。
+4. **版本身份**：本仓库 release build 会注入 Gateway Revision / Modified 构建元数据；但当前已审查的 bootstrap 与 runtime 响应没有提供可直接核对线上 SHA 的字段。仅从 GitHub `dev` SHA 不能推断线上容器版本，部署版本需从实际镜像标签/digest或部署构建记录核实。
+5. **RSS 缺口**：当前管理台 API 没有专门的 Gateway 进程 RSS 字段。首页 memory 是容器级内存，不能替代进程 RSS。后续先评估 1Panel/Docker 已有容器指标是否能提供同一时间窗的 Gateway 容器内存；若只能取得 cgroup usage，就按容器内存 observed 记录，不声称是 RSS，不新增代码采集器。
+
+### 8.2 采样前固定条件
+
+- Gateway 部署 SHA / 镜像 digest / build revision；确认是否为 `8c7d0f210b6f35fb1fc1fdc76747d3d3b7ced5af` 对应构建。不是则单独标注部署版本，不混入当前 SHA 结论。
+- NUC 硬件：i5-1340P、32 GB RAM；CPU-only 或实际 backend 必须以运行时证据为准。
+- llama.cpp 镜像 digest、版本、启动参数（尤其线程、ctx、batch/ubatch、metrics），Gateway 活动 Provider 与模型 ID。
+- Qwen3.5-9B-Q4_K_M 实际模型文件身份/量化；SHA 缺失则标 unknown，不阻塞 observed，但不补猜。
+- Gateway 配置：请求超时、warm start、日志 payload/stream raw/preview 设置；敏感密钥和完整环境变量不采集、不上传。
+- Benchmark 条件：固定 prompt 数据集版本、temperature/top_p/seed、max_tokens、并发 1；记录实际输入/输出 Token、TTFT、总耗时、原生 Prompt/Decode timings 和缓存分类。
+- 先预热模型，再串行执行；采样窗口内不发其他推理请求。先完成少量 smoke 请求确认指标完整，再按固定样本重复采集，不盲目并发压测。
+
+### 8.3 本轮允许输出的结论
+
+本轮只报告实际部署版本下的 observed：TTFT、总延迟、输入/输出 Token、Prompt/Decode timings、缓存状态、host CPU、容器内存和 llama.cpp Metrics。由于当前没有关闭请求观测的生产对照开关，且不应为本任务关闭审计/请求关联，不能从两批不同时间的请求推导观测开销因果增量。没有 Gateway 进程 RSS 数据时，明确记为 unavailable/not_collected。
+
+## 9. 下一步执行顺序
+
+1. 确认 NUC 上 Gateway 的实际部署 SHA / image digest，不假定 `dev` 最新代码已部署。
+2. 核对运行模型、llama.cpp digest/参数、Gateway 配置和 Metrics 状态；只记录必要非敏感字段。
+3. 通过现有 Benchmark UI 进行单并发预热与小样本 smoke，检查 RequestAnalysis、Runtime Snapshot、llama.cpp Metrics 和容器内存来源是否完整。
+4. 条件满足后执行固定样本串行 observed 采集；不修改生产逻辑、不新增总开关、不把容器内存冒充进程 RSS。
+5. 根据 observed 证据判断是否存在值得优化的成本；无法建立严格匹配对照时，结论标记 not_comparable。
