@@ -54,8 +54,8 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if catalog.Version != 1 || len(catalog.Providers) != 0 || len(catalog.Models) != 0 || len(catalog.Plans) != 0 {
-		t.Fatalf("unexpected embedded catalog: %+v", catalog)
+	if catalog.Version != 1 || len(catalog.Providers) != 6 || len(catalog.Models) != 5 || len(catalog.Plans) != 5 {
+		t.Fatalf("unexpected embedded catalog counts: providers=%d models=%d plans=%d", len(catalog.Providers), len(catalog.Models), len(catalog.Plans))
 	}
 }
 
@@ -177,5 +177,41 @@ func TestQuotaRejectsInvalidAndNegativeDecimalValues(t *testing.T) {
 		if err := catalog.Validate(); err == nil {
 			t.Errorf("quota value %q should be rejected", rawValue)
 		}
+	}
+}
+
+func TestEmbeddedCatalogFreePlanAccountRequirements(t *testing.T) {
+	catalog, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans := make(map[string]Plan, len(catalog.Plans))
+	for _, plan := range catalog.Plans {
+		plans[plan.ID] = plan
+	}
+	assertRequirement := func(planID string, want Requirement) {
+		t.Helper()
+		plan, ok := plans[planID]
+		if !ok {
+			t.Fatalf("missing plan %q", planID)
+		}
+		if plan.Eligibility.PaymentMethod != want {
+			t.Errorf("%s payment requirement = %q, want %q", planID, plan.Eligibility.PaymentMethod, want)
+		}
+	}
+	assertRequirement("google-ai-studio-free", RequirementNotRequired)
+	assertRequirement("groq-free", RequirementUnknown)
+	assertRequirement("cloudflare-workers-free", RequirementConditional)
+	assertRequirement("openrouter-free-models", RequirementNotRequired)
+	assertRequirement("cerebras-trial", RequirementRequired)
+
+	if _, exists := plans["huggingface-free-inference"]; exists {
+		t.Fatal("Hugging Face Free user with zero API credits must not be represented as a free API plan")
+	}
+	if plans["cerebras-trial"].Type != PlanTypeTrial {
+		t.Fatal("Cerebras time-limited, payment-verified trial was misclassified")
+	}
+	if plans["openrouter-free-models"].Type != PlanTypeFreeModelVariant {
+		t.Fatal("OpenRouter :free model variants were misclassified")
 	}
 }
