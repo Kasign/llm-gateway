@@ -9,7 +9,7 @@ import (
 
 func validCatalogFixture() Catalog {
 	checkedAt := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
-	quotaValue := float64(10000)
+	quotaValue := json.Number("10000")
 	return Catalog{
 		Version: 1,
 		Providers: []Provider{{
@@ -85,7 +85,7 @@ func TestCatalogValidatePreservesQuotaUnitsAndUnknownValues(t *testing.T) {
 		t.Fatalf("unknown quota without numeric value rejected: %v", err)
 	}
 
-	zero := float64(0)
+	zero := json.Number("0")
 	catalog.Plans[0].Quotas[1].Value = &zero
 	if err := catalog.Validate(); err == nil {
 		t.Fatal("unknown quota with numeric zero was accepted")
@@ -147,5 +147,35 @@ func TestDecodeRejectsTrailingJSON(t *testing.T) {
 	_, err = Decode(raw)
 	if err == nil || !strings.Contains(err.Error(), "多余 JSON") {
 		t.Fatalf("trailing JSON error = %v", err)
+	}
+}
+
+func TestQuotaDecimalPrecisionIsPreserved(t *testing.T) {
+	catalog := validCatalogFixture()
+	value := json.Number("0.000000000123456789")
+	catalog.Plans[0].Quotas[0].Value = &value
+
+	raw, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.Plans[0].Quotas[0].Value
+	if got == nil || got.String() != value.String() {
+		t.Fatalf("quota decimal changed: got %v, want %s", got, value)
+	}
+}
+
+func TestQuotaRejectsInvalidAndNegativeDecimalValues(t *testing.T) {
+	for _, rawValue := range []string{"-0.01", "not-a-number", "NaN", "Inf"} {
+		catalog := validCatalogFixture()
+		value := json.Number(rawValue)
+		catalog.Plans[0].Quotas[0].Value = &value
+		if err := catalog.Validate(); err == nil {
+			t.Errorf("quota value %q should be rejected", rawValue)
+		}
 	}
 }

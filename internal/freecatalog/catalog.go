@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
+	"math/big"
 	"net/url"
 	"regexp"
 	"strings"
@@ -160,7 +160,7 @@ const (
 // Quota 保留原始单位、周期和作用域。Value=nil 与 State=unknown 不等同于数值 0。
 type Quota struct {
 	Metric         string     `json:"metric"`
-	Value          *float64   `json:"value,omitempty"`
+	Value          *json.Number `json:"value,omitempty"`
 	Unit           string     `json:"unit"`
 	Period         string     `json:"period"`
 	Scope          string     `json:"scope"`
@@ -406,8 +406,12 @@ func validateQuota(item Quota, evidence map[string]struct{}) error {
 	}
 	switch item.State {
 	case QuotaStateKnown:
-		if item.Value == nil || math.IsNaN(*item.Value) || math.IsInf(*item.Value, 0) || *item.Value < 0 {
-			return fmt.Errorf("已知额度必须是非负有限数值")
+		if item.Value == nil {
+			return fmt.Errorf("已知额度必须提供数值")
+		}
+		value, ok := new(big.Rat).SetString(item.Value.String())
+		if !ok || value.Sign() < 0 {
+			return fmt.Errorf("已知额度必须是非负有限十进制数值")
 		}
 	case QuotaStateUnknown, QuotaStateUnlimited, QuotaStateNotPublished, QuotaStateNotApplicable:
 		if item.Value != nil {
