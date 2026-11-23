@@ -25,6 +25,7 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsActiveStatus, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
+import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown } from '../features/benchmark-repeat.mjs';
 
 // 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
 initAdminKey();
@@ -40,7 +41,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
-  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();}
+  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();renderBenchmarkRepeatReport();}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference'&&globalThis.InferenceParams)globalThis.InferenceParams.load().catch(()=>{});
@@ -1797,10 +1798,16 @@ function benchPayloadForApi(target,scenario='performance',promptOverride='',acce
   if(p.stop?.length)body.stop=p.stop;
   return body;
 }
+let benchRepeatActive=false;
+let benchRepeatCancelRequested=false;
+let benchRepeatInRequest=false;
+let benchRepeatCurrentJobID='';
+const BENCH_REPEAT_STORAGE_KEY='llm-gateway.bench-repeat.v1';
 function setBenchRunning(running){
   const ids=['benchRunBtn','benchSuiteRunBtn','benchToolRunBtn','benchToolForceRunBtn','benchAcceptanceRunBtn'];
-  ids.forEach(id=>{const button=$(id);if(button)button.disabled=!!running;});
-  ['benchStopBtn','toolBenchStopBtn','acceptanceBenchStopBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!running;});
+  ids.forEach(id=>{const button=$(id);if(button)button.disabled=!!running||benchRepeatActive;});
+  const repeatButton=$('benchRepeatRunBtn');if(repeatButton)repeatButton.disabled=!!running||benchRepeatActive;
+  ['benchStopBtn','toolBenchStopBtn','acceptanceBenchStopBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!(running||benchRepeatActive);});
 }
 
 
@@ -2516,6 +2523,14 @@ async function resumeBenchmarkSession(){
 }
 
 async function stopBenchmark(){
+  if(benchRepeatActive){
+    benchRepeatCancelRequested=true;
+    if(!benchRepeatCurrentJobID){
+      const status=$('benchRepeatStatus');
+      if(status)status.textContent=benchRepeatInRequest?'已请求停止；当前任务正在提交，创建后会立即取消。':'已请求停止；不再启动下一次采样。';
+      setBenchRunning(false);return;
+    }
+  }
   if(benchSuiteActive){
     benchSuiteCancelRequested=true;
     const activeJobId=benchSuiteCurrentJobId;
@@ -3201,8 +3216,14 @@ async function runBenchmark(scenario='performance'){
     if(token!==benchPollToken)return;
     const jobId=start.job_id,t0=Date.now();
     writeBenchStore({jobId});
-    persistBenchParams();
-    await pollBenchmarkJob(jobId,t0,token);
+    if(benchRepeatActive){
+      benchRepeatCurrentJobID=jobId;
+      if(benchRepeatCancelRequested){
+        await api('/api/benchmark/'+encodeURIComponent(jobId),{method:'DELETE'});
+        const cancelled=await api('/api/benchmark/'+encodeURIComponent(jobId));renderBenchResult(cancelled);return;
+      }
+    }
+    persistBenchParams();await pollBenchmarkJob(jobId,t0,token);
   }catch(e){
     if(token!==benchPollToken)return;
     const ansE=benchResultElement('answer');if(ansE){ansE.className='bench-answer err';ansE.textContent=e.message}
@@ -3211,6 +3232,59 @@ async function runBenchmark(scenario='performance'){
   }finally{
     if(token===benchPollToken)setBenchRunning(false);
   }
+}
+
+function readBenchmarkRepeatReport(){try{const raw=localStorage.getItem(BENCH_REPEAT_STORAGE_KEY);return raw?JSON.parse(raw):null;}catch{return null;}}
+function writeBenchmarkRepeatReport(report){localStorage.setItem(BENCH_REPEAT_STORAGE_KEY,JSON.stringify(report));}
+function benchmarkRepeatSampleFromWrap(wrap,index){
+ const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens;
+ return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',model:job.model_id||job.model_key||job.llama_model||'unknown',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
+}
+function renderBenchmarkRepeatReport(report=readBenchmarkRepeatReport()){
+ const output=$('benchRepeatReport'),status=$('benchRepeatStatus'),copy=$('benchRepeatCopyBtn');if(!output)return;
+ if(!report){output.textContent='尚未执行重复采样。';if(status)status.textContent='默认 10 次；每次独立保存到 Benchmark 历史。';if(copy)copy.disabled=true;return;}
+ output.textContent=buildBenchmarkRepeatMarkdown(report);
+ const completed=(report.samples||[]).filter(item=>item.status==='completed').length;
+ if(status)status.textContent='状态：'+(report.status||'unknown')+' · 服务端完成 '+completed+'/'+report.requested_count+' 次 · 已记录 '+(report.samples||[]).length+' 次尝试';
+ if(copy)copy.disabled=!(report.samples||[]).length;
+}
+async function copyBenchmarkRepeatReport(){
+ const report=readBenchmarkRepeatReport();if(!report)return;const copied=await writeClipboard(buildBenchmarkRepeatMarkdown(report));
+ const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
+}
+function setBenchmarkRepeatControlsDisabled(disabled){
+ ['benchRepeatCount','benchPrompt','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+}
+async function runBenchmarkRepeat(){
+ if(benchRepeatActive)return;let count;
+ try{count=normalizeBenchmarkRepeatCount($('benchRepeatCount')?.value);}catch(error){const status=$('benchRepeatStatus');if(status)status.textContent=error.message;$('benchRepeatCount')?.focus();return;}
+ const clientKey=($('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
+ if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。每次都会独立保存任务；期间请勿发送其他推理请求。可以随时停止。继续？'))return;
+ const fixedParams=collectBenchParams(),fixedPrompt=$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,samples:[]};
+ benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
+ try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
+ setBenchRunning(false);renderBenchmarkRepeatReport(report);
+ try{
+  for(let index=1;index<=count;index++){
+   if(benchRepeatCancelRequested)break;const status=$('benchRepeatStatus');if(status)status.textContent='正在执行第 '+index+'/'+count+' 次串行采样…';
+   applyBenchParams(fixedParams);if($('benchPrompt'))$('benchPrompt').value=fixedPrompt;persistBenchParams();
+   const previousJobID=readBenchStore().jobId||'';benchRepeatCurrentJobID='';benchRepeatInRequest=true;
+   await runBenchmark('performance');benchRepeatInRequest=false;benchRepeatCurrentJobID='';
+   if(benchRepeatCancelRequested)break;
+   const currentJobID=readBenchStore().jobId||'';
+   if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
+   let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
+   const sample=benchmarkRepeatSampleFromWrap(wrap,index);report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
+   if(['running','cancelling'].includes(sample.status)||sample.status==='unknown'){report.status='interrupted';break;}
+  }
+ }catch(error){report.error=error?.message||'重复采样执行失败';report.status='failed';}
+ finally{
+  benchRepeatInRequest=false;benchRepeatCurrentJobID='';benchRepeatActive=false;report.finished_at=new Date().toISOString();
+  if(benchRepeatCancelRequested)report.status='cancelled';
+  else if(!report.status||report.status==='running')report.status=report.samples.length===count?(report.samples.every(s=>s.status==='completed')?'completed':'completed_with_failures'):'partial';
+  try{writeBenchmarkRepeatReport(report);}catch(error){report.error=(report.error?report.error+'；':'')+'报告保存失败：'+error.message;}
+  setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);renderBenchmarkRepeatReport(report);loadBenchHistory().catch(()=>{});
+ }
 }
 
 async function loadBenchmarkAcceptanceCases(){
@@ -3382,6 +3456,9 @@ exposeGlobals({
   resumeBenchmarkSession,
   rotateKey,
   runBenchmark,
+  runBenchmarkRepeat,
+  renderBenchmarkRepeatReport,
+  copyBenchmarkRepeatReport,
   runBenchmarkSuite,
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
