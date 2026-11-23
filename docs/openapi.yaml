@@ -1999,6 +1999,109 @@ paths:
           $ref: "#/components/responses/AdminError"
         "405":
           $ref: "#/components/responses/AdminError"
+  /api/admin/backend-runtime-profiles:
+    get:
+      operationId: getApiAdminBackendRuntimeProfiles
+      tags: [Admin]
+      summary: 查询用户声明的 Backend 运行参数档案
+      description: 仅返回 llama.cpp 实际运行参数的用户声明记录；Gateway 不会应用或修改 Backend 进程。
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - name: backend
+          in: query
+          schema: { type: string, enum: [llamacpp] }
+        - name: model_id
+          in: query
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: Backend 运行参数档案
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/BackendRuntimeProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/AdminError" }
+    post:
+      operationId: postApiAdminBackendRuntimeProfiles
+      tags: [Admin]
+      summary: 创建 Backend 运行参数档案
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackendRuntimeProfileMutation" }
+      responses:
+        "200":
+          description: 创建后的档案
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profile]
+                properties:
+                  profile: { $ref: "#/components/schemas/BackendRuntimeProfile" }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      operationId: putApiAdminBackendRuntimeProfiles
+      tags: [Admin]
+      summary: 更新 Backend 运行参数档案并递增版本
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackendRuntimeProfileMutation" }
+      responses:
+        "200":
+          description: 更新后的档案
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profile]
+                properties:
+                  profile: { $ref: "#/components/schemas/BackendRuntimeProfile" }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "404": { $ref: "#/components/responses/AdminError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/backend-runtime-profiles/{profile_id}:
+    delete:
+      operationId: deleteApiAdminBackendRuntimeProfilesProfileId
+      tags: [Admin]
+      summary: 删除 Backend 运行参数档案
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties: { ok: { type: boolean, const: true } }
+        "404": { $ref: "#/components/responses/AdminError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/admin/inference-params/reset:
     post:
       operationId: postApiAdminInferenceParamsReset
@@ -3315,6 +3418,7 @@ components:
       type: object
       properties:
         acceptance_case_id: { type: string, enum: [TM-01, TM-02, TM-03, TM-04, TM-05], description: 可选的项目内置验收用例 ID；TM-03 仅在服务端 benchmark.isolated_environment=true 时允许创建。 }
+        runtime_profile_id: { type: string, maxLength: 64, description: 可选的用户声明 Backend 运行参数档案；档案必须匹配当前 Backend 和 Model ID。 }
         model_key: { type: string }
         scenario:
           type: string
@@ -3774,6 +3878,39 @@ components:
           type: object
           additionalProperties: { type: string }
       additionalProperties: false
+    BackendRuntimeParameters:
+      type: object
+      properties:
+        threads: { type: integer, minimum: 0, maximum: 256, description: "0 表示 Backend 默认值" }
+        threads_batch: { type: integer, minimum: 0, maximum: 256 }
+        batch_size: { type: integer, minimum: 1, maximum: 65536 }
+        ubatch_size: { type: integer, minimum: 1, maximum: 65536 }
+        ctx_size: { type: integer, minimum: 1, maximum: 1048576 }
+        n_gpu_layers: { type: integer, minimum: -1, maximum: 1024 }
+        flash_attn: { type: boolean }
+        cache_type_k: { type: string, pattern: "^[a-zA-Z0-9_]{1,16}$" }
+        cache_type_v: { type: string, pattern: "^[a-zA-Z0-9_]{1,16}$" }
+      additionalProperties: false
+    BackendRuntimeProfileMutation:
+      type: object
+      required: [name, backend, model_id, parameters]
+      properties:
+        id: { type: string, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        backend: { type: string, const: llamacpp }
+        model_id: { type: string, minLength: 1, maxLength: 256 }
+        parameters: { $ref: "#/components/schemas/BackendRuntimeParameters" }
+        notes: { type: string, maxLength: 500 }
+      additionalProperties: false
+    BackendRuntimeProfile:
+      allOf:
+        - $ref: "#/components/schemas/BackendRuntimeProfileMutation"
+        - type: object
+          required: [id, version, source, updated_at]
+          properties:
+            version: { type: integer, minimum: 1 }
+            source: { type: string, const: user_declared }
+            updated_at: { type: string, format: date-time }
     InferenceParamsMutation:
       type: object
       properties:

@@ -1,6 +1,7 @@
 import { exposeGlobals } from './expose.js';
 import { ModelDownload } from './features/model-download.js';
 import { InferenceParams } from './features/inference-params.js';
+import { BackendRuntimeProfiles } from './features/backend-runtime-profiles.js';
 import {
   initAuth,
   submitLogin,
@@ -30,6 +31,7 @@ function stripEmptyQueryFromUrl() {
   exposeGlobals({
     ModelDownload,
     InferenceParams,
+    BackendRuntimeProfiles,
     submitLogin,
     logout,
     loadAccountSettings,

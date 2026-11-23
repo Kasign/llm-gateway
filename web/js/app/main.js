@@ -44,7 +44,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();renderBenchmarkRepeatReport();}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
-  if(b.dataset.tab==='models-inference'&&globalThis.InferenceParams)globalThis.InferenceParams.load().catch(()=>{});
+  if(b.dataset.tab==='models-inference'){globalThis.InferenceParams?.load().catch(()=>{});globalThis.BackendRuntimeProfiles?.load().catch(()=>{});}
   if(b.dataset.tab==='dashboard'){
     loadDashboardRecent().catch(()=>{});
     loadDashboardStats().catch(()=>{});
@@ -1786,6 +1786,8 @@ function benchPayloadForApi(target,scenario='performance',promptOverride='',acce
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
   if(scenario==='tool_performance'||scenario==='tool_performance_auto')body.scenario=scenario;
   if(acceptanceCaseID)body.acceptance_case_id=acceptanceCaseID;
+  const runtimeProfileID=String($('benchRuntimeProfile')?.value||'').trim();
+  if(runtimeProfileID)body.runtime_profile_id=runtimeProfileID;
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
   if(p.top_k!=null)body.top_k=p.top_k;
@@ -2233,6 +2235,7 @@ async function loadBenchPanel(opts={}){
       '推理后端（API 流量）：<b>'+esc(be==='ollama'?'Ollama':be==='llamacpp'?'llama.cpp':be)+'</b> · '+
       '上游模型：<b><code>'+esc(name)+'</code></b>'+
       (gk?' · 网关模型键：<code>'+esc(gk)+'</code>':'');
+    await globalThis.BackendRuntimeProfiles?.loadBenchmarkOptions(be,name);
     updateBenchReqPreview(name);
     if(opts.resume!==false)await resumeBenchmarkSession();
     return {upstream:name,gatewayKey:gk};
@@ -3260,7 +3263,7 @@ async function copyBenchmarkRepeatReport(){
  const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
 }
 function setBenchmarkRepeatControlsDisabled(disabled){
- ['modelTestApiKey','modelTestClearKeyBtn','benchRepeatCount','benchPrompt','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+ ['modelTestApiKey','modelTestClearKeyBtn','benchRepeatCount','benchPrompt','benchRuntimeProfile','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;

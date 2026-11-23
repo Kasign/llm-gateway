@@ -327,6 +327,38 @@
           </div>
           <div id="inferenceParamsRoot" class="inference-params-root muted">加载中…</div>
         </div>
+        <div class="card mm-section">
+          <div class="card-head"><div><h2>Backend 运行参数档案</h2><p class="small muted">记录 llama.cpp 当前实际启动参数，供 Benchmark 条件快照和优化对照使用</p></div></div>
+          <p class="small muted">这些值由你按实际容器启动配置填写，来源标记为 user_declared。Gateway 只保存档案，不会修改、重启或控制 llama.cpp 进程。未填写的字段保持未知。</p>
+          <div id="backendRuntimeProfilesRoot">
+            <form id="backendRuntimeProfileForm" class="param-field-list">
+              <input id="runtimeProfileID" type="hidden">
+              <div class="row">
+                <div class="field"><label for="runtimeProfileName">档案名称</label><input id="runtimeProfileName" maxlength="80" placeholder="例如：NUC CPU baseline" required></div>
+                <div class="field"><label for="runtimeProfileModelID">上游模型 ID</label><input id="runtimeProfileModelID" maxlength="256" placeholder="必须与实际加载模型 ID 完全一致" required></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileThreads">threads</label><input id="runtimeProfileThreads" type="number" min="0" max="256" placeholder="未知留空；0=后端默认"></div>
+                <div class="field"><label for="runtimeProfileThreadsBatch">threads_batch</label><input id="runtimeProfileThreadsBatch" type="number" min="0" max="256" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileBatchSize">batch_size</label><input id="runtimeProfileBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileUBatchSize">ubatch_size</label><input id="runtimeProfileUBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileContextSize">ctx_size</label><input id="runtimeProfileContextSize" type="number" min="1" max="1048576" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileGPULayers">n_gpu_layers</label><input id="runtimeProfileGPULayers" type="number" min="-1" max="1024" placeholder="未知留空；0=CPU"></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileFlashAttention">flash_attn</label><select id="runtimeProfileFlashAttention"><option value="">未知</option><option value="true">true</option><option value="false">false</option></select></div>
+                <div class="field"><label for="runtimeProfileCacheTypeK">cache_type_k</label><input id="runtimeProfileCacheTypeK" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
+                <div class="field"><label for="runtimeProfileCacheTypeV">cache_type_v</label><input id="runtimeProfileCacheTypeV" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
+              </div>
+              <div class="field"><label for="runtimeProfileNotes">备注</label><textarea id="runtimeProfileNotes" rows="2" maxlength="500" placeholder="可记录容器版本、启动参数来源等"></textarea></div>
+              <div class="btn-row"><button type="submit" class="btn primary">保存档案</button><button type="button" id="runtimeProfileClearBtn" class="btn ghost">清空表单</button></div>
+              <p id="runtimeProfileMsg" class="small muted" role="status" aria-live="polite">档案只记录实际部署参数，不会修改或重启 llama.cpp。</p>
+            </form>
+            <div id="backendRuntimeProfilesList"></div>
+          </div>
+        </div>
       </section>
 
       <section id="account" class="panel">
@@ -494,6 +526,11 @@
               <button type="button" class="btn sm ghost" id="benchParamsOpenBtn" aria-haspopup="dialog" aria-controls="benchParamsDrawer" onclick="openBenchParamsDrawer()">推理参数</button>
             </div>
             <textarea id="benchPrompt" rows="4">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea>
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="benchRuntimeProfile">Backend 运行参数档案</label>
+            <select id="benchRuntimeProfile"><option value="">不关联档案（运行参数未知）</option></select>
+            <small class="muted">选择与当前模型、当前容器实际启动参数一致的档案。仅记录条件，不会修改 Backend。</small>
           </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">单次测试</button>
