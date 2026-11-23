@@ -33,12 +33,12 @@
 
 | 组别 | 路径 | 目的 |
 |---|---|---|
-| A | 仅消费 chunk，不解析/记录 | 测量基准开销 |
-| B | requestTrace.recordStreamChunk | 测量 SSE 解析与 Trace 记录增量 |
-| C | inferenceObserver.onChunk，事件预算未耗尽 | 测量完整 chunk 观察路径 |
-| D | inferenceObserver.onChunk，事件预算已耗尽 | 测量长流稳态路径 |
-| E | buildRequestAnalysis + encodeRequestAnalysis | 测量请求结束分析构建与 JSON 编码 |
-| F | Runtime Snapshot 读取/映射 | 测量请求收尾快照开销 |
+| A | `BenchmarkConsumeSSEChunk`：仅消费 chunk，不解析/记录 | 测量基准开销 |
+| B | `BenchmarkRequestTraceRecordStreamChunk`：requestTrace.recordStreamChunk | 测量 SSE 解析与 Trace 事件构造增量 |
+| C | `BenchmarkLiveSessionAppendStreamEvent`：Live Session 追加事件 | 测量单条事件追加、锁和分配成本 |
+| D | `BenchmarkInferenceObserverOnChunkParallel`：inferenceObserver.onChunk，事件预算已耗尽 | 测量长流稳态并发路径 |
+| E | `BenchmarkBuildRequestAnalysis` + `BenchmarkEncodeRequestAnalysis` | 分别测量 DTO 构建和 JSON 编码 |
+| F | Runtime Snapshot 读取/映射 | 测量请求收尾快照开销；目前尚无独立基准，需先确认采样器 nil/不可用分支和 host CPU 采样依赖 |
 
 统一记录 `ns/op`、`B/op`、`allocs/op`；串行和并行路径分开，避免把并发竞争误当成单请求成本。重复运行并保存 Go 版本、OS/架构、CPU、commit SHA、命令行、原始输出。该层可以量化 Gateway 代码路径成本，但不能直接等同于真实模型 TTFT 增量。
 
@@ -82,7 +82,7 @@
 ## 6. 当前执行顺序
 
 1. PERF-11 Go CI 通过后归档 PERF-11。
-2. 补齐 A～F 同版本微基准，复用现有 `performance_benchmark_test.go`，不新增第二套测试框架。
+2. 补齐 A～E 同版本微基准，复用现有 `performance_benchmark_test.go`，不新增第二套测试框架；F Runtime Snapshot 仅在采样依赖可被无副作用隔离后再补。
 3. 执行固定机器基准并保存原始结果。
 4. 根据微基准结果决定是否需要受控端到端 A/B；没有必要时不新增生产开关。
 5. 完成真实 NUC 的 observed 分布采样与结论归档。
