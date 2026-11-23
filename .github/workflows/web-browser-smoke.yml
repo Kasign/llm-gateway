@@ -25,7 +25,7 @@ jobs:
   browser-smoke:
     name: 启动 Gateway 并执行真实浏览器验收
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       MARIADB_ROOT_PASSWORD: gateway-browser-root-pass
       LLM_GATEWAY_DB_PASSWORD: gateway-browser-db-pass
@@ -148,11 +148,30 @@ jobs:
           cat "${RUNNER_TEMP}/llm-gateway.log"
           exit 1
 
-      - name: 安装 Chromium 与 Playwright
+      - name: 缓存 Playwright 浏览器
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.56.1-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-1.56.1-
+
+      - name: 安装 Playwright 依赖包
         working-directory: web
+        timeout-minutes: 10
         run: |
-          npm install --no-save --package-lock=false playwright@1.56.1
+          npm install --no-save --package-lock=false --fetch-retries=2 --fetch-timeout=120000 playwright@1.56.1
+          node -e "console.log('Playwright', require('playwright/package.json').version)"
+
+      - name: 安装 Chromium 及系统依赖
+        working-directory: web
+        timeout-minutes: 25
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: 120000
+        run: |
           npx playwright install --with-deps chromium
+          npx playwright --version
+          test -d "$HOME/.cache/ms-playwright"
 
       - name: 验证 PERF-12 Suite 状态机
         run: node --test web/tests/benchmark-suite-state.test.mjs
