@@ -495,6 +495,32 @@ func benchmarkHardwareSnapshot(s *Server) map[string]interface{} {
 	}
 }
 
+// benchmarkModelLoadStateBefore 优先使用后台快照；证据缺失或过期时，在创建 Benchmark 条件快照前主动读取一次上游运行时状态。
+//
+// 该读取只调用 Provider Runtime API，不发起模型推理，也不触发加载/卸载。
+func (s *Server) benchmarkModelLoadStateBefore(parent context.Context, backend, modelID string) string {
+	now := time.Now()
+	sample := s.runtimeSnapshotSampleLatest()
+	state := benchmarkModelLoadState(sample, backend, modelID, now)
+	if state != "unknown" || !isLocalInferenceBackend(backend) {
+		return state
+	}
+
+	client, err := s.localClientForBackend(backend)
+	if err != nil || client == nil {
+		return "unknown"
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	snapshot, err := client.RuntimeSnapshot(ctx, modelID)
+	if err != nil || snapshot == nil {
+		return "unknown"
+	}
+	snapshot.SampledAt = time.Now()
+	s.setRuntimeSnapshotSample(snapshot, "complete", "benchmark_preflight")
+	return benchmarkModelLoadState(s.runtimeSnapshotSampleLatest(), backend, modelID, time.Now())
+}
+
 func benchmarkModelLoadState(sample *runtimeSnapshotSample, backend, modelID string, now time.Time) string {
 	if sample == nil || sample.Snapshot == nil || sample.Status != "complete" ||
 		sample.SampledAt.IsZero() || now.Before(sample.SampledAt) || now.Sub(sample.SampledAt) > runtimeSnapshotMaxAge {
@@ -1117,8 +1143,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		modelIdentity["quantization"] = m.Quantization
 		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
 	}
-	modelLoadSample := s.runtimeSnapshotSampleLatest()
-	modelLoadState := benchmarkModelLoadState(modelLoadSample, target.Backend, taskModelID, time.Now())
+	modelLoadState := s.benchmarkModelLoadStateBefore(r.Context(), target.Backend, taskModelID)
 	backendVersion, backendVersionSource, backendVersionStatus := benchmarkBackendVersion(r.Context(), s, target.Backend)
 
 	toolNames := []string{}
