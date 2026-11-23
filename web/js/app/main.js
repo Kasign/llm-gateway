@@ -2086,13 +2086,13 @@ function renderBenchmarkHistoryDetail(wrap){
     ['输出速度',throughput.output_tokens_per_sec!=null?Number(throughput.output_tokens_per_sec).toFixed(2)+' tok/s':'未知']
   ];
   const metadata=[
-    ['请求 ID',job.request_id],['HTTP 状态',job.http_status],
+    ['请求 ID',job.request_id],['分析数据状态',wrap.analysis_status|| (wrap.analysis?'persisted':'unknown')],['HTTP 状态',job.http_status],
     ['上游模型标识',job.llama_model],['开始时间',job.started_at?fmtDate(job.started_at):null],
     ['结束时间',job.finished_at?fmtDate(job.finished_at):null],
     ['正文字符',job.content_chars],['思考字符',job.reasoning_chars],
     ['响应字节',job.response_bytes],['流式事件数',job.stream_event_count]
   ].filter(([,value])=>value!=null&&value!=='');
-  let html='<div class="card-head"><div><h3 tabindex="-1">请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><div class="btn-row"><button type="button" class="btn sm" data-bench-history-copy>复制分析数据</button><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div></div>';
+  let html='<div class="card-head"><div><h3 tabindex="-1">请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><div class="btn-row">'+(job.request_id?'<button type="button" class="btn sm ghost" data-bench-history-request-id="'+esc(job.request_id)+'">完整调用记录</button>':'')+'<button type="button" class="btn sm" data-bench-history-copy>复制分析数据</button><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div></div>';
   html+='<h4>核心结果</h4><dl class="bench-history-detail-grid">'+coreMetrics.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v??'未知'))+'</dd>').join('')+'</dl>';
   html+='<details class="bench-detail-fold"><summary>测试条件与请求元数据</summary><div class="bench-detail-fold-body">'+renderBenchCondition(job)+
     (metadata.length?'<dl class="bench-history-detail-grid">'+metadata.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>':'')+
@@ -3265,6 +3265,8 @@ $('benchHistoryList')?.addEventListener('click',event=>{
   if(button)openBenchmarkHistory(button.dataset.benchHistoryId,button);
 });
 $('benchHistoryDetail')?.addEventListener('click',event=>{
+  const requestButton=event.target.closest('[data-bench-history-request-id]');
+  if(requestButton){showDetail(encodeURIComponent(requestButton.dataset.benchHistoryRequestId||''));return;}
   const copyButton=event.target.closest('[data-bench-history-copy]');
   if(copyButton&&currentBenchmarkHistoryWrap){copyBenchmarkHistoryAnalysis(currentBenchmarkHistoryWrap,copyButton).catch(()=>{});return;}
   if(!event.target.closest('[data-bench-history-detail-close]'))return;
