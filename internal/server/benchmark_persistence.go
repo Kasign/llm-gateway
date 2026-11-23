@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/whl/llm-gateway/internal/applog"
@@ -166,25 +167,13 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 			out["analysis_note"] = "请求分析存储当前不可用"
 		default:
 			raw, readErr := s.logs.GetRequestAnalysis(r.Context(), run.RequestID)
-			switch {
-			case readErr == sql.ErrNoRows:
-				out["analysis_status"] = "request_log_missing"
-				out["analysis_note"] = "Benchmark 仍存在，但关联请求日志已不存在；可能是历史保留策略造成的孤立关联"
-			case readErr != nil:
-				out["analysis_status"] = "read_failed"
-				out["analysis_note"] = "读取关联请求分析失败"
-			case raw == "":
-				out["analysis_status"] = "not_recorded"
-				out["analysis_note"] = "关联请求日志存在，但没有持久化 RequestAnalysis"
-			default:
-				analysis, decodeErr := decodeRequestAnalysis(raw)
-				if decodeErr != nil || analysis == nil {
-					out["analysis_status"] = "invalid"
-					out["analysis_note"] = "关联请求分析数据为空或格式无效"
-				} else {
-					out["analysis"] = analysis
-					out["analysis_status"] = "persisted"
-				}
+			status, note, analysis := classifyBenchmarkAnalysis(raw, readErr)
+			out["analysis_status"] = status
+			if note != "" {
+				out["analysis_note"] = note
+			}
+			if analysis != nil {
+				out["analysis"] = analysis
 			}
 		}
 	}
@@ -219,4 +208,22 @@ func benchmarkConditionSnapshotFromConfigJSON(raw string) map[string]interface{}
 		return nil
 	}
 	return snapshot
+}
+
+// classifyBenchmarkAnalysis 将 Benchmark 关联分析的缺失原因显式化，避免前端把空字段误认为零值分析。
+func classifyBenchmarkAnalysis(raw string, readErr error) (string, string, *RequestAnalysis) {
+	switch {
+	case readErr == sql.ErrNoRows:
+		return "request_log_missing", "Benchmark 仍存在，但关联请求日志已不存在；可能是历史保留策略造成的孤立关联", nil
+	case readErr != nil:
+		return "read_failed", "读取关联请求分析失败", nil
+	case strings.TrimSpace(raw) == "":
+		return "not_recorded", "关联请求日志存在，但没有持久化 RequestAnalysis", nil
+	default:
+		analysis, err := decodeRequestAnalysis(raw)
+		if err != nil || analysis == nil {
+			return "invalid", "关联请求分析数据为空或格式无效", nil
+		}
+		return "persisted", "", analysis
+	}
 }
