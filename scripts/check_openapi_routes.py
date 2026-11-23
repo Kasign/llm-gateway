@@ -37,6 +37,9 @@ ROUTE_FAMILIES = {
     "/api/benchmark/": (
         "/api/benchmark/{job_id}",
     ),
+    "/api/admin/backend-runtime-profiles/": (
+        "/api/admin/backend-runtime-profiles/{profile_id}",
+    ),
     "/api/admin/keys/": (
         "/api/admin/keys/{id}",
         "/api/admin/keys/{id}/disable",
