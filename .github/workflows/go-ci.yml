@@ -60,6 +60,9 @@ jobs:
       - name: 构建管理台与部署 Bundle
         working-directory: web
         run: npm run build
+      - name: 前端单元测试
+        working-directory: web
+        run: npm test
       - name: 保存前端部署 Bundle
         uses: actions/upload-artifact@v4
         with:
