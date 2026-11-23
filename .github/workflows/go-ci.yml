@@ -322,7 +322,7 @@ jobs:
           cache: true
 
       - name: 扫描可达 Go 漏洞
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v0.0.0-20261117202528-ef4cb2f7cae4 ./...
   build:
     name: 编译与 Docker 镜像
     runs-on: ubuntu-latest
