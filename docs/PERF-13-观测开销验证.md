@@ -1,6 +1,6 @@
 # PERF-13 观测开销验证方案
 
-> 状态：预研完成，等待 PERF-11 验收后启动
+> 状态：进行中（A～E 微基准首轮已完成；待评估长流/内存阶梯与真实 NUC observed 采样）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -79,10 +79,44 @@
 5. 不因测量结果不理想而放宽统计口径；不改变正常推理语义。
 6. 若成本处于噪声范围或无法建立可靠因果对照，结论明确为 not_comparable，而不是宣称“零开销”。
 
-## 6. 当前执行顺序
+## 6. 首轮微基准结果（2026-11-23）
 
-1. PERF-11 Go CI 通过后归档 PERF-11。
-2. 补齐 A～E 同版本微基准，复用现有 `performance_benchmark_test.go`，不新增第二套测试框架；F Runtime Snapshot 仅在采样依赖可被无副作用隔离后再补。
-3. 执行固定机器基准并保存原始结果。
-4. 根据微基准结果决定是否需要受控端到端 A/B；没有必要时不新增生产开关。
-5. 完成真实 NUC 的 observed 分布采样与结论归档。
+### 6.1 执行证据
+
+- GitHub Actions Go CI：Run `45133513574`，提交 `b79f64967ef4bc8a843af9c0f40b6e0fd5b75deb`，6/6 Job success。
+- Go 测试 Job 中 PERF-13 微基准步骤 success，命令使用 `-benchmem -benchtime=500ms -count=5`。
+- 原始结果 Artifact：`perf13-observer-bench`，Artifact ID `14799156039`，大小 785 bytes，保留期 30 天。
+- 环境：GitHub Actions Linux amd64，Go 1.27.4，AMD EPYC 7763 64-Core Processor。
+- 测试包：`internal/server`；全部基准 PASS，测试进程总耗时约 20.346 秒。
+
+### 6.2 结果摘要
+
+以下为每项 5 次采样的中位数；区间为五次原始样本的最小值至最大值。
+
+| 基准 | ns/op 中位数 | ns/op 范围 | B/op | allocs/op |
+|---|---:|---:|---:|---:|
+| `BenchmarkConsumeSSEChunk` | 0.6349 | 0.6289–0.6399 | 0 | 0 |
+| `BenchmarkRequestTraceRecordStreamChunk` | 2,560 | 2,549–2,619 | 616 | 15 |
+| `BenchmarkLiveSessionAppendStreamEvent` | 204.9 | 201.9–249.6 | 608 | 2 |
+| `BenchmarkInferenceObserverOnChunkParallel` | 3,740 | 3,670–3,867 | 2,194（个别样本 2,193） | 40 |
+| `BenchmarkBuildRequestAnalysis` | 1,145 | 1,130–1,179 | 544 | 15 |
+| `BenchmarkEncodeRequestAnalysis` | 6,190 | 6,146–6,386 | 3,842 | 7 |
+
+原始逐次结果以 GitHub Actions Artifact 为准；本表不替代原始输出。
+
+### 6.3 初步解释与限制
+
+1. 在该 CI CPU 上，Trace 记录路径约 2.56 μs/op，Live Session 单事件追加约 205 ns/op，并发 Observer 稳态路径约 3.74 μs/op。
+2. RequestAnalysis DTO 构建约 1.15 μs/op；JSON 编码约 6.19 μs/op、3.8 KB 分配，是本组独立微基准中单次耗时和分配量较高的步骤。
+3. `BenchmarkConsumeSSEChunk` 仅作为循环与全局 sink 写入的下界，不是与 Trace 完全等价的真实请求基线；不能将各基准简单相减后宣称为观测增量。
+4. 并发 Observer 基准测的是事件预算已耗尽后的稳态路径，不覆盖完整请求生命周期、数据库审计写入、模型网络等待或完整流式响应。
+5. 以上数据来自共享 CI 虚拟机，不代表用户 NUC 的绝对性能；微基准也不能直接推导 TTFT、P50/P95 或 RSS 的因果增量。
+6. 当前结果没有证明观测链路构成实际瓶颈，不能仅凭 JSON 编码相对较高就启动优化。
+
+## 7. 下一步执行顺序
+
+1. 审查并补齐 A～E 的测试覆盖边界；重点核对默认配置、事件预算上限前后、长流增长与分配情况，复用现有测试文件，不新建基准框架。
+2. 评估 F Runtime Snapshot 是否能在无副作用条件下隔离；不能安全隔离就记录 not_comparable，不强行造基准。
+3. 若代码路径测试未显示明显高成本，再在真实 NUC 上采集正常部署的 TTFT/P50/P95/RSS observed 分布；固定模型、参数、缓存分类、并发和版本条件。
+4. 当前没有关闭核心请求观测的生产 A/B 开关。真实 NUC 分布只能描述运行状态，不能声称因果观测增量；未经独立设计评审，不新增生产总开关，也不关闭鉴权、错误审计或请求关联能力。
+5. 根据长流/内存阶梯与 NUC observed 结果决定是否存在值得优化的具体瓶颈；若无法形成有效因果对照，结论明确为 not_comparable。
