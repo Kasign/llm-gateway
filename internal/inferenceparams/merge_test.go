@@ -98,8 +98,14 @@ func TestThinkingClientSilentUsesConfigOff(t *testing.T) {
 	off := "false"
 	raw := []byte(`{"messages":[]}`)
 	llama := string(MergeChatBody("llamacpp", ModeClientFirst, Params{EnableThinking: &off}, raw))
-	if !containsStr(llama, `"enable_thinking":false`) {
-		t.Fatalf("llamacpp should write false, got %s", llama)
+	if !containsStr(llama, `"reasoning_effort":"none"`) {
+		t.Fatalf("llamacpp should disable reasoning with reasoning_effort=none, got %s", llama)
+	}
+	if !containsStr(llama, `"chat_template_kwargs":{"enable_thinking":false}`) {
+		t.Fatalf("llamacpp should preserve the legacy template toggle, got %s", llama)
+	}
+	if containsStr(llama, `"enable_thinking":false`) && !containsStr(llama, `"chat_template_kwargs":{"enable_thinking":false}`) {
+		t.Fatalf("llamacpp should not emit unsupported top-level enable_thinking, got %s", llama)
 	}
 	ollama := string(MergeChatBody("ollama", ModeClientFirst, Params{EnableThinking: &off}, raw))
 	if containsStr(ollama, "enable_thinking") || containsStr(ollama, `"think"`) {
