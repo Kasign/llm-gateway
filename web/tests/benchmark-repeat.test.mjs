@@ -11,9 +11,9 @@ test('repeat count defaults to ten and enforces bounds', () => {
 
 test('summary only includes completed samples with one identical non-empty condition fingerprint', () => {
   const summary = summarizeBenchmarkRepeat([
-    { status: 'completed', condition_sha256: 'same', latency_ms: 100, ttft_ms: 20, cache_state: 'cold' },
-    { status: 'completed', condition_sha256: 'same', latency_ms: 300, ttft_ms: 40, cache_state: 'partial' },
-    { status: 'failed', condition_sha256: 'same', latency_ms: 999, ttft_ms: 99, cache_state: 'cold' }
+    { status: 'completed', condition_status: 'complete', condition_sha256: 'same', latency_ms: 100, ttft_ms: 20, cache_state: 'cold' },
+    { status: 'completed', condition_status: 'complete', condition_sha256: 'same', latency_ms: 300, ttft_ms: 40, cache_state: 'partial' },
+    { status: 'failed', condition_status: 'complete', condition_sha256: 'same', latency_ms: 999, ttft_ms: 99, cache_state: 'cold' }
   ]);
   assert.equal(summary.completed_count, 2);
   assert.equal(summary.attempted_count, 3);
@@ -26,11 +26,26 @@ test('summary only includes completed samples with one identical non-empty condi
 
 test('different condition fingerprints are not pooled', () => {
   const summary = summarizeBenchmarkRepeat([
-    { status: 'completed', job_id: 'a', condition_sha256: 'one', latency_ms: 100 },
-    { status: 'completed', job_id: 'b', condition_sha256: 'two', latency_ms: 200 }
+    { status: 'completed', condition_status: 'complete', job_id: 'a', condition_sha256: 'one', latency_ms: 100 },
+    { status: 'completed', condition_status: 'complete', job_id: 'b', condition_sha256: 'two', latency_ms: 200 }
   ]);
   assert.equal(summary.comparable_count, 0);
   assert.equal(summary.cache_metrics && Object.keys(summary.cache_metrics).length, 0);
+});
+
+test('incomplete conditions and detected condition changes are excluded from pooled metrics', () => {
+  const incomplete = summarizeBenchmarkRepeat([
+    { status: 'completed', condition_status: 'partial', condition_sha256: 'same', latency_ms: 100 }
+  ]);
+  assert.equal(incomplete.completed_count, 1);
+  assert.equal(incomplete.comparable_count, 0);
+  const changed = summarizeBenchmarkRepeat([
+    { status: 'completed', condition_status: 'complete', condition_sha256: 'same', latency_ms: 100 },
+    { status: 'completed', condition_status: 'complete', condition_sha256: 'same', condition_mismatch: true, latency_ms: 200 }
+  ]);
+  assert.equal(changed.completed_count, 2);
+  assert.equal(changed.comparable_count, 0);
+  assert.equal(Object.keys(changed.cache_metrics).length, 0);
 });
 
 test('Markdown report retains Job IDs and comparability wording', () => {
