@@ -203,7 +203,14 @@ func benchmarkConditionFromConfigJSON(raw string) (string, string, []string) {
 		}
 	}
 	for _, item := range benchmarkRuntimeProfileMissing(config) {
-		if !containsString(missing, item) {
+		found := false
+		for _, existing := range missing {
+			if existing == item {
+				found = true
+				break
+			}
+		}
+		if !found {
 			missing = append(missing, item)
 		}
 	}
