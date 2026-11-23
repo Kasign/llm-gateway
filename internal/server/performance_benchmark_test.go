@@ -472,7 +472,9 @@ func TestBenchmarkObserverTTFTStartsAtRunBoundary(t *testing.T) {
 // TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs 验证条件快照稳定，并显式暴露缺失维度。
 func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *testing.T) {
 	snapshot := map[string]interface{}{
-		"model_identity": map[string]interface{}{"sha256": "abc123"},
+		"backend": "llamacpp",
+		"model_id": "active-model",
+		"model_identity": map[string]interface{}{"model_id": "active-model", "sha256": "abc123"},
 		"environment": map[string]interface{}{"vcs_revision": "deadbeef", "vcs_modified": "false"},
 		"backend_version": "1.2.3",
 		"model_load_state_before": "loaded",
@@ -502,7 +504,9 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 	}
 
 	partial := map[string]interface{}{
-		"model_identity": map[string]interface{}{"sha256": ""},
+		"backend": "llamacpp",
+		"model_id": "active-model",
+		"model_identity": map[string]interface{}{"model_id": "active-model", "sha256": ""},
 		"environment": map[string]interface{}{"vcs_revision": ""},
 		"backend_version": "",
 		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil},
@@ -517,7 +521,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 // TestBenchmarkConditionMetadataHandlesMissingSnapshotFields 验证旧记录和缺失字段不会被误判为完整条件。
 func TestBenchmarkConditionMetadataHandlesMissingSnapshotFields(t *testing.T) {
 	fingerprint, status, missing, err := benchmarkConditionMetadata(map[string]interface{}{}, "prompt-hash")
-	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 7 {
+	if err != nil || fingerprint == "" || status != "partial" || len(missing) != 9 {
 		t.Fatalf("missing snapshot metadata = %q/%q/%v, err=%v", fingerprint, status, missing, err)
 	}
 }
@@ -536,18 +540,20 @@ func TestBenchmarkConditionFromConfigJSONRestoresLegacyAndCurrentRecords(t *test
 }
 
 
-// TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness 验证构建 revision 存在但工作区状态未知时仍不可严格比较。
-func TestBenchmarkConditionMetadataMarksUnknownBuildCleanliness(t *testing.T) {
+// TestBenchmarkConditionMetadataAllowsUnknownBuildCleanliness 验证构建工作区状态未知只降低追溯等级。
+func TestBenchmarkConditionMetadataAllowsUnknownBuildCleanliness(t *testing.T) {
 	snapshot := map[string]interface{}{
-		"model_identity": map[string]interface{}{"sha256": "abc123"},
+		"backend": "llamacpp",
+		"model_id": "active-model",
+		"model_identity": map[string]interface{}{"model_id": "active-model", "sha256": "abc123"},
 		"environment": map[string]interface{}{"vcs_revision": "deadbeef"},
 		"backend_version": "1.2.3",
 		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
 	}
 	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
-	if err != nil || status != "partial" {
-		t.Fatalf("unknown build cleanliness status = %q, err=%v", status, err)
+	if err != nil || status != "complete" {
+		t.Fatalf("unknown build cleanliness should allow limited comparison, status = %q, err=%v", status, err)
 	}
 	found := false
 	for _, item := range missing {
