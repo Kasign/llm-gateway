@@ -1,6 +1,6 @@
 # PERF-13 观测开销验证方案
 
-> 状态：进行中（A～E 微基准首轮已完成；待评估长流/内存阶梯与真实 NUC observed 采样）
+> 状态：进行中（A～F 微基准与事件数阶梯已执行；正在补齐事件上限回归测试与结果分析，之后评估真实 NUC observed 采样）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -38,7 +38,7 @@
 | C | `BenchmarkLiveSessionAppendStreamEvent`：Live Session 追加事件 | 测量单条事件追加、锁和分配成本 |
 | D | `BenchmarkInferenceObserverOnChunkParallel`：inferenceObserver.onChunk，事件预算已耗尽 | 测量长流稳态并发路径 |
 | E | `BenchmarkBuildRequestAnalysis` + `BenchmarkEncodeRequestAnalysis` | 分别测量 DTO 构建和 JSON 编码 |
-| F | Runtime Snapshot 读取/映射 | 测量请求收尾快照开销；目前尚无独立基准，需先确认采样器 nil/不可用分支和 host CPU 采样依赖 |
+| F | `BenchmarkLatestRequestRuntimeSnapshot` | 测量缓存快照复制与 CPU 状态映射；使用预置缓存，不触发上游请求或 CPU 采样等待 |
 
 统一记录 `ns/op`、`B/op`、`allocs/op`；串行和并行路径分开，避免把并发竞争误当成单请求成本。重复运行并保存 Go 版本、OS/架构、CPU、commit SHA、命令行、原始输出。该层可以量化 Gateway 代码路径成本，但不能直接等同于真实模型 TTFT 增量。
 
@@ -113,10 +113,45 @@
 5. 以上数据来自共享 CI 虚拟机，不代表用户 NUC 的绝对性能；微基准也不能直接推导 TTFT、P50/P95 或 RSS 的因果增量。
 6. 当前结果没有证明观测链路构成实际瓶颈，不能仅凭 JSON 编码相对较高就启动优化。
 
-## 7. 下一步执行顺序
+## 7. 长流阶梯与 Runtime Snapshot 结果（2026-11-23）
 
-1. 审查并补齐 A～E 的测试覆盖边界；重点核对默认配置、事件预算上限前后、长流增长与分配情况，复用现有测试文件，不新建基准框架。
-2. 评估 F Runtime Snapshot 是否能在无副作用条件下隔离；不能安全隔离就记录 not_comparable，不强行造基准。
-3. 若代码路径测试未显示明显高成本，再在真实 NUC 上采集正常部署的 TTFT/P50/P95/RSS observed 分布；固定模型、参数、缓存分类、并发和版本条件。
-4. 当前没有关闭核心请求观测的生产 A/B 开关。真实 NUC 分布只能描述运行状态，不能声称因果观测增量；未经独立设计评审，不新增生产总开关，也不关闭鉴权、错误审计或请求关联能力。
-5. 根据长流/内存阶梯与 NUC observed 结果决定是否存在值得优化的具体瓶颈；若无法形成有效因果对照，结论明确为 not_comparable。
+### 7.1 执行证据
+
+- Go CI：Run `45136188818`，SHA `ff724b182630857d6190a1dbc05c7e9ec390025d`，6/6 Job success。
+- Browser Smoke：Run `45136188864`，同 SHA，success。
+- 微基准 Artifact：`perf13-observer-bench`，Artifact ID `14799862757`，1,186 bytes。
+- 环境：GitHub Actions Linux amd64，Go 1.27.4，Intel Xeon Platinum 8370C CPU @ 2.80GHz。
+- 基准命令：`-benchmem -benchtime=500ms -count=5`；全部基准 PASS，包耗时 34.372 秒。
+- 该轮与 6.1 的 AMD EPYC 7763 运行环境不同，结果单独分组，不合并计算或直接比较绝对耗时。
+
+### 7.2 本轮新增基准中位数
+
+| 基准 | ns/op 中位数 | B/op | allocs/op |
+|---|---:|---:|---:|
+| `BenchmarkRequestTraceRecordStreamChunkWithLiveSession/events_1` | 2,831 | 1,225 | 17 |
+| `.../events_100` | 257,965（2,580 ns/chunk） | 85,842 | 1,410 |
+| `.../events_2000` | 5,198,764（2,599 ns/chunk） | 1,931,892 | 28,021 |
+| `.../events_2100` | 5,598,082（2,666 ns/chunk） | 1,992,757 | 29,421 |
+| `BenchmarkLatestRequestRuntimeSnapshot` | 1,143 | 2,272 | 9 |
+
+同一轮既有基准复测：Trace 2,507 ns/op、616 B/op、15 allocs/op；Observer 并发 4,147 ns/op、2,194 B/op、40 allocs/op；DTO 构建 1,084 ns/op、544 B/op、15 allocs/op；JSON 编码 6,185 ns/op、3,842 B/op、7 allocs/op。Consume 下界与前一轮不同 CPU，不能跨机器作差。
+
+### 7.3 事件上限的正确解释
+
+1. 代码中 `requestTrace.appendStreamEvent` 在 `seq >= 2000` 时拒绝新增事件；`live.Session.AppendStreamEvent` 也有 2000 条防线。默认配置关闭 Preview/Raw，另有每请求内容字节预算。
+2. 2000 事件基准约 1.93 MB/op；2100 事件约 1.99 MB/op，增加约 60.9 KB/op 和 1,400 次分配，额外 100 个 chunk 仍经过 SSE 解析和请求指标处理。该增量是基准迭代期间的累计分配，不是请求结束后保留的内存。
+3. 达到事件上限后继续解析是当前设计行为：Trace 仍需处理后续 chunk 中的 finish/usage/时序等信息，不能直接停止整个解析链路。当前没有证据表明事件列表超过 2000 条，也不能据此认定内存泄漏。
+4. 本轮基准显示单次 chunk 解析路径约 2.6～2.7 μs/chunk；它没有测量完整真实模型请求、数据库写入或真实进程 RSS。
+5. Runtime Snapshot 读取/映射约 1.14 μs/op、2.2 KB/op；该基准使用预置缓存，不包含后台采样、HTTP 或 CPU 采样等待。
+
+### 7.4 补充回归测试
+
+已在 `internal/server/request_trace_test.go` 增加 `TestRequestTraceCapsStoredStreamEvents`：尝试追加 2,100 条事件，要求 Trace 计数和 Session 实际保留数量均严格为 2,000，并核对序号边界。该测试待最新 SHA CI 通过后才算验收。
+
+## 8. 下一步执行顺序
+
+1. 完成最新 SHA 对事件上限回归测试的 Go CI 验收；失败则按实际日志修复。
+2. 不继续为微基准堆叠更多隔离样本；当前 A～F 和 1/100/2000/2100 阶梯已覆盖主要代码路径与事件边界。
+3. 进入真实 NUC observed 采样准备：先核对部署版本、模型/运行参数、配置、缓存分类、请求样本目标与 RSS 采集来源；固定条件并完成预热。
+4. NUC 样本只报告 TTFT、总延迟分布、Gateway RSS、请求输出规模和并发等 observed 指标。当前没有可用于严格因果归因的生产观测总开关，不新增该开关，不关闭鉴权、错误审计或请求关联。
+5. 根据 NUC observed 分布判断是否有实际瓶颈；若无法建立严格匹配对照，结论标记 not_comparable，不做观测开销因果声明。
