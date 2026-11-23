@@ -496,9 +496,18 @@
             <textarea id="benchPrompt" rows="4">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea>
           </div>
           <div class="bench-actions">
-            <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">开始测试</button>
+            <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">单次测试</button>
+            <label class="small" for="benchRepeatCount">重复次数</label>
+            <input id="benchRepeatCount" type="number" min="1" max="20" step="1" value="10" style="width:88px" aria-describedby="benchRepeatHint">
+            <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runBenchmarkRepeat()">开始串行采样</button>
             <button type="button" class="btn danger" id="benchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
           </div>
+          <p id="benchRepeatHint" class="small muted">1～20 次，默认 10 次；每次独立保存任务，固定当前推理参数，串行执行。</p>
+          <section class="bench-detail-fold" aria-labelledby="benchRepeatReportTitle">
+            <div class="card-head"><h3 id="benchRepeatReportTitle">重复采样报告</h3><button type="button" class="btn sm" id="benchRepeatCopyBtn" onclick="copyBenchmarkRepeatReport()" disabled>复制 Markdown</button></div>
+            <p id="benchRepeatStatus" class="small muted" role="status" aria-live="polite">默认 10 次；每次独立保存到 Benchmark 历史。</p>
+            <pre id="benchRepeatReport" class="bench-out">尚未执行重复采样。</pre>
+          </section>
           <div id="benchMetrics" class="bench-metrics"></div>
           <div id="benchAnalysis" class="bench-analysis" style="display:none"></div>
           <div class="card-head" style="margin-top:8px;margin-bottom:8px"><h2 style="font-size:14px">正文 content</h2></div>
@@ -740,7 +749,7 @@
 
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261123-suite-tab-history-copy-1"></script>
+<script src="/static/dist/app.js?v=20261123-benchmark-repeat-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-key-contrast-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
