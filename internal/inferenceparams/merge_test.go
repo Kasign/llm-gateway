@@ -104,12 +104,21 @@ func TestThinkingClientSilentUsesConfigOff(t *testing.T) {
 	if !containsStr(llama, `"chat_template_kwargs":{"enable_thinking":false}`) {
 		t.Fatalf("llamacpp should preserve the legacy template toggle, got %s", llama)
 	}
-	if containsStr(llama, `"enable_thinking":false`) && !containsStr(llama, `"chat_template_kwargs":{"enable_thinking":false}`) {
+	if containsStr(llama, `,"enable_thinking":false`) {
 		t.Fatalf("llamacpp should not emit unsupported top-level enable_thinking, got %s", llama)
 	}
 	ollama := string(MergeChatBody("ollama", ModeClientFirst, Params{EnableThinking: &off}, raw))
 	if containsStr(ollama, "enable_thinking") || containsStr(ollama, `"think"`) {
 		t.Fatalf("ollama off should not add thinking fields, got %s", ollama)
+	}
+}
+
+func TestThinkingOffPreservesOtherTemplateKwargs(t *testing.T) {
+	off := "false"
+	raw := []byte(`{"messages":[],"chat_template_kwargs":{"custom_flag":true,"enable_thinking":true}}`)
+	out := string(MergeChatBody("llamacpp", ModeGatewayOnly, Params{EnableThinking: &off}, raw))
+	if !containsStr(out, `"custom_flag":true`) || !containsStr(out, `"enable_thinking":false`) || !containsStr(out, `"reasoning_effort":"none"`) {
+		t.Fatalf("thinking off should preserve unrelated template kwargs and disable reasoning, got %s", out)
 	}
 }
 
