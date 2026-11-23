@@ -158,10 +158,33 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 			}
 		}
 	}
-	if task.Status != "running" && task.Status != "cancelling" && s.logs != nil {
-		if raw, err := s.logs.GetRequestAnalysis(r.Context(), run.RequestID); err == nil {
-			if analysis, err := decodeRequestAnalysis(raw); err == nil && analysis != nil {
-				out["analysis"] = analysis
+	if task.Status != "running" && task.Status != "cancelling" {
+		out["analysis_status"] = "not_available"
+		switch {
+		case s.logs == nil:
+			out["analysis_status"] = "store_unavailable"
+			out["analysis_note"] = "请求分析存储当前不可用"
+		default:
+			raw, readErr := s.logs.GetRequestAnalysis(r.Context(), run.RequestID)
+			switch {
+			case readErr == sql.ErrNoRows:
+				out["analysis_status"] = "request_log_missing"
+				out["analysis_note"] = "Benchmark 仍存在，但关联请求日志已不存在；可能是历史保留策略造成的孤立关联"
+			case readErr != nil:
+				out["analysis_status"] = "read_failed"
+				out["analysis_note"] = "读取关联请求分析失败"
+			case raw == "":
+				out["analysis_status"] = "not_recorded"
+				out["analysis_note"] = "关联请求日志存在，但没有持久化 RequestAnalysis"
+			default:
+				analysis, decodeErr := decodeRequestAnalysis(raw)
+				if decodeErr != nil || analysis == nil {
+					out["analysis_status"] = "invalid"
+					out["analysis_note"] = "关联请求分析数据为空或格式无效"
+				} else {
+					out["analysis"] = analysis
+					out["analysis_status"] = "persisted"
+				}
 			}
 		}
 	}
