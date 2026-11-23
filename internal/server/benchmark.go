@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"runtime"
 	"runtime/debug"
@@ -30,8 +31,8 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/logutil"
-	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/model"
+	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
 )
 
@@ -600,7 +601,9 @@ func benchmarkRuntimeProfileMissing(snapshot map[string]interface{}) []string {
 	if !ok {
 		return []string{"backend_runtime_profile_unknown"}
 	}
-	if strings.TrimSpace(fmt.Sprint(profile["backend"])) == "" || strings.TrimSpace(fmt.Sprint(profile["model_id"])) == "" {
+	backend, _ := profile["backend"].(string)
+	modelID, _ := profile["model_id"].(string)
+	if strings.TrimSpace(backend) == "" || strings.TrimSpace(modelID) == "" {
 		return []string{"backend_runtime_profile_identity_unknown"}
 	}
 	parameters, ok := profile["parameters"].(map[string]interface{})
