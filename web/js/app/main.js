@@ -1879,12 +1879,14 @@ async function openBenchmarkComparison(){
       condition_incomplete:'至少一个任务的测试条件不完整',
       condition_mismatch:'测试条件指纹不同',
     };
-    let body='<h3 style="margin:0 0 8px;font-size:14px">'+(result.comparable?'严格可比':'不可严格比较')+'</h3>';
+    const comparisonTitle=!result.comparable?'不可比较':(result.comparison_level==='limited'?'有限可比（追溯信息不完整）':'严格可比');
+    let body='<h3 style="margin:0 0 8px;font-size:14px">'+comparisonTitle+'</h3>';
+    const missing=[...(result.left?.condition_missing||[]),...(result.right?.condition_missing||[])];
     if(!result.comparable){
       body+='<ul class="req-hints">'+(result.reasons||[]).map(reason=>'<li>'+esc(reasonLabels[reason]||reason)+'</li>').join('')+'</ul>';
-      const missing=[...(result.left?.condition_missing||[]),...(result.right?.condition_missing||[])];
-      if(missing.length)body+='<p class="req-note">条件缺失维度：'+esc([...new Set(missing)].join('、'))+'</p>';
-    }else{
+    }
+    if(missing.length)body+='<p class="req-note">'+(result.comparable?'以下字段仅影响复现追溯，不阻断本次同条件比较：':'条件缺失维度：')+esc([...new Set(missing)].join('、'))+'</p>';
+    if(result.comparable){
       const labels={
         latency_ms:'任务总耗时',inference_latency_ms:'Pipeline 耗时',model_load_ms:'模型加载/就绪',
         ttft_ms:'TTFT',input_tokens:'输入 Token',output_tokens:'输出 Token',total_tokens:'总 Token',
@@ -2312,13 +2314,15 @@ const BENCH_CONDITION_MISSING_LABELS={
 };
 function renderBenchCondition(j){
   const status=j.condition_status||'unknown';
-  const labels={complete:'完整',partial:'部分',unknown:'未知'};
+  const labels={complete:'核心条件完整',partial:'条件不足',unknown:'未知'};
   const missing=Array.isArray(j.condition_missing)?j.condition_missing:[];
   const detail=status==='partial'
-    ?'缺失维度：'+(missing.map(x=>BENCH_CONDITION_MISSING_LABELS[x]||x).join('、')||'未提供')
+    ?'运行条件缺失：'+(missing.map(x=>BENCH_CONDITION_MISSING_LABELS[x]||x).join('、')||'未提供')+'；暂不能进行同条件比较。'
     :status==='unknown'
       ?'历史任务未保存条件快照，无法判断是否可比较。'
-      :'条件信息完整；仍需结合具体指标判断测试结果。';
+      :missing.length
+        ?'核心运行条件完整；以下字段仅影响复现追溯，不阻断同条件性能比较：'+missing.map(x=>BENCH_CONDITION_MISSING_LABELS[x]||x).join('、')
+        :'核心运行条件与追溯信息完整；仍需结合具体指标判断测试结果。';
   const fingerprint=typeof j.condition_sha256==='string'?j.condition_sha256:'';
   return '<section class="bench-condition"><h3 style="margin:0 0 6px;font-size:13px">测试条件：'+esc(labels[status]||labels.unknown)+'</h3>'+
     '<p class="req-note" style="margin:0">'+esc(detail)+'</p>'+
@@ -3238,7 +3242,7 @@ function readBenchmarkRepeatReport(){try{const raw=localStorage.getItem(BENCH_RE
 function writeBenchmarkRepeatReport(report){localStorage.setItem(BENCH_REPEAT_STORAGE_KEY,JSON.stringify(report));}
 function benchmarkRepeatSampleFromWrap(wrap,index){
  const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens;
- return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',model:job.model_id||job.model_key||job.llama_model||'unknown',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
+ return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
 }
 function renderBenchmarkRepeatReport(report=readBenchmarkRepeatReport()){
  const output=$('benchRepeatReport'),status=$('benchRepeatStatus'),copy=$('benchRepeatCopyBtn');if(!output)return;

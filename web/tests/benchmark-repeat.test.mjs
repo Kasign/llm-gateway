@@ -33,6 +33,20 @@ test('different condition fingerprints are not pooled', () => {
   assert.equal(summary.cache_metrics && Object.keys(summary.cache_metrics).length, 0);
 });
 
+test('traceability-only gaps allow limited comparison, but runtime-condition gaps still block', () => {
+  const limited = summarizeBenchmarkRepeat([
+    { status: 'completed', condition_status: 'partial', condition_sha256: 'same', condition_missing: ['model_sha256_unknown','gateway_revision_unknown','gateway_build_cleanliness_unknown'], latency_ms: 100, cache_state: 'partial' },
+    { status: 'completed', condition_status: 'partial', condition_sha256: 'same', condition_missing: ['model_sha256_unknown','gateway_revision_unknown','gateway_build_cleanliness_unknown'], latency_ms: 200, cache_state: 'partial' }
+  ]);
+  assert.equal(limited.comparable_count, 2);
+  assert.equal(limited.comparability_level, 'limited');
+  assert.equal(limited.cache_metrics.partial.metrics.latency_ms.median, 150);
+  const blocked = summarizeBenchmarkRepeat([
+    { status: 'completed', condition_status: 'partial', condition_sha256: 'same', condition_missing: ['model_load_state_unknown','model_sha256_unknown'], latency_ms: 100 }
+  ]);
+  assert.equal(blocked.comparable_count, 0);
+});
+
 test('incomplete conditions and detected condition changes are excluded from pooled metrics', () => {
   const incomplete = summarizeBenchmarkRepeat([
     { status: 'completed', condition_status: 'partial', condition_sha256: 'same', latency_ms: 100 }

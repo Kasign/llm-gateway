@@ -570,15 +570,58 @@ func benchmarkBackendVersion(parent context.Context, s *Server, backend string) 
 }
 
 // benchmarkConditionMetadata 计算条件指纹。信息不完整时保留部分指纹，但禁止自动视为严格可比较。
+// benchmarkTraceabilityOnlyMissing 判断缺失项是否仅影响制品追溯，不影响本次运行条件识别。
+func benchmarkTraceabilityOnlyMissing(missing []string) bool {
+	if len(missing) == 0 {
+		return false
+	}
+	for _, item := range missing {
+		switch item {
+		case "model_sha256_unknown", "gateway_revision_unknown", "gateway_build_cleanliness_unknown":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// benchmarkConditionComparisonReady 将历史记录中的“追溯信息不完整”与“运行条件不完整”区分开。
+// 仅当缺失项全部属于非阻断追溯信息时，partial 记录仍可按相同指纹进行有限比较。
+func benchmarkConditionComparisonReady(status string, missing []string) bool {
+	if status == "complete" {
+		return true
+	}
+	return status == "partial" && benchmarkTraceabilityOnlyMissing(missing)
+}
+
+// benchmarkConditionMetadata 计算运行条件指纹。制品追溯信息缺失不再阻断同条件性能比较。
 func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 string) (string, string, []string, error) {
-	missing := make([]string, 0, 6)
+	missing := make([]string, 0, 8)
+	blockingMissing := false
 	modelIdentity, _ := snapshot["model_identity"].(map[string]interface{})
 	modelSHA256 := ""
+	modelID, _ := snapshot["model_id"].(string)
 	if modelIdentity != nil {
 		modelSHA256, _ = modelIdentity["sha256"].(string)
+		if modelID == "" {
+			modelID, _ = modelIdentity["model_id"].(string)
+		}
 	}
 	if strings.TrimSpace(modelSHA256) == "" {
 		missing = append(missing, "model_sha256_unknown")
+	}
+	if strings.TrimSpace(modelID) == "" {
+		missing = append(missing, "model_id_unknown")
+		blockingMissing = true
+	}
+	backend, _ := snapshot["backend"].(string)
+	if strings.TrimSpace(backend) == "" {
+		missing = append(missing, "backend_unknown")
+		blockingMissing = true
+	}
+	if strings.TrimSpace(promptSHA256) == "" {
+		missing = append(missing, "prompt_sha256_unknown")
+		blockingMissing = true
 	}
 	environment, _ := snapshot["environment"].(map[string]interface{})
 	revision, modified := "", ""
@@ -592,6 +635,7 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	switch strings.ToLower(strings.TrimSpace(modified)) {
 	case "true":
 		missing = append(missing, "gateway_build_modified")
+		blockingMissing = true
 	case "false":
 		// 已明确记录构建工作区干净。
 	default:
@@ -600,10 +644,12 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	backendVersion, _ := snapshot["backend_version"].(string)
 	if strings.TrimSpace(backendVersion) == "" {
 		missing = append(missing, "backend_version_unknown")
+		blockingMissing = true
 	}
 	modelLoadState, _ := snapshot["model_load_state_before"].(string)
 	if modelLoadState != "loaded" && modelLoadState != "not_loaded" {
 		missing = append(missing, "model_load_state_unknown")
+		blockingMissing = true
 	}
 	hardware, _ := snapshot["hardware"].(map[string]interface{})
 	cpuModel := ""
@@ -612,16 +658,19 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 	}
 	if strings.TrimSpace(cpuModel) == "" {
 		missing = append(missing, "hardware_model_unknown")
+		blockingMissing = true
 	}
 	if hardware == nil || hardware["memory_bytes"] == nil {
 		missing = append(missing, "hardware_memory_unknown")
+		blockingMissing = true
 	}
 	sort.Strings(missing)
 	status := "complete"
-	if len(missing) > 0 {
+	if blockingMissing {
 		status = "partial"
 	}
-	// model_key 是网关内部可变别名，不影响模型执行条件；保留在历史配置中，但不纳入比较指纹。
+	// model_key 是 Gateway 模型表的唯一业务键，但不是 llama.cpp 请求中的模型 ID；
+	// 条件指纹以实际传给 Backend 的 model_id 为准，避免别名变更误判为模型变化。
 	fingerprintSnapshot := make(map[string]interface{}, len(snapshot))
 	for key, value := range snapshot {
 		if key != "model_key" {
@@ -954,8 +1003,16 @@ func (s *Server) benchmarkCompareAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
+	comparisonLevel := "not_comparable"
+	if comparable {
+		comparisonLevel = "strict"
+		if len(left.ConditionMissing) > 0 || len(right.ConditionMissing) > 0 {
+			comparisonLevel = "limited"
+		}
+	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"comparable": comparable,
+		"comparison_level": comparisonLevel,
 		"reasons": reasons,
 		"left": left,
 		"right": right,

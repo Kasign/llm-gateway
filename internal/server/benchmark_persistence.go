@@ -192,7 +192,11 @@ func benchmarkConditionFromConfigJSON(raw string) (string, string, []string) {
 	if err := json.Unmarshal([]byte(raw), &condition); err != nil || condition.Status == "" {
 		return "", "unknown", nil
 	}
-	return condition.SHA256, condition.Status, append([]string(nil), condition.Missing...)
+	status := condition.Status
+	if benchmarkConditionComparisonReady(status, condition.Missing) {
+		status = "complete"
+	}
+	return condition.SHA256, status, append([]string(nil), condition.Missing...)
 }
 
 func valueOrZero(value *int64) int64 {

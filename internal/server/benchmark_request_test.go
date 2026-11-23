@@ -91,6 +91,39 @@ func containsBenchmarkComparisonReason(values []string, target string) bool {
 }
 
 
+func TestBenchmarkConditionMetadataAllowsTraceabilityGaps(t *testing.T) {
+	snapshot := map[string]interface{}{
+		"backend": "llamacpp",
+		"model_id": "Qwen3.5-4B-IQ4_NL",
+		"model_identity": map[string]interface{}{"model_id": "Qwen3.5-4B-IQ4_NL", "sha256": ""},
+		"environment": map[string]interface{}{"vcs_revision": "", "vcs_modified": ""},
+		"backend_version": "llama.cpp test-build",
+		"model_load_state_before": "loaded",
+		"hardware": map[string]interface{}{"cpu_model": "Intel Core i5-1340P", "memory_bytes": int64(34359738368)},
+	}
+	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil { t.Fatalf("benchmarkConditionMetadata() error = %v", err) }
+	if status != "complete" { t.Fatalf("traceability-only gaps must remain comparable, status = %q, missing=%v", status, missing) }
+	if len(missing) != 3 || !benchmarkTraceabilityOnlyMissing(missing) {
+		t.Fatalf("expected only model SHA / Gateway revision / build cleanliness gaps, got %v", missing)
+	}
+	snapshot["model_load_state_before"] = "unknown"
+	_, status, missing, err = benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil { t.Fatalf("benchmarkConditionMetadata() error = %v", err) }
+	if status != "partial" { t.Fatalf("unknown model load state must block comparison, status=%q missing=%v", status, missing) }
+}
+
+func TestBenchmarkConditionFromConfigJSONReclassifiesTraceabilityOnlyGaps(t *testing.T) {
+	raw := `{"condition_sha256":"same","condition_status":"partial","condition_missing":["gateway_build_cleanliness_unknown","gateway_revision_unknown","model_sha256_unknown"]}`
+	hash, status, missing := benchmarkConditionFromConfigJSON(raw)
+	if hash != "same" || status != "complete" || !benchmarkTraceabilityOnlyMissing(missing) {
+		t.Fatalf("traceability-only historical condition should be comparable: hash=%q status=%q missing=%v", hash, status, missing)
+	}
+	raw = `{"condition_sha256":"same","condition_status":"partial","condition_missing":["model_load_state_unknown","model_sha256_unknown"]}`
+	_, status, _ = benchmarkConditionFromConfigJSON(raw)
+	if status != "partial" { t.Fatalf("unknown model load state must remain blocking, status=%q", status) }
+}
+
 func TestBenchmarkConditionSnapshotFromConfigJSON(t *testing.T) {
 	raw := `{"backend":"llamacpp","condition_status":"partial","environment":{"vcs_revision":"abc123"},"model_identity":{"sha256":"deadbeef"},"runtime_config":{"warm_start":true}}`
 	got := benchmarkConditionSnapshotFromConfigJSON(raw)

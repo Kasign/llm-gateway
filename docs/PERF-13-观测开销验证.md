@@ -207,6 +207,51 @@
 - 本次采样的 `cache_n=7`，存在缓存命中；不能将它当作冷缓存样本，也不能与无缓存样本混合计算同一组性能分布。
 - 结论：思考关闭参数修复通过代码 CI 和真实 NUC 请求验证。下一步固定模型、参数、提示词与输出目标，分开记录缓存命中/未命中样本，完成串行重复采样；不重跑 PERF-12。
 
+## 10. Benchmark 条件完整度规则修正（2026-11-23）
+
+### 10.1 问题与结论
+
+NUC 串行采样的 10 条任务均为 completed，但条件状态为 partial，缺失项只有：
+
+- model_sha256_unknown
+- gateway_revision_unknown
+- gateway_build_cleanliness_unknown
+
+此前实现将“性能比较条件完整度”和“实验制品追溯完整度”混为一谈，导致全部样本被排除。该判定过严，需要区分运行条件与追溯信息。
+
+### 10.2 新规则
+
+以下信息缺失只降低复现追溯等级，不单独阻断同条件性能比较：
+
+- 模型文件 SHA-256：只要 Backend 实际模型 ID 可确认，允许使用该 ID 作为本轮运行身份；不能据此声称模型文件字节级一致。
+- Gateway Revision：缺失时不阻断，但不能声称已确认线上代码版本。
+- Gateway 构建洁净状态未知：缺失时不阻断；若明确检测到构建包含未提交修改，仍作为比较阻断项。
+
+以下运行条件仍是比较门槛：Backend、实际模型 ID、Prompt SHA-256、Backend 版本、测试前模型加载状态、CPU 型号、内存快照。任一关键项缺失，仍标记 partial 并阻止自动合并。
+
+比较仍要求任务 completed、场景相同、条件指纹非空且一致。比较接口区分 strict 与 limited：存在上述追溯缺口时标记 limited，不再错误展示为严格可比。
+
+### 10.3 模型标识语义
+
+- Gateway 的 models.model_key 是数据库唯一业务键（全局 UNIQUE），用于定位 Gateway 管理的模型记录。
+- llama.cpp 请求实际使用的 model_id 是 Backend 注册模型标识；它不是 Gateway model_key，也不是文件 SHA-256。
+- 条件指纹以 Backend、实际 model_id 和推理配置为运行身份依据；model_key 作为 Gateway 别名保留在快照中，但不单独决定模型内容身份。
+- 当 Benchmark 通过 active model / model_id 路径运行且没有关联到 Gateway Model 记录时，model_key 为空不代表 llama.cpp 模型未知；只要实际 model_id 有值，仍可按有限追溯条件比较。
+
+### 10.4 历史记录兼容
+
+历史任务不做数据迁移。比较读取 ConfigJSON 时，若旧记录的 condition_status=partial 且 condition_missing 仅包含上述三种追溯缺口，则按可比较运行条件重新分类；其他 partial 记录继续阻断。历史原始 condition_status 与缺失字段仍保留在 ConfigJSON 中。
+
+### 10.5 当前 10 次采样的处理
+
+本批 10 次采样保留原始记录，不重新执行。用户提供的第一条任务已确认：
+- Backend llamacpp、实际 model_id Qwen3.5-4B-IQ4_NL；
+- 测试前模型状态 loaded；
+- Backend 版本、CPU、内存等条件未列入 condition_missing；
+- 缺失项仅为三种追溯信息。
+
+因此该样本属于有限追溯、可按相同指纹与其余样本分组的 observed 数据；仍不能称为模型文件 SHA 和线上 Gateway 版本均已确认的严格可复现基线。
+
 ## 9. 下一步执行顺序
 
 1. 打开 NUC 当前管理台，确认当前活动 Backend、模型标识和模型已加载状态；部署 revision 无现成证据时记为 `unknown`，不额外取 SHA、不阻塞采样。
