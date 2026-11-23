@@ -1,6 +1,8 @@
 package server
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,4 +126,37 @@ func TestBenchmarkModelLoadStateUsesFreshMatchingRuntimeEvidence(t *testing.T) {
 	if got := benchmarkModelLoadState(fresh, "ollama", "Qwen3.5-4B-IQ4_NL", now); got != "unknown" { t.Fatalf("mismatched backend state = %q", got) }
 	fresh.SampledAt = now.Add(-runtimeSnapshotMaxAge - time.Second)
 	if got := benchmarkModelLoadState(fresh, "llamacpp", "Qwen3.5-4B-IQ4_NL", now); got != "unknown" { t.Fatalf("stale state = %q", got) }
+}
+
+func TestClassifyBenchmarkAnalysis(t *testing.T) {
+	valid := encodeRequestAnalysis(buildRequestAnalysis(analysisInput{TotalMS: 123}))
+	tests := []struct {
+		name string
+		raw string
+		err error
+		want string
+	}{
+		{name: "persisted", raw: valid, want: "persisted"},
+		{name: "not recorded", want: "not_recorded"},
+		{name: "request log missing", err: sql.ErrNoRows, want: "request_log_missing"},
+		{name: "read failed", err: errors.New("database unavailable"), want: "read_failed"},
+		{name: "invalid json", raw: "{", want: "invalid"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, note, analysis := classifyBenchmarkAnalysis(tc.raw, tc.err)
+			if status != tc.want {
+				t.Fatalf("status = %q, want %q (note=%q)", status, tc.want, note)
+			}
+			if tc.want == "persisted" && analysis == nil {
+				t.Fatal("persisted analysis must be returned")
+			}
+			if tc.want != "persisted" && analysis != nil {
+				t.Fatalf("unexpected analysis for status %q: %+v", status, analysis)
+			}
+			if tc.want != "persisted" && note == "" {
+				t.Fatalf("status %q must explain analysis availability", status)
+			}
+		})
+	}
 }
