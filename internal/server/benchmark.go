@@ -498,27 +498,29 @@ func benchmarkHardwareSnapshot(s *Server) map[string]interface{} {
 // benchmarkModelLoadStateBefore 优先使用后台快照；证据缺失或过期时，在创建 Benchmark 条件快照前主动读取一次上游运行时状态。
 //
 // 该读取只调用 Provider Runtime API，不发起模型推理，也不触发加载/卸载。
-func (s *Server) benchmarkModelLoadStateBefore(parent context.Context, backend, modelID string) string {
+func (s *Server) benchmarkModelLoadStateBefore(parent context.Context, backend, modelID string) (string, string) {
 	now := time.Now()
 	sample := s.runtimeSnapshotSampleLatest()
 	state := benchmarkModelLoadState(sample, backend, modelID, now)
 	if state != "unknown" || !isLocalInferenceBackend(backend) {
-		return state
+		source := "runtime_snapshot_cache"
+		if sample == nil || sample.Source == "" { source = "unavailable" } else { source = sample.Source }
+		return state, source
 	}
 
 	client, err := s.localClientForBackend(backend)
 	if err != nil || client == nil {
-		return "unknown"
+		return "unknown", "benchmark_preflight_unavailable"
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	snapshot, err := client.RuntimeSnapshot(ctx, modelID)
 	if err != nil || snapshot == nil {
-		return "unknown"
+		return "unknown", "benchmark_preflight_failed"
 	}
 	snapshot.SampledAt = time.Now()
 	s.setRuntimeSnapshotSample(snapshot, "complete", "benchmark_preflight")
-	return benchmarkModelLoadState(s.runtimeSnapshotSampleLatest(), backend, modelID, time.Now())
+	return benchmarkModelLoadState(s.runtimeSnapshotSampleLatest(), backend, modelID, time.Now()), "benchmark_preflight"
 }
 
 func benchmarkModelLoadState(sample *runtimeSnapshotSample, backend, modelID string, now time.Time) string {
@@ -1143,7 +1145,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		modelIdentity["quantization"] = m.Quantization
 		modelIdentity["sha256"] = strings.ToLower(strings.TrimSpace(m.SHA256))
 	}
-	modelLoadState := s.benchmarkModelLoadStateBefore(r.Context(), target.Backend, taskModelID)
+	modelLoadState, modelLoadStateSource := s.benchmarkModelLoadStateBefore(r.Context(), target.Backend, taskModelID)
 	backendVersion, backendVersionSource, backendVersionStatus := benchmarkBackendVersion(r.Context(), s, target.Backend)
 
 	toolNames := []string{}
@@ -1163,7 +1165,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		"repeat_penalty": in.RepeatPenalty, "seed": in.Seed, "enable_thinking": in.EnableThinking, "stop": runIn.Stop,
 		"model_identity": modelIdentity,
 		"model_load_state_before": modelLoadState,
-		"model_load_state_source": "runtime_snapshot_cache",
+		"model_load_state_source": modelLoadStateSource,
 		"environment": benchmarkEnvironmentSnapshot(),
 		"hardware": benchmarkHardwareSnapshot(s),
 		"backend_version": backendVersion,
