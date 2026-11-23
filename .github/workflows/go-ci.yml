@@ -306,6 +306,23 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+  govulncheck:
+    name: Go 依赖与标准库漏洞扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 扫描可达 Go 漏洞
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
   build:
     name: 编译与 Docker 镜像
     runs-on: ubuntu-latest
@@ -336,5 +353,27 @@ jobs:
             GATEWAY_BUILD_REVISION=${{ github.sha }}
             GATEWAY_BUILD_MODIFIED=false
           push: false
+          load: true
           cache-from: type=gha,scope=llm-gateway-release
           cache-to: type=gha,scope=llm-gateway-release,mode=max
+
+      - name: 验证 release 镜像非 root 身份与模型目录读写
+        run: |
+          set -Eeuo pipefail
+          model_dir="${RUNNER_TEMP}/gateway-models"
+          mkdir -p "${model_dir}"
+          printf 'existing-model-readable\n' > "${model_dir}/existing-model.gguf"
+          chmod 0644 "${model_dir}/existing-model.gguf"
+          # 仅在隔离的 CI 临时目录中模拟宿主机目录所有权准备。
+          docker run --rm --user 0:0 \
+            -v "${model_dir}:/data/models" \
+            --entrypoint sh llm-gateway:ci \
+            -ec 'chown 10001:10001 /data/models'
+          docker run --rm \
+            -v "${model_dir}:/data/models" \
+            --entrypoint sh llm-gateway:ci \
+            -ec 'test "$(id -u)" = 10001
+                 && test "$(id -g)" = 10001
+                 && test -r /data/models/existing-model.gguf
+                 && test -w /data/models
+                 && touch /data/models/.gateway-ci-write-test'
