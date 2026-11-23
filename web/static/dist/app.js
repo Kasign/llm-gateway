@@ -2734,7 +2734,7 @@ async function pollBenchmarkJob(jobId, t0, token, onObserved = null) {
       if (typeof onObserved === "function") onObserved(wrap);
       setBenchResultScopeFromJob(wrap);
       const j = benchJobPayload(wrap);
-      if (j.status === "running") {
+      if (benchmarkSuiteIsActiveStatus(j.status)) {
         renderBenchLive(wrap, true);
         renderBenchRunningMetrics(wrap, t0);
         await new Promise((r) => setTimeout(r, 800));
@@ -3010,11 +3010,15 @@ const TERMINAL_BENCHMARK_JOB_STATUSES = new Set(['completed','failed','cancelled
 function benchmarkSuiteIsTerminalStatus(status){
   return TERMINAL_BENCHMARK_JOB_STATUSES.has(String(status||'').trim().toLowerCase());
 }
+function benchmarkSuiteIsActiveStatus(status){
+  const value=String(status||'').trim().toLowerCase();
+  return value==='running'||value==='cancelling';
+}
 function benchmarkSuiteTaskOutcome({jobStatus='',jobID='',cancelled=false,lastObservedServerStatus=''}={}){
   const returnedStatus=String(jobStatus||'').trim().toLowerCase();
   const serverStatus=returnedStatus||String(lastObservedServerStatus||'').trim().toLowerCase()||'unknown';
   if(benchmarkSuiteIsTerminalStatus(returnedStatus))return {status:returnedStatus,server_status:serverStatus,poll_status:'completed',result_status:returnedStatus};
-  if(String(jobID||'').trim())return {status:'poll_interrupted',server_status:serverStatus,poll_status:cancelled?'cancelled':'interrupted',result_status:'unknown'};
+  if(String(jobID||'').trim())return {status:cancelled?'cancelled':'running',server_status:serverStatus,poll_status:cancelled?'cancelled':'interrupted',result_status:'unknown'};
   if(cancelled)return {status:'cancelled',server_status:serverStatus,poll_status:'cancelled',result_status:'not_submitted'};
   return {status:'failed',server_status:serverStatus,poll_status:'failed',result_status:'not_submitted'};
 }
@@ -3023,20 +3027,20 @@ function benchmarkSuiteCaseHasRecoverableJob(item){
   const status=String(item.status||'').trim().toLowerCase();
   const resultStatus=String(item.result_status||'').trim().toLowerCase();
   if(benchmarkSuiteIsTerminalStatus(resultStatus))return false;
-  return status==='running'||status==='poll_interrupted'||status==='unknown';
+  return status==='running'||status==='poll_interrupted'||status==='unknown'||(status==='cancelled'&&resultStatus==='unknown');
 }
 function benchmarkSuiteStatusForReport(item){
   if(!item)return 'unknown';
   const pollStatus=String(item.poll_status||'').trim().toLowerCase();
   const serverStatus=String(item.server_status||'').trim().toLowerCase()||'unknown';
   const resultStatus=String(item.result_status||'').trim().toLowerCase();
-  if(resultStatus==='unknown'||pollStatus==='interrupted'||(pollStatus==='cancelled'&&resultStatus!=='not_submitted'))return 'poll_interrupted（最近确认服务端状态：'+serverStatus+'；轮询：'+(pollStatus||'unknown')+'）';
+  if(pollStatus==='polling')return 'polling（最近确认服务端状态：'+(serverStatus==='unknown'?'服务端状态未确认':serverStatus)+'）';if(resultStatus==='unknown'||pollStatus==='interrupted'||(pollStatus==='cancelled'&&resultStatus!=='not_submitted')){const displayStatus=pollStatus==='cancelled'?'client_cancelled_unverified':'poll_interrupted';return displayStatus+'（最近确认服务端状态：'+serverStatus+'；轮询：'+(pollStatus||'unknown')+'）';}
   if(resultStatus&&resultStatus!=='not_submitted')return resultStatus;
   if(!pollStatus&&String(item.status||'').trim().toLowerCase()==='running')return 'legacy_running_unverified（旧报告未保留服务端轮询回执）';
   return String(item.status||'').trim().toLowerCase()||'unknown';
 }
 function benchmarkSuiteTaskStatus(status,jobID,cancelled,lastObservedServerStatus=''){
-  return benchmarkSuiteTaskOutcome({jobStatus:status,jobID,cancelled,lastObservedServerStatus});
+  return benchmarkSuiteTaskOutcome({jobStatus:status,jobID,cancelled,lastObservedServerStatus}).status;
 }
 
 async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onCreated=null,onObserved=null){
@@ -3280,7 +3284,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       }catch(error){failure=error?.message||'任务执行失败'}
       const job=benchJobPayload(wrap||{});
       const cancelled=benchSuiteCancelRequested;
-      const outcome=benchmarkSuiteTaskStatus(job.status,job.job_id||observedJobId||previous?.job_id||null,cancelled,lastObservedServerStatus);
+      const outcome=benchmarkSuiteTaskOutcome({jobStatus:job.status,jobID:job.job_id||observedJobId||previous?.job_id||null,cancelled,lastObservedServerStatus});
       const resultStatus=outcome.status;
       const runtimeAfter=outcome.result_status==='unknown'
         ?{status:'not_sampled',observed_at:new Date().toISOString(),error:'尚未取得服务端任务终态，未采集完成后 Runtime Snapshot'}

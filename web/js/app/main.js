@@ -24,7 +24,7 @@ import {
   renderStreamEventsSection,
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
-import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
+import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsActiveStatus, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
 
 // 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
 initAdminKey();
@@ -2419,7 +2419,7 @@ async function pollBenchmarkJob(jobId,t0,token,onObserved=null){
     if(typeof onObserved==='function')onObserved(wrap);
     setBenchResultScopeFromJob(wrap);
     const j=benchJobPayload(wrap);
-    if(j.status==='running'){
+    if(benchmarkSuiteIsActiveStatus(j.status)){
       renderBenchLive(wrap,true);
       renderBenchRunningMetrics(wrap,t0);
       await new Promise(r=>setTimeout(r,800));
@@ -2542,7 +2542,11 @@ async function benchmarkTextSHA256(value){
 }
 function benchmarkSuiteCaseStatusRank(item){
   const status=String(item?.status||item?.job?.status||'').toLowerCase();
-  return status==='completed'?4:(status==='failed'||status==='cancelled'?3:(status==='running'||status==='poll_interrupted')?2:status==='submitting'?1:0);
+  const resultStatus=String(item?.result_status||'').toLowerCase();
+  if(status==='completed'||resultStatus==='completed')return 4;
+  if(status==='failed'||(status==='cancelled'&&resultStatus!=='unknown'))return 3;
+  if(status==='running'||status==='poll_interrupted'||status==='unknown'||(status==='cancelled'&&resultStatus==='unknown'))return 2;
+  return status==='submitting'?1:0;
 }
 function normalizeBenchmarkSuiteCases(cases){
   const byID=new Map();
@@ -2730,7 +2734,7 @@ async function captureBenchmarkRuntime(){
   }
 }
 function benchmarkSuiteTaskStatus(status,jobID,cancelled,lastObservedServerStatus=''){
-  return benchmarkSuiteTaskOutcome({jobStatus:status,jobID,cancelled,lastObservedServerStatus});
+  return benchmarkSuiteTaskOutcome({jobStatus:status,jobID,cancelled,lastObservedServerStatus}).status;
 }
 
 async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onCreated=null,onObserved=null){
@@ -2981,7 +2985,7 @@ async function runBenchmarkSuite(resumeExisting=false){
       }catch(error){failure=error?.message||'任务执行失败'}
       const job=benchJobPayload(wrap||{});
       const cancelled=benchSuiteCancelRequested;
-      const outcome=benchmarkSuiteTaskStatus(job.status,job.job_id||observedJobId||previous?.job_id||null,cancelled,lastObservedServerStatus);
+      const outcome=benchmarkSuiteTaskOutcome({jobStatus:job.status,jobID:job.job_id||observedJobId||previous?.job_id||null,cancelled,lastObservedServerStatus});
       const resultStatus=outcome.status;
       const runtimeAfter=outcome.result_status==='unknown'
         ?{status:'not_sampled',observed_at:new Date().toISOString(),error:'尚未取得服务端任务终态，未采集完成后 Runtime Snapshot'}

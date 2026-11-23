@@ -15,6 +15,10 @@ export function benchmarkSuiteIsTerminalStatus(status) {
   return TERMINAL_JOB_STATUSES.has(normalizedStatus(status));
 }
 
+export function benchmarkSuiteIsActiveStatus(status) {
+  return normalizedStatus(status) === 'running' || normalizedStatus(status) === 'cancelling';
+}
+
 // status 表示可执行/恢复状态；server_status 只记录服务端 GET 真正返回的状态。
 export function benchmarkSuiteTaskOutcome({
   jobStatus = '',
@@ -36,7 +40,7 @@ export function benchmarkSuiteTaskOutcome({
 
   if (String(jobID || '').trim()) {
     return {
-      status: 'poll_interrupted',
+      status: cancelled ? 'cancelled' : 'running',
       server_status: serverStatus,
       poll_status: cancelled ? 'cancelled' : 'interrupted',
       result_status: 'unknown'
@@ -60,13 +64,13 @@ export function benchmarkSuiteTaskOutcome({
   };
 }
 
-// 旧报告只有 status=running 和 job_id，仍可恢复；新报告的 poll_interrupted 也必须继续查询原 Job。
+// 旧报告的 running + job_id 和所有服务端结果未决的任务都保留原 Job，恢复时只查询、不重复提交。
 export function benchmarkSuiteCaseHasRecoverableJob(item) {
   if (!item || !String(item.job_id || '').trim()) return false;
   const status = normalizedStatus(item.status);
   const resultStatus = normalizedStatus(item.result_status);
   if (benchmarkSuiteIsTerminalStatus(resultStatus)) return false;
-  return status === 'running' || status === 'poll_interrupted' || status === 'unknown';
+  return status === 'running' || status === 'poll_interrupted' || status === 'unknown' || (status === 'cancelled' && resultStatus === 'unknown');
 }
 
 export function benchmarkSuiteStatusForReport(item) {
@@ -75,8 +79,12 @@ export function benchmarkSuiteStatusForReport(item) {
   const serverStatus = normalizedStatus(item.server_status) || 'unknown';
   const resultStatus = normalizedStatus(item.result_status);
 
+  if (pollStatus === 'polling') {
+    return 'polling（最近确认服务端状态：' + (serverStatus === 'unknown' ? '服务端状态未确认' : serverStatus) + '）';
+  }
   if (resultStatus === 'unknown' || pollStatus === 'interrupted' || (pollStatus === 'cancelled' && resultStatus !== 'not_submitted')) {
-    return 'poll_interrupted（最近确认服务端状态：' + serverStatus + '；轮询：' + (pollStatus || 'unknown') + '）';
+    const displayStatus = pollStatus === 'cancelled' ? 'client_cancelled_unverified' : 'poll_interrupted';
+    return displayStatus + '（最近确认服务端状态：' + serverStatus + '；轮询：' + (pollStatus || 'unknown') + '）';
   }
   if (resultStatus && resultStatus !== 'not_submitted') return resultStatus;
   if (!pollStatus && normalizedStatus(item.status) === 'running') {
