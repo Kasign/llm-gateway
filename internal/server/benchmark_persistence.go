@@ -184,19 +184,35 @@ func (s *Server) benchmarkGetFromStore(w http.ResponseWriter, r *http.Request, i
 
 // benchmarkConditionFromConfigJSON 从 Task 配置快照恢复比较元数据；兼容早期没有这些字段的历史记录。
 func benchmarkConditionFromConfigJSON(raw string) (string, string, []string) {
-	var condition struct {
-		SHA256  string   `json:"condition_sha256"`
-		Status  string   `json:"condition_status"`
-		Missing []string `json:"condition_missing"`
-	}
-	if err := json.Unmarshal([]byte(raw), &condition); err != nil || condition.Status == "" {
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil || len(config) == 0 {
 		return "", "unknown", nil
 	}
-	status := condition.Status
-	if benchmarkConditionComparisonReady(status, condition.Missing) {
-		status = "complete"
+	conditionHash, _ := config["condition_sha256"].(string)
+	status, _ := config["condition_status"].(string)
+	if status == "" {
+		return "", "unknown", nil
 	}
-	return condition.SHA256, status, append([]string(nil), condition.Missing...)
+	missing := make([]string, 0)
+	if values, ok := config["condition_missing"].([]interface{}); ok {
+		for _, value := range values {
+			if item, ok := value.(string); ok {
+				missing = append(missing, item)
+			}
+		}
+	}
+	for _, item := range benchmarkRuntimeProfileMissing(config) {
+		if !containsString(missing, item) {
+			missing = append(missing, item)
+		}
+	}
+	sort.Strings(missing)
+	if benchmarkConditionComparisonReady(status, missing) {
+		status = "complete"
+	} else if len(missing) > 0 {
+		status = "partial"
+	}
+	return conditionHash, status, missing
 }
 
 func valueOrZero(value *int64) int64 {

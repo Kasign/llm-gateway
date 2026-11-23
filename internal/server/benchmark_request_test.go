@@ -91,6 +91,23 @@ func containsBenchmarkComparisonReason(values []string, target string) bool {
 }
 
 
+func TestBenchmarkConditionMetadataRequiresCompleteBackendRuntimeProfile(t *testing.T) {
+	snapshot := map[string]interface{}{
+		"backend": "llamacpp",
+		"model_id": "Qwen3.5-4B-IQ4_NL",
+		"model_identity": map[string]interface{}{"model_id": "Qwen3.5-4B-IQ4_NL", "sha256": "deadbeef"},
+		"environment": map[string]interface{}{"vcs_revision": "abc123", "vcs_modified": "false"},
+		"backend_version": "llama.cpp test-build",
+		"model_load_state_before": "loaded",
+		"hardware": map[string]interface{}{"cpu_model": "Intel Core i5-1340P", "memory_bytes": int64(34359738368)},
+	}
+	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil { t.Fatal(err) }
+	if status != "partial" || !containsString(missing, "backend_runtime_profile_unknown") {
+		t.Fatalf("missing runtime profile must block strict comparison: status=%s missing=%v", status, missing)
+	}
+}
+
 func TestBenchmarkConditionMetadataAllowsTraceabilityGaps(t *testing.T) {
 	snapshot := map[string]interface{}{
 		"backend": "llamacpp",
@@ -100,6 +117,14 @@ func TestBenchmarkConditionMetadataAllowsTraceabilityGaps(t *testing.T) {
 		"backend_version": "llama.cpp test-build",
 		"model_load_state_before": "loaded",
 		"hardware": map[string]interface{}{"cpu_model": "Intel Core i5-1340P", "memory_bytes": int64(34359738368)},
+		"backend_runtime_profile": map[string]interface{}{
+			"backend": "llamacpp", "model_id": "Qwen3.5-4B-IQ4_NL",
+			"parameters": map[string]interface{}{
+				"threads": 8, "threads_batch": 8, "batch_size": 512, "ubatch_size": 128,
+				"ctx_size": 8192, "n_gpu_layers": 0, "flash_attn": false,
+				"cache_type_k": "q8_0", "cache_type_v": "q8_0",
+			},
+		},
 	}
 	_, status, missing, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
 	if err != nil { t.Fatalf("benchmarkConditionMetadata() error = %v", err) }
@@ -114,7 +139,7 @@ func TestBenchmarkConditionMetadataAllowsTraceabilityGaps(t *testing.T) {
 }
 
 func TestBenchmarkConditionFromConfigJSONReclassifiesTraceabilityOnlyGaps(t *testing.T) {
-	raw := `{"condition_sha256":"same","condition_status":"partial","condition_missing":["gateway_build_cleanliness_unknown","gateway_revision_unknown","model_sha256_unknown"]}`
+	raw := `{"condition_sha256":"same","condition_status":"partial","condition_missing":["gateway_build_cleanliness_unknown","gateway_revision_unknown","model_sha256_unknown"],"backend_runtime_profile":{"backend":"llamacpp","model_id":"Qwen3.5-4B-IQ4_NL","parameters":{"threads":8,"threads_batch":8,"batch_size":512,"ubatch_size":128,"ctx_size":8192,"n_gpu_layers":0,"flash_attn":false,"cache_type_k":"q8_0","cache_type_v":"q8_0"}}}`
 	hash, status, missing := benchmarkConditionFromConfigJSON(raw)
 	if hash != "same" || status != "complete" || !benchmarkTraceabilityOnlyMissing(missing) {
 		t.Fatalf("traceability-only historical condition should be comparable: hash=%q status=%q missing=%v", hash, status, missing)

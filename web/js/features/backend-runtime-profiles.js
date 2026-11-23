@@ -116,10 +116,11 @@ async function saveProfile(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const msg = $('runtimeProfileMsg');
-    if (msg) msg.textContent = '已保存档案 v' + result.profile.version + '。请确认档案值与当前 llama.cpp 实际启动参数一致。';
+    const savedVersion = result.profile.version;
     clearForm();
     await load();
+    const msg = $('runtimeProfileMsg');
+    if (msg) msg.textContent = '已保存档案 v' + savedVersion + '。请确认档案值与当前 llama.cpp 实际启动参数一致。';
   } catch (error) {
     showError(error);
   }
@@ -149,7 +150,7 @@ async function loadBenchmarkOptions(backend = '', modelID = '') {
     const query = new URLSearchParams();
     if (backend) query.set('backend', backend);
     if (modelID) query.set('model_id', modelID);
-    const result = await api('/api/admin/backend-runtime-profiles' + (query.size ? '?' + query.toString() : ''));
+    const result = await api('/api/admin/backend-runtime-profiles' + (query.toString() ? '?' + query.toString() : ''));
     const items = Array.isArray(result.items) ? result.items : [];
     const previous = select.value;
     select.innerHTML = '<option value="">不关联档案（运行参数未知）</option>' + items.map((p) =>

@@ -30,6 +30,7 @@ import (
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/logutil"
+	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/model"
 	"github.com/whl/llm-gateway/internal/store"
 )
@@ -594,6 +595,33 @@ func benchmarkConditionComparisonReady(status string, missing []string) bool {
 }
 
 // benchmarkConditionMetadata 计算运行条件指纹。制品追溯信息缺失不再阻断同条件性能比较。
+func benchmarkRuntimeProfileMissing(snapshot map[string]interface{}) []string {
+	profile, ok := snapshot["backend_runtime_profile"].(map[string]interface{})
+	if !ok {
+		return []string{"backend_runtime_profile_unknown"}
+	}
+	if strings.TrimSpace(fmt.Sprint(profile["backend"])) == "" || strings.TrimSpace(fmt.Sprint(profile["model_id"])) == "" {
+		return []string{"backend_runtime_profile_identity_unknown"}
+	}
+	parameters, ok := profile["parameters"].(map[string]interface{})
+	if !ok {
+		return []string{"backend_runtime_profile_parameters_unknown"}
+	}
+	required := []string{"threads", "threads_batch", "batch_size", "ubatch_size", "ctx_size", "n_gpu_layers", "flash_attn", "cache_type_k", "cache_type_v"}
+	missing := make([]string, 0)
+	for _, key := range required {
+		value, exists := parameters[key]
+		if !exists || value == nil {
+			missing = append(missing, "backend_runtime_profile_"+key+"_unknown")
+			continue
+		}
+		if text, isString := value.(string); isString && strings.TrimSpace(text) == "" {
+			missing = append(missing, "backend_runtime_profile_"+key+"_unknown")
+		}
+	}
+	return missing
+}
+
 func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 string) (string, string, []string, error) {
 	missing := make([]string, 0, 8)
 	blockingMissing := false
@@ -605,6 +633,11 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 		if modelID == "" {
 			modelID, _ = modelIdentity["model_id"].(string)
 		}
+	}
+	profileMissing := benchmarkRuntimeProfileMissing(snapshot)
+	if len(profileMissing) > 0 {
+		missing = append(missing, profileMissing...)
+		blockingMissing = true
 	}
 	if strings.TrimSpace(modelSHA256) == "" {
 		missing = append(missing, "model_sha256_unknown")
@@ -1255,7 +1288,11 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if profileID := strings.TrimSpace(in.RuntimeProfileID); profileID != "" {
 		profileSnapshot, profileErr := s.backendRuntimeProfileSnapshot(r.Context(), profileID, target.Backend, taskModelID)
 		if profileErr != nil {
-			jsonError(w, http.StatusBadRequest, "benchmark_runtime_profile_invalid", profileErr.Error())
+			if errors.Is(profileErr, errBackendRuntimeProfileMismatch) || errors.Is(profileErr, settings.ErrBackendRuntimeProfileNotFound) {
+				jsonError(w, http.StatusBadRequest, "benchmark_runtime_profile_invalid", profileErr.Error())
+			} else {
+				jsonError(w, http.StatusServiceUnavailable, "benchmark_runtime_profile_unavailable", "failed to load Backend runtime profile")
+			}
 			return
 		}
 		configSnapshot["backend_runtime_profile"] = profileSnapshot

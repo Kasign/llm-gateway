@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/whl/llm-gateway/internal/settings"
 )
+
+var errBackendRuntimeProfileMismatch = errors.New("backend runtime profile does not match benchmark target")
 
 func (s *Server) backendRuntimeProfilesAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
@@ -37,9 +40,19 @@ func (s *Server) backendRuntimeProfilesAPI(w http.ResponseWriter, r *http.Reques
 		}
 		if r.Method == http.MethodPost {
 			profile.ID = newID()
-		} else if strings.TrimSpace(profile.ID) == "" {
-			jsonError(w, http.StatusBadRequest, "invalid_request", "profile id is required for update")
-			return
+		} else {
+			if strings.TrimSpace(profile.ID) == "" {
+				jsonError(w, http.StatusBadRequest, "invalid_request", "profile id is required for update")
+				return
+			}
+			if _, err := s.settings.GetBackendRuntimeProfile(r.Context(), profile.ID); err != nil {
+				if errors.Is(err, settings.ErrBackendRuntimeProfileNotFound) {
+					jsonError(w, http.StatusNotFound, "not_found", "backend runtime profile not found")
+				} else {
+					jsonError(w, http.StatusInternalServerError, "settings_read_failed", "failed to read backend runtime profile")
+				}
+				return
+			}
 		}
 		saved, err := s.settings.SaveBackendRuntimeProfile(r.Context(), profile)
 		if err != nil {
@@ -91,18 +104,28 @@ func (s *Server) backendRuntimeProfileSnapshot(ctx context.Context, id, backend,
 		return nil, err
 	}
 	if strings.ToLower(strings.TrimSpace(profile.Backend)) != strings.ToLower(strings.TrimSpace(backend)) {
-		return nil, errors.New("runtime profile backend does not match the benchmark backend")
+		return nil, fmt.Errorf("%w: backend does not match", errBackendRuntimeProfileMismatch)
 	}
 	if strings.TrimSpace(profile.ModelID) != strings.TrimSpace(modelID) {
-		return nil, errors.New("runtime profile model_id does not match the benchmark model")
+		return nil, fmt.Errorf("%w: model_id does not match", errBackendRuntimeProfileMismatch)
 	}
+	parameters := map[string]interface{}{}
+	if profile.Parameters.Threads != nil { parameters["threads"] = *profile.Parameters.Threads }
+	if profile.Parameters.ThreadsBatch != nil { parameters["threads_batch"] = *profile.Parameters.ThreadsBatch }
+	if profile.Parameters.BatchSize != nil { parameters["batch_size"] = *profile.Parameters.BatchSize }
+	if profile.Parameters.UBatchSize != nil { parameters["ubatch_size"] = *profile.Parameters.UBatchSize }
+	if profile.Parameters.ContextSize != nil { parameters["ctx_size"] = *profile.Parameters.ContextSize }
+	if profile.Parameters.GPULayers != nil { parameters["n_gpu_layers"] = *profile.Parameters.GPULayers }
+	if profile.Parameters.FlashAttention != nil { parameters["flash_attn"] = *profile.Parameters.FlashAttention }
+	if profile.Parameters.CacheTypeK != "" { parameters["cache_type_k"] = profile.Parameters.CacheTypeK }
+	if profile.Parameters.CacheTypeV != "" { parameters["cache_type_v"] = profile.Parameters.CacheTypeV }
 	return map[string]interface{}{
 		"profile_id": profile.ID,
 		"profile_version": profile.Version,
 		"source": profile.Source,
 		"backend": profile.Backend,
 		"model_id": profile.ModelID,
-		"parameters": profile.Parameters,
+		"parameters": parameters,
 		"updated_at": profile.UpdatedAt,
 	}, nil
 }
