@@ -1,6 +1,6 @@
 # PERF-10 Profile 存储与查询设计
 
-> 状态：实施中（请求分析保留与 Benchmark 引用一致性已进入代码修复）
+> 状态：实施中（请求分析生命周期修复已通过 CI；Benchmark 关联分析状态已补充，等待新一轮 CI）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -49,7 +49,7 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 
 - Benchmark Task/Run 仍保留时，其 RequestID 对应的核心 RequestLog/RequestAnalysis 不应被普通请求清理策略提前删除。
 - Payload、原始 SSE、预览、工具事件属于更高敏感度/更大体积的数据，不应因为 Benchmark 保留而无限期保留。
-- 当前实施顺序为：同一轮清理先按统一 cutoff 删除到期 Benchmark Task（Run 由外键级联删除），再清理过期 RequestLog。Store 层额外使用 `NOT EXISTS` 检查，任何仍被 BenchmarkRun 引用的请求都不会被请求清理删除。
+- 当前实施顺序为：同一轮清理先按统一 cutoff 删除到期 Benchmark Task（Run 由外键级联删除），再清理过期 RequestLog。Store 层额外使用 `NOT EXISTS` 检查，任何仍被 BenchmarkRun 引用的请求都不会被请求清理删除。该修复已通过 MariaDB 集成验收、竞态测试与静态检查。
 - 清理必须批次化、事务化，活动请求不删除；共享 RequestID（如有）必须先检查引用数。
 - 不得把“保留 Benchmark 摘要”误认为“必须永久保留完整请求正文”。
 
@@ -66,8 +66,8 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 ## 4. 实施顺序
 
 1. 先修复请求与 Benchmark 的保留一致性：请求清理跳过仍被保留 BenchmarkRun 引用的 RequestID；Benchmark 过期清理后允许回收已超期且不再被引用的请求记录。
-2. 核实并复用现有请求详情 API 对 RequestAnalysis 的查询能力；缺口才增加查询字段或 endpoint。
-3. 增加 Store 层针对引用保护与清理顺序的测试，覆盖并发/批次边界、Benchmark 到期、请求已超期、活动请求保护。
+2. 已确认并复用现有 `/api/requests/{request_id}` 请求详情 API；响应增加 `analysis_status`，区分 `persisted`、`reconstructed`、`unavailable`，不新增 endpoint。Benchmark 持久化恢复响应增加 `analysis_status`，区分 `persisted`、`not_recorded`、`request_log_missing`、`read_failed`、`invalid`、`store_unavailable`。
+3. 已增加 MariaDB 集成测试覆盖 Benchmark 引用期间保护请求记录、Benchmark 到期后再清理请求；新增 Benchmark 分析状态分类单元测试。并发/批次边界仍需在最终验收中确认。
 4. 更新 OpenAPI 与管理台仅在接口契约确有变化时同步，不为“Profile”概念另建平行页面。
 5. PERF-10 完成后，PERF-11 只需使用 BenchmarkRun.RequestID 关联该请求分析，不再增加重复关联表。
 
