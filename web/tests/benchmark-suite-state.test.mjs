@@ -25,6 +25,20 @@ test('completed server response is authoritative, even when the client requested
   });
 });
 
+test('last observed terminal server response remains authoritative if the final response is lost', () => {
+  const outcome = benchmarkSuiteTaskOutcome({
+    jobID: 'job-final',
+    cancelled: true,
+    lastObservedServerStatus: 'completed'
+  });
+  assert.deepEqual(outcome, {
+    status: 'completed',
+    server_status: 'completed',
+    poll_status: 'completed',
+    result_status: 'completed'
+  });
+});
+
 test('poll interruption does not turn a job ID into a server-confirmed running status', () => {
   const outcome = benchmarkSuiteTaskOutcome({
     jobID: 'job-1',

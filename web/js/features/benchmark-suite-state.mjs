@@ -27,14 +27,18 @@ export function benchmarkSuiteTaskOutcome({
   lastObservedServerStatus = ''
 } = {}) {
   const returnedStatus = normalizedStatus(jobStatus);
-  const serverStatus = returnedStatus || normalizedStatus(lastObservedServerStatus) || 'unknown';
+  const observedStatus = normalizedStatus(lastObservedServerStatus);
+  const serverStatus = returnedStatus || observedStatus || 'unknown';
+  const terminalStatus = benchmarkSuiteIsTerminalStatus(returnedStatus)
+    ? returnedStatus
+    : (!returnedStatus && benchmarkSuiteIsTerminalStatus(observedStatus) ? observedStatus : '');
 
-  if (benchmarkSuiteIsTerminalStatus(returnedStatus)) {
+  if (terminalStatus) {
     return {
-      status: returnedStatus,
+      status: terminalStatus,
       server_status: serverStatus,
       poll_status: 'completed',
-      result_status: returnedStatus
+      result_status: terminalStatus
     };
   }
 

@@ -3016,8 +3016,10 @@ function benchmarkSuiteIsActiveStatus(status){
 }
 function benchmarkSuiteTaskOutcome({jobStatus='',jobID='',cancelled=false,lastObservedServerStatus=''}={}){
   const returnedStatus=String(jobStatus||'').trim().toLowerCase();
-  const serverStatus=returnedStatus||String(lastObservedServerStatus||'').trim().toLowerCase()||'unknown';
-  if(benchmarkSuiteIsTerminalStatus(returnedStatus))return {status:returnedStatus,server_status:serverStatus,poll_status:'completed',result_status:returnedStatus};
+  const observedStatus=String(lastObservedServerStatus||'').trim().toLowerCase();
+  const serverStatus=returnedStatus||observedStatus||'unknown';
+  const terminalStatus=benchmarkSuiteIsTerminalStatus(returnedStatus)?returnedStatus:(!returnedStatus&&benchmarkSuiteIsTerminalStatus(observedStatus)?observedStatus:'');
+  if(terminalStatus)return {status:terminalStatus,server_status:serverStatus,poll_status:'completed',result_status:terminalStatus};
   if(String(jobID||'').trim())return {status:cancelled?'cancelled':'running',server_status:serverStatus,poll_status:cancelled?'cancelled':'interrupted',result_status:'unknown'};
   if(cancelled)return {status:'cancelled',server_status:serverStatus,poll_status:'cancelled',result_status:'not_submitted'};
   return {status:'failed',server_status:serverStatus,poll_status:'failed',result_status:'not_submitted'};
