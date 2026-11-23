@@ -177,6 +177,36 @@ func (s *Server) cleanupExpiredRequests(ctx context.Context, now time.Time) {
 	s.beginRequestRetentionRun(started)
 	cutoff := now.Add(-time.Duration(s.cfg.Logging.RetentionDays) * 24 * time.Hour)
 	batchSize := s.cfg.Logging.RetentionBatchSize
+
+	// Benchmark Task/Run 与请求分析使用同一保留期限。先删除到期 Benchmark 引用，
+	// 再清理请求记录；Store 层仍以 NOT EXISTS 保护任何尚存的 Benchmark 引用。
+	var deletedBenchmarkTasks int64
+	if s.benchmarkRepo != nil {
+		for i := 0; i < requestRetentionMaxBatchesPerRun; i++ {
+			if ctx.Err() != nil {
+				s.finishRequestRetentionRun(started, time.Now(), 0, ctx.Err())
+				return
+			}
+			deleted, err := s.benchmarkRepo.DeleteFinishedBefore(ctx, cutoff, batchSize)
+			if err != nil {
+				if ctx.Err() != nil {
+					s.finishRequestRetentionRun(started, time.Now(), 0, ctx.Err())
+					return
+				}
+				applog.Printf("benchmark retention cleanup failed: %v", err)
+				s.finishRequestRetentionRun(started, time.Now(), 0, err)
+				return
+			}
+			if deleted == 0 {
+				break
+			}
+			deletedBenchmarkTasks += deleted
+		}
+	}
+	if deletedBenchmarkTasks > 0 {
+		applog.Infof("benchmark retention cleanup completed: deleted_tasks=%d cutoff=%s", deletedBenchmarkTasks, cutoff.UTC().Format(time.RFC3339))
+	}
+
 	var total int64
 	for i := 0; i < requestRetentionMaxBatchesPerRun; i++ {
 		if ctx.Err() != nil {
