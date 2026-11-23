@@ -1,6 +1,6 @@
 # PERF-10 Profile 存储与查询设计
 
-> 状态：设计审计完成，实施待开始
+> 状态：实施中（请求分析保留与 Benchmark 引用一致性已进入代码修复）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -19,8 +19,8 @@ PERF-10 的目标是让现有请求分析数据具备清晰的数据档位、可
 2. `request_logs` 是请求分析的现有权威记录。Store 已有 `SaveRequestAnalysis` / `GetRequestAnalysis`，Benchmark 恢复路径通过 Run.RequestID 读取同一份分析。
 3. `benchmark_runs.request_id` 保存请求关联，但数据库没有到 `request_logs` 的外键。
 4. 请求保留任务按 `started_at` 删除终态 `request_logs`，并显式删除请求事件和 Payload；它不检查 `benchmark_runs` 是否仍引用该 RequestID。
-5. Benchmark Task/Run 有独立的 `DeleteFinishedBefore` 存储方法，但当前审计未发现与请求保留任务形成统一生命周期策略的证据。
-6. 当前没有独立 Profile API 或 Profile 页面；请求详情和 Benchmark 恢复接口已能读取部分既有 RequestAnalysis。
+5. Benchmark Task/Run 有独立的 `DeleteFinishedBefore` 存储方法；Gateway 启动链路此前只启动请求清理，没有调度 Benchmark 到期清理。PERF-10 已将 Benchmark 清理接入同一请求保留周期，并先删到期 Task/Run，再清理请求记录。
+6. 当前没有独立 Profile API 或 Profile 页面；现有 `/api/requests/{request_id}` 详情接口已经能返回 RequestAnalysis，Benchmark 恢复接口也能按 Run.RequestID 读取分析。因此不新增 Profile 查询 API。
 
 ## 3. 设计决策
 
@@ -49,7 +49,7 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 
 - Benchmark Task/Run 仍保留时，其 RequestID 对应的核心 RequestLog/RequestAnalysis 不应被普通请求清理策略提前删除。
 - Payload、原始 SSE、预览、工具事件属于更高敏感度/更大体积的数据，不应因为 Benchmark 保留而无限期保留。
-- 当 Benchmark Task 到期删除时，若 RequestLog 已超过请求保留期，再由清理任务回收不再被其他 Benchmark Run 引用的 RequestLog 及子记录。
+- 当前实施顺序为：同一轮清理先按统一 cutoff 删除到期 Benchmark Task（Run 由外键级联删除），再清理过期 RequestLog。Store 层额外使用 `NOT EXISTS` 检查，任何仍被 BenchmarkRun 引用的请求都不会被请求清理删除。
 - 清理必须批次化、事务化，活动请求不删除；共享 RequestID（如有）必须先检查引用数。
 - 不得把“保留 Benchmark 摘要”误认为“必须永久保留完整请求正文”。
 
@@ -73,7 +73,7 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 
 ## 5. 当前阻塞与风险
 
-- Benchmark 清理调度是否已接入 Server 生命周期仍需从启动调用链进一步核实；仅有 Store 删除方法不能视为自动清理已运行。
+- Benchmark 清理已接入现有请求保留后台任务；它与请求日志共用 `logging.retention_days`，避免新增一套调度器和独立配置。
 - 请求详情 API 的分析字段和鉴权范围需要进一步核实，避免误判“没有 Profile API”等同于“没有分析查询能力”。
 - 若请求日志清理任务和 Benchmark 清理任务并发执行，必须以数据库事务/锁定和引用检查确保不会先删掉仍被引用的 RequestLog。
 - 不引入新的配置项，直到默认请求、诊断请求和深度请求的真实采集差异被代码证据证明需要独立配置。
