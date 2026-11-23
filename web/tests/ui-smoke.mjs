@@ -1631,7 +1631,17 @@ try {
           prompt_ms: 100, prompt_per_token_ms: 5, predicted_ms: 100,
           predicted_per_token_ms: 2.94,
           prompt_progress: [{ total: 100, cache: 80, processed: 90, time_ms: 500 }]
-        }}
+        }},
+        performance_diagnosis: {
+          status: 'observed_only',
+          candidates: [{
+            category: 'prompt_eval', status: 'candidate', title: 'Prompt Eval',
+            summary: '已取得 llama.cpp 原生 Prompt Eval 计时；需要同条件样本比较。',
+            evidence: [{ metric: 'prompt_ms', value: 100, unit: 'ms', source: 'llama.cpp_response_timings', scope: 'request' }],
+            next_steps: ['使用相同模型、输入规模和缓存状态重复测量']
+          }],
+          limitations: ['当前没有同条件基线，不输出主瓶颈。']
+        }
       }
     });
     return root.textContent;
@@ -1642,6 +1652,12 @@ try {
     requestTimingDetail.includes('Decode 每 Token') &&
     requestTimingDetail.includes('Prompt progress') &&
     requestTimingDetail.includes('50.0%'));
+  check('请求详情展示性能候选、原始证据和结论限制',
+    requestTimingDetail.includes('性能诊断') &&
+    requestTimingDetail.includes('已有观测，尚未确认瓶颈') &&
+    requestTimingDetail.includes('prompt_ms') &&
+    requestTimingDetail.includes('使用相同模型、输入规模和缓存状态重复测量') &&
+    requestTimingDetail.includes('当前没有同条件基线，不输出主瓶颈。'));
   const toastCountBeforeSilentPoll = await page.locator('#toastHost .toast').count();
   failNextRequestList = true;
   expectedSilentRequestPollFailure = true;
