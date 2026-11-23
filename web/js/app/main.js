@@ -3271,8 +3271,15 @@ async function runBenchmarkRepeat(){
    applyBenchParams(fixedParams);if($('benchPrompt'))$('benchPrompt').value=fixedPrompt;persistBenchParams();
    const previousJobID=readBenchStore().jobId||'';benchRepeatCurrentJobID='';benchRepeatInRequest=true;
    await runBenchmark('performance');benchRepeatInRequest=false;benchRepeatCurrentJobID='';
-   if(benchRepeatCancelRequested)break;
    const currentJobID=readBenchStore().jobId||'';
+   if(benchRepeatCancelRequested){
+    if(currentJobID&&currentJobID!==previousJobID){
+     try{const stoppedWrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));report.samples.push(benchmarkRepeatSampleFromWrap(stoppedWrap,index));}
+     catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'停止后读取任务结果失败：'+(error?.message||'未知错误')});}
+     writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
+    }
+    break;
+   }
    if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
    const sample=benchmarkRepeatSampleFromWrap(wrap,index);
