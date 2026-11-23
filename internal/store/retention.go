@@ -28,6 +28,11 @@ func (r *Repo) DeleteFinishedRequestsBefore(ctx context.Context, cutoff time.Tim
 	rows, err := tx.QueryContext(ctx, `SELECT request_id
 		FROM request_logs
 		WHERE started_at < ? AND status <> 'running'
+		  AND NOT EXISTS (
+			SELECT 1 FROM benchmark_runs br
+			JOIN benchmark_tasks bt ON bt.task_id = br.task_id
+			WHERE br.request_id = request_logs.request_id
+		  )
 		ORDER BY started_at ASC, id ASC
 		LIMIT ? FOR UPDATE`, cutoff, batchSize)
 	if err != nil {
@@ -68,7 +73,7 @@ func (r *Repo) DeleteFinishedRequestsBefore(ctx context.Context, cutoff time.Tim
 		}
 	}
 	res, err := tx.ExecContext(ctx,
-		"DELETE FROM request_logs WHERE request_id IN ("+placeholders+") AND started_at < ? AND status <> 'running'",
+		"DELETE FROM request_logs WHERE request_id IN ("+placeholders+") AND started_at < ? AND status <> 'running' AND NOT EXISTS (SELECT 1 FROM benchmark_runs br JOIN benchmark_tasks bt ON bt.task_id=br.task_id WHERE br.request_id=request_logs.request_id)",
 		append(args, cutoff)...)
 	if err != nil {
 		return 0, err
