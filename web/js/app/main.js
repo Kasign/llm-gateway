@@ -2262,6 +2262,19 @@ function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverri
   $(id)?.addEventListener('input',()=>{const n=$('benchTarget')?.querySelector('code')?.textContent;updateBenchReqPreview(n||'')});
   $(id)?.addEventListener('change',()=>{const n=$('benchTarget')?.querySelector('code')?.textContent;updateBenchReqPreview(n||'')});
 });
+function benchmarkCacheClassification(timings,inputTokens){
+  const cacheN=timings?.cache_n==null?null:Number(timings.cache_n);
+  const promptN=timings?.prompt_n==null?null:Number(timings.prompt_n);
+  const input=Number(inputTokens);
+  if(!Number.isFinite(cacheN)||!Number.isFinite(promptN)||!Number.isFinite(input)||input<=0||cacheN<0||promptN<0)return 'unknown';
+  if(cacheN===0&&promptN===input)return 'cold';
+  if(cacheN>0&&promptN===0&&cacheN===input)return 'full';
+  if(cacheN>0&&promptN>0&&cacheN+promptN===input)return 'partial';
+  return 'inconsistent';
+}
+function benchmarkCacheClassificationLabel(state){
+  return ({cold:'冷缓存',partial:'部分缓存命中',full:'全缓存命中',unknown:'未知',inconsistent:'缓存证据不一致'})[state]||'未知';
+}
 function benchJobPayload(j){return j.job||j}
 function benchTextsFromJob(j){
   let content=(j.content_text||'').trim();
@@ -2620,10 +2633,19 @@ function readBenchmarkSuiteState(){
     const suite=JSON.parse(raw);
     if(!suite||typeof suite!=='object')return null;
     const cases=normalizeBenchmarkSuiteCases(suite.cases);
-    if(JSON.stringify(cases)!==JSON.stringify(suite.cases||[])){
-      suite.cases=cases;
-      localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
+    let changed=JSON.stringify(cases)!==JSON.stringify(suite.cases||[]);
+    if(changed)suite.cases=cases;
+    // 已完成的历史报告按当前资格规则重新计算，只使用原报告已保存的证据，不发起新请求。
+    if(suite.status==='completed'&&cases.length>=4){
+      const currentQualification=benchmarkSuiteQualification(suite);
+      if(suite.qualification_status!==currentQualification){
+        suite.qualification_status_previous=suite.qualification_status||'not_evaluated';
+        suite.qualification_status=currentQualification;
+        suite.qualification_rules_version='perf12-qualification-v2';
+        changed=true;
+      }
     }
+    if(changed)localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
     return suite;
   }catch{return null}
 }
@@ -2814,18 +2836,19 @@ function benchmarkSuiteQualification(suite){
   const allPerformanceContextAvailable=caseOrder.every(id=>{
     const item=cases.find(entry=>entry.case_id===id);
     const snapshot=item.job?.condition_snapshot||{};
-    return typeof snapshot.model_id==='string'&&snapshot.model_id.trim()!==''&&
-      typeof snapshot.backend==='string'&&snapshot.backend.trim()!==''&&
+    return typeof snapshot.model_id==='string'&&snapshot.model_id.trim()!==''&&snapshot.model_id===String(suite.model_id||'')&&
+      typeof snapshot.backend==='string'&&snapshot.backend.trim()!==''&&snapshot.backend.toLowerCase()===String(suite.backend||'').toLowerCase()&&
       snapshot.model_load_state_before==='loaded';
   });
   const allCold=caseOrder.every(id=>{
     const item=cases.find(entry=>entry.case_id===id);
+    const job=item.job||{};
+    const timings=item.analysis?.throughput?.llama_timings||item.analysis?.llama_timings||item.analysis?.model_timings||{};
+    const input=Number(job.input_tokens),output=Number(job.output_tokens);
     return item.status==='completed'&&
-      item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&
-      item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&
-      item.validation?.some(v=>v==='原生 Prompt/Decode timings 完整')&&
-      !item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&
-      !item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
+      benchmarkCacheClassification(timings,input)==='cold'&&
+      Number.isFinite(output)&&timings.prompt_ms!=null&&timings.predicted_ms!=null&&
+      Number(timings.predicted_n)===output&&Number(timings.prompt_n)===input;
   });
   // condition_status 表示环境复现信息完整度，不代表性能样本本身是否有效。
   // 模型 SHA、Gateway 构建身份、Backend 版本和硬件快照缺失只降低复现等级。
@@ -3060,17 +3083,13 @@ async function runBenchmarkSuite(resumeExisting=false){
       const modelTimings=wrap?.analysis?.throughput?.llama_timings||wrap?.analysis?.llama_timings||{};
       const cacheN=modelTimings.cache_n==null?null:Number(modelTimings.cache_n);
       const promptN=modelTimings.prompt_n==null?null:Number(modelTimings.prompt_n);
-      const coldPrompt=cacheN===0&&Number.isFinite(input)&&promptN===input;
+      const cacheState=benchmarkCacheClassification(modelTimings,input);
+      const coldPrompt=cacheState==='cold';
       if(cacheN!=null)validation.push('Prompt Cache '+(cacheN===0?'未命中（cache_n=0）':'命中 '+cacheN+' tokens'));
       else validation.push('Prompt Cache 状态未知');
       if(promptN!=null&&Number.isFinite(input))validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
       else validation.push('Prompt Eval Token 覆盖情况未知');
-      if(cacheN!=null&&promptN!=null&&Number.isFinite(input)){
-        if(coldPrompt)validation.push('缓存状态：冷缓存');
-        else if(cacheN>0&&promptN>0)validation.push('缓存状态：部分缓存命中');
-        else if(cacheN>0&&promptN===0)validation.push('缓存状态：全缓存命中');
-        else validation.push('缓存状态：缓存证据不一致');
-      }else validation.push('缓存状态：未知');
+      validation.push('缓存状态：'+benchmarkCacheClassificationLabel(cacheState));
       if(!coldPrompt)validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
@@ -3357,6 +3376,7 @@ exposeGlobals({
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
+  benchmarkCacheClassification,
   readBenchmarkSuiteState,
   normalizeBenchmarkSuiteCases,
   benchmarkSuiteCanResume,

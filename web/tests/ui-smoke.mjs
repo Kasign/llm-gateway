@@ -393,29 +393,35 @@ try {
     const ids = ['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
     const suite = {
       resume_parameter_status:'complete_snapshot',
+      model_id:'Qwen3.5-4B-IQ4_NL',backend:'llamacpp',
       cases:ids.map(case_id => ({
         case_id,status:'completed',
         job:{
           condition_status:'partial',condition_missing:['model_sha256_unknown','gateway_revision_unknown'],
+          input_tokens:128,output_tokens:64,
           condition_snapshot:{backend:'llamacpp',model_id:'Qwen3.5-4B-IQ4_NL',model_load_state_before:'loaded'}
         },
-        validation:[
-          '输入目标 达标（128 tokens）',
-          '输出目标 达标（64 tokens）',
-          'Prompt Cache 未命中（cache_n=0）',
-          'Prompt Eval Token 覆盖 128/128 tokens',
-          '原生 Prompt/Decode timings 完整'
-        ]
+        analysis:{throughput:{llama_timings:{cache_n:0,prompt_n:128,predicted_n:64,prompt_ms:100,predicted_ms:200}}},
+        validation:['输入目标 达标（128 tokens）','输出目标 达标（64 tokens）']
       }))
     };
     const partialEnvironment = benchmarkSuiteQualification(suite);
+    const legacyReportRecalculation = benchmarkSuiteQualification(suite);
     suite.cases[0].job.condition_snapshot.model_load_state_before='unknown';
     const missingLoadEvidence = benchmarkSuiteQualification(suite);
-    return {partialEnvironment,missingLoadEvidence};
+    const cacheStates = [
+      benchmarkCacheClassification({cache_n:0,prompt_n:128},128),
+      benchmarkCacheClassification({cache_n:7,prompt_n:4},11),
+      benchmarkCacheClassification({cache_n:11,prompt_n:0},11),
+      benchmarkCacheClassification({cache_n:7,prompt_n:3},11)
+    ];
+    return {partialEnvironment,legacyReportRecalculation,missingLoadEvidence,cacheStates};
   });
-  check('环境复现信息缺失不否决有效性能基线，但测试前模型加载状态缺失会阻止晋级',
+  check('环境复现信息缺失不否决有效性能基线，历史报告可按原始 timings 重算，测试前加载状态缺失仍阻止晋级',
     qualification.partialEnvironment === 'baseline_candidate' &&
-    qualification.missingLoadEvidence === 'baseline_not_qualified',
+    qualification.legacyReportRecalculation === 'baseline_candidate' &&
+    qualification.missingLoadEvidence === 'baseline_not_qualified' &&
+    JSON.stringify(qualification.cacheStates)===JSON.stringify(['cold','partial','full','inconsistent']),
     qualification);
   check('四组测试使用同一分析任务和固定版本提示词',
     suitePrompts.version === 'perf12-synthetic-dataset-v2' && suitePrompts.sameTask);
