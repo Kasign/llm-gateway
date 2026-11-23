@@ -3253,7 +3253,7 @@ async function copyBenchmarkRepeatReport(){
  const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
 }
 function setBenchmarkRepeatControlsDisabled(disabled){
- ['benchRepeatCount','benchPrompt','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+ ['modelTestApiKey','modelTestClearKeyBtn','benchRepeatCount','benchPrompt','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
@@ -3261,6 +3261,7 @@ async function runBenchmarkRepeat(){
  const clientKey=($('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
  if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。每次都会独立保存任务；期间请勿发送其他推理请求。可以随时停止。继续？'))return;
  const fixedParams=collectBenchParams(),fixedPrompt=$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,samples:[]};
+ let baselineConditionHash='',baselineModel='';
  benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
  setBenchRunning(false);renderBenchmarkRepeatReport(report);
@@ -3274,7 +3275,15 @@ async function runBenchmarkRepeat(){
    const currentJobID=readBenchStore().jobId||'';
    if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
-   const sample=benchmarkRepeatSampleFromWrap(wrap,index);report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
+   const sample=benchmarkRepeatSampleFromWrap(wrap,index);
+   if(sample.status==='completed'){
+    if(index===1){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
+    else if(sample.model!==baselineModel||(baselineConditionHash&&sample.condition_sha256!==baselineConditionHash)){
+     sample.condition_mismatch=true;sample.error=sample.error||'模型或条件指纹与首个样本不同，已停止后续采样。';
+     report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='conditions_changed';break;
+    }
+   }
+   report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
    if(['running','cancelling'].includes(sample.status)||sample.status==='unknown'){report.status='interrupted';break;}
   }
  }catch(error){report.error=error?.message||'重复采样执行失败';report.status='failed';}
