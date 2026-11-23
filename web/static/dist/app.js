@@ -2854,7 +2854,27 @@ async function benchmarkTextSHA256(value){
   }catch{return null}
 }
 function readBenchmarkSuiteState(){
-  try{return JSON.parse(localStorage.getItem(BENCH_SUITE_STORAGE_KEY)||'null')}catch{return null}
+  try{
+    const raw=localStorage.getItem(BENCH_SUITE_STORAGE_KEY);
+    if(!raw)return null;
+    const suite=JSON.parse(raw);
+    if(!suite||typeof suite!=='object')return null;
+    const cases=Array.isArray(suite.cases)?suite.cases:[];
+    let changed=false;
+    if(suite.status==='completed'&&cases.length>=4){
+      const currentQualification=benchmarkSuiteQualification(suite);
+      if(suite.qualification_status!==currentQualification){
+        suite.qualification_status_previous=suite.qualification_status||'not_evaluated';
+        suite.qualification_status=currentQualification;
+      }
+      // 每次读取已完成报告都记录实际使用的规则版本和计算时间，避免结果未变化时无法证明已重算。
+      suite.qualification_rules_version='perf12-qualification-v2';
+      suite.qualification_evaluated_at=new Date().toISOString();
+      changed=true;
+    }
+    if(changed)localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
+    return suite;
+  }catch{return null}
 }
 function saveBenchmarkSuiteState(value){
   try{localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(value));return true}catch{return false}
@@ -2933,6 +2953,10 @@ function buildBenchmarkSuiteMarkdown(suite){
     '- 报告版本：'+benchmarkEvidenceValue(suite.suite_version),
     '- 执行状态：'+benchmarkEvidenceValue(suite.status),
     '- 基线资格：'+benchmarkEvidenceValue(suite.qualification_status||'not_evaluated'),
+    '- 资格规则版本：'+benchmarkEvidenceValue(suite.qualification_rules_version||'not_evaluated'),
+    '- 资格重新计算时间（浏览器本地）：'+benchmarkEvidenceValue(suite.qualification_evaluated_at),
+    '- 上一次资格结果：'+benchmarkEvidenceValue(suite.qualification_status_previous||'无历史记录'),
+    '- 参数快照状态：'+benchmarkEvidenceValue(suite.resume_parameter_status||'unknown'),
     '- 开始时间：'+benchmarkEvidenceValue(suite.started_at),
     '- 前端流程结束时间：'+benchmarkEvidenceValue(suite.finished_at),
     '- 当前测试组：'+benchmarkEvidenceValue(suite.current_case_id),
@@ -3066,6 +3090,16 @@ async function submitBenchmarkSuiteTask(target,prompt,maxTokens,token,params,onC
     if(benchSuiteCurrentJobId===start.job_id)benchSuiteCurrentJobId=null;
   }
 }
+function benchmarkCacheClassification(timings,inputTokens){
+  const cacheN=timings?.cache_n==null?null:Number(timings.cache_n);
+  const promptN=timings?.prompt_n==null?null:Number(timings.prompt_n);
+  const input=Number(inputTokens);
+  if(!Number.isFinite(cacheN)||!Number.isFinite(promptN)||!Number.isFinite(input)||input<=0||cacheN<0||promptN<0)return 'unknown';
+  if(cacheN===0&&promptN===input)return 'cold';
+  if(cacheN>0&&promptN===0&&cacheN===input)return 'full';
+  if(cacheN>0&&promptN>0&&cacheN+promptN===input)return 'partial';
+  return 'inconsistent';
+}
 function benchmarkSuiteQualification(suite){
   const caseOrder=['S-P / S-O','L-P / S-O','S-P / L-O','L-P / L-O'];
   const cases=Array.isArray(suite?.cases)?suite.cases:[];
@@ -3075,16 +3109,26 @@ function benchmarkSuiteQualification(suite){
     const item=cases.find(entry=>entry.case_id===id);
     return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
   });
+  const allPerformanceContextAvailable=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    const snapshot=item.job?.condition_snapshot||{};
+    return typeof snapshot.model_id==='string'&&snapshot.model_id.trim()!==''&&snapshot.model_id===String(suite.model_id||'')&&
+      typeof snapshot.backend==='string'&&snapshot.backend.trim()!==''&&snapshot.backend.toLowerCase()===String(suite.backend||'').toLowerCase()&&
+      snapshot.model_load_state_before==='loaded';
+  });
   const allCold=caseOrder.every(id=>{
     const item=cases.find(entry=>entry.case_id===id);
-    return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
-  });
-  const allConditionsComplete=caseOrder.every(id=>{
-    const item=cases.find(entry=>entry.case_id===id);
     const job=item.job||{};
-    return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
+    const analysis=item.analysis||{};
+    const timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{};
+    const input=Number(job.input_tokens),output=Number(job.output_tokens);
+    return item.status==='completed'&&
+      benchmarkCacheClassification(timings,input)==='cold'&&
+      Number.isFinite(output)&&timings.prompt_ms!=null&&timings.predicted_ms!=null&&
+      Number(timings.predicted_n)===output&&Number(timings.prompt_n)===input;
   });
-  return allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+  return allTargetsMet&&allPerformanceContextAvailable&&allCold&&suite.resume_parameter_status==='complete_snapshot'
+    ?'baseline_candidate':'baseline_not_qualified';
 }
 
 function benchmarkSuiteWarmupCanResume(suite){
