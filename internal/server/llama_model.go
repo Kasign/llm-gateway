@@ -54,12 +54,22 @@ func (s *Server) gatewayModelMatchKeys(m *model.Model) []string {
 }
 
 func (s *Server) modelMatchesUpstreamID(m *model.Model, upstreamID string) bool {
+	return s.modelMatchesUpstreamIDForBackend(m, "llamacpp", upstreamID)
+}
+
+// modelMatchesUpstreamIDForBackend 同时检查模型静态别名和该后端已持久化的上游 ID。
+func (s *Server) modelMatchesUpstreamIDForBackend(m *model.Model, backend, upstreamID string) bool {
+	if m == nil || strings.TrimSpace(upstreamID) == "" {
+		return false
+	}
 	for _, k := range s.gatewayModelMatchKeys(m) {
 		if llama.ModelIDMatch(k, upstreamID) {
 			return true
 		}
 	}
-	return false
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	registeredID := model.UpstreamNameForBackend(m.RuntimeJSON, backend)
+	return registeredID != "" && llama.ModelIDMatch(registeredID, upstreamID)
 }
 
 func (s *Server) llamaLoadCandidates(ctx context.Context, m *model.Model) []string {
@@ -116,20 +126,31 @@ func (s *Server) llamaLoadCandidatesWithClient(ctx context.Context, client *llam
 }
 
 func (s *Server) gatewayModelForUpstreamID(ctx context.Context, modelID string) *model.Model {
+	matched, _ := s.gatewayModelForUpstreamIDForBackend(ctx, s.effectiveUpstream().Backend, modelID)
+	return matched
+}
+
+// gatewayModelForUpstreamIDForBackend 区分未匹配、映射歧义和模型仓库读取失败。
+func (s *Server) gatewayModelForUpstreamIDForBackend(ctx context.Context, backend, modelID string) (*model.Model, error) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
-		return nil
+		return nil, nil
 	}
 	ms, err := s.models.List(ctx)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list Gateway models for upstream ID %q: %w", modelID, err)
 	}
+	var matched *model.Model
 	for i := range ms {
-		if s.modelMatchesUpstreamID(&ms[i], modelID) {
-			return &ms[i]
+		if !s.modelMatchesUpstreamIDForBackend(&ms[i], backend, modelID) {
+			continue
 		}
+		if matched != nil && matched.ModelKey != ms[i].ModelKey {
+			return nil, fmt.Errorf("upstream model ID %q matches multiple Gateway models", modelID)
+		}
+		matched = &ms[i]
 	}
-	return nil
+	return matched, nil
 }
 
 func (s *Server) upstreamLoadCandidates(ctx context.Context, modelID string) []string {
@@ -387,7 +408,7 @@ func (s *Server) persistUpstreamNameForID(ctx context.Context, backend, upstream
 	}
 	ms, _ := s.models.List(ctx)
 	for i := range ms {
-		if s.modelMatchesUpstreamID(&ms[i], upstreamID) {
+		if s.modelMatchesUpstreamIDForBackend(&ms[i], backend, upstreamID) {
 			s.persistUpstreamName(ctx, &ms[i], backend, upstreamID)
 			return
 		}
@@ -416,7 +437,7 @@ func (s *Server) resolveUpstreamModelNameForBackend(ctx context.Context, client 
 		}
 	}
 	activeModel = strings.TrimSpace(activeModel)
-	if activeModel != "" && s.modelMatchesUpstreamID(m, activeModel) {
+	if activeModel != "" && s.modelMatchesUpstreamIDForBackend(m, backend, activeModel) {
 		return activeModel, nil
 	}
 	keys := s.gatewayModelMatchKeys(m)

@@ -1018,6 +1018,8 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if modelID == "" {
 		modelID = strings.TrimSpace(in.Model)
 	}
+	activeUpstream := s.effectiveUpstream()
+	backend := strings.ToLower(strings.TrimSpace(activeUpstream.Backend))
 	// 管理台「跟当前 loaded 模型测」：忽略 model_key，以 model_id / 默认 active 为准。
 	if in.UseActive && in.ModelKey != "" {
 		in.ModelKey = ""
@@ -1027,7 +1029,14 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case modelID != "":
 		upstreamOnly = modelID
-		m = s.gatewayModelForUpstreamID(r.Context(), modelID)
+		if isLocalInferenceBackend(backend) {
+			var lookupErr error
+			m, lookupErr = s.gatewayModelForUpstreamIDForBackend(r.Context(), backend, modelID)
+			if lookupErr != nil {
+				jsonError(w, http.StatusServiceUnavailable, "model_registry_unavailable", "failed to resolve Gateway model identity")
+				return
+			}
+		}
 	case in.ModelKey != "":
 		got, e := s.models.GetByKey(r.Context(), in.ModelKey)
 		if e != nil {
@@ -1063,7 +1072,6 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 	if modelKey == "" && m != nil {
 		modelKey = m.ModelKey
 	}
-	activeUpstream := s.effectiveUpstream()
 	target := benchmarkTargetSnapshot{Backend: activeUpstream.Backend, ModelName: activeUpstream.ModelName}
 	taskModelID := upstreamOnly
 	if taskModelID == "" {

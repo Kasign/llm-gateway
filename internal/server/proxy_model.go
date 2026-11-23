@@ -96,7 +96,11 @@ func (s *Server) proxyTargetForHintForUpstream(ctx context.Context, hint string,
 	if m, err := s.models.GetByKey(ctx, hint); err == nil {
 		return s.proxyTargetFromGatewayModelForUpstream(ctx, active, m, hint)
 	}
-	if m := s.gatewayModelForUpstreamID(ctx, hint); m != nil {
+	m, err := s.gatewayModelForUpstreamIDForBackend(ctx, active.Backend, hint)
+	if err != nil {
+		return zero, err
+	}
+	if m != nil {
 		return s.proxyTargetFromGatewayModelForUpstream(ctx, active, m, hint)
 	}
 	return proxyModelTarget{ProviderID: active.Backend, Hint: hint, ModelKey: hint, UpstreamID: hint}, nil

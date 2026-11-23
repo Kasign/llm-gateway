@@ -6,8 +6,34 @@ import (
 
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/llama"
+	"github.com/whl/llm-gateway/internal/model"
 	"github.com/whl/llm-gateway/internal/settings"
 )
+
+func TestModelMatchesUpstreamIDUsesBackendRuntimeAlias(t *testing.T) {
+	s := &Server{}
+	m := &model.Model{
+		ModelKey: "qwen-local",
+		Filename: "Qwen3.5-9B-Q4_K_M.gguf",
+		RuntimeJSON: model.MergeUpstreamName(
+			model.MergeUpstreamName("", "llamacpp", "router-qwen-id"),
+			"ollama",
+			"qwen3.5:9b",
+		),
+	}
+	if !s.modelMatchesUpstreamIDForBackend(m, "llamacpp", "router-qwen-id") {
+		t.Fatal("llama.cpp persisted upstream ID was not matched")
+	}
+	if !s.modelMatchesUpstreamIDForBackend(m, "ollama", "qwen3.5:9b") {
+		t.Fatal("Ollama persisted upstream name was not matched")
+	}
+	if s.modelMatchesUpstreamIDForBackend(m, "ollama", "router-qwen-id") {
+		t.Fatal("llama.cpp upstream ID must not be treated as an Ollama name")
+	}
+	if !s.modelMatchesUpstreamIDForBackend(m, "llamacpp", "Qwen3.5-9B-Q4_K_M.gguf") {
+		t.Fatal("legacy filename matching must remain compatible")
+	}
+}
 
 func TestSelectSwitchModelNameDoesNotCarryOtherBackend(t *testing.T) {
 	cur := settings.Upstream{Backend: "llamacpp", ModelName: "qwen.gguf"}
