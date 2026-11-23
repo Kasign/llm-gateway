@@ -170,7 +170,6 @@ func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
 	})
 }
 
-// Benchmark 创建同时要求管理员会话与独立的调用方服务密钥，不能用 Authorization 中的管理员凭据代替。
 // BenchmarkRequestTraceRecordStreamChunkWithLiveSession 测量默认观测配置下不同长度流的完整事件记录成本。
 // 每次迭代创建独立 Session，覆盖 SSE 解析、事件构造、Session 锁与事件切片增长；不连接数据库。
 // 2100 组用于确认达到 2000 条事件上限后，内存事件列表不再增长，但解析路径仍继续执行。
@@ -230,6 +229,7 @@ func BenchmarkLatestRequestRuntimeSnapshot(b *testing.B) {
 	}
 }
 
+// TestAuthenticateBenchmarkKeyRequiresDedicatedClientKey 验证创建任务必须同时提供管理员会话与独立调用方服务密钥。
 func TestAuthenticateBenchmarkKeyRequiresDedicatedClientKey(t *testing.T) {
 	s := &Server{}
 	r := httptest.NewRequest(http.MethodPost, "/api/benchmark", nil)
