@@ -171,7 +171,7 @@ func applyThinkingOn(backend string, body map[string]interface{}) {
 }
 
 func applyThinkingOff(backend string, body map[string]interface{}) {
-	// 最终关闭时，这些字段都会让上游打开思考，必须一起去掉。
+	// 最终关闭时，先清除所有可能开启思考的客户端字段。
 	delete(body, "reasoning")
 	delete(body, "reasoning_effort")
 	delete(body, "thinking")
@@ -179,9 +179,19 @@ func applyThinkingOff(backend string, body map[string]interface{}) {
 	delete(body, "enable_thinking")
 	stripReasoningInclude(body)
 	deleteTemplateEnableThinking(body)
-	if !isOllamaBackend(backend) {
-		body["enable_thinking"] = false
+	if isOllamaBackend(backend) {
+		return
 	}
+
+	// llama.cpp 不使用顶层 enable_thinking 字段。
+	// 新版通过 reasoning_effort=none 关闭；保留 chat_template_kwargs 作为旧版模板兼容路径。
+	body["reasoning_effort"] = "none"
+	kwargs, ok := body["chat_template_kwargs"].(map[string]interface{})
+	if !ok {
+		kwargs = map[string]interface{}{}
+		body["chat_template_kwargs"] = kwargs
+	}
+	kwargs["enable_thinking"] = false
 }
 
 func clearThinkingOffMarkers(body map[string]interface{}) {
