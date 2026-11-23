@@ -215,3 +215,14 @@
 4. 已完成思考关闭修复部署验收：Request ID `req_1795426066335852781_bf7024a377` 的上游 body 包含 `reasoning_effort=none` 和 `chat_template_kwargs.enable_thinking=false`，SSE 只有正文 content，无 reasoning_content。该 Smoke 已记录在 9.1。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
 5. Smoke 数据完整后，在同一模型、参数、输入长度、输出上限和并发条件下串行采集重复样本；每次记录请求详情和采样前后 Runtime。测试窗口内不发送其它推理请求。若 UI 没有批量重复入口，不新增脚本或 API，先以现有普通 Benchmark 单次任务入口逐次执行。
 6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU/内存；若 1Panel/Docker 提供独立指标，再单独报告 Gateway 容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
+
+
+## 10. 自动串行采样工具
+
+- 普通性能测试入口保留单次执行，并增加可填写重复次数（1～20，默认 10）的串行采样入口。
+- 批量执行复用现有 Benchmark 创建与轮询；每次独立创建 Job，等待上一 Job 终态后才启动下一次。若任务详情无法确认终态，则停止批次，避免请求重叠。
+- 每次记录 Job ID、状态、条件状态、TTFT、总耗时、Token、Prompt/Decode timings、吞吐和缓存分类；不复制或持久化 Prompt、回答、思考正文。
+- 报告在浏览器本地保存轻量指标，可复制 Markdown；每个 Job 的完整分析仍由现有 Benchmark 历史详情提供。
+- 指标汇总仅纳入状态为 completed 且非空条件指纹完全一致的样本；条件指纹缺失或不同，不做合并统计。缓存分类单独呈现。
+- 停止操作阻止后续采样，并在有活动 Job 时取消该 Job；已完成 Job 与已记录结果保留。
+- 工具代码与自动化测试通过后，仍需部署到 NUC 并执行实际采样；不得把 UI 工具完成误报为 PERF-13 真实环境验收完成。
