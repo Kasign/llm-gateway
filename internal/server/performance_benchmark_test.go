@@ -171,27 +171,32 @@ func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
 }
 
 // Benchmark 创建同时要求管理员会话与独立的调用方服务密钥，不能用 Authorization 中的管理员凭据代替。
-// BenchmarkRequestTraceRecordStreamChunkWithLiveSession 测量默认观测配置下完整记录 2000 个流事件的请求成本。
+// BenchmarkRequestTraceRecordStreamChunkWithLiveSession 测量默认观测配置下不同长度流的完整事件记录成本。
 // 每次迭代创建独立 Session，覆盖 SSE 解析、事件构造、Session 锁与事件切片增长；不连接数据库。
+// 2100 组用于确认达到 2000 条事件上限后，内存事件列表不再增长，但解析路径仍继续执行。
 func BenchmarkRequestTraceRecordStreamChunkWithLiveSession(b *testing.B) {
-	const chunksPerRequest = maxStreamEventsPerRequest
 	cfg := &config.Config{}
+	s := &Server{cfg: cfg}
 	chunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"benchmark token\"}}]}\n\n")
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		session := &live.Session{}
-		trace := &requestTrace{
-			s: &Server{cfg: cfg}, id: "benchmark-stream-session",
-			start: time.Now(), stream: true, ttftRecorded: true, session: session,
-		}
-		for n := 0; n < chunksPerRequest; n++ {
-			trace.recordStreamChunk(chunk)
-		}
-		liveSessionBenchmarkSink = session
+	for _, chunkCount := range []int{1, 100, maxStreamEventsPerRequest, maxStreamEventsPerRequest + 100} {
+		b.Run(fmt.Sprintf("events_%d", chunkCount), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				session := &live.Session{}
+				trace := &requestTrace{
+					s: s, id: "benchmark-stream-session",
+					start: time.Now(), stream: true, ttftRecorded: true, session: session,
+				}
+				for n := 0; n < chunkCount; n++ {
+					trace.recordStreamChunk(chunk)
+				}
+				liveSessionBenchmarkSink = session
+			}
+			elapsed := b.Elapsed()
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N*chunkCount), "ns/chunk")
+		})
 	}
-	elapsed := b.Elapsed()
-	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N*chunksPerRequest), "ns/chunk")
 }
 
 // BenchmarkLatestRequestRuntimeSnapshot 测量请求收尾时读取缓存快照、复制模型条目并映射 CPU 状态的成本。
