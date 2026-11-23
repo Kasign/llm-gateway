@@ -372,8 +372,8 @@ jobs:
           docker run --rm \
             -v "${model_dir}:/data/models" \
             --entrypoint sh llm-gateway:ci \
-            -ec 'test "$(id -u)" = 10001
-                 && test "$(id -g)" = 10001
-                 && test -r /data/models/existing-model.gguf
-                 && test -w /data/models
-                 && touch /data/models/.gateway-ci-write-test'
+            -ec 'test "$(id -u)" = 10001 &&
+                 test "$(id -g)" = 10001 &&
+                 test -r /data/models/existing-model.gguf &&
+                 test -w /data/models &&
+                 touch /data/models/.gateway-ci-write-test'
