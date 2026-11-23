@@ -3286,7 +3286,7 @@ async function runBenchmarkRepeat(){
    if(sample.status==='completed'){
     if(!baselineModel){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
     else if(sample.model!==baselineModel||(baselineConditionHash&&sample.condition_sha256!==baselineConditionHash)){
-     sample.condition_mismatch=true;sample.server_status=sample.status;sample.status='condition_mismatch';sample.error=sample.error||'模型或条件指纹与首个样本不同，已停止后续采样。';
+     sample.condition_mismatch=true;sample.error=sample.error||'模型或条件指纹与首个样本不同，已停止后续采样。';
      report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='conditions_changed';break;
     }
    }
