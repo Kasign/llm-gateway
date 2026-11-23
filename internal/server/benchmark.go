@@ -676,6 +676,14 @@ func benchmarkConditionMetadata(snapshot map[string]interface{}, promptSHA256 st
 			fingerprintSnapshot[key] = value
 		}
 	}
+	if runtimeProfile, ok := fingerprintSnapshot["backend_runtime_profile"].(map[string]interface{}); ok {
+		// 档案 ID/版本/更新时间是追溯元数据；条件指纹只纳入用户声明的实际运行参数值。
+		fingerprintSnapshot["backend_runtime_profile"] = map[string]interface{}{
+			"backend": runtimeProfile["backend"],
+			"model_id": runtimeProfile["model_id"],
+			"parameters": runtimeProfile["parameters"],
+		}
+	}
 	if identity, ok := fingerprintSnapshot["model_identity"].(map[string]interface{}); ok {
 		stableIdentity := make(map[string]interface{}, len(identity))
 		for key, value := range identity {
@@ -1059,6 +1067,7 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 		Model            string   `json:"model"`
 		Scenario         string   `json:"scenario"`
 		AcceptanceCaseID string `json:"acceptance_case_id"`
+		RuntimeProfileID string `json:"runtime_profile_id"`
 		Prompt           string   `json:"prompt"`
 		MaxTokens        int      `json:"max_tokens"`
 		UseActive        bool     `json:"use_active"`
@@ -1242,6 +1251,14 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 			"models_max": s.cfg.Llama.ModelsMax,
 			"auto_load_on_proxy": s.cfg.Llama.AutoLoadOnProxy,
 		},
+	}
+	if profileID := strings.TrimSpace(in.RuntimeProfileID); profileID != "" {
+		profileSnapshot, profileErr := s.backendRuntimeProfileSnapshot(r.Context(), profileID, target.Backend, taskModelID)
+		if profileErr != nil {
+			jsonError(w, http.StatusBadRequest, "benchmark_runtime_profile_invalid", profileErr.Error())
+			return
+		}
+		configSnapshot["backend_runtime_profile"] = profileSnapshot
 	}
 	conditionSHA256, conditionStatus, conditionMissing, configErr := benchmarkConditionMetadata(configSnapshot, promptSHA256)
 	if configErr != nil {

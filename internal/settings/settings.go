@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -86,6 +87,7 @@ func validBackendID(id string) bool {
 // Repo 读写 gateway_settings 表中的 JSON 配置项。
 type Repo struct {
 	db *sql.DB
+	profileMu sync.Mutex
 }
 
 func NewRepo(db *sql.DB) *Repo {

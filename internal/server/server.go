@@ -329,6 +329,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/inference-params/schema", s.inferenceParamsSchemaAPI) // 获取推理参数的配置表单结构
 	mux.HandleFunc("/api/admin/inference-params/reset", s.inferenceParamsResetAPI)   // 重置推理参数为默认
 	mux.HandleFunc("/api/admin/inference-params", s.inferenceParamsAPI)              // 读取/保存推理参数
+	mux.HandleFunc("/api/admin/backend-runtime-profiles/", s.backendRuntimeProfileActionAPI) // 删除 Backend 运行参数档案
+	mux.HandleFunc("/api/admin/backend-runtime-profiles", s.backendRuntimeProfilesAPI)       // 读取/保存 Backend 运行参数档案
 	mux.HandleFunc("/api/admin/audit/metrics", s.auditMetricsAPI)                     // 查看审计队列的只读聚合指标
 	mux.HandleFunc("/api/admin/retention/status", s.requestRetentionStatusAPI)           // 查看请求日志保留策略的只读运行状态
 
