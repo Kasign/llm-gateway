@@ -2641,9 +2641,13 @@ function readBenchmarkSuiteState(){
       if(suite.qualification_status!==currentQualification){
         suite.qualification_status_previous=suite.qualification_status||'not_evaluated';
         suite.qualification_status=currentQualification;
-        suite.qualification_rules_version='perf12-qualification-v2';
         changed=true;
       }
+      // 每次读取已完成报告都明确记录本次实际使用的规则版本与计算时间。
+      // 即使资格结果与旧值相同，也不能让用户无法判断新规则是否已执行。
+      suite.qualification_rules_version='perf12-qualification-v2';
+      suite.qualification_evaluated_at=new Date().toISOString();
+      changed=true;
     }
     if(changed)localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
     return suite;
@@ -2726,6 +2730,10 @@ function buildBenchmarkSuiteMarkdown(suite){
     '- 报告版本：'+benchmarkEvidenceValue(suite.suite_version),
     '- 执行状态：'+benchmarkEvidenceValue(suite.status),
     '- 基线资格：'+benchmarkEvidenceValue(suite.qualification_status||'not_evaluated'),
+    '- 资格规则版本：'+benchmarkEvidenceValue(suite.qualification_rules_version||'not_evaluated'),
+    '- 资格重新计算时间（浏览器本地）：'+benchmarkEvidenceValue(suite.qualification_evaluated_at),
+    '- 上一次资格结果：'+benchmarkEvidenceValue(suite.qualification_status_previous||'无历史记录'),
+    '- 参数快照状态：'+benchmarkEvidenceValue(suite.resume_parameter_status||'unknown'),
     '- 开始时间：'+benchmarkEvidenceValue(suite.started_at),
     '- 前端流程结束时间：'+benchmarkEvidenceValue(suite.finished_at),
     '- 当前测试组：'+benchmarkEvidenceValue(suite.current_case_id),
