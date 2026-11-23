@@ -188,7 +188,7 @@
 - Gateway 部署身份：优先记录管理台/部署记录中已有的镜像标签或 digest；当前管理 API 未暴露可核对的 Gateway Revision。用户现行 ZIP + `docker compose up -d --build` 流程不能假定 ZIP 内含 `.git`；`scripts/build-gateway-image.sh` 也要求 Git 工作区，不能假定实际部署使用了该脚本。因此线上 revision 无证据时标记 `unknown`，不要求用户手工获取 SHA，也不阻塞 observed 采样。不得把 GitHub `dev` 最新 SHA 当成线上版本。
 - NUC 硬件：i5-1340P、32 GB RAM；CPU-only 或实际 backend 必须以运行时证据为准。
 - llama.cpp 镜像 digest、版本、启动参数（尤其线程、ctx、batch/ubatch、metrics），Gateway 活动 Provider 与模型 ID。
-- Qwen3.5-9B-Q4_K_M 实际模型文件身份/量化；SHA 缺失则标 unknown，不阻塞 observed，但不补猜。
+- 本轮实际活动模型为 Qwen3.5-4B-IQ4_NL；模型文件身份/量化 SHA 未取得，记为 unknown，不阻塞 observed，但不补猜。
 - Gateway 配置：请求超时、warm start、日志 payload/stream raw/preview 设置；敏感密钥和完整环境变量不采集、不上传。
 - Benchmark 条件：固定 prompt 数据集版本、temperature/top_p/seed、max_tokens、并发 1；记录实际输入/输出 Token、TTFT、总耗时、原生 Prompt/Decode timings 和缓存分类。
 - 先预热模型，再串行执行；采样窗口内不发其他推理请求。先完成少量 smoke 请求确认指标完整，再按固定样本重复采集，不盲目并发压测。
@@ -197,11 +197,21 @@
 
 本轮只报告实际运行环境下的 observed：TTFT、总延迟、输入/输出 Token、Prompt/Decode timings、缓存状态、宿主机 CPU/内存和 llama.cpp Metrics；如有独立 1Panel/Docker 指标，再单列 Gateway 容器内存。由于当前没有关闭请求观测的生产对照开关，且不应为本任务关闭审计/请求关联，不能从两批不同时间的请求推导观测开销因果增量。没有 Gateway 进程 RSS 数据时，明确记为 unavailable/not_collected。
 
+### 9.1 思考关闭修复后的 NUC Smoke（2026-11-23）
+
+- Request ID：`req_1795426066335852781_bf7024a377`；Gateway / upstream HTTP 200，状态 success；模型 `Qwen3.5-4B-IQ4_NL`，流式请求。
+- 上游请求体已同时包含 `reasoning_effort: "none"` 和 `chat_template_kwargs.enable_thinking: false`，不再出现顶层 `enable_thinking: false`。
+- 上游 SSE 实际返回均为 `delta.content`，未观察到 `reasoning_content`；说明本次「关闭思考」请求行为符合预期，修复已通过真实 NUC 请求验证。
+- 总耗时 969 ms；TTFT / 首条正文 263 ms；正文生成阶段 706 ms；输入 13 tokens、输出 10 tokens；llama.cpp Prompt 256.489 ms（6 prompt tokens，23.39 tok/s），Decode 706.193 ms（10 tokens，12.74 tok/s）。
+- Runtime Snapshot：`complete`，活动模型正确，采样年龄 970 ms；宿主机 CPU 1.25%。本次输入/输出均较短，只作为部署 Smoke，不作为性能分布结论。
+- 本次采样的 `cache_n=7`，存在缓存命中；不能将它当作冷缓存样本，也不能与无缓存样本混合计算同一组性能分布。
+- 结论：思考关闭参数修复通过代码 CI 和真实 NUC 请求验证。下一步固定模型、参数、提示词与输出目标，分开记录缓存命中/未命中样本，完成串行重复采样；不重跑 PERF-12。
+
 ## 9. 下一步执行顺序
 
 1. 打开 NUC 当前管理台，确认当前活动 Backend、模型标识和模型已加载状态；部署 revision 无现成证据时记为 `unknown`，不额外取 SHA、不阻塞采样。
 2. 在「本地模型 → 运行概览」查看 llama.cpp Server Metrics，展开动态指标，记录 `sampled_at`、采样状态、进程实例标识和指标值；采样器约每 5 秒刷新一次，读取时必须记录样本时间，不能把页面打开时间当作指标采样时间。
 3. 在首页记录宿主机 CPU 与宿主机内存 used/total/source。当前实现的 CPU 来源为 `/proc/stat`，内存来源为 `/proc/meminfo`（`source=meminfo`）；两者均为宿主机口径。Gateway 容器内存和进程 RSS 需从 1Panel/Docker 独立指标取得；拿不到就分别记为 `not_collected`。
-4. 先部署包含 llama.cpp 思考关闭参数修复的最新 dev 代码。代码验收：SHA `87eba067932fd39a2dc5c516dfaa75a3e2020cd4` 的 Go CI Run `45144940856` 六个 Job 全部 success；Browser Smoke Run `45144872097` success，覆盖相同代码提交 `714d266`（其后仅文档更新）。部署后确认 UI 关闭思考时上游 body 同时包含 `reasoning_effort=none` 和 `chat_template_kwargs.enable_thinking=false`，且没有顶层 `enable_thinking=false`；再执行单并发 smoke，检查是否仍持续输出长时间 reasoning。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
+4. 已完成思考关闭修复部署验收：Request ID `req_1795426066335852781_bf7024a377` 的上游 body 包含 `reasoning_effort=none` 和 `chat_template_kwargs.enable_thinking=false`，SSE 只有正文 content，无 reasoning_content。该 Smoke 已记录在 9.1。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
 5. Smoke 数据完整后，在同一模型、参数、输入长度、输出上限和并发条件下串行采集重复样本；每次记录请求详情和采样前后 Runtime。测试窗口内不发送其它推理请求。若 UI 没有批量重复入口，不新增脚本或 API，先以现有普通 Benchmark 单次任务入口逐次执行。
 6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU/内存；若 1Panel/Docker 提供独立指标，再单独报告 Gateway 容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
