@@ -404,7 +404,7 @@ function renderPerformanceDiagnosis(d) {
           '<dt>' + esc(e.metric || '指标') + '</dt><dd>' + esc(String(e.value)) + ' ' + esc(e.unit || '') +
           '<span class="muted"> · ' + esc(e.source || '') + ' · ' + esc(e.scope || '') +
           (e.note ? ' · ' + esc(e.note) : '') + '</span></dd>'
-        ).join('') + '</div>'
+         ).join('') + '</dl>'
       : '<p class="req-note">没有可展示的原始证据。</p>';
     const next = Array.isArray(item.next_steps) && item.next_steps.length
       ? '<ul class="req-hints">' + item.next_steps.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'

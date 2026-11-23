@@ -51,7 +51,7 @@ func TestBuildPerformanceDiagnosisIncludesQueueTimeoutAndCancellation(t *testing
 		if len(got.Candidates) != 1 || got.Candidates[0].Category != "provider_queue" {
 			t.Fatalf("%s queue wait should remain visible: %+v", status, got)
 		}
-		if !strings.Contains(got.Candidates[0].Evidence[0].Note, status) {
+		if got.Candidates[0].Evidence[0].Note != "queue_status="+status {
 			t.Fatalf("%s status missing from evidence: %+v", status, got.Candidates[0].Evidence)
 		}
 	}
