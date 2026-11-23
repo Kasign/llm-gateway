@@ -1,6 +1,6 @@
 # PERF-11 Benchmark ↔ Profile 关联
 
-> 状态：进行中
+> 状态：已完成
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -32,6 +32,15 @@
 - 不新增数据表、API、存储副本或第二套关联逻辑。
 - Browser Smoke 与 Go CI 通过。
 
-## 5. 后续边界
+## 5. 验收结果
 
-完成导航和状态展示后，PERF-11 即可结束。PERF-13 再验证观测本身对 TTFT、P95 和 RSS 的开销；PERF-12 的四组 observed 样本不因本任务改变资格。
+- 历史 Benchmark 详情入口已使用 Run.RequestID 跳转到现有完整请求详情。
+- 历史详情已展示 analysis_status；缺少 RequestID 时不展示无效入口。
+- Browser Smoke：Run `45133268206`，SHA `32ce0902487efd20909a872188c069e29ef03924`，success。
+- Go CI：Run `45133513574`，SHA `b79f64967ef4bc8a843af9c0f40b6e0fd5b75deb`，6/6 Job success。
+- Browser Smoke SHA 到最终 Go CI SHA 之间的 GitHub compare 仅包含 `.github/workflows/go-ci.yml` 与 PERF-13 文档变更，未改变 PERF-11 前端实现。
+- 不新增关联表、API、存储副本或第二套关联逻辑。
+
+## 6. 后续边界
+
+PERF-11 已完成。PERF-13 负责验证观测链路的代码路径成本与真实部署运行分布；PERF-12 的四组 observed 样本不因本任务改变资格。
