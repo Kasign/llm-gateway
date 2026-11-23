@@ -364,6 +364,42 @@ try {
     await page.locator('#benchSuiteReport').count() === 1 &&
     !(await page.locator('#benchSuiteRunBtn').isVisible()) &&
     !(await page.locator('#benchToolRunBtn').isVisible()));
+  check('普通性能测试提供 1～20 次重复采样，默认 10 次',
+    await page.locator('#benchRepeatCount').inputValue() === '10' &&
+    await page.locator('#benchRepeatCount').getAttribute('min') === '1' &&
+    await page.locator('#benchRepeatCount').getAttribute('max') === '20' &&
+    await page.locator('#benchRepeatRunBtn').isVisible() &&
+    await page.locator('#benchRepeatReport').isVisible());
+  await page.locator('#benchRepeatCount').fill('0');
+  await page.locator('#benchRepeatRunBtn').click();
+  check('重复采样拒绝超出范围的次数且不提交任务',
+    (await page.locator('#benchRepeatStatus').textContent()).includes('1～20') &&
+    !(await page.locator('#benchStopBtn').isEnabled()));
+  await page.locator('#benchRepeatCount').fill('10');
+  const repeatReportSmoke = await page.evaluate(() => {
+    const key='llm-gateway.bench-repeat.v1';
+    const previous=localStorage.getItem(key);
+    localStorage.setItem(key,JSON.stringify({
+      version:1,status:'completed',requested_count:1,
+      started_at:'2026-11-23T00:00:00Z',finished_at:'2026-11-23T00:00:01Z',
+      samples:[{index:1,job_id:'benchmark-repeat-smoke-job',status:'completed',
+        condition_status:'complete',condition_sha256:'smoke-condition',
+        model:'smoke-model',cache_state:'cold',latency_ms:1250,ttft_ms:300,
+        input_tokens:12,output_tokens:34,output_tokens_per_sec:27.2}]
+    }));
+    renderBenchmarkRepeatReport();
+    const result={
+      reportVisible:(document.getElementById('benchRepeatReport')?.textContent||'').includes('benchmark-repeat-smoke-job'),
+      copyEnabled:!document.getElementById('benchRepeatCopyBtn')?.disabled,
+      noPromptStored:!localStorage.getItem(key).includes('Write a small')
+    };
+    if(previous===null)localStorage.removeItem(key);else localStorage.setItem(key,previous);
+    renderBenchmarkRepeatReport();
+    return result;
+  });
+  check('重复采样报告展示独立 Job ID 并提供 Markdown 复制，且不持久化提示词',
+    repeatReportSmoke.reportVisible&&repeatReportSmoke.copyEnabled&&repeatReportSmoke.noPromptStored,
+    repeatReportSmoke);
   await page.locator('#modelTestTabSuite').click();
   check('一键四组测试独立 Tab 与工具、验收并列',
     await page.locator('#modelTestPanelSuite').isVisible() &&
