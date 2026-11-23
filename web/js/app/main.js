@@ -2262,6 +2262,19 @@ function updateBenchReqPreview(upstreamModel,scenario='performance',promptOverri
   $(id)?.addEventListener('input',()=>{const n=$('benchTarget')?.querySelector('code')?.textContent;updateBenchReqPreview(n||'')});
   $(id)?.addEventListener('change',()=>{const n=$('benchTarget')?.querySelector('code')?.textContent;updateBenchReqPreview(n||'')});
 });
+function benchmarkCacheClassification(timings,inputTokens){
+  const cacheN=timings?.cache_n==null?null:Number(timings.cache_n);
+  const promptN=timings?.prompt_n==null?null:Number(timings.prompt_n);
+  const input=Number(inputTokens);
+  if(!Number.isFinite(cacheN)||!Number.isFinite(promptN)||!Number.isFinite(input)||input<=0||cacheN<0||promptN<0)return 'unknown';
+  if(cacheN===0&&promptN===input)return 'cold';
+  if(cacheN>0&&promptN===0&&cacheN===input)return 'full';
+  if(cacheN>0&&promptN>0&&cacheN+promptN===input)return 'partial';
+  return 'inconsistent';
+}
+function benchmarkCacheClassificationLabel(state){
+  return ({cold:'冷缓存',partial:'部分缓存命中',full:'全缓存命中',unknown:'未知',inconsistent:'缓存证据不一致'})[state]||'未知';
+}
 function benchJobPayload(j){return j.job||j}
 function benchTextsFromJob(j){
   let content=(j.content_text||'').trim();
@@ -2620,10 +2633,19 @@ function readBenchmarkSuiteState(){
     const suite=JSON.parse(raw);
     if(!suite||typeof suite!=='object')return null;
     const cases=normalizeBenchmarkSuiteCases(suite.cases);
-    if(JSON.stringify(cases)!==JSON.stringify(suite.cases||[])){
-      suite.cases=cases;
-      localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
+    let changed=JSON.stringify(cases)!==JSON.stringify(suite.cases||[]);
+    if(changed)suite.cases=cases;
+    // 已完成的历史报告按当前资格规则重新计算，只使用原报告已保存的证据，不发起新请求。
+    if(suite.status==='completed'&&cases.length>=4){
+      const currentQualification=benchmarkSuiteQualification(suite);
+      if(suite.qualification_status!==currentQualification){
+        suite.qualification_status_previous=suite.qualification_status||'not_evaluated';
+        suite.qualification_status=currentQualification;
+        suite.qualification_rules_version='perf12-qualification-v2';
+        changed=true;
+      }
     }
+    if(changed)localStorage.setItem(BENCH_SUITE_STORAGE_KEY,JSON.stringify(suite));
     return suite;
   }catch{return null}
 }
@@ -2811,16 +2833,27 @@ function benchmarkSuiteQualification(suite){
     const item=cases.find(entry=>entry.case_id===id);
     return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
   });
+  const allPerformanceContextAvailable=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    const snapshot=item.job?.condition_snapshot||{};
+    return typeof snapshot.model_id==='string'&&snapshot.model_id.trim()!==''&&snapshot.model_id===String(suite.model_id||'')&&
+      typeof snapshot.backend==='string'&&snapshot.backend.trim()!==''&&snapshot.backend.toLowerCase()===String(suite.backend||'').toLowerCase()&&
+      snapshot.model_load_state_before==='loaded';
+  });
   const allCold=caseOrder.every(id=>{
     const item=cases.find(entry=>entry.case_id===id);
-    return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
-  });
-  const allConditionsComplete=caseOrder.every(id=>{
-    const item=cases.find(entry=>entry.case_id===id);
     const job=item.job||{};
-    return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
+    const timings=item.analysis?.throughput?.llama_timings||item.analysis?.llama_timings||item.analysis?.model_timings||{};
+    const input=Number(job.input_tokens),output=Number(job.output_tokens);
+    return item.status==='completed'&&
+      benchmarkCacheClassification(timings,input)==='cold'&&
+      Number.isFinite(output)&&timings.prompt_ms!=null&&timings.predicted_ms!=null&&
+      Number(timings.predicted_n)===output&&Number(timings.prompt_n)===input;
   });
-  return allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+  // condition_status 表示环境复现信息完整度，不代表性能样本本身是否有效。
+  // 模型 SHA、Gateway 构建身份、Backend 版本和硬件快照缺失只降低复现等级。
+  return allTargetsMet&&allPerformanceContextAvailable&&allCold&&suite.resume_parameter_status==='complete_snapshot'
+    ?'baseline_candidate':'baseline_not_qualified';
 }
 
 function benchmarkSuiteWarmupCanResume(suite){
@@ -3050,15 +3083,18 @@ async function runBenchmarkSuite(resumeExisting=false){
       const modelTimings=wrap?.analysis?.throughput?.llama_timings||wrap?.analysis?.llama_timings||{};
       const cacheN=modelTimings.cache_n==null?null:Number(modelTimings.cache_n);
       const promptN=modelTimings.prompt_n==null?null:Number(modelTimings.prompt_n);
-      const coldPrompt=cacheN===0&&Number.isFinite(input)&&promptN===input;
+      const cacheState=benchmarkCacheClassification(modelTimings,input);
+      const coldPrompt=cacheState==='cold';
       if(cacheN!=null)validation.push('Prompt Cache '+(cacheN===0?'未命中（cache_n=0）':'命中 '+cacheN+' tokens'));
       else validation.push('Prompt Cache 状态未知');
       if(promptN!=null&&Number.isFinite(input))validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
       else validation.push('Prompt Eval Token 覆盖情况未知');
+      validation.push('缓存状态：'+benchmarkCacheClassificationLabel(cacheState));
       if(!coldPrompt)validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
-      if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
+      if(timingComplete)validation.push('原生 Prompt/Decode timings 完整');
+      else validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
       const sameJob=!!previous?.job_id&&previous.job_id===(job.job_id||observedJobId);
       if(previous&&!sameJob)previousAttempts.push({status:previous.status||'unknown',server_status:previous.server_status||'unknown',poll_status:previous.poll_status||'legacy_unknown',result_status:previous.result_status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,last_observed_at:previous.last_observed_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
@@ -3340,6 +3376,7 @@ exposeGlobals({
   buildBenchmarkSuitePrompts,
   benchmarkSuitePromptForCase,
   benchmarkSuiteQualification,
+  benchmarkCacheClassification,
   readBenchmarkSuiteState,
   normalizeBenchmarkSuiteCases,
   benchmarkSuiteCanResume,
