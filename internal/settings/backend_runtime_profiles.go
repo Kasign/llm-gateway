@@ -167,6 +167,9 @@ func (r *Repo) SaveBackendRuntimeProfile(ctx context.Context, profile BackendRun
 	if err != nil {
 		return BackendRuntimeProfile{}, err
 	}
+	profile.Version = 0
+	profile.Source = "user_declared"
+	profile.UpdatedAt = time.Now().UTC()
 	profile, err = profile.NormalizeAndValidate()
 	if err != nil {
 		return BackendRuntimeProfile{}, err
