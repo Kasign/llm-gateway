@@ -1,6 +1,6 @@
 # PERF-10 Profile 存储与查询设计
 
-> 状态：实施中（请求分析生命周期修复已通过 CI；Benchmark 关联分析状态已补充，等待新一轮 CI）
+> 状态：已完成（生命周期、分析可用状态、OpenAPI 契约均已通过验收）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -67,7 +67,7 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 
 1. 先修复请求与 Benchmark 的保留一致性：请求清理跳过仍被保留 BenchmarkRun 引用的 RequestID；Benchmark 过期清理后允许回收已超期且不再被引用的请求记录。
 2. 已确认并复用现有 `/api/requests/{request_id}` 请求详情 API；响应增加 `analysis_status`，区分 `persisted`、`reconstructed`、`unavailable`，不新增 endpoint。Benchmark 持久化恢复响应增加 `analysis_status`，区分 `persisted`、`not_recorded`、`request_log_missing`、`read_failed`、`invalid`、`store_unavailable`。
-3. 已增加 MariaDB 集成测试覆盖 Benchmark 引用期间保护请求记录、Benchmark 到期后再清理请求；新增 Benchmark 分析状态分类单元测试。并发/批次边界仍需在最终验收中确认。
+3. 已增加 MariaDB 集成测试覆盖 Benchmark 引用期间保护请求记录、Benchmark 到期后再清理请求；新增 Benchmark 分析状态分类单元测试。最新 Go CI `45130146800`（SHA `e9e96ead`）6/6 Job 成功，覆盖 MariaDB 生命周期、竞态、静态检查、OpenAPI 契约、前端构建和 Docker 镜像。
 4. 更新 OpenAPI 与管理台仅在接口契约确有变化时同步，不为“Profile”概念另建平行页面。
 5. PERF-10 完成后，PERF-11 只需使用 BenchmarkRun.RequestID 关联该请求分析，不再增加重复关联表。
 
@@ -78,7 +78,15 @@ PERF-10 不新增 Profile 主表。Profile 的稳定身份沿用 `request_id`，
 - 若请求日志清理任务和 Benchmark 清理任务并发执行，必须以数据库事务/锁定和引用检查确保不会先删掉仍被引用的 RequestLog。
 - 不引入新的配置项，直到默认请求、诊断请求和深度请求的真实采集差异被代码证据证明需要独立配置。
 
-## 6. 验收标准
+## 6. 验收结果
+
+- 生命周期：MariaDB 集成测试验证 Benchmark 引用期间请求记录受保护；Benchmark 到期后允许请求记录按原 TTL 回收。
+- 并发与代码质量：最新 Go CI `45130146800` 对应 SHA `e9e96eadff672717344966253fb239ca444221bb`，6/6 Job 成功；包括竞态测试与静态检查。
+- API 契约：RequestDetail 与 BenchmarkStatus 的分析状态字段已同步 OpenAPI，契约检查通过。
+- 浏览器回归：Browser Smoke `45129981162`（SHA `0e87a421`）成功；其后至 `e9e96ead` 的变更为后端状态分类测试、OpenAPI 和文档，不包含前端功能代码变更。
+- PERF-10 不新增 Profile 表、独立 Profile API 或重复 RequestAnalysis 存储；验收完成。
+
+## 7. 验收标准
 
 - 不重复保存 RequestAnalysis。
 - BenchmarkRun 在其保留期内可通过 RequestID 读取对应分析；分析不可用时返回明确状态。
