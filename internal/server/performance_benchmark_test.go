@@ -523,6 +523,7 @@ func TestBenchmarkConditionMetadataMarksPartialAndFingerprintsKnownInputs(t *tes
 		"environment": map[string]interface{}{"vcs_revision": ""},
 		"backend_version": "",
 		"hardware": map[string]interface{}{"cpu_model": "", "memory_bytes": nil},
+		"backend_runtime_profile": completeBenchmarkRuntimeProfile("active-model"),
 	}
 	_, status, missing, err = benchmarkConditionMetadata(partial, "prompt-hash")
 	if err != nil || status != "partial" || len(missing) != 7 {
