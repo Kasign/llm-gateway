@@ -518,9 +518,16 @@ func (s *Server) benchmarkModelLoadStateBefore(parent context.Context, backend, 
 	if err != nil || snapshot == nil {
 		return "unknown", "benchmark_preflight_failed"
 	}
-	snapshot.SampledAt = time.Now()
+	sampledAt := time.Now()
+	snapshot.SampledAt = sampledAt
+	// 资格判定直接使用本次预检响应，避免后台采样在缓存写入后覆盖它，
+	// 导致返回的 source 与实际参与判定的快照不一致。
+	preflightSample := &runtimeSnapshotSample{
+		Snapshot: snapshot, Status: "complete", Source: "benchmark_preflight", SampledAt: sampledAt,
+	}
+	state = benchmarkModelLoadState(preflightSample, backend, modelID, time.Now())
 	s.setRuntimeSnapshotSample(snapshot, "complete", "benchmark_preflight")
-	return benchmarkModelLoadState(s.runtimeSnapshotSampleLatest(), backend, modelID, time.Now()), "benchmark_preflight"
+	return state, "benchmark_preflight"
 }
 
 func benchmarkModelLoadState(sample *runtimeSnapshotSample, backend, modelID string, now time.Time) string {
