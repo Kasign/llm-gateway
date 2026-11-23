@@ -1,7 +1,762 @@
 {
   "version": 1,
-  "providers": [],
-  "models": [],
-  "plans": [],
-  "evidence": []
+  "providers": [
+    {
+      "id": "google-ai-studio",
+      "name": "Google AI Studio / Gemini API",
+      "website": "https://ai.google.dev/",
+      "docs_url": "https://ai.google.dev/gemini-api/docs"
+    },
+    {
+      "id": "groq",
+      "name": "GroqCloud",
+      "website": "https://groq.com/",
+      "docs_url": "https://console.groq.com/docs"
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras Inference",
+      "website": "https://www.cerebras.ai/",
+      "docs_url": "https://inference-docs.cerebras.ai/"
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "name": "Cloudflare Workers AI",
+      "website": "https://www.cloudflare.com/",
+      "docs_url": "https://developers.cloudflare.com/workers-ai/"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "website": "https://openrouter.ai/",
+      "docs_url": "https://openrouter.ai/docs"
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face Inference Providers",
+      "website": "https://huggingface.co/",
+      "docs_url": "https://huggingface.co/docs/inference-providers"
+    }
+  ],
+  "models": [
+    {
+      "provider_id": "groq",
+      "id": "openai/gpt-oss-120b",
+      "name": "openai/gpt-oss-120b",
+      "protocols": [
+        "chat_completions"
+      ],
+      "evidence_ids": [
+        "groq-models",
+        "groq-limits"
+      ]
+    },
+    {
+      "provider_id": "groq",
+      "id": "openai/gpt-oss-20b",
+      "name": "openai/gpt-oss-20b",
+      "protocols": [
+        "chat_completions"
+      ],
+      "evidence_ids": [
+        "groq-models",
+        "groq-limits"
+      ]
+    },
+    {
+      "provider_id": "groq",
+      "id": "qwen/qwen3.8-27b",
+      "name": "qwen/qwen3.8-27b",
+      "protocols": [
+        "chat_completions"
+      ],
+      "evidence_ids": [
+        "groq-models",
+        "groq-limits"
+      ]
+    },
+    {
+      "provider_id": "cerebras",
+      "id": "gpt-oss-120b",
+      "name": "GPT-OSS 120B",
+      "protocols": [
+        "chat_completions"
+      ],
+      "evidence_ids": [
+        "cerebras-limits"
+      ]
+    },
+    {
+      "provider_id": "cerebras",
+      "id": "qwen-3.8-27b",
+      "name": "Qwen 3.8 27B",
+      "protocols": [
+        "chat_completions"
+      ],
+      "evidence_ids": [
+        "cerebras-limits"
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "id": "google-ai-studio-free",
+      "provider_id": "google-ai-studio",
+      "name": "Gemini API Free Tier",
+      "type": "ongoing_tier",
+      "status": "active",
+      "eligibility": {
+        "regions": {
+          "mode": "unspecified"
+        },
+        "payment_method": "not_required",
+        "verification_requirements": [
+          "Google 账号与活跃 Google Cloud Project",
+          "接受 AI Studio / Gemini API 条款"
+        ],
+        "account_types": [
+          "google_account",
+          "google_cloud_project"
+        ],
+        "notes": "Singapore 在官方可用地区列表中；部分导入项目可能需要验证。具体免费模型资格与额度以 AI Studio 项目控制台为准。"
+      },
+      "data_policy": {
+        "training": "yes",
+        "retention": "unknown",
+        "notes": "Free Tier 输入/输出可能用于改进 Google 产品；不应发送敏感业务数据。",
+        "evidence_ids": [
+          "google-pricing",
+          "google-billing"
+        ]
+      },
+      "quotas": [
+        {
+          "metric": "rpm",
+          "unit": "requests",
+          "period": "minute",
+          "scope": "project",
+          "state": "unknown",
+          "evidence_ids": [
+            "google-rate-limits"
+          ]
+        },
+        {
+          "metric": "input_tpm",
+          "unit": "tokens",
+          "period": "minute",
+          "scope": "project",
+          "state": "unknown",
+          "evidence_ids": [
+            "google-rate-limits"
+          ]
+        },
+        {
+          "metric": "rpd",
+          "unit": "requests",
+          "period": "day",
+          "scope": "project",
+          "state": "unknown",
+          "reset_timezone": "America/Los_Angeles",
+          "evidence_ids": [
+            "google-rate-limits"
+          ]
+        }
+      ],
+      "verified_at": "2026-11-23T00:00:00Z",
+      "next_review_at": "2026-12-07T00:00:00Z",
+      "evidence_ids": [
+        "google-pricing",
+        "google-billing",
+        "google-regions",
+        "google-rate-limits",
+        "google-openai"
+      ]
+    },
+    {
+      "id": "groq-free",
+      "provider_id": "groq",
+      "name": "Groq Free Plan",
+      "type": "ongoing_tier",
+      "status": "active",
+      "eligibility": {
+        "regions": {
+          "mode": "unspecified"
+        },
+        "payment_method": "unknown",
+        "account_types": [
+          "groq_account",
+          "organization"
+        ],
+        "notes": "官方文档未明确确认 Free Tier 是否必须绑卡；服务协议中的 Consumer Use 限制需在实际使用前核实。"
+      },
+      "data_policy": {
+        "training": "no",
+        "retention": "unknown",
+        "notes": "官方服务协议说明除非客户明确授权，否则不使用输入/输出训练；留存细节需按适用协议确认。",
+        "evidence_ids": [
+          "groq-terms"
+        ]
+      },
+      "models": [
+        {
+          "model_id": "openai/gpt-oss-120b",
+          "availability": "included",
+          "evidence_ids": [
+            "groq-limits",
+            "groq-models"
+          ],
+          "quotas": [
+            {
+              "metric": "rpm",
+              "value": 30,
+              "unit": "requests",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "rpd",
+              "value": 1000,
+              "unit": "requests",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpm",
+              "value": 8000,
+              "unit": "tokens",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpd",
+              "value": 200000,
+              "unit": "tokens",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            }
+          ]
+        },
+        {
+          "model_id": "openai/gpt-oss-20b",
+          "availability": "included",
+          "evidence_ids": [
+            "groq-limits",
+            "groq-models"
+          ],
+          "quotas": [
+            {
+              "metric": "rpm",
+              "value": 30,
+              "unit": "requests",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "rpd",
+              "value": 1000,
+              "unit": "requests",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpm",
+              "value": 8000,
+              "unit": "tokens",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpd",
+              "value": 200000,
+              "unit": "tokens",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            }
+          ]
+        },
+        {
+          "model_id": "qwen/qwen3.8-27b",
+          "availability": "included",
+          "evidence_ids": [
+            "groq-limits",
+            "groq-models"
+          ],
+          "quotas": [
+            {
+              "metric": "rpm",
+              "value": 30,
+              "unit": "requests",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "rpd",
+              "value": 1000,
+              "unit": "requests",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpm",
+              "value": 8000,
+              "unit": "tokens",
+              "period": "minute",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            },
+            {
+              "metric": "tpd",
+              "value": 200000,
+              "unit": "tokens",
+              "period": "day",
+              "scope": "model",
+              "state": "known",
+              "evidence_ids": [
+                "groq-limits"
+              ]
+            }
+          ]
+        }
+      ],
+      "verified_at": "2026-11-23T00:00:00Z",
+      "next_review_at": "2026-12-07T00:00:00Z",
+      "evidence_ids": [
+        "groq-limits",
+        "groq-models",
+        "groq-quickstart",
+        "groq-terms",
+        "groq-trust"
+      ]
+    },
+    {
+      "id": "cloudflare-workers-free",
+      "provider_id": "cloudflare-workers-ai",
+      "name": "Workers Free AI Allocation",
+      "type": "daily_allocation",
+      "status": "active",
+      "eligibility": {
+        "regions": {
+          "mode": "unspecified"
+        },
+        "payment_method": "conditional",
+        "account_types": [
+          "cloudflare_account",
+          "workers_account"
+        ],
+        "notes": "Workers Free 包含每日额度；部分模型要求 Workers Paid 或付费账单方式，必须逐模型核验。"
+      },
+      "data_policy": {
+        "training": "unknown",
+        "retention": "unknown"
+      },
+      "quotas": [
+        {
+          "metric": "neurons",
+          "value": 10000,
+          "unit": "neurons",
+          "period": "day",
+          "scope": "account",
+          "state": "known",
+          "reset_timezone": "UTC",
+          "evidence_ids": [
+            "cloudflare-pricing"
+          ]
+        }
+      ],
+      "verified_at": "2026-11-23T00:00:00Z",
+      "next_review_at": "2026-12-07T00:00:00Z",
+      "evidence_ids": [
+        "cloudflare-pricing",
+        "cloudflare-limits",
+        "cloudflare-model-paid",
+        "cloudflare-openai",
+        "cloudflare-model-search"
+      ]
+    },
+    {
+      "id": "openrouter-free-models",
+      "provider_id": "openrouter",
+      "name": "OpenRouter Free Model Variants",
+      "type": "free_model_variant",
+      "status": "active",
+      "eligibility": {
+        "regions": {
+          "mode": "unspecified"
+        },
+        "payment_method": "not_required",
+        "account_types": [
+          "openrouter_account"
+        ],
+        "notes": "仅以 :free 结尾的免费变体保证无需购买 Credits；其他标价 0 美元的模型可能要求账户已有充值余额。具体模型集合动态变化。"
+      },
+      "data_policy": {
+        "training": "conditional",
+        "retention": "unknown",
+        "notes": "请求会转发给实际模型 Provider，各上游的数据处理政策不同。",
+        "evidence_ids": [
+          "openrouter-privacy",
+          "openrouter-terms"
+        ]
+      },
+      "quotas": [
+        {
+          "metric": "rpm",
+          "value": 20,
+          "unit": "requests",
+          "period": "minute",
+          "scope": "account",
+          "state": "known",
+          "evidence_ids": [
+            "openrouter-limits"
+          ]
+        },
+        {
+          "metric": "rpd",
+          "value": 50,
+          "unit": "requests",
+          "period": "day",
+          "scope": "account",
+          "state": "known",
+          "evidence_ids": [
+            "openrouter-limits"
+          ]
+        }
+      ],
+      "verified_at": "2026-11-23T00:00:00Z",
+      "next_review_at": "2026-11-30T00:00:00Z",
+      "evidence_ids": [
+        "openrouter-free-models",
+        "openrouter-pricing",
+        "openrouter-limits",
+        "openrouter-terms",
+        "openrouter-privacy"
+      ]
+    },
+    {
+      "id": "cerebras-trial",
+      "provider_id": "cerebras",
+      "name": "Cerebras 30-Day Free Trial",
+      "type": "trial",
+      "status": "active",
+      "eligibility": {
+        "regions": {
+          "mode": "unspecified"
+        },
+        "payment_method": "required",
+        "verification_requirements": [
+          "添加已验证付款方式以激活试用"
+        ],
+        "account_types": [
+          "cerebras_account"
+        ],
+        "notes": "5 美元试用额度，自激活起 30 天有效；不属于持续免费 API。"
+      },
+      "data_policy": {
+        "training": "unknown",
+        "retention": "unknown"
+      },
+      "quotas": [
+        {
+          "metric": "credits",
+          "value": 5,
+          "unit": "USD",
+          "period": "trial_validity",
+          "scope": "account",
+          "state": "known",
+          "evidence_ids": [
+            "cerebras-limits",
+            "cerebras-pricing"
+          ]
+        }
+      ],
+      "models": [
+        {
+          "model_id": "gpt-oss-120b",
+          "availability": "included",
+          "evidence_ids": [
+            "cerebras-limits"
+          ]
+        },
+        {
+          "model_id": "qwen-3.8-27b",
+          "availability": "included",
+          "evidence_ids": [
+            "cerebras-limits"
+          ]
+        }
+      ],
+      "verified_at": "2026-11-23T00:00:00Z",
+      "next_review_at": "2026-12-07T00:00:00Z",
+      "evidence_ids": [
+        "cerebras-limits",
+        "cerebras-pricing",
+        "cerebras-quickstart"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "google-pricing",
+      "url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "kind": "pricing_page",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.google-ai-studio-free.type",
+        "plans.google-ai-studio-free.data_policy.training"
+      ]
+    },
+    {
+      "id": "google-billing",
+      "url": "https://ai.google.dev/gemini-api/docs/billing",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.google-ai-studio-free.eligibility"
+      ]
+    },
+    {
+      "id": "google-rate-limits",
+      "url": "https://ai.google.dev/gemini-api/docs/rate-limits",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.google-ai-studio-free.quotas"
+      ]
+    },
+    {
+      "id": "google-regions",
+      "url": "https://ai.google.dev/gemini-api/docs/available-regions",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.google-ai-studio-free.eligibility.regions"
+      ]
+    },
+    {
+      "id": "google-openai",
+      "url": "https://ai.google.dev/gemini-api/docs/openai",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.google-ai-studio.docs_url"
+      ]
+    },
+    {
+      "id": "groq-limits",
+      "url": "https://console.groq.com/docs/rate-limits",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.groq-free.models.quotas"
+      ]
+    },
+    {
+      "id": "groq-models",
+      "url": "https://console.groq.com/docs/models",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "models.groq"
+      ]
+    },
+    {
+      "id": "groq-quickstart",
+      "url": "https://console.groq.com/docs/quickstart",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.groq.docs_url"
+      ]
+    },
+    {
+      "id": "groq-terms",
+      "url": "https://console.groq.com/docs/legal/services-agreement",
+      "kind": "terms",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.groq-free.eligibility",
+        "plans.groq-free.data_policy"
+      ]
+    },
+    {
+      "id": "groq-trust",
+      "url": "https://trust.groq.com/faq",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.groq-free.eligibility.regions"
+      ]
+    },
+    {
+      "id": "cloudflare-pricing",
+      "url": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
+      "kind": "pricing_page",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.cloudflare-workers-free.quotas.neurons"
+      ]
+    },
+    {
+      "id": "cloudflare-limits",
+      "url": "https://developers.cloudflare.com/workers-ai/platform/limits/",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.cloudflare-workers-free.quotas"
+      ]
+    },
+    {
+      "id": "cloudflare-model-paid",
+      "url": "https://developers.cloudflare.com/changelog/post/2026-07-28-models-require-workers-paid/",
+      "kind": "announcement",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.cloudflare-workers-free.eligibility"
+      ]
+    },
+    {
+      "id": "cloudflare-openai",
+      "url": "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.cloudflare-workers-ai.docs_url"
+      ]
+    },
+    {
+      "id": "cloudflare-model-search",
+      "url": "https://developers.cloudflare.com/api/resources/ai/subresources/models/methods/list/",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.cloudflare-workers-ai.docs_url"
+      ]
+    },
+    {
+      "id": "openrouter-free-models",
+      "url": "https://openrouter.ai/collections/free-models",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.openrouter-free-models.models"
+      ]
+    },
+    {
+      "id": "openrouter-pricing",
+      "url": "https://openrouter.ai/pricing",
+      "kind": "pricing_page",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.openrouter-free-models.type"
+      ]
+    },
+    {
+      "id": "openrouter-limits",
+      "url": "https://openrouter.ai/docs/api-reference/limits",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.openrouter-free-models.quotas"
+      ]
+    },
+    {
+      "id": "openrouter-terms",
+      "url": "https://openrouter.ai/terms",
+      "kind": "terms",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.openrouter-free-models.eligibility"
+      ]
+    },
+    {
+      "id": "openrouter-privacy",
+      "url": "https://openrouter.ai/privacy",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.openrouter-free-models.data_policy"
+      ]
+    },
+    {
+      "id": "cerebras-limits",
+      "url": "https://inference-docs.cerebras.ai/support/rate-limits",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.cerebras-trial.quotas",
+        "plans.cerebras-trial.eligibility"
+      ]
+    },
+    {
+      "id": "cerebras-pricing",
+      "url": "https://www.cerebras.ai/pricing",
+      "kind": "pricing_page",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "plans.cerebras-trial.quotas"
+      ]
+    },
+    {
+      "id": "cerebras-quickstart",
+      "url": "https://inference-docs.cerebras.ai/quickstart",
+      "kind": "official_document",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.cerebras.docs_url"
+      ]
+    },
+    {
+      "id": "hf-pricing",
+      "url": "https://huggingface.co/docs/inference-providers/main/pricing",
+      "kind": "pricing_page",
+      "checked_at": "2026-11-23T00:00:00Z",
+      "supports": [
+        "providers.huggingface",
+        "exclusions.huggingface_free_api"
+      ]
+    }
+  ]
 }
