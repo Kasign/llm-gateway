@@ -90,6 +90,23 @@ func TestRequestTraceEventContentHasPerRequestByteBudget(t *testing.T) {
 	}
 }
 
+func TestRequestTraceCapsStoredStreamEvents(t *testing.T) {
+	trace := newRequestTraceForTest(&config.Config{})
+	for i := 0; i < maxStreamEventsPerRequest+100; i++ {
+		trace.appendStreamEvent("delta", "content", 1, "", "")
+	}
+	if got := trace.StreamEventCount(); got != maxStreamEventsPerRequest {
+		t.Fatalf("trace event count = %d, want cap %d", got, maxStreamEventsPerRequest)
+	}
+	events := trace.drainEvents()
+	if len(events) != maxStreamEventsPerRequest {
+		t.Fatalf("stored stream event count = %d, want cap %d", len(events), maxStreamEventsPerRequest)
+	}
+	if events[0].Seq != 1 || events[len(events)-1].Seq != maxStreamEventsPerRequest {
+		t.Fatalf("unexpected retained event sequence range: first=%d last=%d", events[0].Seq, events[len(events)-1].Seq)
+	}
+}
+
 func TestRequestTraceCapsUnterminatedParserLine(t *testing.T) {
 	trace := newRequestTraceForTest(&config.Config{})
 	trace.recordStreamChunk([]byte(strings.Repeat("x", maxStreamParserLineBytes+1)))
