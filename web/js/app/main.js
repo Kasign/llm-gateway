@@ -2811,16 +2811,26 @@ function benchmarkSuiteQualification(suite){
     const item=cases.find(entry=>entry.case_id===id);
     return item.validation?.some(v=>v.startsWith('输入目标 达标'))&&item.validation?.some(v=>v.startsWith('输出目标 达标'));
   });
+  const allPerformanceContextAvailable=caseOrder.every(id=>{
+    const item=cases.find(entry=>entry.case_id===id);
+    const snapshot=item.job?.condition_snapshot||{};
+    return typeof snapshot.model_id==='string'&&snapshot.model_id.trim()!==''&&
+      typeof snapshot.backend==='string'&&snapshot.backend.trim()!==''&&
+      snapshot.model_load_state_before==='loaded';
+  });
   const allCold=caseOrder.every(id=>{
     const item=cases.find(entry=>entry.case_id===id);
-    return item.status==='completed'&&item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&!item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&!item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
+    return item.status==='completed'&&
+      item.validation?.some(v=>v.startsWith('Prompt Cache 未命中（cache_n=0）'))&&
+      item.validation?.some(v=>v.startsWith('Prompt Eval Token 覆盖 '))&&
+      item.validation?.some(v=>v==='原生 Prompt/Decode timings 完整')&&
+      !item.validation?.some(v=>v.startsWith('不满足冷缓存条件'))&&
+      !item.validation?.some(v=>v.startsWith('原生 Prompt/Decode timings 不完整'));
   });
-  const allConditionsComplete=caseOrder.every(id=>{
-    const item=cases.find(entry=>entry.case_id===id);
-    const job=item.job||{};
-    return job.condition_status==='complete'&&(!Array.isArray(job.condition_missing)||job.condition_missing.length===0);
-  });
-  return allTargetsMet&&allCold&&allConditionsComplete&&suite.resume_parameter_status==='complete_snapshot'?'baseline_candidate':'baseline_not_qualified';
+  // condition_status 表示环境复现信息完整度，不代表性能样本本身是否有效。
+  // 模型 SHA、Gateway 构建身份、Backend 版本和硬件快照缺失只降低复现等级。
+  return allTargetsMet&&allPerformanceContextAvailable&&allCold&&suite.resume_parameter_status==='complete_snapshot'
+    ?'baseline_candidate':'baseline_not_qualified';
 }
 
 function benchmarkSuiteWarmupCanResume(suite){
@@ -3055,10 +3065,17 @@ async function runBenchmarkSuite(resumeExisting=false){
       else validation.push('Prompt Cache 状态未知');
       if(promptN!=null&&Number.isFinite(input))validation.push('Prompt Eval Token 覆盖 '+promptN+'/'+input+' tokens');
       else validation.push('Prompt Eval Token 覆盖情况未知');
+      if(cacheN!=null&&promptN!=null&&Number.isFinite(input)){
+        if(coldPrompt)validation.push('缓存状态：冷缓存');
+        else if(cacheN>0&&promptN>0)validation.push('缓存状态：部分缓存命中');
+        else if(cacheN>0&&promptN===0)validation.push('缓存状态：全缓存命中');
+        else validation.push('缓存状态：缓存证据不一致');
+      }else validation.push('缓存状态：未知');
       if(!coldPrompt)validation.push('不满足冷缓存条件（要求 cache_n=0 且 prompt_n=input_tokens）');
       const predictedN=modelTimings.predicted_n==null?null:Number(modelTimings.predicted_n);
       const timingComplete=modelTimings.prompt_ms!=null&&modelTimings.predicted_ms!=null&&promptN!=null&&predictedN===output;
-      if(!timingComplete)validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
+      if(timingComplete)validation.push('原生 Prompt/Decode timings 完整');
+      else validation.push('原生 Prompt/Decode timings 不完整或 Token 数不匹配');
       const previousAttempts=Array.isArray(previous?.attempts)?previous.attempts.slice():[];
       const sameJob=!!previous?.job_id&&previous.job_id===(job.job_id||observedJobId);
       if(previous&&!sameJob)previousAttempts.push({status:previous.status||'unknown',server_status:previous.server_status||'unknown',poll_status:previous.poll_status||'legacy_unknown',result_status:previous.result_status||'unknown',job_id:previous.job_id||null,prompt_sha256:previous.prompt_sha256||null,failure:previous.failure||null,recorded_at:previous.finished_at||null,last_observed_at:previous.last_observed_at||null,job:previous.job||null,analysis:previous.analysis||null,acceptance:previous.acceptance||null,runtime_before:previous.runtime_before||null,runtime_after:previous.runtime_after||null,validation:previous.validation||[]});
