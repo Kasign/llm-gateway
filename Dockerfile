@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY web/js ./js
 RUN npm run build
 
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.27.4-bookworm AS builder
 WORKDIR /src
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GATEWAY_BUILD_REVISION=

@@ -1,6 +1,6 @@
 {
     "name": "Go Dev Container",
-    "image": "golang:1.23",
+    "image": "golang:1.27.4-bookworm",
     "features": {
         "ghcr.io/devcontainers/features/go:1": {}
     },
