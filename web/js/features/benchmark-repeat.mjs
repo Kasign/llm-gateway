@@ -14,13 +14,15 @@ function median(values){
 }
 export function summarizeBenchmarkRepeat(samples=[]){
   const completed=samples.filter(sample=>sample?.status==='completed'),groups=new Map();
-  for(const sample of completed){
-    const key=String(sample.condition_sha256||'').trim()||'missing:'+(sample.job_id||sample.index);
+  const conditionMismatch=completed.some(sample=>sample?.condition_mismatch===true);
+  const eligible=completed.filter(sample=>sample?.condition_status==='complete'&&String(sample.condition_sha256||'').trim()!=='');
+  for(const sample of eligible){
+    const key=String(sample.condition_sha256).trim();
     if(!groups.has(key))groups.set(key,[]);
     groups.get(key).push(sample);
   }
   const ranked=[...groups.entries()].sort((a,b)=>b[1].length-a[1].length);
-  const comparable=ranked.length===1&&!ranked[0][0].startsWith('missing:')?ranked[0][1]:[];
+  const comparable=!conditionMismatch&&ranked.length===1?ranked[0][1]:[];
   const metricKeys=['latency_ms','ttft_ms','output_tokens_per_sec','prompt_tokens_per_sec','decode_tokens_per_sec'];
   const cacheGroups={};
   for(const sample of comparable){
