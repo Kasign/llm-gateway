@@ -45,8 +45,8 @@ services:
       LLM_BACKEND: ${LLM_BACKEND}
       REDIS_ROOT_PASSWORD: ${REDIS_ROOT_PASSWORD}
 
-    # 模型下载目录通常由宿主机 root 创建；首次部署先使用 root 简化权限问题。
-    user: "0:0"
+    # 默认使用专用非 root UID/GID；若宿主机目录由其他账号管理，可在 .env 中映射其数字 UID/GID。
+    user: "${GATEWAY_UID:-10001}:${GATEWAY_GID:-10001}"
 
     networks:
       - existing-ai

@@ -50,6 +50,33 @@ sudo docker exec llm-gateway wget -qO- http://Llama-cpp:8080/models
 sudo docker exec llm-gateway wget -qO- http://ollama:11434/api/tags
 ```
 
+
+### Gateway 非 root 运行与模型目录权限
+
+Gateway 容器默认以专用非 root 用户 `10001:10001` 运行。模型目录是唯一需要由 Gateway 写入的宿主机挂载目录；请在首次启动前确认目录权限：
+
+```bash
+# 读取 .env 中的 MODEL_HOST_DIR；下面以示例路径说明，按实际值执行。
+MODEL_HOST_DIR=/server-whl/docker/llm-models
+sudo install -d -o 10001 -g 10001 -m 0775 "$MODEL_HOST_DIR"
+sudo chown 10001:10001 "$MODEL_HOST_DIR"
+sudo chmod u+rwx "$MODEL_HOST_DIR"
+```
+
+以上只调整模型目录本身，不递归修改已有 GGUF 文件的所有权。已有模型文件必须对 Gateway 和 llama.cpp 容器可读；Gateway 新下载的文件由非 root 用户创建，默认文件权限为 0644。
+
+如果模型目录必须继续由现有宿主机账号管理，不要改目录所有权，可在 `.env` 中将 `GATEWAY_UID` / `GATEWAY_GID` 设置为该账号的数字 UID/GID（分别通过 `id -u 用户名` 和 `id -g 用户名` 获取），再重建容器。不要将其设置为 0:0 作为常规方案。
+
+迁移后检查：
+
+```bash
+sudo docker compose config | grep -E 'user:|MODEL_HOST_DIR'
+sudo docker compose up -d --build --force-recreate gateway
+sudo docker exec llm-gateway id
+sudo docker exec llm-gateway sh -c 'test -w /data/models && echo model-dir-writable'
+sudo docker compose logs --tail=100 gateway
+```
+
 ### OpenResty 反向代理（尤其是慢速本地模型）
 
 Gateway 容器内监听 `0.0.0.0:8088`，宿主机发布端口限定为 `127.0.0.1:8088`。反代地址要按 OpenResty 的运行位置选择：

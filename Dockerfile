@@ -31,11 +31,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:3.22 AS release-base
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
+RUN addgroup -S -g 10001 gateway \
+    && adduser -S -D -H -u 10001 -G gateway gateway
 COPY --from=builder /out/llm-gateway /app/llm-gateway
 COPY migrations /app/migrations
 COPY web/index.html /app/web/index.html
 COPY web/static/css /app/web/static/css
-USER 0:0
+USER 10001:10001
 EXPOSE 8088
 ENTRYPOINT ["/app/llm-gateway"]
 
