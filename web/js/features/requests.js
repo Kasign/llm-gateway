@@ -363,6 +363,7 @@ function diagnosticBundle(j) {
     },
     analysis: { phases_ms: analysis.phases_ms || null, throughput: analysis.throughput || null,
       runtime_snapshot: analysis.runtime_snapshot || null, summary: analysis.summary || [],
+      performance_diagnosis: analysis.performance_diagnosis || null,
       diagnosis: j.diagnosis || null, timeline: analysis.timeline || [] },
     tool_calls: Array.isArray(j.tool_calls) ? j.tool_calls : [],
     tool_call_count: j.tool_call_count ?? (Array.isArray(j.tool_calls) ? j.tool_calls.length : 0),
@@ -380,6 +381,49 @@ export async function copyDiagnosticBundle(btn) {
   if (!bundle.request.request_id) { await flashCopyBtn(btn, false); return; }
   await flashCopyBtn(btn, await writeClipboard(JSON.stringify(bundle, null, 2)));
 }
+function renderPerformanceDiagnosis(d) {
+  if (!d || typeof d !== 'object') return '';
+  const statusLabels = {
+    observed_only: '已有观测，尚未确认瓶颈',
+    insufficient_data: '性能证据不足'
+  };
+  const categoryLabels = {
+    gateway_pre_inference: 'Gateway 推理前阶段',
+    provider_queue: 'Provider 并发排队',
+    prompt_eval: 'Prompt Eval',
+    decode: 'Decode 生成',
+    upstream_headers_wait: '上游响应头等待'
+  };
+  const findings = Array.isArray(d.candidates) ? d.candidates : [];
+  const limitations = Array.isArray(d.limitations) ? d.limitations : [];
+  const findingHtml = findings.map((item) => {
+    const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+    const evidenceHtml = evidence.length
+      ? '<div class="req-kv">' + evidence.map((e) =>
+          '<dt>' + esc(e.metric || '指标') + '</dt><dd>' + esc(String(e.value)) + ' ' + esc(e.unit || '') +
+          '<span class="muted"> · ' + esc(e.source || '') + ' · ' + esc(e.scope || '') +
+          (e.note ? ' · ' + esc(e.note) : '') + '</span></dd>'
+        ).join('') + '</div>'
+      : '<p class="req-note">没有可展示的原始证据。</p>';
+    const next = Array.isArray(item.next_steps) && item.next_steps.length
+      ? '<ul class="req-hints">' + item.next_steps.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+      : '';
+    return '<div class="card" style="padding:10px;margin:8px 0"><strong>' +
+      esc(categoryLabels[item.category] || item.title || item.category || '待排查方向') +
+      '</strong><p class="req-note">' + esc(item.summary || '') + '</p>' + evidenceHtml + next + '</div>';
+  }).join('');
+  const limitationHtml = limitations.length
+    ? '<ul class="req-hints">' + limitations.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+    : '';
+  const primary = d.primary_bottleneck
+    ? '<p><strong>已确认主瓶颈：</strong>' + esc(d.primary_bottleneck.title || d.primary_bottleneck.category || '') + '</p>'
+    : '<p class="req-note">当前没有足够的同条件基线或性能 SLA，以下仅是候选排查方向，不代表已确认瓶颈。</p>';
+  return '<section class="req-section"><h3>性能诊断</h3><p><strong>' +
+    esc(statusLabels[d.status] || d.status || '状态未知') + '</strong></p>' + primary +
+    (findingHtml || '<p class="req-note">没有可用的候选阶段证据。</p>') +
+    (limitationHtml ? '<h4>结论限制</h4>' + limitationHtml : '') + '</section>';
+}
+
 function detailSections(j) {
   const s = j.summary || {};
   const t = j.timing || {};
@@ -534,6 +578,7 @@ function detailSections(j) {
     if ((j.analysis.summary || []).length) {
       block += `<ul class="req-hints">${j.analysis.summary.map((line) => `<li>${esc(line)}</li>`).join('')}</ul>`;
     }
+    block += renderPerformanceDiagnosis(j.analysis.performance_diagnosis);
     block += `</section>`;
     add('analysis', 'swap', block);
   }

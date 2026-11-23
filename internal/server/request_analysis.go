@@ -19,6 +19,7 @@ type RequestAnalysis struct {
 	TimelineOnly     bool                  `json:"timeline_only,omitempty"`
 	Timeline         []requestTimelineEvent `json:"timeline,omitempty"`
 	Summary          []string            `json:"summary,omitempty"`
+	PerformanceDiagnosis *PerformanceDiagnosis `json:"performance_diagnosis,omitempty"`
 }
 
 // MarshalJSON 对 timeline_only 记录省略阶段指标，避免把未执行阶段序列化成零值。
@@ -192,7 +193,7 @@ func buildRequestAnalysis(in analysisInput) RequestAnalysis {
 	}
 
 	summary := summarizeAnalysis(ph, tp, in.Stream)
-	return RequestAnalysis{Phases: ph, Throughput: tp, RuntimeSnapshot: in.RuntimeSnapshot, Timeline: in.Timeline, Summary: summary}
+	return RequestAnalysis{Phases: ph, Throughput: tp, RuntimeSnapshot: in.RuntimeSnapshot, Timeline: in.Timeline, Summary: summary, PerformanceDiagnosis: buildPerformanceDiagnosis(in)}
 }
 
 func tokensPerSec(out *int64, windowMS int64) *float64 {

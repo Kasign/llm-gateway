@@ -2920,6 +2920,50 @@ components:
         summary:
           type: array
           items: { type: string }
+        performance_diagnosis:
+          $ref: "#/components/schemas/PerformanceDiagnosis"
+      additionalProperties: false
+    PerformanceDiagnosis:
+      type: object
+      required: [status, candidates, limitations]
+      properties:
+        status: { type: string, enum: [observed_only, insufficient_data] }
+        primary_bottleneck:
+          allOf:
+            - $ref: "#/components/schemas/PerformanceFinding"
+          nullable: true
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/PerformanceFinding" }
+        limitations:
+          type: array
+          items: { type: string }
+      additionalProperties: false
+    PerformanceFinding:
+      type: object
+      required: [category, status, title, summary, evidence]
+      properties:
+        category: { type: string, enum: [gateway_pre_inference, provider_queue, prompt_eval, decode, upstream_headers_wait] }
+        status: { type: string, enum: [candidate] }
+        title: { type: string }
+        summary: { type: string }
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/PerformanceEvidence" }
+        next_steps:
+          type: array
+          items: { type: string }
+      additionalProperties: false
+    PerformanceEvidence:
+      type: object
+      required: [metric, value, unit, source, scope]
+      properties:
+        metric: { type: string }
+        value: { type: number }
+        unit: { type: string }
+        source: { type: string }
+        scope: { type: string, enum: [request] }
+        note: { type: string }
       additionalProperties: false
     RequestTimelineEvent:
       type: object
