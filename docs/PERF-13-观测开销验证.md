@@ -180,7 +180,7 @@
 1. **Benchmark**：复用管理台现有模型测试/Benchmark 页面和 `/api/benchmark` 创建、`/api/benchmark/{job_id}` 轮询；请求详情使用 `/api/requests/{id}`。不新增压测 API，不要求用户直接调用带密钥的 API。
 2. **宿主机资源**：管理员首页 bootstrap 已返回 `host.cpu_usage_percent`、`host.memory`（含 total/used/source）和磁盘信息。CPU 由 `/proc/stat` 计算，是宿主机整体 CPU；内存由 `/proc/meminfo` 的 `MemTotal - MemAvailable` 计算，`source=meminfo`，也是宿主机整体内存。两者都不是 Gateway 容器独占资源或 Gateway 进程 RSS。
 3. **llama.cpp 运行状态**：管理台「本地模型」页面的「运行概览」复用 `/api/admin/runtime`，显示模型加载状态和后台 `/metrics` 进程级样本。Metrics 采样器每 5 秒运行一次，独立于请求热路径；请求分析中的 Runtime Snapshot 只附带最近快照，最多 15 秒新鲜度判定，必须结合 `sampled_at` / `age_ms` 解释。
-4. **版本身份**：本仓库 release build 会注入 Gateway Revision / Modified 构建元数据；但当前已审查的 bootstrap 与 runtime 响应没有提供可直接核对线上 SHA 的字段。仅从 GitHub `dev` SHA 不能推断线上容器版本，部署版本需从实际镜像标签/digest或部署构建记录核实。
+4. **版本身份**：release build 支持注入 Gateway Revision / Modified，但用户现行 ZIP + Compose 构建流程不能假定包含 `.git` 或使用 Git 构建脚本；当前 bootstrap/runtime API 也未暴露可直接核对的线上 revision。若现有镜像标签、digest 或部署记录没有提供身份，就记为 `unknown`。GitHub `dev` SHA 不能代替线上版本，且不要求用户额外手工取 SHA。
 5. **RSS 缺口**：当前管理台 API 没有专门的 Gateway 进程 RSS 或 Gateway 容器内存字段。首页 memory 是宿主机整体内存（`/proc/meminfo`），不能替代上述任一指标。后续可查看 1Panel/Docker 是否已有 Gateway 容器内存指标；若能取得，按容器内存 observed 单独记录；没有则标记 `not_collected`。不新增代码采集器，也不把宿主机内存冒充容器内存或进程 RSS。
 
 ### 8.2 采样前固定条件
@@ -195,7 +195,7 @@
 
 ### 8.3 本轮允许输出的结论
 
-本轮只报告实际部署版本下的 observed：TTFT、总延迟、输入/输出 Token、Prompt/Decode timings、缓存状态、host CPU、容器内存和 llama.cpp Metrics。由于当前没有关闭请求观测的生产对照开关，且不应为本任务关闭审计/请求关联，不能从两批不同时间的请求推导观测开销因果增量。没有 Gateway 进程 RSS 数据时，明确记为 unavailable/not_collected。
+本轮只报告实际运行环境下的 observed：TTFT、总延迟、输入/输出 Token、Prompt/Decode timings、缓存状态、宿主机 CPU/内存和 llama.cpp Metrics；如有独立 1Panel/Docker 指标，再单列 Gateway 容器内存。由于当前没有关闭请求观测的生产对照开关，且不应为本任务关闭审计/请求关联，不能从两批不同时间的请求推导观测开销因果增量。没有 Gateway 进程 RSS 数据时，明确记为 unavailable/not_collected。
 
 ## 9. 下一步执行顺序
 
