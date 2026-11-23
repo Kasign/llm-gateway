@@ -1,0 +1,1678 @@
+# PERF-12 历史任务记录：真实 NUC 推理性能基线
+
+> 状态：待恢复（四组样本已归档为 observed；因首组测试前模型加载状态 unknown，整组 baseline_not_qualified；不回填、不重跑）
+> 更新日期：2026-11-23
+> 仓库：Kasign/llm-gateway
+> 分支：dev
+> 前序任务：[PERF-07 Inference Timing](任务历史/本地模型性能分析/PERF-07-Inference-Timing.md)
+> 总体方案：[本地模型全链路性能分析方案](本地模型全链路性能分析方案.md)
+> 任务规划权威来源：[整体任务规划](整体任务规划.md)
+
+> 当前执行任务已切换至 [PERF-10 Profile 存储与查询](PERF-10-Profile存储与查询设计.md)。以下内容保留 PERF-12 原始目标、采集协议与证据规则，作为历史追溯，不再代表当前执行任务。
+
+## 1. 目标
+
+建立 Qwen3.5-4B-IQ4_NL 在用户真实 NUC（i5-1340P、32GB RAM、CPU-only llama.cpp）上的可复现四组性能基线，为后续瓶颈归因和优化提供真实证据。
+
+本轮只完成单请求、串行、冷缓存条件下的基线采集与数据核验。四组数据未完整且环境条件不完整前，不判定主瓶颈、不开展 CPU 线程/batch 等参数调优。
+
+## 2. 当前范围与硬约束
+
+1. 复用现有 Benchmark API 和 Task/Run 持久化；不新增平行压测 API、独立脚本体系或第二套请求分析实现。
+2. 四组测试串行执行，测试窗口内不发送其他推理请求；不将进程级 Metrics Delta 冒充单请求数据。
+3. 每组独立随机 Prompt 前缀只用于降低缓存复用概率；冷缓存必须由 llama.cpp 原生 timings 证明：cache_n=0 且 prompt_n=input_tokens。
+4. Prompt/Decode timings、Token 数、Request ID、条件指纹和 Runtime/Metrics 快照缺失时保持缺失，不反推、不伪造。
+5. 已完成样本在续跑时保留，不重复执行；未完成组必须有明确状态、Job ID 和重试记录。
+6. 不要求用户提权、修改 sysctl、增加容器 capability、重启或重建生产模型服务。
+7. 未形成完整、可比基线前，不根据单次 tok/s 或阶段耗时认定主瓶颈，不盲目调整模型或推理参数。
+8. 测试报告中的 Secret 不落盘；客户端服务密钥只在当前页面内存中使用。
+
+## 3. 固定测试矩阵
+
+| 组别 | Prompt 目标 | 输出目标 | max_tokens | 目的 |
+|---|---:|---:|---:|---|
+| S-P / S-O | 96–180 input tokens | 至少 32 output tokens | 64 | 短上下文、短生成 |
+| L-P / S-O | 1,800–2,400 input tokens | 至少 32 output tokens | 64 | 长上下文、短生成 |
+| S-P / L-O | 96–180 input tokens | 至少 256 output tokens | 512 | 短上下文、长生成 |
+| L-P / L-O | 1,800–2,400 input tokens | 至少 256 output tokens | 512 | 长上下文、长生成 |
+
+固定提示词版本为 perf12-synthetic-dataset-v2：短输入使用 1 条合成记录，长输入使用 50 条。四组使用相同分析任务与固定推理参数；每组使用独立随机前缀。测试参数、数据集版本和环境条件必须随报告保存。
+
+## 4. 基线资格规则
+
+性能样本有效性与环境复现完整度分开判定，不能将环境身份字段缺失直接等同于性能样本无效。
+
+### 4.1 性能基线资格
+
+只有同时满足以下条件，报告才允许标记为 baseline_candidate：
+
+1. 四组均有 completed 结果，且实际输入/输出 Token 达到各组目标。
+2. 每组原生 timings 完整；cache_n=0、prompt_n=input_tokens、predicted_n=output_tokens。
+3. 每组条件快照明确记录实际 model_id、backend，且测试前模型加载状态为 loaded。
+4. 测试参数快照完整，四组使用同一模型与同一固定参数；没有未说明的配置变化。
+5. 不存在并发推理流量、缓存命中或其他已知破坏冷缓存可比性的情况。
+
+任一条件不满足，报告保持 baseline_not_qualified；已完成样本仍可作为 observed 记录，不因此丢弃。completed_with_failures、partial、cancelled、unknown 等状态都不能被视为完成样本。
+
+### 4.2 环境复现完整度
+
+以下字段继续采集并显示，但缺失时只降低环境复现完整度，不单独否决性能基线资格：
+
+- 模型文件 SHA-256；
+- Gateway Revision 与构建工作区状态；
+- Backend 版本；
+- CPU 型号与内存容量。
+
+model_key、llama.cpp upstream ID、HF Repo、HF Revision、filename 等模型资产登记字段不属于性能测试必要条件。模型实际身份以请求使用的 model_id 与 backend 为基础，不要求通过 Gateway 模型登记表回查后才能认定样本有效。
+
+服务端 condition_status / condition_missing 保留为环境条件完整度与历史严格比较信息，不再作为 PERF-12 baseline_candidate 的单独硬门槛。严格复现或严格同条件比较时，仍需检查具体缺失字段及条件指纹。
+
+### 4.3 缓存分类
+
+- 冷缓存：cache_n=0 且 prompt_n=input_tokens。
+- 部分缓存：cache_n>0 且 prompt_n>0。
+- 全缓存：cache_n>0 且 prompt_n=0。
+- 未知或证据不一致：原生缓存字段缺失或组合不满足以上定义。
+
+只有冷缓存样本进入本轮冷 Prompt Eval 基线。部分缓存、全缓存及缓存状态未知样本保留为 observed，不得混入冷缓存比较。
+
+## 5. 当前执行顺序
+
+1. PERF-08 的镜像/源码、CPU backend、`--perf`、graph counters 与 Linux perf 路线审计已完成；宿主机采样因权限拒绝停止，不提权、不修改系统权限、不增加容器 capability、不编写 llama.cpp C++ 探针。
+2. PERF-09 的请求级 Timing、进程窗口 Metrics、Runtime Snapshot 证据边界，以及 Metrics SampledAt / Counter Delta 窗口契约已完成。
+3. PERF-12 继续复用现有 Benchmark API 和 Task/Run 持久化；四组固定矩阵、提示词版本、冷缓存判据和基线资格规则不开放为普通设置。
+4. 续跑支持在途 Job ID 恢复、轮询异常暂停后续组、提交状态不确定时禁止自动重提；预热任务支持原 Job 恢复，明确 failed/cancelled 后可安全重试。运行中任务不采集伪“完成后”Runtime Snapshot。
+5. Suite 状态语义、性能资格与环境复现完整度拆分、缓存状态分类均已进入实现；以当前 dev 对应的 Go CI 与 Browser Smoke 结果为准，历史运行记录仅作变更前验收参考。
+6. 当前优先使用现有四组报告中的原始 model_id/backend、测试前 Runtime 状态、Token 与 llama.cpp timings 按新规则重新计算资格；不查模型登记映射、不为补 SHA 重跑四组、不调整推理参数。部分缓存样本继续保留为 observed，不纳入冷缓存基线。
+
+### PERF-12 真实部署采集协议
+
+**测试入口与鉴权**
+- 使用现有管理员页面的 Benchmark 功能，或 POST /api/benchmark；不新建独立压测 API。
+- 创建任务要求管理员 Web Session，并单独提供 X-Client-API-Key；两者用途不同，不能互相替代。轮询任务只需要管理员 Session。
+- 固定填写实际部署的 model_id，不要依赖活动模型在测试期间不发生变化；场景固定为 performance。
+- 每个 Benchmark 当前只执行一次模型调用（RunCount=1），因此重复次数由多次独立任务完成；首轮先每个组合一次，确认链路和结果完整后再决定是否重复。
+- 每次任务返回 job_id/request_id；轮询 GET /api/benchmark/{job_id} 直到 completed/failed，保存完整 job 与 analysis；同时记录 /api/admin/runtime 的测试前后快照。不要把 Runtime 快照当成请求期间连续采样。
+
+**首轮四组输入矩阵**
+| 组别 | Prompt 目标长度 | max_tokens 上限 | 目的 |
+|---|---:|---:|---|
+| S-P / S-O | 约 128 input tokens | 64 | 短上下文、短生成基线 |
+| L-P / S-O | 约 2,048 input tokens | 64 | 观察 Prompt Eval 随上下文增长的变化 |
+| S-P / L-O | 约 128 input tokens | 512 | 观察 Decode 延长后的持续速度与资源占用 |
+| L-P / L-O | 约 2,048 input tokens | 512 | 观察长上下文与长生成组合 |
+
+- 上述 Prompt 长度只是目标区间，不以字符数代替 Token 数；最终分组以 Benchmark 返回的 input_tokens 为准。超出目标区间的任务保留原始结果并标记，不伪装成目标样本。
+- max_tokens 是上限，不保证模型一定生成到上限。以 output_tokens 为准；若短输出不足 32 tokens、长输出不足 256 tokens，该组只能记为未达到目标，不能据此比较 Decode 持续吞吐。
+- 四组使用同一模型 ID、相同请求参数（temperature=0、top_p=1、seed=42；若部署后端不支持 seed，则记录缺失并降低可比性）。每组使用不同的 Prompt 内容是必要的；Benchmark 条件指纹包含 Prompt SHA，因此不同组的指纹不同，不能调用历史比较接口把不同组宣称为严格可比。
+- 测试前先发一个不计入样本的短请求完成模型加载/预热；正式四组串行执行，确保没有其他推理请求。记录每组前后的 server_metrics，并在测试窗口确认无其他请求。
+- 单次测试耗时可能较长；长输出上限先控制在 512，不在首轮使用 4,000 Token 默认上限。
+
+**每组必须留存的证据**
+- Benchmark：job_id/request_id、model_id/model_key、condition_sha256/status/missing、started_at/finished_at、input_tokens/output_tokens、max_tokens、latency_ms、ttft_ms/ttft_status。
+- RequestAnalysis：phases_ms、throughput、原生 llama_timings.prompt_ms/predicted_ms/prompt_n/predicted_n；缺失字段保持缺失，不从总耗时反推。
+- Runtime/Metrics：前后 server_metrics 的 SampledAt、window_start/end/window_ms、Counter Delta 状态，以及 Runtime/Host CPU 各自 sampled_at/age_ms、CPU、RSS/内存字段。
+- 环境：模型文件 SHA/量化、llama.cpp 镜像 digest/版本、服务启动参数、线程数、batch/ubatch、CPU governor（若可读取）、测试时是否有其他负载。无法确认的项目明确标 unknown。
+
+**判读限制**
+- 首轮只建立 observed 样本，不因 CPU-only 或某个 tok/s 数值直接判定 Decode 是主瓶颈。
+- Prompt Eval 以原生 prompt_ms 与 prompt_n 计算；Decode 以原生 predicted_ms 与 predicted_n 计算。Gateway TTFT、流式窗口和 upstream_ms 是不同语义，不相加、不互相替代。
+- Metrics Counter Delta 是进程级窗口证据，即使单请求串行也只有在确认窗口内无其他流量时才可描述为隔离窗口；仍不把它标成单请求指标。
+- 如果 Benchmark condition_status 不是 complete、关键 Token/timing 缺失、Metrics 窗口不可比较或 Runtime 过期，样本照常归档但不进入严格比较。
+- 完成首轮四组后再各重复 2 次，估算波动范围；若结果差异大，先排查温度、后台负载、模型冷热状态与缓存影响，再考虑参数实验。
+
+> 说明：第 6～16 节是前序 PERF-08/09 的技术审计、能力核验和证据契约记录，不代表当前正在实施 Deep Profile；当前执行范围以第 1～5 节和第 17～18 节为准。
+
+## 6. llama.cpp 目标镜像与原生 profiling 初步核验（2026-11-19）
+
+### 6.1 目标镜像版本映射
+
+已将用户提供的 RepoDigest 与 GHCR 包版本列表交叉核对：
+
+- 用户镜像 digest：`sha256:086942d6ac097c894d9d5bbaf8085c53af85e113fbb9d6d61b3748863c86aa5f`。
+- GHCR 包页面将同一 digest 标记为 `server-b12282`，因此该镜像可映射到构建标签 `b12282`。
+- GitHub 将短 SHA `b12282` 解析为完整源码 commit `aa75ff3239f9cc675b081697deda9e1b112345c6`，提交日期为 2026-11-10T22:30:14Z；用户请求响应的 `system_fingerprint` 为 `b12282-aa75ff323`，与该构建标识一致。
+- 因此本轮可将上述完整 commit 作为目标镜像源码审计基线。仍需注意 GHCR 多架构 manifest 与具体平台子镜像的关系；用户当前运行架构未从现有证据单独确认。
+
+证据链接：
+- [GHCR llama.cpp package / digest 列表](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp)
+- [目标源码 commit aa75ff3239f9cc675b081697deda9e1b112345c6](https://github.com/ggml-org/llama.cpp/commit/aa75ff3239f9cc675b081697deda9e1b112345c6)
+- [目标版本 server Dockerfile](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/.devops/cpu.Dockerfile)
+- [目标版本 Docker build matrix](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/.github/workflows/docker.yml)
+
+### 6.2 构建 backend 初步判断
+
+目标版本 `.devops/cpu.Dockerfile` 的 build 阶段显式使用 `GGML_BACKEND_DL=ON`、`GGML_CPU_ALL_VARIANTS=ON`，未启用 `GGML_CUDA`、`GGML_VULKAN`、`GGML_METAL` 等 GPU backend 编译选项。Server 镜像从该 CPU Dockerfile 的 `server` target 构建；同一 workflow 将 CUDA、Vulkan、ROCm、OpenVINO 等构建作为不同 tag / Dockerfile 矩阵项。
+
+据此，用户当前 `ghcr.io/ggml-org/llama.cpp:server` 对应通用 CPU server 构建，不应按 CUDA server 处理。最终仍以运行容器中的设备列表/启动日志核对实际加载 backend；不能因为主机有 GPU 就推断此镜像使用 GPU。
+
+### 6.3 `--perf` 原生能力边界
+
+在目标 commit 的 `common/arg.cpp` 中，`--perf / --no-perf` 注册为 `LLAMA_ARG_PERF`，回调将参数映射为 `params.no_perf = !value`，再由 `common/common.cpp` 传入 `llama_context_params.no_perf`。`common/common.h` 中 `no_perf` 默认值为 false；但该版本参数帮助文本对默认值的描述存在表述歧义，且用户提供的 per-model args 未显式出现 `--perf` 或 `--no-perf`。因此当前不根据参数缺席推断运行时 perf counter 开关状态，需继续核对 router 子进程参数默认值和实际日志。该开关控制 libllama 内部 performance timings，不是 GGML 每个 operation 的 trace 开关，也不会自动生成完整 CPU/GPU kernel profile。
+
+目标 commit 的 `tools/server/server-context.cpp` 中，slot 完成请求时调用 `slot.print_timings()`，日志可输出 Prompt eval 与 Decode 的时间、Token 数、每 Token 耗时和吞吐，以及 `graphs reused`、`graph reallocs`（same-size / changed-size）。
+
+但 graph reuse/realloc 读取 `llama_perf_context(ctx_tgt)`，属于模型 context 级计数。目标 commit 的 `src/llama-context.cpp` 显示 `perf_reset()` 会重置 `n_reused`，但 `n_reallocs_same/diff` 明确不重置、统计 context 生命周期累计值；在目标 commit 的 `tools/server/server-context.cpp` 中未发现 server 请求结束时调用 `llama_perf_context_reset()`。因此 graph reuse 至少是 context 累计窗口值，graph realloc 是 context 生命周期累计值，均不能作为单个 request 的指标。slot 的 Prompt/Decode timing 是 server 自己维护的请求统计；但日志文本仍可能与同一进程其他 slot 的日志交错，解析前必须解决 request/slot 身份关联、日志原子性和敏感内容风险。
+
+源码：
+- [目标版本 common/arg.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/common/arg.cpp)
+- [目标版本 server-context.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/server-context.cpp)
+
+### 6.4 当前能力矩阵（初版）
+
+| 能力 | 来源/开关 | Scope | request 关联 | 当前判断 |
+|---|---|---|---|---|
+| Prompt/Decode timing | Chat Completions `timings` | request | 有 | PERF-07 已完成 |
+| libllama 内部计时 | `--perf` / `LLAMA_ARG_PERF` | context/slot 日志混合 | 需验证 | 可用于进一步审计，不等同 operation profile |
+| Graph reuse/realloc | `llama_perf_context(ctx_tgt)` 输出 | model context | 未证明 | 不直接作为 request 级数据 |
+| Backend operation/kernel 明细 | 需 backend profiler / 外部 profiler | 通常 process/device/window | 通常无稳定 request ID | 尚未确认可安全采集 |
+| CPU/GPU transfer | backend / OS / vendor profiler | process/device/window | 通常无稳定 request ID | 需按 backend 单独评估 |
+| Runtime CPU/内存 | 现有 Runtime Snapshot | host/process snapshot | 通过请求时间附近快照弱关联 | PERF-04 已覆盖，不重复实现 |
+
+初步结论：目标镜像版本和 CPU 构建路径已基本锁定；`--perf` 能提供的主要是 libllama 内部计时和 graph reuse/realloc 线索，不足以单独满足 GGML operation/backend/transfer 深度剖析。下一步继续核对目标 commit 的 server 参数传递、context perf 计数 reset/聚合语义，以及是否存在稳定的 backend profiler 输出接口；在此之前不要求用户修改启动参数或重启容器。
+
+
+补充源码：[目标版本 llama-context.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/src/llama-context.cpp)、[目标版本 server-context.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/server-context.cpp)。`llama_context::perf_reset()` 注释明确说明 graph realloc counters 不重置，跟踪 context lifetime totals；目标 server 请求收尾路径调用 `slot.print_timings()`，但没有调用 `llama_perf_context_reset()`。据此禁止把这两个 graph 计数按单请求持久化或比较。
+
+
+## 7. Linux perf 外部采样可行性与 Router 调用链审计（2026-11-19）
+
+### 7.1 Router 进程与模型实例是两个 profiling 目标
+
+目标版本 `tools/server/server.cpp` 在 router 模式初始化 `server_models`；`tools/server/server-models.cpp` 在模型加载时通过 `server_model_meta::update_args()` 渲染模型实例参数，再由 `server_subproc` 创建独立子进程。Router 主进程参数（用户提供的 `--models-dir`、`--models-max` 等）不等同于模型实例最终参数。
+
+模型实例 preset 会与 router base preset 合并，router 启动时捕获的环境变量也会传递给子进程。因此，仅凭容器 `docker inspect Args` 不能确认模型子进程的 `--perf/--no-perf` 或 `LLAMA_ARG_PERF` 最终值；还必须考虑模型 preset 与继承环境。当前不要求用户读取或公开完整环境变量，避免泄露 API Key 等秘密。
+
+外部 profiler 的目标应是实际加载模型的 child PID，而不是默认采集 router PID。模型可能卸载/重载，PID 不是稳定身份；任何后续采集都必须绑定一次明确的模型实例生命周期，记录 PID、启动时间、模型别名和 build ID，结束后即丢弃 PID 关联。
+
+### 7.2 libllama perf 默认值核对
+
+目标 commit 的 `common/common.h` 将 `common_params::no_perf` 初始化为 `false`，注释是“disable performance metrics”；`common/common.cpp` 将该值原样赋给 `llama_context_params.no_perf`。`--no-perf` 的回调才会将其设为 `true`，`--perf` 则设为 `false`。
+
+但 `common/arg.cpp` 帮助文本用 `params.no_perf` 直接拼接 `--perf` 的默认值，语义上与“是否启用 perf”相反；目标版本 README 也写 `--perf` default false。由此可确认源码默认 `no_perf=false`，但不能单靠帮助文本或 router 主进程 Args 确认实际 child context 状态，因为 preset / 环境可覆盖。后续文档与 UI 应分别表达 `perf_enabled` 和 `no_perf`，不混用双重否定字段。
+
+### 7.3 Linux perf 外部采样路径
+
+当前目标是 CPU-only llama.cpp build，因此 Linux `perf` 是优先评估的低侵入外部路径：在宿主机上按 child PID 附加，不把 profiler 安装进 llama.cpp 容器，也不向容器增加 `CAP_SYS_ADMIN`、`SYS_PTRACE` 等宽权限。容器 PID 需映射为宿主机 PID；目标进程需在采样窗口内保持存活。
+
+推荐分层采集：
+
+1. **L0 / perf stat**：短窗口、指定 child PID，先采集 cycles、instructions、task-clock、context-switches、page-faults 等聚合计数。它可回答 CPU 计算量、IPC、调度/缺页是否异常，但不能给出单个算子调用耗时。
+2. **L1 / perf record**：只在 L0 已发现热点且明确授权时，对同一 child PID 做低频、短时 CPU sampling，先不采集 data addresses、寄存器快照或系统全局事件。它可形成 process/window scope 的函数热点分布，不具备天然 request ID。
+3. **L2 / call graph**：仅在符号与栈回溯验证通过后启用。frame-pointer / DWARF / LBR 的可用性依赖构建方式、CPU 与 perf 版本；DWARF 需要额外栈数据，不能默认开启。
+
+若隔离 Benchmark 保证同一模型 child 在窗口内仅处理一个请求，且无 warmup、后台任务、其他 slot 请求，进程窗口样本可标注 `window-correlated`，但仍不是 request-native；并发或存在后台工作时必须标注 `process-scope` / `not-comparable`。不能把时间窗口简单等同请求执行区间。
+
+### 7.4 安全、权限与数据保留
+
+Linux 内核 perf 安全文档指出 perf_events/perf.data 可能包含进程/线程名、PID/TID、时间戳、代码地址、寄存器和内存地址等敏感信息；采集权限由 `perf_event_paranoid` 与 capability 等控制。优先采用宿主机 `CAP_PERFMON` 的最小权限方案；不为方便而调低全局 `perf_event_paranoid`，不授予 `CAP_SYS_ADMIN`，不开放全系统 `-a` 采集。
+
+以下是待实验确认的安全预算候选值，而非已经实施的系统配置：一次只允许 1 个 profiler session；初始窗口不超过 10 秒；先使用 `perf stat`，必要时再试低频 `perf record`；单次原始文件暂定不超过 32 MiB、默认 24 小时清理。原始 `perf.data` 不进入长期数据库或普通备份，只保留脱敏聚合报告和构建/环境指纹。
+
+### 7.5 当前能力判断
+
+| 方案 | 目标对象 | 可回答的问题 | 关联范围 | 当前结论 |
+|---|---|---|---|---|
+| llama.cpp Chat Completions timings | 单次请求 | Prompt/Decode 时间和 Token 速度 | request | PERF-07 已覆盖 |
+| llama.cpp `--perf` | child libllama context | 内部 perf 计数、graph 相关统计 | context / 日志 | 不足以做 GGML 算子级分析 |
+| `/metrics` | 模型实例 | 累计 Prompt/Decode 计数与吞吐 | process/model | 现有能力，不重复实现 |
+| `/slots` | 当前 slot | 活跃状态、部分 timing/Token 进度 | slot 当前态 | 可能含 prompt/参数数据，不作为默认采集源 |
+| Linux `perf stat -p PID` | child PID | CPU cycles、instructions、task-clock、调度/缺页计数 | process/window | 首选低侵入试验 |
+| Linux `perf record -p PID` | child PID | 函数热点采样 | process/window | 次级手动授权能力；需要符号/权限核验 |
+| Intel PT / LBR / vendor profiler | CPU/设备 | 分支/指令流或硬件细节 | process/CPU/window | 本轮不默认启用，数据量与权限成本较高 |
+
+### 7.6 证据边界和待办
+
+- 已确认 router 会创建独立模型实例子进程，后续必须定位 child PID，不得对 router 主进程做默认采样。
+- 已确认目标源码默认 `no_perf=false`，但运行时值可能由模型 preset / 继承环境覆盖；目前没有用户 child process 的最终 argv/env 证据，故运行时状态仍为 unknown。
+- 已确认 Linux perf 可以按 PID 采样；但用户宿主机内核版本、`perf_event_paranoid`、CAP_PERFMON 可用性、perf 工具版本、目标 PID 映射和二进制符号情况尚未核实。
+- 本轮不修改容器启动参数，不要求用户安装工具，不要求重启或发起额外模型请求。
+
+参考资料：
+- [Linux perf security 官方文档](https://www.kernel.org/doc/html/latest/admin-guide/perf-security.html)
+- [Linux perf record 官方文档](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/perf-record.txt)
+- [目标版本 server-models.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/server-models.cpp)
+- [目标版本 common/common.cpp](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/common/common.cpp)
+
+## 8. 构建符号、CPU Hybrid PMU 与数据契约边界（2026-11-19）
+
+### 8.1 目标二进制的符号条件
+
+目标 `.devops/cpu.Dockerfile` 使用 `CMAKE_BUILD_TYPE=Release`，CMake configure 未设置 `-g` / `RelWithDebInfo`；Dockerfile 复制 `llama-server` 和动态库到最终镜像，没有显式执行 `strip`。
+
+因此不能简单断言二进制已完全剥除符号，也不能认为它带有完整 DWARF source-line debug info。当前可作出的结论是：Release 优化构建且未显式启用调试信息、未显式 strip。函数符号是否仍保留、`.eh_frame` 是否足够回溯、动态库 build-id 是否可用于宿主机符号化，必须对实际运行二进制做只读检查后才能定论。
+
+首轮 `perf record` 应先以 IP/符号热点可读性为验收，不默认启用 DWARF callchain；如果符号不足，再决定是否单独构建匹配版本的符号包。不得为 profiling 直接替换生产镜像或改变当前模型服务。
+
+### 8.2 宿主机 Intel Hybrid PMU 对计数口径的影响
+
+用户此前提供的宿主机 CPU 为 Intel Core i5-1340P，官方规格为 4 个 Performance-core 与 8 个 Efficient-core。Linux perf 在 Intel hybrid CPU 上可能分别暴露 `cpu_core` 与 `cpu_atom` PMU；同名硬件事件可能分别在两类核心上计数，且事件可用性并不完全相同。
+
+因此后续 `perf stat` 不得只把一个未区分 core type 的 cycles/instructions 值作为稳定可比基线。采集前需要核对宿主机 `/sys/bus/event_source/devices/cpu_core`、`cpu_atom` 和 `perf list`；可用时分别采集 P-core / E-core 事件，并记录线程实际运行 CPU、事件运行百分比和 multiplexing 状态。若环境不支持 hybrid PMU 事件，则降级为 task-clock / software events，并明确硬件计数不可比较。
+
+参考：[Intel i5-1340P 官方规格](https://www.intel.com/content/www/us/en/products/sku/232126/intel-core-i51340p-processor-12m-cache-up-to-4-60-ghz/specifications.html)、[Linux perf Intel Hybrid 文档](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/intel-hybrid.txt)。
+
+### 8.3 PERF-08.3 最小采集契约（设计草案）
+
+本轮审计后，建议将外部 profile 定义为独立的 Profile Session，而不是把 `perf.data` 塞入 `request_logs.analysis_json` 或 Benchmark Run 大 JSON：
+
+| 字段组 | 最小字段 | 目的 |
+|---|---|---|
+| 身份 | `session_id`、可选 `benchmark_run_id` / `request_id` | 与现有 Benchmark Run / Request Log 关联 |
+| 进程实例 | `provider_id`、`model_id`、host PID、process start time、binary build-id | 避免 PID 重用或模型卸载/重载后错误关联 |
+| 实验指纹 | host kernel、CPU model、perf version、backend、事件集合、采样频率 | 判断样本是否可比较 |
+| 采集范围 | `request` / `window` / `process` / `device` | 明确数据 scope，不伪装 request-level |
+| 关联质量 | `exact` / `exclusive_window` / `process_only` / `not_comparable` | 区分原生请求关联与时间窗口近似关联 |
+| 生命周期 | started/finished、status、stop_reason、timeout、cancelled | 支持中断、失败与清理诊断 |
+| 资源限制 | sample duration、frequency、max bytes、actual bytes、TTL | 资源和留存边界可审计 |
+| 结果 | 脱敏聚合 summary、artifact checksum、expiry | UI 展示摘要，原始文件短期保留 |
+
+现有 `BenchmarkRun` 已关联 `RequestID`，`request_logs.analysis_json` 已存请求级阶段耗时和 Runtime Snapshot；二者职责不同。Profile Session 应关联 Benchmark Run / Request ID，但不能把进程级采样结果写成请求级指标。若未来支持一个 Run 多次采样（stat + record 或复测），独立 session 表比在 `benchmark_runs` 增加单个 profile 字段更合适。
+
+### 8.4 建议的首轮实验矩阵
+
+首轮只验证外部采集可行性，不先写自动化 profiler 服务：
+
+1. 无 profiler 的隔离 Benchmark 基线（同模型、同参数、相同请求负载）。
+2. 同一模型 child PID 的短窗口 `perf stat`；仅选宿主机实际支持的 P-core / E-core 事件和软件事件。
+3. 与基线对照 TTFT、总耗时、Decode throughput、CPU task-clock、cycles/instructions、context-switches、page-faults；报告事件运行百分比，避免把 multiplexed / not-counted 结果当真实值。
+4. 只有 stat 结果显示有进一步热点归因价值时，才做短时、低频 `perf record`；不启用 data-address、寄存器或全系统采样。
+5. 对照采样前后性能差异，记录观测开销；如果超出预先设定容忍范围，降低采样强度或判定不可用于该场景。
+
+该矩阵需要真实宿主机的 perf / kernel 权限和 child PID 才能完成。目前这些运行条件尚未提供，因此本轮不伪造实验数据，也不将静态源码审计写成运行时通过。
+
+### 8.5 当前阶段结论
+
+- 已确认目标镜像为 CPU Release 构建；未显式 strip，但也未配置完整 debug build。符号可读性仍需对实际二进制验证。
+- 已确认宿主机 CPU 属于 Intel Hybrid 架构，后续硬件 PMU 指标需要按 P-core / E-core 分开检查。
+- 已确认外部 Linux perf 可按模型 child PID 进行 process/window 级采样，但权限、PID 映射、符号和开销仍需真实环境核验。
+- 最小架构应采用独立 Profile Session + 现有 BenchmarkRun/RequestID 关联；当前没有足够证据证明外部 perf 能做到 request-native profile。
+- PERF-08.1 代码链路审计与 PERF-08.2 目标版本源码审计已基本完成；下一阶段是完善 PERF-08.3 数据契约和实验准入条件，尚不进入代码实现。
+
+## 9. 隔离 Benchmark 与请求窗口关联审计（2026-11-19）
+
+### 9.1 当前 Benchmark 的独占范围
+
+当前 `internal/server/benchmark.go` 的 `maxActiveBenchmarkJobs = 1` 只限制 Gateway 内同时运行的 Benchmark Job 数量；它不是模型 Provider 的全局请求互斥锁，也不阻止普通 `/v1` 请求继续转发到同一 llama.cpp child process。
+
+目标 llama.cpp Router 模型实例的并发 slot 数由 child model args 中的 `--parallel` 等配置决定；用户提供的 router Args 没有包含 `--parallel`。因此不能假设一次 Benchmark Run 在模型进程中是唯一活动请求。
+
+### 9.2 对 `window-correlated` 的影响
+
+仅凭 Benchmark Job 自身的 `StartedAt/FinishedAt/RequestID`，不足以把 host `perf` 的 PID 时间窗口归因到该 Benchmark Run。只要同一 child PID 期间还有普通 API 请求、其他 slot、warmup 或后台任务，进程采样就混合了多个工作负载。
+
+所以 `exclusive_window` 必须是经过验证的运行状态，而不是由 Benchmark Run 时间戳推导。至少需要满足：
+
+1. 指定模型 child PID / build ID / process start time 在窗口内保持不变。
+2. 采样开始前确认该 child 无活动 slot；采样窗口内不允许其他请求进入该 child。
+3. 只执行一个明确的 Benchmark Run，记录其 RequestID 与精确起止时间。
+4. 确认无模型加载/卸载、warmup、自动探测或其他后台推理任务干扰。
+5. 任何条件无法确认，关联级别降为 `process_only` 或 `not_comparable`，不写入请求级 `RequestAnalysis`。
+
+### 9.3 可行实现路径比较
+
+| 路径 | 优点 | 风险/成本 | 当前判断 |
+|---|---|---|---|
+| A. 仅靠人工选安静窗口 | 不改生产路由，最快 | 无法阻止并发请求；证据只能是弱关联 | 只适合初步诊断，不适合自动验收 |
+| B. Gateway 对指定 model child 增加独占 profiling lease | 可阻止 Gateway 新请求进入；能与 Benchmark Run 绑定 | 需覆盖所有路由入口、排队、取消、超时和租约释放；仍需确认外部直连流量；不能启用 GGML callback 或解决节点归因 | **不采用为 PERF-08 路径**；只在未来存在通用模型资源独占需求时另行评估 |
+| C. 启动独立临时 llama-server child | 天然隔离其他模型请求，可独立采样 | 额外内存、模型加载时间、端口/生命周期管理；当前设备资源未实测 | 最干净的实验边界，但不应默认占用第二份模型内存 |
+
+不应通过轮询 `/slots` 并只读取 `is_processing` 来假设绝对独占：当前 `/slots` 响应还包含 prompt 和请求参数等信息，且轮询间隙仍可能有请求进入。若未来需要 idle 检查，必须在服务端只解析并暴露必要的状态字段，避免将 prompt/参数正文引入诊断存储。
+
+### 9.4 当前结论
+
+- 当前 Benchmark 的单活动 Job 限制不等于模型进程独占；因此外部 `perf` 暂时只能保证 process/window scope。
+- `exclusive_window` 不能由时间戳自动推定，必须有模型实例级准入控制或独立 child 进程。
+- Gateway lease 的接入点审计已完成，但最终不作为 PERF-08 的实施路径：它只约束 Gateway 内流量，不能提供 GGML node/backend 事件，也无法防止外部直连。首轮采用独立 profiling child/harness 设计；无法独立隔离时退化为 process/window scope。
+- 独立 child/harness 是首选隔离方案；如果真实内存预算不允许启动第二个模型实例，则不强行独占，保留 process/window scope。无论采用哪条路径，都不增加 `profile_session` 数据库表，直到事件质量与数据价值通过验证。
+
+
+## 10. Provider Queue 复用边界审计（2026-11-19）
+
+### 10.1 现有并发队列的实际覆盖范围
+
+审查 `internal/provider/openai_compatible.go`、`internal/provider/local_http.go`、`internal/provider/provider.go` 和 `internal/server/provider_runtime.go` 后确认：
+
+- 现有 `ConcurrencyLimiter` 位于 `OpenAICompatibleProvider`，用于 Web 管理的远程 OpenAI-compatible Provider；负责该 Provider 的并发预算、FIFO 等待、取消与 timeout。
+- `LocalHTTPProvider.Forward()` 直接调用本地 HTTP Client 的 `Proxy` / `StreamProxy`，没有使用该 `ConcurrencyLimiter`。
+- `NewLocalRegistryWithBackendClient()` 注册的 `llamacpp` / `ollama` 本地 Provider 使用 `LocalHTTPProvider`，不挂载上述远程 Provider queue。
+- `provider_runtime.go` 中的 `providerRateLimitGuard()` 明确只限制远程 Provider，`rpm <= 0` 或本地 backend 直接跳过。
+
+所以 PERF-03 的 FIFO Provider Queue 不能直接复用为本地模型独占 lease；它既不覆盖 llama.cpp 请求，也不是按模型实例隔离的准入器。
+
+### 10.2 可复用的现有边界
+
+仍可复用 `Provider.Forward()` 作为 Gateway 推理统一入口：本地请求进入 `LocalHTTPProvider.Forward()`，此处能取得 `InferenceCall.ModelID` 和请求 Context。可在该边界增加可选的 model-scoped admission capability，但必须先核对所有本地请求是否都经过该 Registry/Forward 路径，并覆盖 Benchmark、普通 `/v1`、Agent/工具调用和内部调用。
+
+外部直接访问 llama.cpp 端口不经过 Gateway Provider。若端口仍允许其他宿主机进程直接访问，则 Gateway lease 不能保证真正独占；这类场景必须使用独立临时 child，或明确将采样关联降为 process-only。
+
+### 10.3 最小 lease 语义草案（历史评估，未采用）
+
+本节保留当时评估过的语义，供未来通用模型资源管理参考；PERF-08 已决定不实施该 lease：
+
+1. Lease key 至少包含 `provider_id + upstream_model_id`，不能仅按 `llamacpp` 全局锁定，以免阻塞无关模型。
+2. 申请 lease 时先禁止该 model key 的新普通请求进入，再等待已有 in-flight 请求自然结束；等待有 deadline，可取消，不强杀现有请求。
+3. Lease owner 的单个 Benchmark 请求通过内部 Context capability 获准进入；其他请求 fail-fast 返回稳定错误，不无限排队。
+4. lease 释放必须覆盖成功、失败、panic、请求取消、进程退出和 Gateway shutdown；租约不能跨进程重启恢复为 active。
+5. 同时校验 child PID / process start time / build ID；模型卸载或重载后旧 lease 立即失效。
+6. 若发现 Gateway 外部直连流量、slot 状态不明或模型 child 身份变化，禁止标记 `exclusive_window`。
+
+当前不实现该 lease。它涉及 Provider 统一入口、Benchmark 生命周期和本地模型管理边界；只有未来出现跨功能模型资源独占需求时才重新评估。
+
+### 10.4 当前决策
+
+- 现有远程 Provider queue 不覆盖本地 llama.cpp / Ollama Provider，不能错误复用。
+- Gateway `Provider.Forward()` 是潜在最小接入点，但 model-scoped lease 属于新诊断准入能力，不是 PERF-03 queue 的简单配置。
+- 若仅做外部 `perf stat` 的人工 process 诊断，可以不增加 lease，但结果只能是 `process_only`；要形成 `exclusive_window` 或自动化请求关联，则必须先实现并验证独占控制，或启动隔离 child。
+- Gateway lease 已从 PERF-08 实施路线中排除；独立 profiling child/harness 是首选实验载体，资源预算不足时降级为 process/window scope。PERF-08 不修改 Gateway 推理路径、不新增表、不接入常驻 profiler。
+
+
+### 10.5 Gateway 内统一准入点的可行性
+
+继续检查 `internal/server/pipeline_forward.go`、`tool_mode.go`、`tool_model_caller.go` 与 `benchmark.go` 后，发现一个比改造远程 Provider Queue 更小的接入点：
+
+- `inferenceForwarder.Forward()` 注释明确是 core Pipeline 唯一的出网点；普通请求在这里解析 Provider 并调用 `Provider.Forward()`。
+- `forwardWithTools()` 在同一个 `inferenceForwarder` 内执行；其 `bufferedModelCaller.Complete(ctx, ...)` 将同一 Context 传给内部 `Provider.Forward()`，因此在 `forwardWithTools()` 之前取得的 model-scoped lease 可以覆盖整个工具循环，而不只是单轮模型调用。
+- `runBenchmark()` 使用 `s.pipe.Run(ctx, core.Request{...})`，与普通推理共用 core Pipeline，因此同一 lease 也能覆盖 Benchmark 请求。
+
+据此，若未来确有跨功能的 Gateway 模型独占需求，`inferenceForwarder.Forward()` 的 Provider 解析之后、`forwardWithTools()` 之前是较合适的接入点；按 `provider_id + upstream_model_id` 分区并通过 Context capability 覆盖工具多轮调用。但这只是保留的架构评估，不在 PERF-08 中实现。
+
+该方案仍只覆盖经 Gateway 的请求。用户或其他宿主机进程直接访问暴露的 llama.cpp 端口时可绕过 Gateway lease；因此即使未来实施，最多标记 `gateway_exclusive`，不能仅凭 lease 标记 `exclusive_window`。PERF-08 当前选择独立 child/harness，不实施此 lease。
+
+
+## 11. GGML Scheduler Callback 深度观测能力核验（2026-11-19）
+
+### 11.1 `cb_eval` 可观察计算图节点，但不是零开销 profiler
+
+目标 commit `aa75ff3239f9cc675b081697deda9e1b112345c6` 的 `ggml/include/ggml-backend.h` 定义 `ggml_backend_sched_eval_callback(t, ask, user_data)`：
+
+- `ask=true`：scheduler 询问是否需要观察该节点；返回 true 会要求 scheduler 在该节点处切分执行区间。
+- `ask=false`：scheduler 将节点交给回调；调用前已执行对应 graph slice，并执行 `ggml_backend_synchronize(split_backend)`。
+- scheduler 源码明确将回调模式实现为分段 graph compute；若对每个节点都返回 true，就会接近逐节点执行并在节点边界同步，而不是原始整图批量执行。
+
+因此可以在受控构建中取得节点级观察点和分段 wall time，但它会改变原有批处理、同步和调度行为，测得的单节点时间包含调度/同步开销，不能直接当作原始 kernel latency。必须把该采集模式标记为 intrusive，并与普通 Benchmark 分开；采样后需要与无 callback 基线做观测开销对照。
+
+### 11.2 callback 的可用信息和缺口
+
+- 回调参数只有 `ggml_tensor *`、`ask` 和用户数据，不直接提供 backend ID、请求 ID、slot ID 或节点开始/结束时间。
+- 同一目标头文件提供 `ggml_backend_sched_get_tensor_backend(sched, node)`，但 scheduler handle 不在 eval callback 参数中；若要记录准确 backend，instrumentation patch 需要安全地把 scheduler/backend identity 传入用户数据或扩展 callback 契约。
+- `common_params` / `llama_context_params` 已有 `cb_eval` 与 `cb_eval_user_data` 传递字段；目标 `common/common.cpp` 会将其传入 context。但对目标 `tools/server/` 源码检索没有发现 server CLI、HTTP API 或 router 管理面设置该 callback 的入口。
+- 因此当前官方 server 镜像不能通过现有 `/v1` 请求参数临时打开该 callback。需要自定义 llama.cpp server 构建/补丁，或编写独立 harness；仅修改 Gateway 无法凭空启用 GGML callback。
+
+### 11.3 Copy callback 不是完整 transfer trace
+
+目标 `ggml_backend_sched_copy_callback` 在 scheduler 中只对满足 `ggml_backend_sched_is_host_weight(input)` 的 host weight 输入复制路径触发，且发生在对应 split 的计算前。它可观察部分权重从 host buffer 到 split backend 的复制，但不是所有 tensor copy、activation copy、backend 间传输的统一钩子。
+
+完整 transfer 统计若是目标，需要进一步在 scheduler 的实际 copy 路径埋点，并明确同步/异步 copy、字节数、源/目标 backend、等待时间与执行时间；不能只把 copy callback 次数/字节数称为全部 transfer。当前 CPU-only 构建没有 GPU backend 间传输场景，device-to-device transfer 应标记 `not_applicable`，不能造出零值性能结论；CPU host memory copy 若要研究，需单独定义范围。
+
+### 11.4 PERF-08 当前技术路径决策
+
+| 路径 | 能力 | 主要限制 | 当前决策 |
+|---|---|---|---|
+| 现有生产镜像 + Linux perf | CPU 函数热点、cycles/instructions、调度/缺页 | 进程/窗口级；不提供 GGML op/backend/transfer 结构 | 保留为低侵入 L0/L1 辅助证据，不称为 Deep Profile 完成 |
+| 仅 Gateway model-scoped lease | 排除经 Gateway 的其他模型请求 | 外部直连端口可绕过；无法动态启用 GGML callback | 不单独实施；不能解决核心采集缺口 |
+| 自定义 llama.cpp instrumentation + 当前 child | 可记录 op/graph/backend/copy 事件 | 需要匹配目标 commit 构建；callback 可能改变图执行与同步；request/slot 关联要补充 | 研究性候选；必须做观测开销和并发隔离验证 |
+| 独立 profiling child / harness | 可隔离样本并控制请求负载 | 额外模型内存、加载时间、部署与版本管理 | 作为更可信的实验载体候选；先测资源预算，不默认启动 |
+
+当前推荐不是先做 Gateway lease，而是先建立一个与生产服务隔离的 profiling harness/child 设计：固定目标 llama.cpp commit、CPU backend、模型和参数；仅执行一个预先定义的 Prompt/Decode 样本；记录每个 graph node 的 op、shape、backend、阶段和观测时间；对 transfer 只报告实际埋点覆盖的 copy 类型；输出脱敏聚合文件。由于 callback 可能强制 graph slice 同步，结果用于定位热点，不用于直接替换原始吞吐/延迟基线。
+
+### 11.5 进入实验前的硬门槛
+
+1. 明确 instrumentation patch 的 callback 行为、node/backend 身份获取方式、计时边界和输出 schema；不记录 tensor 内容、Prompt/Response、权重或内存地址。
+2. 明确请求阶段标记：Prompt Eval / Decode；server 的多个 slot 共享一个 llama_context，首轮 child 强制 `n_parallel=1`，并补充 task/phase 标记；不做多 slot 关联。
+3. 先用小型短样本验证节点数、输出大小、callback 是否使 graph execution 退化为逐节点同步；限制最大节点数、最大记录字节和最大采样时长。
+4. 量化 callback 开启/关闭时 TTFT、总耗时、Decode throughput 差异；超出预设容忍范围则只把结果作为结构线索，不用于性能数值比较。
+5. CPU-only 构建下 transfer 的首轮结论应是 device transfer 不适用；若需要 CPU 内存搬运，另定义 host-copy 埋点，避免将其误写成 GPU transfer。
+6. 独立 child 资源预算必须来自实际模型文件、mmap/RSS、KV cache、上下文长度和并发配置；在数据不足时不估算、不启动第二份模型。
+
+### 11.7 llama.cpp Server 多 Slot 共享同一 llama_context
+
+目标 `tools/server/server-context.cpp` 的 server 初始化路径只创建一个 `ctx_tgt`，随后在 `for (i < n_parallel)` 中将同一个 `ctx_tgt` 指针赋给每个 `server_slot.ctx_tgt`。因此多个 slot 并不是各自拥有独立的 llama_context；它们通过同一 context / backend scheduler 执行，batcher 还可能把多个 slot 的 token 合并到同一 graph。
+
+这会直接影响 eval callback 的归因：callback 收到的是 GGML node，不带 slot/task/request ID。若 `n_parallel > 1`，即使 Gateway 只允许一个 Benchmark Job，也不能排除同一 child 的其他 API 请求或多个 slot 的 graph 混合，节点事件无法可靠归属单请求。
+
+因此首轮隔离 profiling child 必须显式设置 `--parallel 1`（并确认实际 `/props` 或启动配置对应值），且采样窗口内只允许一个请求；仅限制 Gateway Benchmark Job 数量不够。若无法证明单 slot 和单请求，结果只能标记 process/window scope。
+
+### 11.6 当前结论
+
+- 已发现目标 ggml scheduler 提供 node eval callback 和 host-weight copy callback，但它们不是现成、低开销、完整的 profiler API。
+- eval callback 能观察 graph node，但其当前 scheduler 实现会切分 graph 并同步，存在明显观测扰动；copy callback 只覆盖部分 host weight copy。
+- 目标 server 没有暴露 callback 的 CLI/API 控制入口；现有生产镜像无法通过 Gateway 请求动态开启深度观测。
+- 因此 Gateway model-scoped lease 不是当前主要卡点的解决方案。PERF-08.3 的事件契约草案已形成；当前继续核验 callback 生命周期、阶段归因、backend 获取与观测成本，再决定是否构建隔离 instrumentation harness；现阶段不改 Gateway 推理路径、不建 profile 表、不要求用户重启或重新部署。
+
+目标源码证据：
+- [ggml-backend.h callback 契约](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/ggml/include/ggml-backend.h)
+- [ggml-backend.cpp scheduler callback 执行路径](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/ggml/src/ggml-backend.cpp)
+- [common.cpp callback 参数传递](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/common/common.cpp)
+
+
+## 12. 独立 Profile Artifact 事件契约草案（2026-11-19）
+
+本节是 PERF-08.3 的设计草案，不代表已经实现或冻结数据库/API。首轮产物使用本地受限目录中的 manifest + event stream，先验证数据价值与体积，再决定是否持久化到 Gateway。
+
+### 12.1 产物结构
+
+```text
+profile-session/
+├── manifest.json       # 一次实验的固定环境、构建、负载和采集指纹
+├── events.ndjson       # 有界事件流；一行一个结构化事件
+└── summary.json        # 聚合结果、质量状态、观测开销与可比性
+```
+
+原始事件文件默认只在隔离实验环境短期保存；Gateway 数据库不存 `perf.data`、原始 tensor 信息或完整事件流。只有经过脱敏的聚合摘要才有资格进入后续持久化评审。
+
+### 12.2 Manifest 最小字段
+
+| 分组 | 字段 | 约束 |
+|---|---|---|
+| 身份 | `schema_version`、`profile_session_id`、可选 `benchmark_run_id` | Session 独立身份；不复用 RequestAnalysis 主键 |
+| 目标构建 | `llama_cpp_commit`、`instrumentation_patch_sha`、`binary_build_id`、`backend` | 必须可复现到确切构建；不只记录镜像 tag |
+| 模型/运行参数 | `model_fingerprint`、量化类型、`n_ctx`、`n_batch`、`n_ubatch`、线程数、`n_parallel`、slot_id | 首轮必须 `n_parallel=1`；不记录模型绝对路径、密钥或用户配置秘密 |
+| 主机环境 | kernel、CPU model、逻辑 CPU 数、Hybrid PMU 类型、perf 版本 | 缺失字段明确标记 unknown，不补猜测值 |
+| 工作负载 | phase、输入/输出 Token 数、warmup 次数、重复次数、并发数 | 不记录 Prompt、Response、Reasoning、Token 文本或 Token ID |
+| 采集方式 | callback mode、copy hook 覆盖范围、采样频率、最大事件数、最大字节数 | 记录是否 per-node sync，以及覆盖不完整的原因 |
+| 关联 | scope、association、request/benchmark 引用、slot_id | 仅在独立 child、`n_parallel=1`、单请求窗口且 task/phase 可追踪时标记 isolated-child request；否则降级 process/window |
+| 质量/生命周期 | started/finished、status、stop_reason、event_dropped、truncated、artifact checksum、expiry | 失败、截断、取消必须显式表达 |
+
+### 12.3 Node Event
+
+```json
+{
+  "type": "ggml_node",
+  "seq": 17,
+  "phase": "prompt_eval",
+  "graph_seq": 1,
+  "node_seq": 42,
+  "op": "MUL_MAT",
+  "dtype": "f32",
+  "shape": [4096, 4096],
+  "backend": "CPU",
+  "duration_us": 123.456,
+  "duration_kind": "graph_segment_wall_time_including_sync",
+  "includes_backend_sync": true
+}
+```
+
+`duration_us` 在当前 callback 方案中表示 callback 两阶段包围的 graph segment wall time；当前目标源码计时工具的基础精度为微秒，因此不伪造纳秒精度。当每节点单独切分时，它包含 backend 执行、scheduler 和同步成本，不得命名为 `kernel_duration_us`。`backend` 必须由 instrumentation patch 可靠取得，不能根据设备存在与否猜测。
+
+### 12.4 Copy Event
+
+```json
+{
+  "type": "ggml_copy",
+  "seq": 18,
+  "copy_kind": "host_weight_to_backend",
+  "src_backend": "CPU_HOST",
+  "dst_backend": "CPU",
+  "planned_bytes": 1048576,
+  "duration_us": null,
+  "duration_kind": "not_measured_by_copy_callback",
+  "copy_status": "observed_before_default_copy",
+  "coverage": "host_weight_copy_only"
+}
+```
+
+只有 instrumentation 实际覆盖的 copy 路径才能产生事件。现有 copy callback 在默认 copy 前触发，事件中的 `planned_bytes` 仅表示计划复制量，不能称为已完成传输字节；`duration_us` 在没有真实 copy 分支埋点时必须为 null。`coverage` 必须标识 host-weight、activation、backend-to-backend 等范围；没有埋点的类型是 `not_observed`，不是 0。CPU-only 当前构建的 device-to-device transfer 标记 `not_applicable`。
+
+### 12.5 Summary 和质量状态
+
+Summary 至少输出：按 phase/op/backend 聚合的 node count、graph-segment wall-time sum、median/p95、占比；这些数值是包含同步成本的诊断段耗时，不是原始 kernel time。按 copy kind/source/destination 聚合实际观测的次数和字节；总事件数、丢弃/截断数；baseline 对照的 TTFT/总耗时/Decode throughput 差异；以及 `evidence_status`、`scope`、`association`、`comparability`。
+
+可比性采用显式枚举：`comparable`、`intrusive_diagnostic_only`、`process_only`、`not_comparable`。启用 per-node sync callback 的样本默认 `intrusive_diagnostic_only`，除非实验数据证明观测扰动在事先设定的容忍范围内。
+
+### 12.6 设计冻结前仍需验证
+
+1. 最小 patch 能否稳定取得 op、shape、backend、phase 和节点序号，不依赖不稳定的 tensor 指针/内存地址。
+2. callback 在 graph reuse 路径是否持续生效，是否存在重复节点、漏节点或 callback 并发调用。
+3. per-node sync 的事件数和文件大小上界，以及 callback 开关关闭时的额外成本。
+4. copy instrumentation 能否区分实际 copy 路径与等待/同步时间，避免字节数重复统计。
+5. 独立 child 的真实 RSS、共享文件页、KV cache、加载时长和端口/进程清理成本。
+
+上述验证完成前，不增加 SQL migration、公开 API、管理 UI 或自动化 profiler 常驻服务。
+
+
+## 13. Node Event 阶段归因与 Callback 执行语义核验（2026-11-19）
+
+### 13.1 Eval callback 的真实调用语义
+
+目标 `ggml/src/ggml-backend.cpp` 的 scheduler 执行顺序为：
+
+1. 对 graph split 的节点依次调用 `callback_eval(t, true, user_data)`，询问是否需要观察该节点。
+2. 将连续的非观察节点合并为一个 graph view 执行；遇到需要观察的节点时，在该节点边界结束当前 graph view。
+3. `ggml_backend_graph_compute_async()` 提交该 graph view 后，scheduler 立即调用 `ggml_backend_synchronize(split_backend)`。
+4. 对请求观察的节点调用 `callback_eval(t, false, user_data)`，此时该 graph view 已完成同步。
+
+因此 callback 并非天然逐节点执行：只有 `ask=true` 返回 true 的节点才成为观察边界。若每个节点都返回 true，就会变成每节点一个 graph view，并逐节点同步。若只观察少量节点，非观察节点仍可批量执行，但当前需求需要完整算子分布时会有较大扰动。
+
+注意 `ask=false` 的返回值：当前 scheduler 实现中返回 false 会 `break` 当前 split 的节点循环，而不是普通的“采样结束”通知；profiling callback 必须始终返回 true 以避免截断剩余计算。头文件注释中关于 cancel compute 的描述不能替代对当前实现行为的检查。
+
+### 13.2 阶段与 Slot 信息可从 Server 边界补充，但需要 instrumentation patch
+
+目标 `tools/server/server-context.cpp` 的 `server_batch::token` 保留 `id_slot`、`output`、`is_prompt`；在 `decode(n_batch, off)` 调用 `llama_process(...DECODE...)` 前，仍可访问 `batch.tokens[off .. off+n_tokens)`。但这些 Server 元数据不会自动传入 GGML callback。
+
+可行的最小归因方案是在 server `decode()` 调用 `llama_process` 的边界建立 profiling scope（建议 thread-local、RAII 清理），把当前 request_seq、slot_id 集合、phase 和 batch_seq 写入 callback 可读取的上下文。callback 在同步的 scheduler 调用链内读取该上下文，并将其复制到事件记录；不得保存 tensor 指针供异步线程稍后读取。
+
+阶段判定规则：
+- 当前子批次 `is_prompt` 全为 true：`prompt_eval`。
+- 当前子批次 `is_prompt` 全为 false：`decode`。
+- 同一子批次同时出现 true/false：`mixed`，不得强行归为 Prompt 或 Decode。
+- Slot 集合不是单一 slot，或 slot/request 关联缺失：标记多请求/进程级 scope，不生成 request-level 结论。
+
+首轮 `--parallel 1` + 单请求窗口使 slot/request 归属可控；但仍需通过运行时断言确认每个 callback scope 的 slot/phase 一致。`--parallel 1` 是隔离条件，不是自动关联机制。
+
+### 13.3 Backend 归因的最小实现位置
+
+GGML callback 原始签名只有 tensor、ask 和 user_data，没有 backend 参数。目标 `ggml-backend.h` 提供 `ggml_backend_sched_get_tensor_backend(sched, tensor)`，但 callback 不持有 scheduler handle。
+
+优先评估在 `src/llama-context.cpp` 中为 scheduler 安装一个轻量 wrapper：wrapper 的 user_data 持有原始 callback、原始 user_data 和当前 scheduler handle；在转调用户 callback 前查询节点 backend。该方案避免直接改变公开 callback ABI，但必须验证 scheduler 重建、graph reuse、scheduler reset 后 wrapper 持有的 handle 始终有效。若 wrapper 不能安全覆盖生命周期，再考虑在 GGML scheduler 内部扩展 callback 参数，不应在 Gateway 层猜测 backend。
+
+### 13.4 Callback 并发、生命周期和事件写入约束
+
+- scheduler 的当前实现按节点顺序在调用 `ggml_backend_graph_compute_async` 后同步 backend，再执行观察回调；回调本身位于 scheduler 调用线程，不应在回调里等待另一个依赖同一 scheduler 的任务。
+- callback 不应做磁盘 I/O、JSON 序列化、锁竞争或分配大量内存；只写入预分配的有界内存队列/环形缓冲区，计算结束后由独立线程或主线程落盘。首轮可利用单 child、单请求、同步 callback 的串行特性，验证单写者预分配缓冲区；如果未来启用并发，必须重新设计并发写入。
+- event 记录必须立即复制 op、dtype、shape、backend、phase、slot/request scope 和时间戳；不能在 callback 返回后继续引用 `ggml_tensor *`。
+- 对 callback 失败、队列满、事件上限、异常退出分别计数；profiling 不得影响推理结果。事件丢失时 summary 标记 `truncated` / `event_dropped`，不得静默丢弃。
+- 需要覆盖首次 graph build、graph reuse、scheduler reset、模型卸载/重载和异常退出测试；确认 callback 安装不会在 graph reuse 分支丢失，也不会持有已释放的 scheduler。
+
+### 13.5 本轮结论和未验证项
+
+当前源码支持一条可行的最小 patch 路线：Server decode 边界提供 phase/slot/request scope；llama-context scheduler wrapper 提供 backend；GGML callback 提供节点观察点。这样不需要将 Request ID 传入 GGML 公共 API，也不需要修改 Gateway 热路径。
+
+但这只是源码层面的可行性判断，尚未编译或运行 patch。以下仍是 PERF-08.4 实验门槛：
+
+1. callback 在实际 llama-server graph build/reuse/reset 全生命周期中是否持续生效（源码显示 graph reuse 沿用已注册 callback，仍需运行验证）。
+2. callback 与 Server decode 是否在同一调用线程，TLS scope 是否完整覆盖 callback，是否存在重入或并发。
+3. prompt/decode phase 是否能由子批次 `is_prompt` 稳定判定；混合子批次是否能被识别并降级。
+4. scheduler wrapper 获取 backend 的 handle 生命周期是否安全。
+5. 有界队列在最大节点量下的丢失率、内存上限和落盘开销。
+6. 每节点同步 callback 与无 callback 基线之间 TTFT、总耗时、Decode throughput 的变化。
+
+未完成上述实验前，不宣称已获得 request-level node profile，也不新增 Gateway lease、SQL migration 或管理 API。
+
+
+### 13.6 Graph Reuse 时 callback 的注册生命周期
+
+目标 `src/llama-context.cpp` 的 `llama_context::process_ubatch()` 在 graph 不可复用的分支执行 `ggml_backend_sched_reset()`，随后重新调用 `ggml_backend_sched_set_eval_callback()`；graph 可复用分支不 reset scheduler，也不重新设置 callback。因此按当前实现，callback 在 graph reuse 时沿用 scheduler 中已注册的函数指针和 user_data，不会因正常 graph reuse 自动丢失。
+
+这也意味着 callback wrapper/user_data 必须至少与 llama_context/scheduler 同寿命；模型卸载销毁 context 后不得保留旧 scheduler 指针。仍需用目标构建验证 graph reset、model reload 和 context teardown，不将静态代码路径等同运行时验收。
+
+### 13.7 CPU-only 构建下 Copy 事件的实际预期
+
+目标 scheduler 仅在输入属于 host weight 且 `hv_tensor_requires_copy` 为 true 时调用 copy callback；该标记来自节点输入跨 backend 且目标 backend 不支持直接使用源 buffer 的路径。当前目标镜像为 CPU-only 构建，若运行时图只分配到单一 CPU backend，通常不会形成 backend 间权重复制，因此不能期待 copy callback 提供有意义的 transfer trace。
+
+首轮应记录实际 backend 数量、graph split 数和 copy callback 触发次数；若没有触发，summary 表达 `not_observed`，而不是宣称没有内存搬运。CPU cache/memory bandwidth 与 memcpy 热点需要由 CPU PMU/perf 或单独埋点研究，不能由 host-weight copy callback 代替。
+
+
+### 13.8 Copy callback 的行为和计时边界
+
+目标 `ggml_backend_sched_copy_callback` 的参数实际包含目标 backend、源 tensor、目标 tensor、当前 split graph 和 user_data。该 callback 在 scheduler 已完成必要的前序等待后、执行本次权重 copy 前调用：返回 true 表示 callback 自己负责完成 copy，scheduler 跳过默认 copy；返回 false 才会继续执行 scheduler 默认复制路径。
+
+因此纯观测 callback 必须返回 false，不能为了记录事件而返回 true。该 callback 本身发生在 copy 前，不能直接提供复制耗时；如果要报告真实 copy duration，需要在 scheduler 默认 copy 的实际同步/异步执行分支前后埋点，并区分 enqueue time、completion/sync wait 和 bytes。只记录 callback 触发次数/`ggml_nbytes(src)` 时，只能称为计划复制量或路径观测，不能称为已完成传输字节/耗时。
+
+
+### 13.9 Server Queue 与 TLS 阶段上下文的线程边界
+
+目标 `tools/server/server-queue.cpp` 的 `server_queue::yield_to_queue()` 明确在调用线程执行传入的 `work()`；其 worker thread 在并行期间执行 `process_new_tasks(true)`。目标 `server-context.cpp` 的 `process_single_task()` 在 `is_yielding=true` 时只允许 `SERVER_TASK_TYPE_METRICS` 和 `SERVER_TASK_TYPE_SLOT_GET`，其他会改变推理/Slot 状态的任务被拒绝并延后。因此 `decode()` 中 `yield_to_queue([&]{ llama_process(...); })` 的 GGML eval callback 与 Server decode scope 在同一调用线程。TLS 在当前路径技术上可用，但后续实现审计优先采用 context-owned scope，避免跨 translation unit 的 TLS 符号、ODR 和多 context 归属问题。
+
+这个结论只适用于目标版本上述路径。TLS scope 必须严格包在 `llama_process()` 调用内，不能跨出 yield，不得包住整个 server loop；仍需用运行时 thread-id 断言验证。未来若 Server 改为在 worker thread 执行推理，必须重新评估 TLS 方案。
+
+### 13.10 PERF-08 最小 instrumentation patch 文件级方案
+
+本方案是针对上游 `ggml-org/llama.cpp` 固定 commit `aa75ff3239f9cc675b081697deda9e1b112345c6` 的 patch 设计，不修改 Gateway 的生产推理链路。当前 `llm-gateway` 仓库的 Dockerfile 只构建 Gateway 本身，`docker-compose.yml` 也没有构建或管理 llama.cpp 服务；因此不能把 GGML patch 混进 Gateway Dockerfile，也不能误以为重建 Gateway 就会替换用户当前 llama.cpp 容器。
+
+| 上游文件 | 最小改动 | 目的/约束 |
+|---|---|---|
+| `tools/server/server-context.cpp` | 在 `decode()` 的 `yield_to_queue` work lambda 内、`llama_process()` 调用前建立/结束 profiling scope；从 `batch.tokens[off..off+batch.view.size())` 汇总 `id_slot`、`is_prompt`，并解析对应 slot 的内部 task id | 提供 phase/slot/task scope；混合 phase、多 slot、无 task 映射必须降级；不把内部 task id 宣称为 Gateway Request ID |
+| `src/llama-context.h` | 为 `llama_context` 增加仅 instrumentation 构建启用的 callback wrapper/采集状态成员，或使用独立内部 profiling state | wrapper user_data 使用 `this`，其寿命不短于 scheduler；不改变公开 `llama_context_params` ABI |
+| `src/llama-context.cpp` | 在 `process_ubatch()` 设置 eval callback 时注册 wrapper；wrapper 通过 `sched.get()` 调用 `ggml_backend_sched_get_tensor_backend()`，再转交节点观察；在 `graph_compute()` 边界维护 graph_seq/node_seq | callback 只在 `ask=true` 建立当前节点记录并返回 true；`ask=false` 计算 segment wall time、写入有界缓冲区并始终返回 true；Graph Reuse 复用注册但每个 graph 重置序号 |
+| `ggml/src/ggml-backend.cpp` | 首轮不改 eval callback ABI；若要 copy duration，另在真实默认 copy 执行/完成路径埋点 | copy callback 只报告 hook-before-copy 与 planned bytes；不接管默认 copy；异步 copy 必须测 completion/sync，不把 enqueue 时间当完成时间 |
+| 独立 profiling harness / 构建脚本 | 固定上游 commit、patch SHA、编译参数、CPU backend 和启动参数；只监听 loopback/隔离端口；启动失败或超预算立即退出 | 不触碰现有生产容器；首轮 `--parallel 1`、单请求窗口；不自动启动第二份模型，先完成资源预算 |
+
+实现顺序：先完成 eval callback + phase scope + backend + bounded event buffer；通过构建和无模型单测后，再接入 copy path；copy duration 不属于首个可运行版本的阻塞条件。
+
+### 13.11 事件缓冲区与回调实现细节
+
+- 首轮单 child、单请求、同步 callback 使用预分配固定容量的单写者缓冲区；callback 不获取互斥锁、不做 JSON 编码、不做文件写入、不扩容。写入前检查容量，满时只增加 dropped counter 并设置 truncated 标记。
+- 事件字段在 callback 内复制到 POD/定长记录：seq、graph_seq、node_seq、phase、slot_id、内部 task_id、op enum、dtype、shape、backend enum、start/end monotonic timestamp。Tensor 名称不默认保存，避免携带用户内容或不稳定字符串；需要展示时使用 op/type/shape 聚合。
+- `ask=true` 对每个节点返回 true，以获取逐节点 segment；`ask=false` 记录结束时间并返回 true。任何路径返回 false 都可能中断当前 split 的剩余节点，不能作为队列满或停止采样的处理方式。
+- `ggml_time_us()` 记录微秒级时间；duration 定义为 scheduler graph segment wall time，包含 backend 执行与同步。不能解释成纯 kernel time。若只对部分节点返回 true，事件时间会覆盖多个节点的 segment，必须使用 segment 语义并避免归因到单个算子。
+- `graph_seq` 在每次 `process_ubatch()` 的 graph compute 边界递增；`node_seq` 在该 graph 内按 ask callback 顺序递增。遇到同一 callback 中 ask 配对不完整、graph scope 缺失或事件缓冲区溢出，整个 session 质量降级，不补造事件。
+
+### 13.12 Patch 验证矩阵与准入条件
+
+| 验证项 | 测试方式 | 通过条件 |
+|---|---|---|
+| 构建兼容 | 固定目标 commit，CPU-only Release 构建 | 无 ABI 变更；Gateway 仓库构建不受影响 |
+| Callback 配对 | 单节点、多节点、graph split、失败/取消路径 | 每个 ask=true 节点有且仅有一次 ask=false；callback 始终返回 true |
+| Graph 生命周期 | 首次 graph、reuse、reset、scheduler 重建、context 销毁 | wrapper/user_data 与 scheduler 同寿命；无悬空指针和重复事件 |
+| Thread scope | 记录 decode scope 与 callback 的 thread id；在 yield 期间并发发 metrics/slot-get 请求 | 推理 callback thread id 一致；其他线程无 scope 污染 |
+| Phase/Slot | prompt-only、decode-only、混合子批次、多 slot 负向样本 | phase 判定准确；混合/多 slot 明确降级；内部 task id 不冒充外部 Request ID |
+| 缓冲区 | 人工缩小容量触发 overflow，异常终止 | 不阻断推理；dropped/truncated 可观测；内存上限固定 |
+| 观测开销 | 相同模型、参数、Prompt/输出 Token、warmup/重复次数，callback OFF/ON 对照 | 报告 TTFT、总耗时、decode tok/s 的分布；按预先设定阈值决定是否仅结构诊断 |
+| 进程资源 | 不启动第二实例先测当前 child RSS/PSS、模型 mmap、KV/cache、峰值内存 | 先得到可用内存余量和安全阈值，再决定隔离 child 是否可启动 |
+
+当前尚未执行上述 patch 构建或运行验证。执行顺序调整为先验证宿主机 process/window 级 perf 证据：通过独立脚本对已确认的 llama-server child PID 做最多 10 秒的 perf stat，不启用全系统采样、不采集 perf.data、不修改系统权限。只有该证据仍无法解释目标瓶颈时，才进入 metadata-only C++ patch 评估；在用户明确确认前不修改 llama.cpp 上游源码，不要求重启现有服务。
+
+
+### 13.13 上游 eval-callback 示例复用评估
+
+目标 commit 已包含 `examples/eval-callback/eval-callback.cpp`，可用于验证官方 callback 参数传递和最小推理调用；但不能直接作为 PERF-08 采集器：
+
+- 示例把 `common_debug_cb_eval` 注册到 `params.cb_eval`，其 `ask=true` 对所有节点返回 true，会触发逐节点 graph segment。
+- `common_debug_cb_eval` 对非 host tensor 调用 `ggml_backend_tensor_get()`，将完整 tensor 内容复制到 host buffer；对符合条件的非量化 tensor 还会打印数值。它会带来额外拷贝、内存分配和 I/O，且可能暴露模型中间激活，不符合 PERF-08 的数据最小化和低扰动要求。
+- 示例在 prompt tokenization 后打印 token 数和 token ID；虽然不是明文 Prompt，但也不应直接继承为生产采集输出。
+- 示例的 CMake 测试会下载 tinyllamas 15M 模型，可作为上游 callback smoke test 的参考；它不覆盖 server `decode()`、Slot/Task phase scope、Router child、Graph Reuse 归因和真实目标模型资源预算。
+
+决策：复用它的构建/回调启用方式作为 smoke-test 参考，但自行实现 metadata-only callback。禁止调用 `common_debug_cb_eval`、`ggml_backend_tensor_get()` 或打印 tensor 内容；事件只记录 op/type/shape/backend/phase/序号/时间，不记录 tensor 名称、数值、token ID、Prompt/Response。
+
+上游证据：
+- [eval-callback 示例](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/examples/eval-callback/eval-callback.cpp)
+- [common_debug_cb_eval 实现](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/common/debug.cpp)
+- [eval-callback CMake 测试](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/examples/eval-callback/CMakeLists.txt)
+
+
+### 13.14 原有 eval callback 的兼容边界与 wrapper 决策
+
+本轮继续核验了目标上游 commit 的真实初始化链：
+
+- `common_context_params_to_llama()` 将 `common_params.cb_eval` / `cb_eval_user_data` 原样复制到 `llama_context_params`。
+- `llama_context` 构造时再复制到内部 `cparams.cb_eval` / `cb_eval_user_data`。
+- `process_ubatch()` 在 graph 不可复用分支 reset scheduler 后，调用 `ggml_backend_sched_set_eval_callback(sched, cparams.cb_eval, cparams.cb_eval_user_data)`；graph reuse 分支沿用已有注册。
+- Server 通过 `common_init_from_params(params_base)` 创建 context，因此 Server 的 profiling 接入点不能绕过 common 参数转换链，也不能改公开 `llama_context_params` ABI。
+
+**修正后的 wrapper 规则：**
+
+1. instrumentation build 内部将 scheduler callback 注册为 `llama_context` 的静态 wrapper，`user_data=this`；wrapper 从 context 内部读取原 callback、原 user_data 和当前 scheduler。wrapper 与 context/scheduler 同寿命，不引入跨 translation unit 的 header-only `thread_local` 状态。
+2. 若原 callback 为空，profiling wrapper 可在 `ask=true` 时返回 true、在 `ask=false` 时返回 true，以逐节点建立 segment。
+3. 若原 callback 非空，必须调用原 callback，并逐次原样返回其 bool 结果；不得为了 profiling 把 false 改成 true，也不得吞掉原 callback 的副作用或替换其 user_data。只有原 callback 选择切分的节点才可能被观察，因此该 session 必须标记 `coverage=callback_selected_nodes_only`，不能宣称完整逐节点覆盖。
+4. 对要求完整逐节点覆盖的 PERF-08 样本，若发现原 callback 非空，首轮应拒绝启动该采集模式并给出明确原因；不通过覆盖 callback 来强行满足采集要求。未来若需要同时支持两种 callback 语义，再单独设计显式组合协议。
+5. `ask=true` 的原 callback 返回 true 后再记录 segment 起点；`ask=false` 在进入原 callback 前捕获 segment 结束时间，再调用原 callback 并返回其结果，避免把原 callback 自身执行时间计入 segment。所有记录仍使用微秒级时间戳。
+6. wrapper 必须处理 context/scheduler 重建、graph reuse、销毁路径；每次 scheduler 新建或重置后都要确认 callback/user_data 仍指向当前 context。不得保存过期 scheduler 指针或依赖静态 TLS 变量在多个 context 间传递状态。
+
+**本轮审计结论：** callback wrapper 方案仍可行，但之前“无条件每个 ask=true 都返回 true、ask=false 始终返回 true”的文件级方案仅适用于原 callback 为空的 profiling context。必须增加原 callback 冲突检查和 coverage 状态。当前 llama.cpp 上游 `common_params.cb_eval` 默认初始化为 nullptr；这只是默认值，不构成所有运行场景都为空的保证。
+
+**仍未验证：** 以上为固定 commit 的源码调用链审计，尚未构建 instrumentation patch；还需通过编译和离线测试验证 wrapper 的函数签名、scheduler reset/rebuild 注册、原 callback 委托顺序以及原 callback 非空时的兼容行为。
+
+
+### 13.15 phase/slot scope 的跨模块传递：优先采用 context-owned internal API
+
+本轮检查了 `tools/server/CMakeLists.txt` 与 `server-context.cpp` 的依赖：Server context 通过 `common_init_from_params(params_base)` 创建 llama context，当前只直接包含公开 `llama.h`，并不直接依赖 `src/llama-context.h`。因此，不应让 Server 直接访问 `llama_context` 私有成员，也不应在多个 translation unit 中各自定义 header-only `thread_local`。
+
+**优先方案：增加仅供同一上游构建内部使用的 profiling scope 头文件和内部函数，不修改公开 `include/llama.h` 的结构体或 callback ABI。**
+
+- 在 `src/` 下增加内部 `llama-profile.h`，声明 `llama_profile_scope` POD/定长数据，以及 `llama_context_profile_scope_begin(ctx, scope)` / `llama_context_profile_scope_end(ctx)` 内部入口；只由 instrumentation build 编译启用。
+- 在 `llama-context.cpp` 定义入口函数，`llama_context` 保存当前 scope 与 begin 时的 `std::thread::id`；eval callback wrapper 从当前 context 读取 scope，并断言 callback thread 与 begin thread 一致。
+- `tools/server/server-context.cpp` 在 decode 的 `yield_to_queue` work lambda 内，紧贴 `llama_process()` 前后调用 begin/end；scope 只覆盖同步推理调用，不跨出 yield。begin 失败、scope 重入或 thread mismatch 都要使 session 降级，不得复用上一请求的 scope。
+- Server target 通过 CMake 私有 include path 引用 `src/llama-profile.h`；内部函数符号的可见性/静态与 shared build 链接方式必须在 patch 构建时验证。若需要 `LLAMA_API` 导出，也只导出内部头文件声明的符号，不向公开 API 承诺稳定性。
+- scope 是 context-owned 而不是全局 TLS，多个 context 不共享当前请求状态；但同一个 context 同一时刻仍只允许一个 active scope。若未来同一 context 并发执行，必须扩展为明确的并发归属设计，不能直接复用此假设。
+
+该方案比跨文件 TLS 更容易审计生命周期和多 context 隔离，同时保留 Server `yield_to_queue` 的线程边界证据。当前仍是设计决策，尚未编译验证内部头文件 include path、符号导出和 shared/static 两种构建。
+
+
+
+
+### 13.18 固定上游 CPU 构建基线工作流
+
+已新增独立 workflow：`.github/workflows/perf08-llama-cpu.yml`，并新增 `tools/perf08/README.md`。
+
+- workflow 固定 checkout `ggml-org/llama.cpp` commit `aa75ff3239f9cc675b081697deda9e1b112345c6`，包含递归 submodule，并校验 checkout HEAD。
+- 使用 Ubuntu 24.04 runner、Ninja、CPU backend，关闭 CUDA/Metal/Vulkan、native host tuning、CPU all variants；构建目标为 `llama-server`。
+- 不下载 GGUF、不启动模型、不接触用户生产容器；此构建只验证上游固定版本及 Server CMake 基线。
+- workflow 由 `dev` 分支相关路径变更触发，也支持手动触发。首个执行因紧接着的第二次提交触发 concurrency cancel；第二次执行已进入上游 checkout 阶段，最终结果待确认。
+- 此 workflow 目前不应用 PERF-08 patch，因此即使基线构建成功，也不能作为 patch 已应用或 callback 行为正确的证据。
+
+**后续接入要求：** patch 文件提交后，在该 workflow 中先执行 `git apply --check`，再应用 patch；然后执行相同构建，并增加 callback 原 callback 委托、空 callback 分段、scope 生命周期和 overflow 不改变 graph compute 返回语义的测试。测试未落地前，workflow 结果只能标为 `upstream_baseline_pass`，不能标为 `perf08_patch_pass`。
+
+### 13.17 decode scope 的同步边界复核（固定 commit 源码）
+
+重新逐行核对目标 commit 的 `tools/server/server-context.cpp` 后，修正此前对 decode scope 的描述：
+
+- `decode()` 在进入 `yield_to_queue` 前计算 `has_output`，其值是当前 batch view 中是否至少有一个 token 标记为 output。
+- yield lambda 内先调用 `llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch.view.get())`；只有 `ret == 0 && has_output` 时才紧接着调用 `llama_synchronize(ctx_tgt)`。
+- 没有 output 的 batch 不会在该 lambda 内调用上述 synchronize。外层 decode loop 的 `DEBUG_TIMINGS` 同步位于 `decode()` 返回之后，且仅在编译启用该宏时执行，不属于常规路径。
+
+因此实际 patch 应将 scope guard 放在 yield lambda 内，覆盖 `llama_process()` 和该条件同步；必须在 lambda 正常退出及异常退出时结束 scope。不能将同步描述为无条件执行，也不能把外层调试同步计入常规采集路径。回调发生在 `llama_process()` 的同步调用栈内；该 scope 的准确含义是“当前 Server decode batch 的调用上下文”，不是保证覆盖所有 backend 异步工作的完整生命周期。
+
+进一步核对 `src/llama-context.cpp` 的 `llama_context::graph_compute()` 与 `ggml/src/ggml-backend.cpp` 的 Scheduler 执行循环：llama 层调用 `ggml_backend_sched_graph_compute_async()`；当 eval callback 非空时，Scheduler 不走整图一次提交的快速分支，而是逐段调用 `ggml_backend_graph_compute_async()`，随后在调用 `ask=false` callback 前对当前 split backend 执行 `ggml_backend_synchronize()`。因此 `ask=false` 的回调在当前调用线程中、对应 segment backend 同步之后执行；测得的 segment wall time包含该 segment 的 backend 执行及同步等待，但不等同单个 kernel 的纯执行时间。此同步由 callback 模式下 Scheduler 内部触发，不能与 Server 外层条件 `llama_synchronize()` 混为一谈。
+
+**实现前提复核：** `llama_context::sched_new()` 在 scheduler 参数兼容时直接复用现有 scheduler，否则替换 scheduler 并重新安装 copy/realloc callback；eval callback 则在 `process_ubatch()` 的 graph reset 分支注册，graph reuse 分支沿用已有注册。因此 wrapper 的注册点必须同时考虑 scheduler 新建/替换和 graph reset，不能仅在 context 构造时注册一次。当前仍未修改上游源码或执行编译。
+
+### 13.16 Scheduler callback 精确语义与内部 API 构建边界
+
+固定上游 commit `aa75ff3239f9cc675b081697deda9e1b112345c6` 的 `ggml/include/ggml-backend.h` 明确了 callback ABI：
+
+`bool (*ggml_backend_sched_eval_callback)(struct ggml_tensor * t, bool ask, void * user_data)`。
+
+- `ask=true`：Scheduler 询问是否观察当前节点，返回 true 会允许 Scheduler 在该节点处切分并执行后续观察回调。
+- `ask=false`：Scheduler 将已执行节点交给用户观察；此时返回 false 会取消 graph compute。不能把它描述为仅跳过当前 split 的剩余节点。
+- 因此 wrapper 在 `ask=false` 必须严格返回原 callback 的结果；采集缓冲区满时不能返回 false，否则会改变推理执行语义。缓冲区满只增加 dropped 计数并标记 truncated。
+
+**可落地的内部接入边界：**
+
+1. `llama_context` 是 `src/llama-context.h` 中的 struct，成员默认 public；可在该内部类型中增加 profiling scope 状态、原 callback 快照和静态 wrapper，不触碰 `include/llama.h` 的 `llama_context_params` 布局。
+2. Scheduler 创建由 `llama_context::sched_reserve()` 执行；Scheduler 对象替换时需重装 copy/realloc callback。Eval callback 当前在 `process_ubatch()` 的 graph reset 分支注册，因此 profiling wrapper 也应在该位置替换注册，并以 `this` 作为 user_data。Graph reuse 不重注册，沿用当前 Scheduler callback。
+3. 原 callback 与 user_data 在 context 构造时从 `llama_context_params` 复制到 `cparams`。instrumentation build 应在 context 内保存原 callback/user_data；wrapper 调用原 callback 时传原 user_data，不得把 `this` 传给原 callback。
+4. Server 的 `server-context` target 目前通过 `llama-common` 间接链接 `llama`；`common/CMakeLists.txt` 明确 `llama-common PUBLIC llama`。内部头文件可通过 `target_include_directories(server-context PRIVATE ${PROJECT_SOURCE_DIR}/src)` 接入，无需复制 llama 内部类型定义。内部 API 函数若需要跨 DLL 边界，应使用上游 `LLAMA_API` 导出声明，并在 shared/static 两种构建下验证。
+5. Server 仅在目标 context `ctx_tgt` 的 `decode()` 中、`yield_to_queue` work lambda 内紧贴 `llama_process()` 建立/结束 scope。该 lambda 只有在 `ret == 0 && has_output` 时才调用 `llama_synchronize()`；无输出批次不会在此处同步。scope 应覆盖实际存在的条件同步，并在 lambda 退出（包括异常路径）时可靠结束；不得把外层 `DEBUG_TIMINGS` 下的同步误算为常规路径。不默认对 draft context 开启采集，避免把目标模型和 draft 模型事件混在同一 session。
+6. `llama_context_profile_scope_begin/end` 应校验 context 非空、scope 未重入、线程归属一致和原 callback 冲突策略。完整逐节点模式在原 callback 非空时拒绝 begin；允许部分覆盖的诊断模式必须显式声明 `coverage=callback_selected_nodes_only`。
+
+**实现顺序状态：** 上述 callback wrapper、Server scope 和 backend 元数据方案仅作为后续可选 patch 的源码审计结果，不代表已获准进入上游代码修改。当前先执行 process/window 级外部采样；只有外部采样无法解释瓶颈时，才重新评估这组 C++ patch。
+
+**尚未执行：** 以上均为源码审计和设计约束，未对 llama.cpp 进行代码修改、编译或运行测试。Gateway CI 不覆盖此上游 patch。
+
+
+### 13.19 固定上游 CPU-only 构建基线结果与实施顺序校正
+
+固定上游构建 workflow 已完成，执行记录：
+
+- Workflow Run：`44507383958`，结论 `success`。
+- Workflow HEAD：`b7cb6f5110afb3a6fee68403e3383371fbd114bf`。
+- 上游 checkout：`aa75ff3239f9cc675b081697deda9e1b112345c6`，pin 校验通过。
+- 构建环境：Ubuntu 24.04、CMake 3.31.6、GCC 13.3.0、Ninja。
+- `llama-server` 构建：185/185 个 Ninja 步骤完成，产物 `build/llama-cpp/bin/llama-server` 存在。
+- CPU-only 配置关闭 CUDA、Metal、Vulkan、native host tuning 和 CPU all variants；未下载 GGUF、未启动模型进程、未接触用户生产容器。
+- UI assets 提示当前无可嵌入资源，构建不包含内嵌 UI；不影响本轮 Server 编译基线。
+
+该结果只标记为 `upstream_baseline_pass`，不是 patch pass，也不证明 callback 或 scope 行为。
+
+**实施顺序校正：** 本轮不继续写 llama.cpp C++ patch。先使用 `tools/perf08/host-perf-stat.sh` 对用户宿主机的 llama-server model child 做短时 process/window 级采样；脚本支持传宿主机 PID，也支持传容器名并自动解析唯一 Router child，多个或零个候选均 fail-closed。脚本只采 task-clock、上下文切换、CPU migration、page fault；只有检测到 P-core/E-core PMU 且当前权限允许时才加入 cycles/instructions，否则只保留软件事件并标记 not_sampled_permissions；不使用全系统 `-a`，不采集 perf.data、调用栈、寄存器、内存地址或请求内容，不自动提权、不修改 `perf_event_paranoid`。输出明确标记 `scope=process_window`、`request_correlation=none`。
+
+脚本已通过 `bash -n` 语法检查；尚未在用户 NUC 上执行，当前没有真实 perf 计数结果。只有 process/window 证据仍无法解释瓶颈时，才重新评估是否需要最小 C++ patch；该 patch 需在实施前单独确认范围。
+
+**CI 复核：** 历史 Go CI Run `44507493365` 曾在 Gateway 稳态负载与审计持久化步骤失败（HTTP 请求均成功，但审计表 11,685/12,192 条）。后续未修改审计队列、未降低测试标准的 Go CI Run `44510872069` 与 `44511368517` 均 5/5 Job 成功，审计负载步骤通过；因此该失败目前不可复现，不能据此认定审计队列容量存在稳定缺陷。保留历史记录，后续若再次失败再采集 Writer StatsSnapshot 归因，不为通过测试而改标准。
+
+**宿主机采样脚本自动化验证：** Workflow Run `44511368692` 成功；`bash -n` 和 mock Docker/perf 的 Router-child 解析烟测均通过，验证脚本能选中 child 而不是 Router、PID/PPID 绑定正确、输出文件权限为 0700/0600。该烟测使用 mock perf，不代表真实 NUC 计数结果。
+
+
+## 14. 宿主机 root-owned child 进程识别修正（2026-11-20）
+
+用户现场确认：
+- Docker Context 为 `default`。
+- 容器 init / Router 宿主机 PID 为 `1095152`。
+- 模型 child 宿主机 PID 为 `1095664`，PPID 为 `1095152`。
+- `/proc/1095664/stat`、`status` 可读，`comm` 为 `llama-server`；但普通用户读取 `/proc/1095664/exe` 被拒绝。目标进程 UID/GID 为 root，执行采样的用户为 UID 1000。
+- 因此此前脚本将 `-e /proc/PID/exe` 和 `readlink -f` 作为强制前置条件不成立；PID 本身并没有映射错误。
+
+已修正：
+- `tools/perf08/host-perf-stat.sh` 不再要求读取 `/proc/PID/exe`。
+- 进程初步识别改为验证 `comm=llama-server`、父进程 comm、PPID 和 start ticks。
+- Build ID 改为可选证据；不可读时记录 `unavailable_permission_or_tool`，不阻断进程识别。
+- 不自动 sudo、不修改内核参数、不改变容器权限。
+
+提交与验证：
+- 脚本修正提交：`1857a5af8d1f731f27a7d85d3e3c5315cfb9c9db`。
+- PERF-08 host script workflow Run `44656684347`：Bash syntax 与 Router child discovery smoke test 均通过。
+- 后续文档提交：`11523aa2178b8cf5de9f72dbe1fb499ac417c667`。
+- 该修正只解决进程元数据识别，不代表普通用户已具备对 root-owned 进程执行 `perf stat -p` 的权限；真实 perf 权限仍未验证，禁止标记真实采样通过。
+- Gateway CI 在代码提交 SHA 的 Run `44656684358` 被后续文档提交触发的并发策略取消；文档提交 SHA 的 Run `44656722150` 正在执行，需以最终结果为准。
+
+执行边界：
+- 下一步只在确认当前用户对 root-owned child 的 perf 权限可用时做最多 10 秒 process/window 采样；权限不足就记录 `permission_denied / not_comparable` 并停止，不继续排查或调整全局系统权限。
+- 不要求重启、重建或重新加载 llama.cpp 服务。
+- 真实采样之前先继续复核现有 Gateway RequestAnalysis、Benchmark、llama.cpp timings/metrics 是否已经足以形成瓶颈判断；不得为完成 PERF-08 名称而强行进入 C++ patch。
+
+## 15. 真实主机 perf 采样结果与停止条件（2026-11-20）
+
+用户执行采样后提供的现场输出确认：
+- Docker Context 为 `default`；目标 Router PID `1095152`，模型 child 宿主机 PID `1095664`，PPID 正确指向 Router。
+- child `comm=llama-server`，`/proc/PID/stat` 与 `status` 可读；`/proc/PID/exe` 对 UID 1000 的采样用户不可读。该问题已通过脚本修正为非阻断项。
+- `perf version 7.0.14`；`perf_event_paranoid=4`。perf 明确返回 `No supported events found`，并提示无 CAP_PERFMON、CAP_SYS_PTRACE 或 CAP_SYS_ADMIN 权限。
+- 因此目标 PID 识别成功，但真实 perf 事件采样被系统策略拒绝。结果状态为 `permission_denied / not_comparable`，不能记录为采样通过，也没有可用于 CPU 瓶颈归因的计数数据。
+- 用户执行 `git fetch` 时另有 `.git/FETCH_HEAD: Permission denied`，说明其仓库目录/文件权限存在问题；这与 perf 内核权限无关。此前同一 shell 继续执行了脚本，故该次执行不能证明使用了刚 fetch 的最新版本。不要要求用户为本任务递归 chown 仓库或改系统权限。
+
+**停止条件：**
+- 不再要求用户读取或调整 `ptrace_scope`、`perf_event_paranoid`。
+- 不授予容器额外 capability，不修改 sysctl，不以 sudo/CAP_SYS_ADMIN 作为本任务前置条件。
+- 本轮 process/window perf 采样到此结束，记录为 `permission_denied / not_comparable`。
+- 不因 perf 采样失败而启动 llama.cpp C++ patch；回到现有 RequestAnalysis、llama.cpp timings、后台 `/metrics` counter delta 和 Runtime Snapshot 做静态能力审计与瓶颈证据矩阵。
+- 当前可继续的是明确各类已有字段能回答/不能回答的问题，以及检查现有采样数据的导出/查询路径；没有真实请求样本或 metrics 值时，不得虚构瓶颈结论。
+
+## 16. PERF-09 Gateway 现有观测能力审计（2026-11-20）
+
+本轮按 Gateway 内部实现审查，不再把宿主机 Shell 命令作为运行时采集方案。Gateway 当前已有 Go 后台采样器，直接读取 Linux procfs 或调用上游 HTTP 观测接口；这与人工执行 `top`、`ps`、`perf` 命令不同。外部 `perf` 路线因宿主机权限限制已停止，不构成 Gateway 基础运行依赖。
+
+### 16.1 已有能力与数据范围
+
+| 能力 | 现有实现 | 数据范围 | 当前能回答的问题 |
+|---|---|---|---|
+| 请求 Timeline | `request_analysis.go`、`pipeline_forward.go`、`request_trace.go` | request_id 级 | Gateway 阶段、Provider queue wait、上游 headers/first byte、SSE 首 token/正文事件 |
+| llama.cpp Inference Timing | `RequestModelTimings`，从上游响应 TokenHarvest 写入 analysis_json | request_id 级（上游响应提供时） | Prompt token/time、Decode token/time、缓存 token、Prompt progress |
+| Runtime Snapshot | `runtime_snapshot_sampler.go` 每 5 秒触发；`runtime_snapshot_cache.go` 调用上游模型状态 API | 上游模型/进程状态快照 | 活跃模型、加载模型数量、上游上报的 RAM/VRAM |
+| CPU | `runtime_sampler.go` 每 5 秒采样 `/proc/stat` | Gateway 所在 Linux 环境的整机 CPU | 只能观察整机 CPU busy 比例，不能归因到 llama-server 进程 |
+| llama.cpp Metrics | `sampleLlamaMetrics` 每 5 秒调用 `GET /metrics`，2 秒独立超时 | 上游进程/模型标签/时间窗口级 | 上游导出的 Gauge、Counter、Histogram 等原始指标；Counter 在可比样本间计算增量 |
+| Metrics Delta | `applyCounterDeltas` | 两次 Metrics 快照之间 | 在 upstream、model scope、process identity 一致且采样间隔有效时比较 Counter 增量 |
+| Benchmark | `benchmark.go`、Benchmark Task/Run 持久化 | Benchmark Job/Request ID | 记录负载条件、请求耗时、TTFT、Token 和模型调用轮次；Job ID 与 Request ID 对齐 |
+
+### 11.2 已确认的限制
+
+1. **Runtime Snapshot 没有进程资源指标。** 当前 RequestRuntimeSnapshot 只包含 backend/model、加载模型数量、上游上报的模型 RAM/VRAM 和 HostCPUPercent；没有 llama-server PID 对应的 CPU、RSS、线程数，也没有 GPU 利用率/显存实时占用的通用采集能力。不能把整机 CPU 或模型权重内存当成进程资源占用。
+2. **HostCPUPercent 是整机口径。** 数据源是 `/proc/stat` 的 CPU 总行，只代表 Gateway 所在 Linux 环境的主机整体 CPU busy，不代表 llama-server 进程 CPU；该值不能单独证明模型进程饱和。
+3. **CPU 时间戳已独立暴露。** `runtime_snapshot` 现有 `host_cpu_status`、`host_cpu_sampled_at`、`host_cpu_age_ms`，与上游 Runtime Snapshot 的 `sampled_at/age_ms` 分开表达；CPU 样本超过 15 秒即不可用。修复记录见 11.6、11.8。
+4. **Runtime Snapshot 缓存采样时间已修复。** 上游 10 秒缓存（Ollama memory-only 路径 30 秒）命中时保留首次真实采集的 `SampledAt`，不会将缓存读取时刻伪装成新采样时刻；请求侧 age 因而反映原始样本年龄。修复记录见 11.5。
+5. **Metrics 不与单请求关联。** Metrics 快照只保存在 Server 内存中的最近状态，并通过管理员 Runtime API 的 `server_metrics` 输出；没有 request_id 关联，也没有按请求持久化。Counter Delta 只能说明两个采样时刻之间进程级计数变化，不能证明变化由某个请求造成。
+6. **Metrics Delta 已有可比性保护，但不是完整归因。** 当前校验 upstream target、model scope、ProcessInstanceID、采样时间、窗口上限、series identity、Counter 类型及 counter reset；缺失时标记 not_comparable 并给出原因。这套机制应复用，不应再造一套 Counter 比较逻辑。
+7. **Slots 未进入默认采样。** `FetchSlots` 已存在，但注释明确要求先验证目标版本 idle-sleep 行为；当前不应为了补齐表面字段直接增加高频轮询。
+8. **模型 RAM/VRAM 数据依赖上游能力。** llama.cpp Router 返回的模型目录状态可能只有 loaded/status，没有 RAM/VRAM 数值；此时零值/缺失不能解释为实际占用为 0。Ollama 的 RAM/VRAM 来自 /api/ps 估算，语义也不能与 llama.cpp 上报值混用。
+
+### 11.3 PERF-09 当前证据能力结论
+
+- **可以做请求级阶段归因（部分）：** Provider queue wait、Gateway 前置阶段、上游 headers/first byte、TTFT、Prompt/Decode 原生 timings、输出速度来源。
+- **可以做进程级/窗口级负载观察（部分）：** llama.cpp Metrics 原始样本和可比 Counter Delta；但必须保留窗口范围，不得归到单个 request_id。
+- **可以做模型加载状态与模型内存观察（部分）：** 依赖上游 API 返回内容；不是进程 RSS/显存利用率。
+- **目前不能可靠做的归因：** llama-server 进程 CPU 是否饱和、进程 RSS/线程/调度压力、GPU 利用率与 GPU 瓶颈；也不能将并发时间窗口的 Metrics Counter Delta 归属给单个请求。
+- **当前不能输出真实瓶颈结论：** 尚未在本轮取得同一真实负载窗口内的请求分析样本、Metrics 样本和 Runtime Snapshot 数值；本轮结论是静态能力审计，不是运行时性能测量。
+
+### 11.4 PERF-09 当前实施状态与后续顺序
+
+已完成的基础契约修复：
+1. Runtime Snapshot 缓存保留首次真实上游采集时间，cache hit 不再伪造新鲜时间；请求侧 freshness 使用原始采样时间。
+2. Host CPU 样本独立暴露 `host_cpu_sampled_at`、`host_cpu_age_ms` 和状态；上游 Runtime Snapshot stale/unavailable 不会抹掉仍然新鲜的 Host CPU 证据。
+3. Metrics API 保留原始样本、target/process/model scope、独立 freshness 与 Counter Delta 可比性状态；Metrics 的 `SampledAt` 是完整读取响应 body 后的客户端观测时间上界。Counter Delta 窗口严格使用两个成功样本时间；采样失败后重新建立 baseline。
+4. 已形成 request-level、process-window、host snapshot、Benchmark 六类证据矩阵，并明确 observed/candidate/not_comparable/primary/secondary 的结论门槛。当前这仍是归因规则与证据边界，不代表已有自动化瓶颈归因 API。
+
+后续顺序：
+1. 已修复 Host CPU 与上游 Runtime Snapshot 解耦后暴露的聚合状态覆盖问题：先确定上游快照状态，再合并 Host CPU 可用性；上游 stale/unavailable 时仍保留独立 CPU 证据。
+2. 已补齐 Metrics Counter Delta 精确窗口和采样失败恢复回归测试；对应契约文档已更新，等待新提交 CI 验收。
+3. 利用现有 Benchmark 功能执行真实 NUC 负载测试；固定模型、量化、上下文、线程/批处理配置，分别测短/长 Prompt 与短/长输出，先做单请求隔离基线，再视结果决定是否做并发测试。
+4. 将 RequestAnalysis、llama.cpp 原生 timings、Metrics 窗口和 Runtime Snapshot 按各自时间尺度对照。没有真实同类基线时只输出 observed/candidate，不宣称 primary bottleneck。
+5. 只有真实样本证明现有证据不足以回答具体瓶颈问题时，才评估最小新增观测能力。不得重新启动已因权限停止的宿主机 perf 路线，不新增历史 Metrics 存储，不将进程窗口 Delta 分摊给 request_id。
+
+当前不修改 llama.cpp C++，不引入 Shell 子进程采样依赖，不改变模型容器权限或启动参数。
+
+### 11.5 Runtime Snapshot 缓存时间语义修复
+
+针对 11.2 第 4 项已完成最小修复：
+
+- `llama.RuntimeSnapshot` 增加仅内部使用的 `SampledAt`（`json:"-"`），不会改变现有 API JSON 契约。
+- Gateway 在真正向上游读取成功后写入 SampledAt；缓存命中返回原快照时保留首次采集时间，不再把 cache hit 时刻伪装成上游采样时间。
+- `setRuntimeSnapshotSample` 优先使用上游快照的 SampledAt；测试夹具或非缓存调用未提供时间时才回退当前时间。
+- 新增缓存命中测试，验证 TTL 内第二次读取不重复访问上游，且 SampledAt 与首次真实采样时间完全一致。
+
+提交：
+- `7d83aefea211da689fa8df37f8f92e57814150e8`：RuntimeSnapshot 内部采集时间字段。
+- `bdb43c9e4c01b1112931f8eda9f1067110901219`：缓存和样本保存真实采集时间。
+- `e361039365ca7e80583dc6c9efd4f9f2b1c65b39`：缓存时间语义回归测试。
+
+**验证状态：** 代码已提交；Go CI 需以最新提交对应的 Actions 结果为准。该修复不增加 Shell 命令、外部依赖、数据库字段或 API JSON 字段。
+
+
+### 11.6 Host CPU 独立采样时间契约
+
+已完成 Host CPU 时间戳补齐：
+
+- `cpuSnapshotPercent` 现在同时返回 CPU 值和 `cpuProcLastSample` 对应的真实采样时刻。
+- 请求分析的 `runtime_snapshot` 新增 `host_cpu_status`、`host_cpu_sampled_at`、`host_cpu_age_ms`。
+- 主机 CPU 值仍明确是 `/proc/stat` 整机 CPU busy 百分比，不代表 llama-server 进程 CPU。
+- CPU 样本过期或不可读时，明确返回 `host_cpu_status=unavailable`，不输出数值；不再借用上游 Runtime Snapshot 的采样时间。
+- Runtime Snapshot 自身的 `sampled_at/age_ms` 与 Host CPU 独立时间信息分别表达，避免两个采样源被误认为同一时刻。
+
+回归测试覆盖：
+- CPU sampler 的新鲜/过期判定同时返回采样时间。
+- 无 CPU 样本时明确输出 unavailable。
+- 有 CPU 样本时返回独立时间戳和 age。
+
+提交：
+- `7b6d345ca3af7b9f71048c785c78010202d4da55`：扩展 RequestRuntimeSnapshot 字段。
+- `54b66c4452e9047ede2b038562638f82ef9ff3c2`：CPU 快照读取返回采样时间。
+- `0ab0aeeba2b945db4bcce817bedb91ef8b06078f`：API 快照独立输出 CPU freshness。
+- `4a790ef9314dbc88ebf4992192adaa29addac2d2`、`ce60039a34afb3ba88baa29004a5f0ea78a05374`：测试覆盖。
+
+### 11.7 Metrics API 静态契约复核
+
+复核 `runtime_snapshot_cache.go` 与 `llama/metrics.go`：
+
+- Metrics 由 Gateway 后台 Go sampler 每 5 秒采集，单次超时 2 秒；不是浏览器或用户命令采集。
+- API `server_metrics` 暴露 status、reason_code、source、sampled_at、age_ms、process_instance_id、model_scope 和原始 samples。
+- Counter sample 暴露 delta_status、delta_reason、delta_value、window_start、window_end、window_ms；只有同一 target、model scope、process identity 且窗口有效时才比较。
+- Counter reset、进程重启、目标变化、scope 变化、缺少前序样本、series 缺失和采样间隔过大均不可比较，不应纳入归因。
+- Metrics 是上游进程/模型 scope 的窗口观测，不能关联或摊派到某个 Gateway request_id。
+- 当前 Metrics 样本保存在进程内存，不是持久化历史；Gateway 重启后需重新建立 baseline。
+- 当前不新增 Metrics API、存储或 UI；已有 `/api/admin/runtime` 中的 `server_metrics` 已提供该只读数据面。
+
+**当前阶段结论：** Host CPU freshness 的 API 契约已补齐；Metrics 基础采样和 Counter Delta 已有实现。PERF-09 下一步应落在证据分类与归因规则，而不是再造采集管道。真实瓶颈仍需真实负载窗口数据验证。
+
+
+### 11.8 Host CPU 与上游 Runtime Snapshot 解耦
+
+进一步检查发现，虽然 CPU 已有独立采样时间，但原函数在上游 Runtime Snapshot 缺失或过期时提前返回，仍会丢弃本来可用的 CPU 证据。已修正：
+
+- 先独立读取 Host CPU 样本，再判断上游 Runtime Snapshot 状态。
+- 上游快照 unavailable/stale 时，仍可保留新鲜 Host CPU 值、采样时间和 age。
+- 两种来源各自表达可用性；上游过期不再隐式抹掉 CPU 样本，CPU 不可用也不影响上游快照自身的采样时间。
+- 新增上游快照过期、上游快照缺失但 CPU 新鲜的回归测试。
+
+提交：
+- `1b749b1965edaae18d244744cf40c66af7a5664e`：运行时快照中独立保留 CPU 证据。
+- `f8069a188c1e75a0e8e497a07afcff440df46001`：覆盖 stale/unavailable 场景。
+
+本轮未增加进程级 CPU 指标；当前 Host CPU 仍然只是主机整体 CPU busy。进程 CPU/RSS 是否值得增加，必须等真实瓶颈证据指出这项缺失会阻止判断后再决定。
+
+
+### 11.9 RequestAnalysis 阶段字段语义审计
+
+复核 `request_analysis.go`、`request_analysis_persist.go`、`pipeline_forward.go`、`logutil/tokens.go` 与现有测试后，明确以下归因边界：
+
+1. **`upstream_ms` 是聚合区间，不是单一模型推理耗时。** 其区间包含 Provider Forward 阶段，Provider queue wait 是其中的子阶段。归因时可以单独展示 queue wait，但不能将 `upstream_ms + provider_queue_wait_ms` 相加。
+2. **Headers、First Byte、TTFT 是相对请求起点的时间偏移。** `time_to_upstream_headers_ms`、`time_to_first_byte_ms`、`ttft_ms` 不是相邻阶段耗时；不得直接相加，也不得把 First Byte 与 TTFT 的差值当作模型纯计算时间。
+3. **`prefill_until_first_ms` 是派生残差，不是 llama.cpp 原生 Prompt Eval。** 当前计算为 TTFT 减去 Gateway 前置准备与模型加载时间，并截断负值；它仍可能包含 Provider queue wait、上游传输和其他未拆分等待。Prompt Eval 归因必须优先使用 `llama_timings.prompt_ms`。
+4. **Prompt/Decode 原生 timings 是请求级上游测量。** `llama_timings.prompt_ms`、`predicted_ms`、Token 数、每 Token 耗时和 tok/s 来自上游响应 `timings`，经 TokenHarvest 保留到 request analysis；字段缺失保持 nil，合法的 0 与缺失在解析层通过 Present 标志区分。它们不应与 Gateway 外层总耗时直接相加。
+5. **Gateway 生成窗口只在有可靠起止事件时成立。** 流式正文窗口由首条 content 到最后事件/完成边界计算；Gateway 派生速度必须标记 `gateway_window`。原生 `predicted_per_second` 标记 `llama_timings`，不能伪装成 Gateway 窗口。
+6. **发现一处现有语义错误并修复。** 非流式请求缺少 TTFT/正文事件时，原实现把整个 `upstream_ms` 写入 `content_generation_ms`，会将聚合上游时间误标为正文生成时长。现已删除该回退：没有可靠首 token 起点时保持 `content_generation_ms` 缺失；新增回归断言，确保非流式 `upstream_ms` 不会被冒充为实测生成窗口。
+
+当前归因只能把可测量事实列为 evidence；“高”“瓶颈”必须依赖同模型、同配置、同负载类别的基线或明确 SLA 阈值。单次正值只证明阶段发生，不足以证明它是瓶颈。Metrics Counter Delta 继续保持进程窗口级，不能归属到单请求。
+
+本轮修改范围：只修正非流式 `content_generation_ms` 的错误回退并补充测试；未新增 API、数据库字段、采样器或 UI。CI 结果以本提交 SHA 对应的 Go CI 为准。
+
+
+### 11.10 PERF-09 证据分类矩阵与跨层关联边界
+
+本轮继续审计 `runtime_snapshot_cache.go`、`llama/metrics.go`、`request_analysis.go`、`request_trace.go` 和 Benchmark 数据结构。确认当前采集数据虽然同时存在，但并不构成可直接拼接的单一时间序列。
+
+#### A. 证据分层矩阵
+
+| 证据层 | 现有来源 | 可直接陈述的事实 | 不允许直接推出的结论 |
+|---|---|---|---|
+| 请求阶段 | `RequestAnalysis.phases_ms`、Timeline | 本次请求 Gateway 准备、上游聚合耗时、Provider queue wait、headers/first byte/TTFT 等观测值 | 不得把请求起点偏移量当阶段 duration；不得将 queue wait 再加到包含它的 upstream_ms |
+| 请求级模型 Timing | `llama_timings` | 上游响应为本次请求提供的 Prompt/Decode token、耗时、吞吐和缓存字段 | 不能代表 GPU 利用率、进程 CPU 饱和或完整端到端耗时 |
+| Gateway 生成窗口 | SSE 首条正文到最后事件/完成边界 | Gateway 可观察窗口内的输出速度 | 不能标记为 llama.cpp 纯 Decode 速度；不覆盖首正文前的等待 |
+| 进程窗口 Metrics | `server_metrics.samples[]` | 某个上游 target、model scope、process identity 下的 Prometheus 样本；可比 Counter 的两个采样点增量及窗口 | 不能分摊给 request_id；未知指标不能按名称猜测含义；单点 Gauge 不能证明持续饱和 |
+| 主机/模型 Runtime Snapshot | `runtime_snapshot` | 独立采样时刻的 Host CPU busy、模型加载状态及上游实际提供的 RAM/VRAM | Host CPU 不是 llama-server CPU；模型权重 RAM/VRAM 不是进程 RSS 或 GPU 利用率 |
+| Benchmark | Benchmark Job/Run + RequestID | 已记录的模型、场景、输入/输出 Token、TTFT、延迟、配置条件摘要等 | Benchmark 与 Metrics 采样窗口重叠不代表 Metrics 增量只由该 Benchmark 产生 |
+
+#### B. Metrics 的语义限制
+
+1. 当前 Prometheus parser 保留指标原始 name/type/help/labels/value，不维护经过目标 llama.cpp 构建版本验证的指标语义注册表。
+2. Counter Delta 只对明确标记为 Counter 的样本计算；比较时已校验 upstream target、model scope、process identity、采样时间、最大窗口、series identity、类型变化和 reset。已有保护必须复用。
+3. Gauge 是采样时刻的观测值，不自动等于整个窗口的平均值、峰值或饱和持续时间。
+4. Histogram/Summary 不能仅凭原始 bucket/count/sum 样本直接转成单请求延迟；当前通用 parser 不应自行推断其单位、分位数或请求归属。
+5. 指标的 Help 文本也不能替代目标版本的源码/部署实测语义核验。未核验前只展示原始样本，不进入瓶颈规则。
+
+6. 已按用户部署镜像的源码基线完成最小指标语义核验：镜像 RepoDigest 对应 GHCR `server-b12282`，源版本 tag `b12282` 指向 llama.cpp commit `aa75ff3239f9cc675b081697deda9e1b112345c6`。该 commit 的 `tools/server/server-task.cpp` 明确生成 Prometheus `HELP`、`TYPE` 和数值行；以下五项的语义可纳入该构建版本的最小目录：
+
+| 指标 | TYPE | 单位 | HELP / 源码语义 | 标签 | 作用域与解释边界 |
+|---|---|---|---|---|---|
+| `llamacpp:prompt_tokens_total` | counter | tokens | 已处理的 Prompt Token 数，不含缓存复用 Token；缓存 Token 单独计入 `prompt_tokens_cached_total` | 无 | Server 实例累计值；不能单独代表请求 Prompt 总 Token |
+| `llamacpp:prompt_seconds_total` | counter | seconds | Prompt 处理累计时间；源码将内部微秒值除以 `1e6` 输出 | 无 | Server 实例累计值；不是单请求耗时 |
+| `llamacpp:tokens_predicted_total` | counter | tokens | 已生成 Token 数 | 无 | Server 实例累计值；并发时不能分摊到单请求 |
+| `llamacpp:tokens_predicted_seconds_total` | counter | seconds | Token 生成累计时间；源码将内部微秒值除以 `1e6` 输出 | 无 | Server 实例累计值；不是单请求 Decode duration |
+| `llamacpp:requests_processing` | gauge | requests | 当前正在处理的请求数，源码取当前 processing slots 数 | 无 | 当前采样时刻的实例状态；不能据单点判断持续饱和 |
+
+`server_task_result_metrics` 的源码注释明确区分：`n_processing_slots` / `n_tasks_deferred` 是即时状态，`server_metrics` 是累计统计。前四个 Counter 来自累计统计，进程重启后应视为新序列并重新建立 baseline；Gateway 已有 process identity/reset 可比性保护。上述五项均以无标签的单一数值行输出，不能进一步按模型名、slot 或 request_id 拆分。
+
+同一源码还确认 `llamacpp:n_decode_total` 是 `llama_decode()` 调用次数，且明确排除 speculative decoding 与 multimodal decoding；它不是输出 Token 数，不能与 `tokens_predicted_total` 混用。其他指标不因本轮核验而自动获得语义，仍须逐项审查。
+
+目标源码证据：[server-task.cpp（指标定义与 Prometheus 输出）](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/server-task.cpp)、[server-task.h（累计与即时状态注释）](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/server-task.h)、[Server README 指标表](https://github.com/ggml-org/llama.cpp/blob/aa75ff3239f9cc675b081697deda9e1b112345c6/tools/server/README.md)。
+
+#### C. 跨层时间关联边界
+
+- RequestAnalysis 的阶段时间主要是请求起点后的相对偏移；Runtime Snapshot 有独立 sampled_at/age；Metrics Delta 有 window_start/window_end。三者必须分别保留原始时间边界。
+- `persistRequestAnalysis` 在请求结束时附加当时可用的 Runtime Snapshot，但这只是请求结束附近的快照，不是覆盖整次请求的资源曲线。
+- Metrics 采样每 5 秒执行，Counter Delta 只存在于当前进程内存中的最近样本；Gateway 重启后需要重新建立 baseline，当前没有可供历史任意查询的 Metrics 时间序列。
+- 因而当前不能对历史任意请求自动计算“该请求期间 GPU/CPU/队列指标变化”。只有当请求绝对起止时间、Metrics 窗口、target/model/process identity 全部可核对时，才可描述窗口重叠；即使重叠也只能称为相关窗口证据，不能建立单请求因果关系。
+- Benchmark RequestID 可查到请求分析，但 Benchmark 与普通请求共享同一上游进程时，Metrics Delta 仍可能混入其他并发请求。除非负载窗口隔离且并发条件明确，否则不能把增量归因给该 Benchmark。
+
+#### D. PERF-09 允许输出的结论级别
+
+以下是归因器设计级别，不代表当前 API 已实现这些字段：
+
+- **observed**：只复述来源明确、状态有效、单位和时间边界清楚的测量事实。
+- **candidate**：存在可能解释，但缺少基线、资源指标或时间因果证据；必须同时列出缺失证据。
+- **not_comparable**：target/process/model scope 不同、窗口无效、数据 stale、指标语义未核验或时间范围无法对齐。
+- **primary/secondary bottleneck**：只有在证据可比、存在同模型/同配置/同负载类别基线或明确 SLA，且主要替代解释已排除时才允许输出。不能因为某字段数值最大就排序为瓶颈。
+
+#### E. 本轮结论与下一步
+
+- 已具备请求级 Prompt/Decode 原生 timing 和 Gateway 阶段观测，可继续形成请求级 observed evidence。
+- 已具备通用进程级 Metrics 采集与 Counter 可比性保护；PERF-06 历史归档包含一次真实、单请求、无并发的端到端对账。该样本仅证明对应指标在该实例/该次隔离测试中的有限对账，不可推广到并发请求。
+- Host CPU/Runtime Snapshot 是独立时间点上下文证据，不能替代进程级 CPU/RSS/GPU 指标。
+- Metrics 窗口审计确认：MetricsSnapshot.SampledAt 在 Gateway 完整读取 /metrics 响应 body 后记录，是客户端观测时间上界，不是上游原子采样时刻。Counter Delta 的窗口起止时间来自前后两个成功样本；采样失败会清空有效样本，恢复后的首个成功样本重新建立 baseline。
+- 目前没有本轮新采集的真实 NUC 多场景负载数据，不能给出新的瓶颈结论。下一步应使用现有 Benchmark 功能做受控真实负载测量，而不是继续扩展 Metrics API、存储或 UI。
+- PERF-08 的主机 perf 采样路线因权限拒绝已停止；不修改系统权限、不增加容器 capability、不启动 llama.cpp C++ patch。
+
+本轮修复了 Runtime Snapshot 聚合状态覆盖问题，并增加 Metrics 窗口/失败恢复回归测试；未新增 API、数据库、采样器或 UI。上一轮 Go CI 暴露的 `TestLatestRequestRuntimeSnapshotPartialWithoutCPU` 状态断言失败已由 `be786213f82d0b8afff6e4c6e4631222d0762330` 修复；该 SHA 的 Go CI 与 Browser Smoke 均已通过。真实 NUC 多场景样本尚未采集，因此当前没有新的主/次瓶颈结论。
+
+
+## 17. PERF-12 四组测试页面自动化执行与报告（2026-11-20）
+
+### 17.1 固定提示词与测试矩阵
+
+页面提供“一键执行四组测试”，使用 `perf12-synthetic-dataset-v2` 固定提示词模板。数据集由浏览器确定性生成，所有记录均明确标记为性能测试合成数据，不代表真实业务数据；短提示词取固定数据集前 1 条记录，长提示词使用 50 条记录。每个正式样本在 Prompt 首部加入独立随机前缀和组别标记，Prompt SHA-256 随报告保存；缓存是否真正隔离仍以服务端原生 timings 验证。
+
+| 组别 | 输入提示词 | max_tokens | 输出目标 |
+|---|---|---:|---:|
+| S-P / S-O | 短提示词 | 64 | 至少 32 output tokens |
+| L-P / S-O | 长提示词 | 64 | 至少 32 output tokens |
+| S-P / L-O | 短提示词 | 512 | 至少 256 output tokens |
+| L-P / L-O | 长提示词 | 512 | 至少 256 output tokens |
+
+短输入目标校验范围为 96–180 tokens，长输入目标校验范围为 1,800–2,400 tokens。该范围是首轮自动验收区间，不是 tokenizer 保证值；最终以服务端返回的 input_tokens 为准。超出范围或字段缺失时保留样本并标记未达标/不可判定，不会补造 Token 数。
+
+### 17.2 自动执行流程
+
+1. 检查客户端服务密钥和当前已加载模型。
+2. 固定测试参数：temperature=0、top_p=1、top_k=40、min_p 不传、frequency_penalty=0、presence_penalty=0、按 Backend 固定 repeat_penalty、seed=42、enable_thinking=false、stop 为空。
+3. 使用现有 Benchmark API 发送一次预热请求（max_tokens=8），预热不计入四组正式结果。
+4. 正式任务严格串行执行；每组开始前和结束后读取一次 `/api/admin/runtime`。
+5. 轮询现有 `GET /api/benchmark/{job_id}`，记录完整任务结果与 RequestAnalysis；不创建新的 Benchmark API 或后台采集器。
+6. 每组完成后立即将报告状态写入浏览器本地存储；中断时保留已经完成的样本。停止操作只停止当前任务/后续流程，不删除已经产生的 Benchmark 历史任务。
+7. 流程结束恢复用户原先的推理参数。
+
+### 17.3 报告和复制
+
+- Markdown 报告：四组对比表、Job ID、Request ID、模型、条件完整性/指纹、实际 Token 数、max_tokens、总耗时、TTFT、原生 Prompt/Decode timings、Prompt/Decode Token 数、Gateway phases、吞吐、前后 Runtime 证据和目标校验结果。
+- 原始 JSON：保留四组 Job、Analysis、条件元数据、前后 Runtime Snapshot、预热任务、提示词版本和 SHA-256；敏感字段通过现有递归脱敏函数处理。
+- 报告保存在当前浏览器 localStorage，复制 Markdown 或 JSON 后可直接粘贴发送；清除浏览器站点数据会清除本地报告副本，但不会自动删除服务端 Benchmark 历史任务。
+- 缺失字段保留为缺失；Runtime Snapshot 获取失败单独标记 unavailable，不阻断 Benchmark 正式任务。
+- 报告明确说明四组 Prompt SHA 不同，四组用于短/长上下文与短/长生成的交叉观察，不构成严格相同条件下的历史对比。
+- Runtime Snapshot 和 Server Metrics 是快照/进程窗口证据，不归属单个请求；报告不把窗口级 Counter Delta 冒充 request-level 指标。
+
+### 17.4 当前限制
+
+- 自动流程依赖已登录的管理员 Web Session、可用的客户端服务密钥和已加载模型；不会自动创建或读取密钥。
+- 四组任务串行不代表整个 Gateway 进程绝对无其他请求；用户仍需在测试期间停止其他推理流量。
+- 输入 Token 目标区间需要结合实际部署 tokenizer 首轮校准；如果长提示词落在目标区间外，应调整固定数据集规模并升级提示词版本，不可通过修改校验阈值伪造达标。
+- 浏览器关闭/刷新后，可依据已持久化的 Job ID 恢复仍在运行的预热或正式组，并继续轮询，不会重复提交该任务；若任务已进入终态，则读取原任务结果。若浏览器在 POST 已被服务端接受、但响应中的 Job ID 尚未来得及写入 localStorage 的极短窗口关闭，状态会标记为提交不确定，不自动重提，需先在任务历史核对，避免重复推理。
+
+
+## 18. PERF-12 首轮真实样本复核与测试修正（2026-11-20）
+
+### 18.1 首轮报告结论
+
+用户提供的首轮四组真实结果均为 HTTP 200 / completed，但不构成四组完整达标的冷缓存基线：
+
+| 组别 | 实际输入/输出 | 关键结果 | 资格判断 |
+|---|---:|---|---|
+| S-P / S-O | 179 / 64 | Decode 12.82 tok/s；短输入、短输出目标达标 | 可保留为 observed；Prompt Cache 仍需检查 |
+| L-P / S-O | 3583 / 64 | Prompt Eval 80149.149 ms；长输入超出 1800–2400 目标 | 不纳入目标长度基线 |
+| S-P / L-O | 179 / 512 | Decode 9.73 tok/s；cache_n=175、prompt_n=4 | 热缓存样本，不代表冷 Prompt Eval |
+| L-P / L-O | 3583 / 512 | Decode 6.79 tok/s；cache_n=3579、prompt_n=4 | 热缓存样本，不代表冷 Prompt Eval |
+
+首轮提示词生成器使用 88 条合成记录，实际长输入达到 3583 tokens，超过目标上限。相同短 Prompt 在 S-P / S-O 与 S-P / L-O 重复使用，相同长 Prompt 在 L-P / S-O 与 L-P / L-O 重复使用，导致后续请求大量命中 llama.cpp Prompt Cache。两个长输出样本的原生 timings 分别为 prompt_n=4/cache_n=175 和 prompt_n=4/cache_n=3579；因此其 prompt_ms 只描述未缓存部分，不能当作完整输入 Prompt Eval 耗时。
+
+### 18.2 已修正的测试生成逻辑
+
+- 合成数据集版本从 `perf12-synthetic-dataset-v1` 升级为 `perf12-synthetic-dataset-v2`。
+- 短输入从 2 条合成记录调整为 1 条；长输入从 88 条调整为 50 条。该调整只是按首轮实际 Token 数估算的生成器修正，是否进入目标区间仍必须由每次真实响应的 `input_tokens` 验收，不能按记录条数直接宣称达标。
+- 每个样本在 Prompt 最前面加入独立批次/组别标记，降低不同组之间共享前缀导致的 Prompt Cache 命中。该标记不能代替服务端验证；只有 `cache_n=0` 且 `prompt_n=input_tokens` 才标记为满足本轮冷缓存条件。
+- 报告增加 `qualification_status`：所有四组输入/输出目标达标且原生 timings 证明冷缓存，才允许标记 `baseline_candidate`；否则标记 `baseline_not_qualified`。任务执行成功（completed）与基线资格分开表达。
+- 样本保留原始 `cache_n`、`prompt_n` 和输入 Token 数；热缓存/缓存状态未知样本仍归档为 observed，但不纳入冷缓存 Prompt Eval 基线。
+
+### 18.3 TTFT 与 First Byte 语义复核
+
+`time_to_first_byte_ms` 与 `ttft_ms` 是不同事件边界，不要求数值相等：
+
+- `time_to_first_byte_ms` 来自 Provider 的 `OnFirstByte` 回调，表示 Gateway 收到上游响应体首个字节的相对请求起点偏移。
+- `ttft_ms` 来自流式事件时间线的首个模型输出事件（首个 reasoning/content 输出），表示首 Token/输出事件的相对请求起点偏移。
+- 因此首个上游字节可能先于首个模型输出事件；本次 L-P / S-O 的 30038 ms 与 80182 ms 差值不能仅凭数值判定为计时 Bug，也不能直接解释成模型在 30 秒时已产生首 Token。必须结合对应 Request Timeline 的 `upstream_first_byte`、`stream_first_any`、`stream_first_reasoning` 和 `stream_first_content` 事件判断。
+
+### 18.4 本轮代码与回归范围
+
+- 已更新 `web/js/app/main.js`：调整提示词记录数量、提示词版本、每组唯一前缀、Prompt Cache/Prompt Eval 覆盖校验和基线资格状态。
+- 已更新 `web/tests/ui-smoke.mjs`：断言 v2 提示词使用 1 条短记录、50 条长记录，并验证四组 Prompt 标记不同。
+- v2 代码、Browser Smoke 断言与 dist bundle 已完成同步；后续对缓存前缀实现复核时发现四组共用 suiteNonce 的残留问题，已在 9.5 改为每组独立随机前缀，并同步更新源代码、Browser Smoke 与 dist bundle。代码提交后的验证记录：当前 dev HEAD `0dc4b7e1721d6a04b8cadceabbd9307b118d783a` 的 Go CI（Run #1395）全部 5 个 Job 通过；Browser Smoke 在包含独立随机前缀修正的 `756529891eda67a4620b00793c62d68583ad20b4` 上通过（Run #677）。文档提交本身不触发 Browser Smoke。部署环境的真实 Token 数和 cache_n 仍待复测。
+- 下一步先完成 dist 构建同步和 CI；然后重新执行 PERF-12 四组冷缓存测试。只有四组实际 Token 范围、输出下限和冷缓存条件均达标后，才对重复样本做波动分析。热缓存测试作为独立实验，不与冷缓存样本混合。
+
+
+### 18.5 四组缓存隔离复核修正
+
+继续复核 v2 实现时发现：虽然每组添加了组别标记，但四组共用同一个 `suiteNonce`，因此 Prompt 首部仍存在相同随机前缀。该实现不能充分隔离 llama.cpp 的最长公共前缀缓存，不能仅凭组别后缀宣称缓存隔离。
+
+已修正为每个正式样本独立生成 96-bit 随机前缀，再附加组别标记；四组之间不再共享批次随机前缀。Browser Smoke 增加断言，检查不同样本的随机前缀长度与唯一性。最终是否冷缓存仍以服务端原生 `cache_n=0` 且 `prompt_n=input_tokens` 为准，随机前缀只降低命中概率，不替代运行时证据。
+
+
+### 18.6 v2 首次真实 NUC 复测结果（2026-11-20）
+
+用户提供的 `perf12-four-case-v2` 报告状态为 `partial`、基线资格 `not_evaluated`。预热完成，前两组已取得有效冷缓存样本：
+
+| 组别 | 输入/输出 Token | Prompt Eval | Decode | Decode 速度 | 冷缓存证据 | 结论 |
+|---|---:|---:|---:|---:|---|---|
+| S-P / S-O | 171 / 64 | 2868.805 ms | 4976.322 ms | 12.66 tok/s | cache_n=0，prompt_n=171 | 单组达标 |
+| L-P / S-O | 2107 / 64 | 41109.483 ms | 5861.05 ms | 10.75 tok/s | cache_n=0，prompt_n=2107 | 单组达标 |
+| S-P / L-O | 缺失 | 缺失 | 缺失 | 缺失 | 未知 | 任务未取得最终结果 |
+| L-P / L-O | 缺失 | 缺失 | 缺失 | 缺失 | 未知 | 未执行/未进入报告 |
+
+前两组输入/输出目标达标，原生 Prompt/Decode Token 数与实际 Token 数一致，可作为单组 observed 冷缓存样本。两组测试条件均为 partial，缺少 backend 版本、Gateway revision/cleanliness、硬件型号/内存、模型 SHA 和模型加载状态，因此不能作为完整可复现环境基线。长输入组 Prompt Eval 约 41.1 秒、短输入组约 2.87 秒；该差异仅描述本次样本，不足以判定主瓶颈。
+
+第三组存在 Job ID，但没有 Request ID、状态响应、Token 数或 timings。第四组没有记录。复核前端执行流程：四组在同一个串行循环中执行；第三组若轮询返回 null（当前实现仅在轮询 token 已失效时返回），记录会落为 unknown，随后 token 检查会中止循环，因此第四组不会启动。该现象与本次“第三组 unknown、第四组缺项”一致；但现有报告无法区分是用户点击停止，还是其他操作使轮询 token 失效，不能进一步断言具体触发者。
+
+已修复轮询取消状态：当轮询 token 失效或用户请求停止时，当前样本记录为 `cancelled`，错误说明为“轮询被取消，未取得任务最终结果”，保留已知 Job ID；未取得服务端响应时不生成 Request ID。
+
+续跑能力已加入模型测试页：对预热已完成、提示词版本匹配的 `perf12-four-case-v2` 报告，仅补跑状态不是 `completed` 的组；已完成样本原样保留，不重新执行。续跑前校验当前后端和模型与原报告一致；每次重试保留前次状态、Job ID、Prompt SHA、失败说明及已有 Job/Analysis/Runtime/Validation 证据。新测试保存完整执行参数快照；旧报告缺少完整参数快照时允许补跑，但明确标记参数来源为当前已保存的页面参数，并禁止将该报告升级为合格基线。续跑不重复预热。
+
+当前用户提供的 v2 报告中，前两组有效冷缓存样本会保留；第三组 `cancelled` 将重试，第四组缺失将首次执行。该功能仍需 Browser Smoke 与 Go CI 验收，并需要在部署环境实际执行后才能取得第三、第四组数据。
+
+## 19. PERF-12 浏览器中断后的在途任务恢复（2026-11-20）
+
+- 正式组和预热任务在收到服务端 Job ID 后立即写入 suite localStorage；恢复时先 GET 原 Job ID 并继续轮询，不重新 POST。
+- 恢复中的原 Job ID 不作为一次失败重试重复写入 attempts；只有旧任务终态失败、取消后重新创建新 Job，才保留旧 attempt。
+- 若状态停留在 submitting 且没有 Job ID，说明客户端无法判断 POST 是否已被服务端接受；自动续跑被禁用，先通过任务历史核对，避免重复推理。
+- 预热恢复与正式组恢复共用同一资格判断：`completed` 可直接进入四组；带 Job ID 的 `running` 继续轮询原任务；明确 `failed` / `cancelled` 的预热可重新执行。恢复运行中预热时，停止按钮指向原 Job ID；网络轮询中断保留 `running` 与原 Job ID，不会跳过预热直接进入四组。
+- 该恢复仍依赖当前浏览器 localStorage；尚未实现跨浏览器/设备恢复和服务端 Suite Manifest 持久化。
+
+## 20. Browser Smoke 无 Key 弹窗顺序修正（2026-11-20）
+
+Browser Smoke 验收发现，四组测试入口在缺少客户端服务密钥时先弹出确认框，再在确认后提示缺少 Key，造成无效弹窗。现将本地 Key 前置校验移动到确认框之前；不影响已有 Job 恢复和正式测试流程。
+
+## 21. PERF-12 轮询异常的重复任务保护（2026-11-20）
+
+- 若 POST 已取得 Job ID，但轮询因网络错误中断，保留该 Job 为 running 并暂停后续组；恢复时继续 GET 原 Job，不创建第二个推理任务。此时不把运行中的 Runtime Snapshot 写成“完成后快照”，该字段标记为 not_sampled。
+- 只有服务端明确返回终态，才把 Job 记为 completed/failed；用户明确点击停止并执行取消后才记为 cancelled。
+- POST 失败且没有 Job ID 时才记为 failed，允许后续重试；组记录只使用本次 POST 返回的 Job ID 或该组原有 Job ID，不从通用“当前任务”指针回退，避免误用上一组残留 ID。
+
+## 22. PERF-12 在途恢复与自动化验收结果（2026-11-20）
+
+- 当前分支最新代码基线：`2df7a9f26af10034db74f52d190da934a8576c42`。
+- Browser Smoke：Run `44702770661`，结论 `success`；覆盖桌面/窄屏布局、核心交互、无客户端 Key 本地拦截、续跑入口显示，以及恢复资格/任务状态辅助函数。**本次 Smoke 没有端到端点击续跑并模拟原 Job GET 轮询**，因此不能将其描述为完整续跑流程的浏览器集成验收。
+- Go CI：Run `44702777137`，结论 `success`；5 个 Job 全部通过：编译与 Docker、Go 测试/竞态/静态检查、配置/API/前端契约、Gateway 故障注入、稳态并发与审计持久化。
+- 代码路径已实现：正式组与预热任务收到服务端 Job ID 后立即保存；刷新后查询原 Job ID，不重新 POST。轮询异常时保留 running 状态并暂停后续组；只有明确取消才标记 cancelled；没有 Job ID 的 submitting 状态不自动重提。上述刷新恢复行为尚未在 Browser Smoke 中做完整端到端网络模拟。
+- 预热恢复与正式组恢复共用状态判定：completed 可直接继续；带 Job ID 的 running 继续轮询原任务；明确 failed/cancelled 的预热可安全重新执行，并记录旧 attempt。当前 Browser Smoke 只验证这些状态判定，不代表真实任务重试已端到端通过。
+- 运行中的任务不写入完成后 Runtime Snapshot；组记录的 Job ID 不从通用当前任务指针回退，避免误关联上一组任务。
+- Suite 聚合报告与续跑状态仍保存在浏览器 localStorage；服务端仅持久化每个 Benchmark Task/Run。跨浏览器、跨设备恢复和服务端 Suite Manifest 尚未实现。
+- 系统设置页配置审计结论见 [设置页与运行时配置设计](设置页与运行时配置设计.md)：现有动态配置已有对应业务管理入口，部署配置大多需重启或涉及 Secret/高风险开关；当前没有新的安全全局热更新设置项，因此不创建空白设置页，也不复制已有写入口。
+- 自动化通过不代表真实 NUC 基线通过。该历史阶段的补跑计划已由 2026-11-20 新报告取代；当前以第 28 节的四组完整报告和环境缺失项为准。
+
+
+
+## 23. PERF-12 四组报告重复记录问题（2026-11-20）
+
+本轮复核发现四组报告可能同时保留同一组的 `running` 占位记录和 `completed` 结果记录：任务创建回调会先更新 `suite.cases`，但完成阶段仍使用提交前缓存的数组索引，导致新记录被再次追加。该问题属于浏览器本地报告记录重复，不代表服务端重复执行推理。
+
+修复要求：
+- 完成阶段按 `case_id` 重新查找当前记录，再替换为终态结果；不得使用提交前缓存的数组索引。
+- 读取旧报告时按 `case_id` 合并重复项，优先保留状态更完整的终态证据；同一 Job ID 的 running 占位记录不得覆盖 completed 结果。
+- 基线资格判断使用归一化后的唯一组记录，避免旧报告中的重复项影响资格计算。
+- Browser Smoke 覆盖旧报告恢复、去重持久化及 completed 证据保留。
+
+
+## 24. PERF-12 报告证据恢复与 reasoning-only 计时边界（2026-11-20）
+
+本轮继续修复两项影响报告可信度的问题：
+
+- Benchmark 条件快照已随 Task 的 `ConfigJSON` 持久化，但此前 GET 详情只返回条件指纹、状态和缺失字段，没有返回完整 `condition_snapshot`。现在内存任务和 MariaDB 恢复任务均从同一份已保存的 ConfigJSON 恢复该字段；OpenAPI 的 BenchmarkJob Schema 同步声明该动态对象；旧记录或无效 JSON 保持缺失，不补造历史环境证据。
+- RequestAnalysis 在没有 `FirstContentMS` 时，曾以 `TotalMS - TTFTMS` 推导 `content_generation_ms`。该时间段可能全部属于 reasoning。现在只有观测到首条正文 content 后才计算正文生成耗时；reasoning-only 请求保留思考阶段时间，正文生成耗时保持 unknown（字段省略）。
+
+新增回归测试覆盖条件快照字段恢复、旧格式缺失行为，以及 reasoning-only 不得生成正文耗时。环境采集字段目前仍有若干固定 unknown 值，下一阶段继续核对现有 Backend/Host/Model 服务可复用的数据来源；不以本次 API 恢复修复为由升级历史报告资格。
+
+
+## 25. PERF-12 Browser Smoke 去重恢复测试入口修正（2026-11-20）
+
+Browser Smoke 已验证页面基础流程，但新增的旧报告恢复测试在执行时发现：测试调用的 `readBenchmarkSuiteState` 尚未加入页面测试辅助函数导出列表，导致测试脚本抛出 ReferenceError，尚未进入去重断言。现将该现有状态读取函数加入测试辅助导出，不改变生产执行逻辑；下一轮 Browser Smoke 重新验证去重断言。
+
+
+## 26. PERF-12 环境条件采集来源补齐（2026-11-20）
+
+Benchmark 创建时开始从现有运行时能力采集可复核环境字段：
+
+- CPU 型号：读取容器可见的 `/proc/cpuinfo`，记录来源；不可读取时保留空值。
+- 物理内存总量：复用现有 `systemHostStatsCached`，其内存值来自 `/proc/meminfo` 的 `MemTotal`；不把模型 RAM 或 cgroup 使用量冒充物理内存总量。
+- 测试前模型加载状态：只使用最近 15 秒内、Provider 匹配且状态完整的 Runtime Snapshot；不额外触发模型列表请求。样本过期、后端不匹配或模型状态不可确认时保持 unknown。
+- Backend 版本：本地 llama.cpp 读取只读 `GET /props` 的 `build_info`，Ollama 读取 `GET /api/version` 的 `version`；远程 Provider 没有统一版本协议，保持 unknown。版本读取最多等待 2 秒，不属于模型推理计时。llama.cpp 的 `/props` 及 `build_info` 字段以其官方 Server README 为依据：https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Gateway revision / modified：优先使用 Docker 构建参数注入值，普通 Go VCS 构建元数据作为回退。新增 `scripts/build-gateway-image.sh`，从当前 Git HEAD 和工作区状态生成构建参数后构建镜像；CI Docker 构建也注入 commit SHA 与 clean 状态。
+
+模型 SHA-256 仍只使用模型登记中已有的 `m.SHA256`；不在 Benchmark 请求路径临时计算大型 GGUF 文件哈希。缺失时继续标记 unknown。历史报告不回填本轮才新增的证据，必须部署新版本并重新采集才可能改善资格状态。
+
+本地构建推荐使用 `scripts/build-gateway-image.sh`，随后执行 `docker compose up -d`。若通过 1Panel 直接构建镜像，需确保其 Build Args 传入 `GATEWAY_BUILD_REVISION` 和 `GATEWAY_BUILD_MODIFIED`；未传入时 Gateway 会如实保留 VCS 字段缺失，不会伪造 clean 状态。
+
+本次四组报告的 `vcs_revision`、`vcs_modified`、对应 source 均为空，说明运行中的 Gateway 二进制没有可用的构建身份值。报告不能证明构建脚本是否执行过；需要在 NUC 核对脚本输出、实际镜像 ID/创建时间和容器使用的镜像，不能仅凭代码已提交推断部署正确。
+
+
+## 27. PERF-12 环境采集实现自动化验收与部署前计划（历史记录，2026-11-20）
+
+本节记录四组完整报告产生前的自动化验收与部署计划，属于历史执行状态；后续实际报告核验以第 28 节为准。
+
+本轮提交的环境采集改动已通过 Go CI #1451：Go 单元/集成测试、竞态与静态检查、Docker 镜像构建、API 契约与前端、故障注入恢复、稳态负载与审计持久化均成功。Browser Smoke #722 也成功。
+
+修正后的部署/采集顺序：
+1. 在 NUC 更新到最新 `dev`，使用 `scripts/build-gateway-image.sh` 构建，确保镜像内写入 Git Revision 和工作区状态。
+2. 不续跑旧的 `perf12-four-case-v2` 报告。旧报告创建时缺失的环境字段无法事后恢复，且新旧 Gateway 构建条件不同；保留旧报告作为 observed 历史样本。
+3. 新建一份四组完整报告，四组在同一 Gateway 构建和同一后端版本下串行执行。
+4. 检查每组 `condition_missing`、`condition_snapshot`、模型 SHA-256、Runtime 状态及 llama.cpp 原生冷缓存 timings。任何无法观测的字段继续保持 unknown，正式基线资格按现有规则判定。
+
+在新四组报告完成并通过资格判定前，不进行 CPU 线程、batch 或模型参数调优。
+
+
+
+## 28. PERF-12 四组完整报告核验与环境身份缺失定位（2026-11-20）
+
+### 28.1 报告结果
+
+报告版本 `perf12-four-case-v2`，执行时间 2026-11-20T10:03:07.403Z–10:07:11.683Z，四组全部 completed：
+
+| 组别 | Input / Output tokens | Prompt Eval | Decode | Decode tok/s |
+|---|---:|---:|---:|---:|
+| S-P / S-O | 172 / 64 | 2.904s | 4.903s | 12.85 |
+| L-P / S-O | 2109 / 64 | 40.441s | 5.778s | 10.90 |
+| S-P / L-O | 169 / 512 | 3.225s | 48.974s | 10.43 |
+| L-P / L-O | 2109 / 512 | 61.900s | 67.271s | 7.60 |
+
+四组输入/输出目标全部达标；`cache_n=0`、`prompt_n=input_tokens`、`predicted_n=output_tokens` 均成立，原生 timings 完整。Backend 版本均观测为 `b12282-aa75ff323`；CPU 为 Intel i5-1340P，内存快照约 32.64 GB；测试前模型状态均为 loaded。
+
+### 28.2 正式基线资格
+
+报告整体 `baseline_not_qualified`。四组都缺少以下三项：
+
+- `gateway_revision_unknown`
+- `gateway_build_cleanliness_unknown`
+- `model_sha256_unknown`
+
+因此样本保留为 observed，不升级为 baseline_candidate。四组 Prompt 内容不同且条件指纹不同，是交叉场景观察，不代表四组之间或与旧报告之间具备严格同条件可比性。
+
+### 28.3 Gateway 构建身份根因边界
+
+代码核对结果：
+
+- `benchmarkEnvironmentSnapshot()` 优先读取 `internal/buildinfo` 的 `Revision` / `Modified`；只有非空时标记来源为 `build_argument`。
+- Go `debug.ReadBuildInfo()` 只在构建元数据中存在 `vcs.revision` / `vcs.modified` 时回退填充。
+- Dockerfile 的 Go builder 只复制 `cmd`、`internal`、`go.mod`、`go.sum`，没有复制 `.git`；Docker build context 内不能假定存在 Go VCS 元数据。
+- `scripts/build-gateway-image.sh` 会从宿主仓库 HEAD 和工作区状态导出 `GATEWAY_BUILD_REVISION` / `GATEWAY_BUILD_MODIFIED`，再执行 `docker compose build gateway`；Compose 将这两个值传给 Dockerfile linker args。
+
+本次报告中两个字段和 source 全为空，能确认运行二进制未获得可用值；但仅凭报告不能区分脚本未执行、构建参数未传递、镜像未重建或容器仍运行旧镜像。不得在没有 NUC 侧证据时断言其中某一种是唯一根因。
+
+### 28.4 模型身份缺失根因边界
+
+代码核对结果：
+
+- Benchmark 使用 `model_id` 时，通过 `gatewayModelForUpstreamID()` 在 Gateway `models` 登记表中按 ModelKey、LlamaModelName、Filename、LocalPath 等别名匹配。
+- 只有成功匹配到 Gateway `model.Model` 记录，才会填充 `model_identity` 的 source、文件名、量化和 `m.SHA256`。
+- 本次报告的 `model_key`、`source_type`、`filename`、`quantization`、`sha256` 均为空，说明本次请求未匹配到 Gateway 模型登记记录：Benchmark 在 model_id 模式下只有匹配到登记记录才会回填 model_key，而本次 model_key 为空。
+- 当前实现有意不在 Benchmark 请求路径对大型 GGUF 临时计算 SHA-256；磁盘 inventory 只枚举文件元数据，不读取模型权重内容。
+
+下一步应在 NUC 的模型管理页/API 核对该模型是否存在于 Gateway 模型登记表、登记的 model_key / llama_model_name / filename 与上游 model_id 是否匹配，以及登记记录是否已有 SHA-256。若模型只是由 llama.cpp Router 独立加载、没有 Gateway 登记记录，则当前设计不会产生模型文件 SHA；应先决定是否将该模型纳入 Gateway 模型登记与哈希管理流程，不临时扫描大文件。
+
+### 28.5 TTFT 与上游首字节差异
+
+`time_to_first_byte_ms` 来自 Provider 上游 HTTP 响应体首次读到字节的回调；`ttft_ms` 来自 Gateway 解析到首个非空 reasoning/content 流事件。二者测量对象不同，不应互相替代。
+
+本次 L-P/S-O 两者相差约 10.435 秒，L-P/L-O 相差约 31.894 秒；短输入两组差异接近零。该差异需要保留为待调查现象，不能直接认定是模型 Prompt Eval 时间，也不能简单视为计时 bug。后续应检查上游首批字节到首个可解析 token 事件之间的 SSE 数据内容、分块和解析路径。
+
+### 28.6 下一步执行顺序
+
+1. 先从 NUC 获取实际运行镜像 ID、镜像创建时间、容器镜像引用，以及执行 `scripts/build-gateway-image.sh` 时输出的 revision/modified；核实容器是否运行预期镜像。不要先重跑四组。
+2. 在 NUC 核对 Gateway 模型登记记录和上游 model_id 映射，确认是否存在登记记录、SHA-256 是否已登记。不要在请求热路径增加大型文件 hash。
+3. 若构建身份确实因部署链路未传 Build Args，按现有脚本重新构建并部署；若脚本已执行但仍为空，再针对 Docker Compose 参数传递和实际容器镜像进行复现。
+4. 构建身份和模型身份来源明确后，再决定是否需要重新执行四组。旧报告保留为 observed，不回填缺失证据。
+5. 在正式基线资格通过前，不调整线程数、batch、ubatch 或模型参数。
+
+
+## 29. PERF-12 第二轮真实 NUC 采集结果与第四组状态异常（2026-11-20）
+
+### 29.1 本轮报告事实
+
+用户提供的报告版本为 `perf12-four-case-v2`：
+
+- 报告执行状态：`partial`
+- 基线资格：`not_evaluated`
+- 报告时间：2026-11-20T10:34:09.419Z–10:37:49.735Z
+- Backend / 模型：`llamacpp / Qwen3.5-4B-IQ4_NL`
+- Prompt 版本：`perf12-synthetic-dataset-v2`
+- 预热 Job：`req_1795170849532338141_9d1f5c5cb7`，状态 completed
+- 固定参数：temperature=0、top_p=1、top_k=40、repeat_penalty=1.1、seed=42、enable_thinking=false，其余按报告记录。
+
+| 组别 | 输入/输出 Token | 总耗时 | TTFT | Prompt Eval | Decode | Decode tok/s | 报告状态 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| S-P / S-O | 169 / 64 | 7,875 ms | 2,849 ms | 2,824.648 ms | 5,024.786 ms | 12.54 | completed |
+| L-P / S-O | 2,111 / 64 | 47,802 ms | 41,688 ms | 41,658.006 ms | 6,113.817 ms | 10.30 | completed |
+| S-P / L-O | 167 / 512 | 54,780 ms | 3,786 ms | 3,733.667 ms | 50,989.367 ms | 10.02 | completed |
+| L-P / L-O | 缺失 | 缺失 | 缺失 | 缺失 | 缺失 | 缺失 | running |
+
+前三组输入/输出目标均达标。与上一份四组完整 observed 报告相比，前三组 Decode 速度分别由 12.85、10.90、10.43 tok/s 变为 12.54、10.30、10.02 tok/s，变化约 -2.4%、-5.5%、-3.9%。这些只是两次不同执行窗口的观察值，不构成严格同条件回归，也不能据此判断性能退化。
+
+第四组仅有 max_tokens=512，输入/输出 Token、耗时和 timings 均缺失。不得推算或补写第四组结果。
+
+### 29.2 报告状态与执行流程状态必须分开
+
+用户确认本轮测试流程已经结束。报告中的 `finished_at` 是 Suite 前端流程进入 finally 时写入的时间，不等同于四个服务端 Benchmark Job 全部进入终态。
+
+代码核验：
+
+1. `web/js/app/main.js::pollBenchmarkJob()` 在服务端 Job 状态为 running 时持续轮询；只有取得非 running 的服务端响应才返回完整结果。若轮询 token 失效会返回 null；API 请求异常会抛出异常。
+2. `runBenchmarkSuite()` 捕获轮询异常后，使用空对象作为未取得的 Job 响应。若该组此前已取得 Job ID，`benchmarkSuiteTaskStatus()` 会将没有服务端状态的情况兜底映射成 `running`。
+3. 因此报告中的第四组 `status=running` 可能代表“已提交且轮询未取得最终响应”，而不是“最后一次 GET 已确认服务端仍处于 running”。此时记录会保留 Job ID，但 Job 对象为空，Token 与 timings 自然缺失。
+4. 发生上述中断时，组记录会保存 `failure`，Suite 会保存 `error` 并进入 catch；最终 Suite 状态变为 partial，finally 仍然写入 `finished_at`。
+5. `qualification_status` 只在四组循环正常走完后计算。若在第四组轮询处中断，资格字段不会被重新计算，保留 `not_evaluated`。这与本轮报告的 `partial / not_evaluated` 组合相符。
+
+**当前能确认的是前端没有取得第四组终态响应；不能仅凭 Markdown 报告确认中断由 token 失效还是 API/网络错误触发，也不能确认服务端第四组 Job 最终是否完成。** 本轮提供的 Markdown 未展示第四组 Job ID、`failure` 和 Suite `error`，无法从现有文本进一步确定具体触发原因。
+
+### 29.3 后端任务终态链路核验
+
+已检查 `internal/server/benchmark.go`、`internal/server/benchmark_persistence.go`、`internal/core/pipeline.go`：
+
+- Benchmark Worker 在退出时通过 defer 调用 `persistBenchmarkJob()`，将内存 Job 的当前状态写入 Task/Run。
+- 正常推理路径调用 `s.pipe.Run()`。
+- `core.Pipeline.Run()` 使用 defer 统一发出一次 `StageFinish`；成功、返回错误以及 Pipeline 内部 panic 都经过该结束事件。
+- `benchRunObserver.On(StageFinish)` 将请求结果写为 completed、failed 或 cancelled。
+- 若 Pipeline 返回错误且观察器未收到结束事件，Worker 另有 `finishBenchmarkPipelineError()` 兜底。
+
+因此，正常进入 Pipeline 的请求具有明确终态路径。当前没有服务端 Job ID 和实际 GET 响应，尚无证据证明后端 Worker 卡死、数据库终态写入失败或第四组请求仍在执行。Worker 在 Pipeline 之前发生未恢复 panic 等异常路径仍需单独审计，但不能先当作本次根因。
+
+### 29.4 已确认的代码诊断缺口
+
+- 前端把“轮询未取得服务端状态”兜底映射为 `running`，混淆了服务端确认状态与客户端观察状态。
+- Markdown 报告没有展示组级 `failure` 和 Suite 级 `error`；即使 JSON 中保存了中断原因，用户复制 Markdown 时也看不到。
+- Suite 的 `finished_at` 命名容易被误读为四组测试全部完成；实际它表示前端执行流程退出时间。
+- 当前 Suite Manifest 仅保存在浏览器 localStorage，服务端只持久化各 Benchmark Task/Run。前端轮询异常后，不能仅靠 Suite 报告判断服务端任务的最终状态。
+
+### 29.5 当前进度与下一步
+
+已完成：
+1. 对照上一份完整报告，核对本轮前三组性能数据与变化幅度。
+2. 复核四组串行执行、轮询返回、异常捕获、报告生成和资格计算的前端调用链。
+3. 复核 Pipeline StageFinish、Benchmark Job finish 与 Task/Run 终态持久化链路。
+4. 确认第四组 `running` 不能直接解释为服务端真实运行状态；当前报告缺少必要诊断字段。
+5. 已定位旧逻辑 `status || (jobID ? 'running' : 'failed')` 的问题：只有 Job ID 但没有轮询终态时，客户端将服务端状态缺失错误映射为 `running`。已改为分别保存 `server_status`、`poll_status`、`result_status`，并在每次成功 GET 后持久化最近服务端状态。
+
+待执行：
+1. 从旧 Suite JSON/localStorage 或服务端 Benchmark 历史中取得第四组原始 Job ID，使用该 ID 查询 `/api/benchmark/{job_id}`，并与 MariaDB Task/Run 记录交叉核对；只查询原任务，不 POST、不重跑。
+2. 从本轮完整 JSON / 原始 condition_snapshot 核验 Gateway Revision、Modified、模型登记映射及 SHA-256；当前 Markdown 摘要未包含这些字段，不得用上一轮数据替代。
+3. 继续检查 TTFT 与 first-byte 的 SSE 分块/解析差异；两者是不同计时边界，先取得分块证据再判定是否存在计时缺陷。
+4. 在第四组终态和环境身份可核验前，不调整 CPU 线程、batch、ubatch 或模型参数，不推算第四组指标，不重跑前三组。
+
+### 29.6 Suite 状态诊断修复（CI 验证通过）
+
+本轮按实际调用链修复前端状态语义：
+
+- `pollBenchmarkJob()` 增加只读观察回调；每次成功取得 `/api/benchmark/{job_id}` 响应后，先保存真实服务端状态及观察时间。轮询令牌失效或 GET 抛错，不再推断服务端仍为 `running`。
+- 新 Suite Case 分开记录 `server_status`（最后一次真实 GET 响应）、`poll_status`（polling/completed/interrupted/cancelled/failed）和 `result_status`（completed/failed/cancelled/unknown/not_submitted）。普通轮询中断保留操作状态 `running`，但 Markdown 明确显示 `poll_interrupted`；用户主动取消保留操作状态 `cancelled`，同时 `result_status=unknown`，显示 `client_cancelled_unverified`。两种情况都保留原 Job ID，不能把客户端操作状态误当作服务端最终状态。
+- 续跑按 Job ID 和 `result_status` 判断是否仍有未决结果；旧报告 `running + job_id` 与新报告中的中断/取消未决任务都会恢复时只 GET 原 Job，不重新 POST；已经 completed 的组继续跳过。
+- Markdown 逐组报告显示状态分层、最后观察时间、Job ID 和 failure；顶层把 `finished_at` 明确标为“前端流程结束时间”，并展示当前组与 Suite error。旧版报告的 `running` 因缺乏轮询回执会显示为 `legacy_running_unverified`，不会伪装成服务端已确认状态。
+- `pollBenchmarkJob()` 对服务端 `running` 和 `cancelling` 都持续轮询；只有明确终态才结束等待，避免把取消过渡态当成最终结果并错误推进后续组。两者由共享状态辅助函数判定，并由单测直接覆盖。报告在正常轮询阶段显示 `polling`，不会提前标记中断。如果最后一次真实 GET 已观察到终态，即使客户端随后丢失返回值或渲染失败，也以该回执为准，不允许汇总流程覆盖已确认终态。
+- 新增 `web/js/features/benchmark-suite-state.mjs` 及 `web/tests/benchmark-suite-state.test.mjs`，覆盖服务端终态优先、轮询中断、首次轮询失败、用户取消、旧报告兼容、取消过渡态、最后一次终态回执与报告状态文案；Browser Smoke 工作流增加 Node 状态机测试步骤。
+- 同步修改 `web/static/dist/app.js`，保证仓库内静态部署产物包含相同状态语义。
+
+**修复范围不等于本轮数据结论：** 当前无法仅凭已提供的 Markdown 得出第四组服务端最终状态；修复后仍需用现有 Job ID 的 GET/持久化 Task/Run 证据确认。此次改动不补写历史第四组数据、不改性能指标、不自动重试请求。
+
+**自动化验收结果（最新代码 SHA `7f107808b3a6b6f86f88e8e260f9c35532a6d377`）：**
+
+- Node 状态机单测：11/11 通过。
+- Go CI：`45097610325` 最终 success；配置/API 契约、前端构建、Go 单测/集成、race、vet、Docker 构建、稳态负载和故障注入均通过。
+- Browser Smoke：`45097610397` success；状态机测试、桌面与窄屏核心交互验收通过。
+- Go CI 故障注入 Job 首次只在 MariaDB service healthcheck 初始化阶段失败（`healthcheck` 用户认证失败、服务容器 unhealthy），未进入测试步骤；只重跑该失败 Job（`137441512240`）后容器初始化成功，延迟/429/503、TCP、DNS、流式中断和 TLS 故障场景全部通过。
+- 代码提交：`4cd3baf`（状态分层与报告诊断）、`94bc237`（兼容 UI 状态契约、取消语义及 cancelling 过渡态）、`7f10780`（保护最后一次已观察终态）。
+
+**历史数据边界：** 本轮用户提供的 Markdown 未暴露第四组 Job ID，无法据此查询历史服务端 Job 和 Task/Run；CI 通过只验证代码，不代表历史第四组已完成。该组仍保持未核实，不能推算结果。
+
+验收条件：Node 状态机测试、esbuild 构建、Browser Smoke 和 Go CI 全部通过；报告中服务端状态与客户端轮询状态不得混淆；未知结果必须可恢复且不能重复提交。
+
+在第四组终态和本轮环境身份完整性得到确认前，报告保持 partial / not_evaluated；不调整 CPU 线程、batch、ubatch 或模型参数，不推算第四组指标，也不重复执行已经完成的前三组。
+
+
+## 19. PERF-12 模型身份映射回查修复（2026-11-23）
+
+### 已确认的代码缺口
+
+- Benchmark 显式传入上游 `model_id` 时，通过 `gatewayModelForUpstreamID` 回查 Gateway `models` 表。
+- 旧实现只比较 `model_key`、`llama_model_name`、文件名和本地路径，未比较 `runtime_json.upstream.llamacpp_id` / `runtime_json.upstream.ollama_name`。
+- 模型成功加载后，`persistUpstreamNameForID` 会把实际上游 ID 写入 `runtime_json`；但回查函数没有使用这份映射。因此当上游 ID 与静态文件别名不一致时，Benchmark 会把已登记模型误判为“无 Gateway 模型记录”，导致 `model_key`、模型来源信息和 SHA-256 一并缺失。
+- 旧回查还把数据库读取失败与“没有匹配模型”都折叠成 nil，无法诊断存储故障。
+
+### 本轮修改
+
+1. 增加 backend-aware 匹配：静态别名之外，按当前后端读取已持久化 upstream ID；llama.cpp 与 Ollama 的映射互不混用。
+2. 新增带错误返回的模型回查：模型表读取失败不再伪装成未匹配。多个 Gateway 模型映射到同一上游 ID 时返回歧义错误，不任意取第一条；保留旧辅助函数兼容其他调用点。
+3. Benchmark 仅对本地推理后端执行 Gateway 模型登记回查；远程 Provider 的模型 ID 不与本地模型表交叉匹配。
+4. 代理模型解析与 `applyInMemorySync` 运行态同步复用同一 backend-aware 匹配；按后端读取并持久化正确的 upstream ID。已知数据库错误向上返回。
+5. 增加 llama.cpp / Ollama 上游别名隔离与旧文件名匹配兼容测试。
+
+### 当前证据边界
+
+- Hugging Face 下载路径已经在下载完成时计算 SHA-256，并调用 `SetArtifact` 写入 `models.sha256`。因此不能笼统归因为“项目没有计算模型哈希”。
+- 如果这次修复后 SHA-256 仍缺失，下一步应检查实际模型是否经由 HF 下载登记、数据库中该模型行的 `sha256` 是否为空，以及是否存在手动登记/外部文件导入路径；不在 Benchmark 请求热路径读取大型 GGUF 文件计算哈希。
+- 第一组 `model_load_state_before=unknown` 来自创建 Benchmark 时最近一次 Runtime Snapshot 缓存不可用、过期或模型 ID 未匹配。当前逻辑是保守标记，不把任务执行后的加载成功倒填为“执行前已加载”。需用该组创建时的 Runtime Snapshot 时间、状态和 model ID 证据判断，不直接改成 loaded。
+- 用户 2026-11-23 提供的新四组报告全部 completed，Token 目标均达标。测试运行时 Gateway Revision 为 `08322a8639632172468683e399f184398e558506`，`vcs_modified=false`；当前 dev 后续有 9 个提交，比较结果未发现这 9 个提交修改 Gateway 后端推理或 Benchmark 环境采集代码。Go CI #1461（Run `45098016431`）对当前 dev HEAD `379dc1e75fa3829415076e4ba21a39f34748cf70` 全部 5 个 Job 成功。
+- 四组结果保留为 observed；模型 SHA 缺失和首组 Runtime 状态未知仍按现有资格规则处理，不将报告升级为正式 baseline candidate。
+
+### 自动化验收与修正记录
+
+- 初次代码提交 `b9dc671` 的 CI 明确发现 `proxy_model.go` 使用未定义变量 `zero`；该编译错误由本轮修改引入，已在 `4dbb41e` 修正为显式零值 `proxyModelTarget{}`。未将首次失败误记为通过。
+- 修正后的代码提交 `4dbb41e57a87ec99a0f0540faa359a8c73ee1f31`：Go CI（Run `45100858887`）5/5 Job success；Browser Smoke（Run `45100858953`）success。
+- 后续检查发现 `applyInMemorySync` 仍使用旧的 llama.cpp 专用匹配入口，已在 `d2d133e34f38b5a1521f0db6627555416787bfcd` 改为按 backend 匹配，避免运行态同步与 Benchmark/代理模型解析口径分叉。
+- 最新代码 SHA `d2d133e34f38b5a1521f0db6627555416787bfcd`：Go CI #45101168175 5/5 Job success；Browser Smoke #45101168171 success。Go 单测/集成、race、vet、Docker、故障注入、稳态负载/审计和 Suite 浏览器验收均通过。
+
+下一步：当前代码 CI 通过后，部署最新 `dev`，打开已有 PERF-12 四组报告，利用页面读取时的资格重算查看新规则下的结果。只使用已保存证据；如果任一组缺少模型/后端/测试前加载状态、Token 或原生 timings，保持 baseline_not_qualified 并明确缺项。部分缓存的普通 Benchmark 样本只归档为 observed，不重跑四组矩阵。
+
+
+## 30. PERF-12 性能资格与环境复现信息解耦（2026-11-23）
+
+本轮修正基线判定边界：
+
+- `condition_status` 表示环境复现信息完整度，不再作为性能样本有效性的替代指标。
+- 模型 SHA-256、Gateway Revision/cleanliness、Backend 版本和硬件信息继续记录；缺失只降低复现完整度。
+- `model_key`、upstream ID、HF Repo 等内部资产登记字段不作为性能测试门槛。实际测试对象以 Benchmark 请求中的 model_id 与 backend 标识。
+- PERF-12 四组晋级仍要求实际模型与后端明确、测试前模型已加载、四组目标达标、参数快照完整、原生 Prompt/Decode timings 完整，并且每组满足冷缓存判据。
+- 每组报告新增明确缓存状态：冷缓存、部分缓存、全缓存、未知/证据不一致。热缓存样本继续保留，但不进入冷缓存基线。
+- 已完成的历史四组报告在页面读取时，按新规则使用已保存的 model_id/backend/测试前加载状态、Token 与原生 timings 重新计算资格；只更新资格元数据并保留旧资格值，不重跑任务、不改写历史测量值或环境字段。
+
+
+## 31. PERF-12 历史报告重算可观测性与生产 Bundle 同步（2026-11-23）
+
+### 31.1 本次报告核验结论
+
+用户提供的四组 Markdown 报告显示：Suite completed，四组均 completed，输入/输出 Token 均达标；四组均为冷缓存（cache_n=0 且 prompt_n=input_tokens），原生 Prompt/Decode timings 与 Token 数一致。第一组测试前模型加载状态为 unknown，其余三组为 loaded，因此按 PERF-12 当前资格规则，该报告仍为 baseline_not_qualified；SHA-256 缺失只降低环境复现完整度，不单独否决性能资格。
+
+### 31.2 已定位的前端实际加载问题
+
+- `web/index.html` 实际加载 `/static/dist/app.js`，不是直接加载 `web/js/app/main.js`。
+- 检查时 `main.js` 已包含新的历史资格重算逻辑，但仓库中的 `static/dist/app.js` 仍保留旧逻辑：只读取 localStorage 中的旧资格值，不会在打开页面时重新计算。
+- 因此，仅部署当时的静态 Bundle 并打开四组测试页面，不会触发新规则重算；此前仅根据源文件判断页面会重算是不准确的。
+
+### 31.3 本轮修正
+
+1. `web/js/app/main.js`：已完成历史资格重算的版本/时间留痕。每次读取 completed 且包含四组记录的报告，都会记录 `qualification_rules_version=perf12-qualification-v2` 与 `qualification_evaluated_at`；只有资格结果发生变化时才更新 `qualification_status_previous`。
+2. Markdown 报告新增资格规则版本、重算时间、上一次资格结果和参数快照状态，避免只看到资格状态却无法判断使用了哪套规则。
+3. `web/static/dist/app.js`：已同步历史报告重算逻辑、冷缓存分类、新资格判定条件及 Markdown 审计字段。生产页面实际加载的 Bundle 不再停留在旧资格规则。
+4. 重算只读取已保存的 Suite/Job/Analysis 证据，不发起 Benchmark 请求，不重新运行推理，也不改写历史测量值。
+
+### 31.4 验收状态与后续
+
+- 源码修正提交：`b9f3d883e9e6b91d99dbf11690dcd8624894f063`。
+- 生产 Bundle 同步提交：`2f2aa0c6513b2bf3ca563235434eeb241d7052fd`。
+- 源码提交触发的 Go CI 已有多个 Job success；Browser Smoke Run `45108602150` success，构建产物中已确认包含新资格规则版本与重算时间字段。
+- 仍需检查 Bundle 同步提交之后的最新 CI 状态，并在部署最新 dev 后打开原有四组报告，复制 Markdown 核验 `qualification_rules_version`、`qualification_evaluated_at`、`qualification_status_previous` 和 `baseline_not_qualified`。不重跑四组测试。
+- 预期本次历史报告仍为 `baseline_not_qualified`，原因至少包括第一组测试前模型加载状态 unknown；不能将其改写为 loaded，也不能用测试后 Runtime 状态倒填。
+
+
+## 32. PERF-12 首组模型加载状态采集补强（2026-11-23）
+
+### 问题定位
+
+- `benchmarkAPI` 在接收 Benchmark POST 时，直接读取最近一次后台 Runtime Snapshot 缓存，并立即写入 `model_load_state_before`。
+- Runtime Snapshot 后台采样每 5 秒执行一次；服务刚启动、采样尚未完成、快照过期或上游采样失败时，首个 Benchmark 可能在缓存尚不可用时创建，因此保守记录为 `unknown`。
+- Benchmark Worker 后续会执行 `InferenceLoad` / `WaitUntilModelReady`，但这些动作发生在测试任务创建之后，不能用于回填测试前状态。
+- 原逻辑没有在创建条件快照前主动补采，因此启动后首组测试存在不必要的 unknown 窗口。
+
+### 本轮修复
+
+1. 创建 Benchmark 条件快照前，先读取最近 Runtime Snapshot。
+2. 若状态仍为 unknown 且目标是本地 Provider（llama.cpp / Ollama），同步调用一次只读 `RuntimeSnapshot` API，最多等待 3 秒。
+3. 成功时以该次实际响应时间标记 SampledAt，并将快照来源记为 `benchmark_preflight`；失败则保留 unknown，并记录 `benchmark_preflight_failed` / `benchmark_preflight_unavailable` 来源。
+4. 不发起推理请求、不执行模型加载/卸载、不使用 Worker 执行后的状态倒填。远程 Provider 不执行本地 Runtime Snapshot 查询。
+5. 配置快照中的 `model_load_state_source` 现在记录实际证据来源，不再一律写成 `runtime_snapshot_cache`。
+
+### 提交与验收
+
+- 首次修复提交：`dde21a76c962c5105225f99002487ab1a6df9650`。
+- 证据来源修正提交：`d914c542de15018e822833178d5f0ff166e5fe4f`。
+- Go CI：Run `45114545966`，对应最新文档提交 `d940ef161cf72d5d94a8bb1c2d3ddfd4fb98ba5e`，5/5 Job success（故障注入恢复、配置/API/前端、稳态负载与审计、Go 测试/竞态/静态检查、编译/Docker）。
+- Browser Smoke：Run `45114510081`，对应代码提交 `d914c542de15018e822833178d5f0ff166e5fe4f`，success；该提交包含本节全部后端代码，后续 `d940ef1` 仅追加文档。
+- CI 已通过，可以进入部署验证；仓库当前没有自动部署 workflow，本轮未访问用户 1Panel 主机，尚未部署。
+- 修复部署后，先确认首组报告的 `model_load_state_before` 与 `model_load_state_source`。只有实际采样结果为 loaded 才满足该项资格；若上游只读快照仍无法确认，继续保留 unknown，不降低验收门槛。
+- 本轮没有重新运行 PERF-12 四组推理，也没有改写历史报告中的第一组状态。修复后的四组矩阵需要在部署通过后重新执行，作为新一轮真实测量。
+
+
+## 33. 全仓整体 Review（2026-11-23）
+
+### Review 范围与结论
+
+- 审查分支：`dev`；审查基线：`995a2f1e7ac937883988b659a2ee27fa0767c3c1`。
+- 审查范围：Go 服务入口与 HTTP 超时/请求体边界、Web Session 与服务 API Key 鉴权隔离、调用方 API Key/模型 ACL、远程 Provider 出站安全与密钥加密、推理/模型管理调用链、请求审计与保留策略、Benchmark 证据采集与前端报告、Docker 发布构建和 CI。
+- 当前 Go CI Run `45114891529` 在审查基线上 5/5 Job 成功；Browser Smoke Run `45114510081` 在包含当前 PERF-12 后端代码的 `d914c542` 上成功。两者作为既有证据复用，不重复执行相同测试。
+- 未发现可直接确认的动态 HTML 注入；前端输出的业务数据主要经过 `esc` 转义。远程 Provider 已具备 DNS 解析后 IP 校验、禁止重定向、默认禁止私网访问、响应体大小限制和请求头白名单；Provider API Key 使用 AES-256-GCM 加密持久化。
+- Web Session 与 Admin API Key 分离；Admin API Key 的旁路授权限制在服务密钥管理 API，其余管理 API 使用 Web Session。调用方 Key 以哈希保存，模型 ACL 在服务端执行。
+
+### 本轮发现与处理
+
+1. **P1：构建工具链落后于官方支持周期。** `go.mod` 和 Docker builder 固定 Go 1.23；Go 官方支持策略仅维护最近两个大版本，当前 Go 1.27.4 已发布并包含安全修复。当前 CI 通过不代表 Go 1.23 仍受安全维护。建议单独升级 `go.mod`、Docker builder 与 CI toolchain，并在同一轮完成兼容性验收。本轮未直接升级，避免把工具链迁移与 PERF-12 修复混在一起。
+2. **P1：dev 分支未启用保护规则。** GitHub 分支元数据为 `protected=false`，required status checks enforcement 为 `off`。CI 会运行，但不能阻止绕过 CI 的直接合入。建议为 `dev` 配置必需状态检查；本轮未擅自改变仓库权限策略。
+3. **P2：Gateway 容器以 root 运行。** Dockerfile 的 release image 与 Compose 均指定 `0:0`，并挂载可写宿主机模型目录。该配置解决了当前模型目录权限，但扩大了容器被攻陷后的文件系统影响面。建议后续使用专用 UID/GID 和宿主机目录组权限替代 root；需结合实际 1Panel 目录所有权实施。
+4. **P2：PERF-12 预检状态缺少直接回归测试，且存在共享快照来源竞态。** 本轮已将资格判定改为使用本次 RuntimeSnapshot 预检响应，不再写入共享缓存后重新读取；新增成功与失败测试，验证预检只执行只读模型列表请求，失败仍保留 unknown，不伪造 loaded。
+5. **生产环境仍未验收。** 仓库没有自动部署 workflow，本轮无法访问 1Panel/OpenResty/NUC 主机。真实部署、反向代理和 Qwen 模型性能属于环境验收，不由 CI Mock 替代。
+
+### 暂不判定为缺陷的事项
+
+- Web Session 与 Admin API Key 保存在浏览器 localStorage，属于当前认证实现的既定选择；未发现可直接利用的 XSS 注入点。仍建议后续配置严格 CSP，并继续保持动态内容转义。
+- HTTP Server 设置了 ReadHeaderTimeout、IdleTimeout 与 MaxHeaderBytes；没有统一 WriteTimeout，需保留长连接/SSE推理语义，不应机械添加全局写超时。
+- 审计写入采用有界异步队列；队列满时会丢弃并计数，需持续监控丢弃指标。当前稳态负载与故障注入 CI 已覆盖队列/持久化路径，但不能据此承诺生产极限吞吐。
+
+### 后续执行顺序
+
+1. 完成本轮预检竞态修复的 Go CI 与 Browser Smoke。
+2. 单独升级 Go 工具链并跑一轮完整 CI。
+3. 生产 Gateway 部署完成后，只安排一轮 PERF-12 四组矩阵复验；沿用已保存报告作为旧基线，不重复跑历史报告重算。
+4. 结合实际宿主机模型目录权限，将容器 root 运行收敛为专用用户；为 `dev` 启用必需状态检查。
+
+
+## 34. Go 工具链升级至 1.27.4（2026-11-23）
+
+### 升级原因
+
+- Go 官方支持策略为每个主版本维护到两个更新的主版本发布；Go 1.27.4 于 2026-11-10 发布，包含 cgo、go 命令、编译器、链接器和 net/http 等安全修复。
+- 原仓库 `go.mod`、Docker builder 与 Dev Container 固定 Go 1.23，已落在官方支持窗口之外。
+- 统一采用 Go 1.27.4，避免开发、CI 和生产构建使用不同 Go 主/次版本。
+
+### 本轮修改
+
+1. `go.mod`：最低 Go 工具链版本提升为 `1.27.4`。
+2. `Dockerfile`：release builder 从 `golang:1.23-bookworm` 更新为 `golang:1.27.4-bookworm`。
+3. `.devcontainer/devcontainer.json`：开发容器镜像统一到 `golang:1.27.4-bookworm`。
+4. Go CI 与 Browser Smoke 均通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取版本，不再增加重复版本常量；因此会自动使用 1.27.4。
+5. 工具链升级提交本身未变更业务依赖；后续发现并修复的 Redis 依赖漏洞见第 37 节。
+
+### 验收要求
+
+- Go CI 必须完成 Go build、全量单元/集成测试、race、vet、故障注入、稳态审计负载和 Docker release 镜像构建。
+- Browser Smoke 必须在 Go 1.27.4 下完成 Gateway 启动、PERF-12 Suite 状态机及桌面/窄屏核心交互。
+- 若升级导致兼容性失败，修复真实兼容问题，不降低测试标准、不跳过测试。
+- 本节记录代码与 CI 结果；生产部署仍需由用户现有 1Panel 流程完成，本轮不声称已部署。
+
+
+## 35. Gateway 容器默认非 root 运行（2026-11-23）
+
+### 风险与处理
+
+- Review 发现 release 镜像和 Compose 均将 Gateway 进程固定为 root；进程同时挂载可写宿主机模型目录，扩大了服务进程被利用后的宿主机文件影响面。
+- release 镜像新增专用系统用户 `gateway`（UID/GID 10001），默认以该身份启动。
+- Compose 默认使用 `10001:10001`，同时允许通过 `GATEWAY_UID` / `GATEWAY_GID` 映射为现有宿主机目录账号；默认值与 Dockerfile 用户一致。
+- `.env.example` 增加 UID/GID 配置；CI 增加 Compose 默认身份和 Dockerfile USER 检查，防止回归 root。
+- `README-1PANEL.md` 增加目录权限迁移步骤。只修改模型目录本身，不递归 chown 大型 GGUF 文件；已有模型文件仍须确保 Gateway 与 llama.cpp 均可读。
+
+### 部署边界
+
+- 本次代码修改不会自动改变用户宿主机模型目录权限，也没有在用户 1Panel 环境执行部署。
+- 部署前必须核实实际 `MODEL_HOST_DIR`，并按 README 选择将目录归属 UID/GID 10001，或将 Compose UID/GID 映射为现有目录账号。
+- 验收必须检查容器进程不是 UID 0、`/data/models` 可写、既有模型可读、下载/删除模型闭环正常。
+- 若目录权限未准备好，Gateway 可能无法下载或删除模型；不能为了快速启动而默认退回 root。
+
+
+## 36. 非 root 镜像运行验收与 Go 漏洞扫描（2026-11-23）
+
+### 本轮补强
+
+1. Go CI 的 Docker Buildx 构建启用本地加载，构建后直接运行 release 镜像，检查实际 UID/GID 为 `10001:10001`。
+2. 在 CI 临时挂载目录中模拟宿主机目录授权，验证非 root 进程可以读取已有模型文件、写入模型目录；测试数据不接触生产模型目录。
+3. 新增独立 `govulncheck` Job，固定使用 `golang.org/x/vuln/cmd/govulncheck@v0.0.0-20261117202528-ef4cb2f7cae4`，扫描当前 Go 模块中可达的标准库与依赖漏洞。
+4. `dev` 当前仍未启用分支保护（GitHub branch metadata: `protected=false`）。本轮连接器只提供仓库读取能力，不能代替仓库管理员写入保护规则。
+
+### dev 分支建议必需状态检查
+
+启用 Branch protection / Ruleset 时，将以下检查设为必需：
+
+- `Go CI / 配置、API 契约与前端`
+- `Go CI / Go 测试、竞态与静态检查`
+- `Go CI / Gateway 稳态负载与审计持久化`
+- `Go CI / Gateway 故障注入与恢复验证`
+- `Go CI / 编译与 Docker 镜像`
+- `Go CI / Go 依赖与标准库漏洞扫描`
+- `Web UI Browser Smoke / 启动 Gateway 并执行真实浏览器验收`
+
+建议同时禁止强制推送和分支删除。是否要求 PR、是否要求审批由仓库实际协作方式决定，不默认强制单人仓库必须有第二名审批者。
+
+### 验收边界
+
+- CI 中的临时目录权限测试只证明镜像默认用户和 Compose 默认 UID/GID 行为正确，不证明用户宿主机目录已经授权。
+- 生产部署仍需按 `README-1PANEL.md` 准备实际 `MODEL_HOST_DIR`，检查真实 llama.cpp 容器可读性及模型下载/删除闭环。
+- govulncheck 的结果只表示扫描时已知漏洞数据库与静态可达调用链的匹配结果，不等同于完整安全审计。
+
+
+### 36.1 govulncheck 与 Go 1.27 的兼容性修正
+
+- 首次 CI 运行发现 govulncheck v1.1.4 携带的 `golang.org/x/tools v0.29.0` 在 Go 1.27 AST 上 panic（`unexpected expr: *ast.KeyValueExpr`），这是扫描器自身与新 Go 语法树不兼容，不是 Gateway 源码漏洞结果。
+- 已将扫描器固定到 `golang/vuln` 2026-11-17 的不可变 pseudo-version（commit `ef4cb2f7cae47fe3e21fc596455f694951867b29`），其依赖已升级至 `golang.org/x/tools v0.53.0`，且模块声明 Go 1.26。
+- 不降级项目 Go 工具链，不跳过漏洞扫描；由新扫描器重新执行完整扫描，若报告真实可达漏洞再逐项修复。
+
+
+## 37. 修复 GO-2025-3540：升级 go-redis（2026-11-23）
+
+### 扫描发现
+
+- 新增的 govulncheck 扫描器首次成功分析 Go 1.27 项目后，发现 `GO-2025-3540` / `CVE-2025-29923`。
+- 受影响模块：`github.com/redis/go-redis/v9`，仓库原版本 `v9.6.1`。
+- 可达调用链：`internal/ratelimit/redis.go` 中 `Limiter.Ping` 调用 `redis.Client.Ping`，进入 `baseClient.initConn`。
+- 问题发生于连接建立阶段 `CLIENT SETINFO` 超时后，可能造成响应乱序；在 sticky connection 或 pipeline 使用场景下影响更明显。
+
+### 修复
+
+- 将 go-redis 从 `v9.6.1` 升级至官方修复版本 `v9.6.3`。
+- 更新 `go.sum` 对应模块与 go.mod 校验和；不改变 Redis API 使用方式，不通过关闭 CLIENT SETINFO 绕过问题。
+- 官方 Advisory 标记 v9.6.3 为 9.6.x 修复版本；最终 govulncheck 已确认该调用链不再命中。
+
+### 验收
+
+- 必须通过全量 Go 测试、race、vet、Docker 镜像、故障注入、稳态审计负载与 govulncheck。
+- 若扫描继续发现其他可达漏洞，继续按实际调用链处理；不得将扫描 Job 改为 continue-on-error。
+
+### 37.1 最终验收结果（2026-11-23）
+
+- 代码验收提交：`f1f512bd10b191e0867b2ff360d102317d540bbb`；其 Go CI 与 Browser Smoke 均成功。
+- Go CI Run `45117546103`：success，6/6 Job 全部成功：
+  - 配置、API 契约与前端；
+  - Go 全量测试、race、vet；
+  - Gateway 稳态并发与审计持久化；
+  - Gateway 故障注入与恢复；
+  - Docker release 镜像构建及非 root 实际运行/模型目录读写检查；
+  - govulncheck。
+- Browser Smoke Run `45117545821`：success；PERF-12 Suite 状态机、桌面/窄屏交互全部通过。
+- govulncheck 使用 Go 1.27.4 执行，最终输出 `No vulnerabilities found` / `0 vulnerabilities`。
+- Docker runtime smoke 实际检查 UID/GID 为 `10001:10001`，读取已有模型文件并写入挂载模型目录成功。
+- Go 1.27.4、go-redis v9.6.3 均已进入最终构建和测试链路。
+- 以上均为 GitHub Actions 隔离环境验收；未部署用户 1Panel 主机，未改变宿主机模型目录权限。
+
+### 尚需仓库管理员执行
+
+- 最终检查 `dev` 分支仍为 `protected=false`。需要仓库管理员在 GitHub Settings → Branches / Rulesets 中启用前述必需状态检查及禁止 force-push / 删除规则。本轮 GitHub 连接器无分支保护写入权限，因此没有声称已启用。
+- 生产部署前按 README 准备实际模型目录 UID/GID；部署后确认容器进程非 root、模型可读、下载和删除闭环正常。
+
+
+
+## 38. 部署后普通 Benchmark 冒烟结果与 PERF-12 资格结论（2026-11-23）
+
+### 38.1 用户提供的部署后普通 Benchmark 结果
+
+- Job / Request ID：`req_1795415069867742121_fd30850b35`。
+- 场景：`performance`；状态：`completed`；HTTP：200。
+- 模型：`Qwen3.5-4B-IQ4_NL`；Backend：`llamacpp`；测试前模型状态：`loaded`。
+- 输入 / 输出：11 / 444 tokens；TTFT：185 ms；总耗时：35,075 ms；llama.cpp Decode：444 tokens、34,887.385 ms、12.698 tokens/s。
+- 缓存：`cache_n=7`、`prompt_n=4`，属于部分缓存；不能作为冷缓存 Prompt Eval 样本。
+- 环境条件：`condition_status=partial`，缺少 Gateway build cleanliness、Gateway revision、model SHA-256。上述字段影响环境复现完整度，不单独否决性能样本。
+- 该请求证明部署后的普通 Benchmark 请求链路可完成，并记录了一条部分缓存 observed 样本；它不是 PERF-12 四组矩阵中的替代组，也不能回填历史第一组测试前 Runtime 状态。
+
+### 38.2 PERF-12 历史四组报告的最终判定
+
+- 原四组报告：Suite 与四组 Job 均 completed，Token 目标达标，四组原生 timings 完整且均满足冷缓存判据。
+- 第一组创建时的 `model_load_state_before=unknown`；其余三组为 `loaded`。该状态是创建任务时的证据缺失，不能使用任务执行后的模型状态或本次普通 Benchmark 的状态倒填。
+- 因第一组未满足“测试前模型已加载”的资格条件，原四组报告保持 `baseline_not_qualified`，四组原始测量值继续保留为 observed。
+- 模型 SHA-256、Gateway Revision / build cleanliness 缺失只降低环境复现完整度；不再为补齐这些字段读取大型 GGUF 文件、增加请求热路径计算或重跑已完成样本。
+- 本轮不重跑四组，不重跑普通 Benchmark，不修改历史测量值或第一组 Runtime 状态。若未来需要正式冷缓存 baseline，必须另行明确授权最小替代样本方案；在此之前不把 observed 报告升级为 baseline candidate。
+
+### 38.3 本轮结论
+
+PERF-12 的代码修复与自动化验收已完成，部署后普通请求链路也已由用户提供的 HTTP 200 结果验证；但历史四组报告仍不具备正式 baseline_candidate 资格。当前不再追查 `model_key`、`source_type` 或 SHA-256 作为性能资格门槛。保留原始证据，避免重复测试与错误回填。
