@@ -1,6 +1,6 @@
 # PERF-13 观测开销验证方案
 
-> 状态：进行中（A～F 微基准、事件数阶梯和事件上限回归测试均已通过；正在准备真实 NUC observed 采样）
+> 状态：进行中（A～F 微基准、事件数阶梯和事件上限回归测试均已通过；思考关闭参数修复已通过 CI，等待 NUC 部署验证后继续 observed 采样）
 > 日期：2026-11-23
 > 分支：dev
 > 状态权威来源：`docs/整体任务规划.md`
@@ -202,6 +202,6 @@
 1. 打开 NUC 当前管理台，确认当前活动 Backend、模型标识和模型已加载状态；部署 revision 无现成证据时记为 `unknown`，不额外取 SHA、不阻塞采样。
 2. 在「本地模型 → 运行概览」查看 llama.cpp Server Metrics，展开动态指标，记录 `sampled_at`、采样状态、进程实例标识和指标值；采样器约每 5 秒刷新一次，读取时必须记录样本时间，不能把页面打开时间当作指标采样时间。
 3. 在首页记录宿主机 CPU 与宿主机内存 used/total/source。当前实现的 CPU 来源为 `/proc/stat`，内存来源为 `/proc/meminfo`（`source=meminfo`）；两者均为宿主机口径。Gateway 容器内存和进程 RSS 需从 1Panel/Docker 独立指标取得；拿不到就分别记为 `not_collected`。
-4. 复用「性能测试」普通 Benchmark 入口做单并发 smoke，核对 Request ID、HTTP 状态、TTFT、输入/输出 Token、原生 Prompt/Decode timings 和 RequestAnalysis。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
+4. 先部署包含 llama.cpp 思考关闭参数修复的最新 dev 代码。代码验收：SHA `87eba067932fd39a2dc5c516dfaa75a3e2020cd4` 的 Go CI Run `45144940856` 六个 Job 全部 success；Browser Smoke Run `45144872097` success，覆盖相同代码提交 `714d266`（其后仅文档更新）。部署后确认 UI 关闭思考时上游 body 同时包含 `reasoning_effort=none` 和 `chat_template_kwargs.enable_thinking=false`，且没有顶层 `enable_thinking=false`；再执行单并发 smoke，检查是否仍持续输出长时间 reasoning。不要重跑 PERF-12 四组固定套件，也不要覆盖其历史报告。
 5. Smoke 数据完整后，在同一模型、参数、输入长度、输出上限和并发条件下串行采集重复样本；每次记录请求详情和采样前后 Runtime。测试窗口内不发送其它推理请求。若 UI 没有批量重复入口，不新增脚本或 API，先以现有普通 Benchmark 单次任务入口逐次执行。
 6. 根据 observed 证据报告 TTFT/总耗时分布、Prompt/Decode timings、Metrics 窗口、宿主机 CPU/内存；若 1Panel/Docker 提供独立指标，再单独报告 Gateway 容器内存。没有观测关闭对照时，不声称观测增量；无法建立严格匹配对照时标记 `not_comparable`。
