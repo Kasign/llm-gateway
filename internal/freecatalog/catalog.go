@@ -33,7 +33,8 @@ type Provider struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Website string `json:"website"`
-	DocsURL string `json:"docs_url,omitempty"`
+	DocsURL     string   `json:"docs_url,omitempty"`
+	AuthMethods []string `json:"auth_methods,omitempty"`
 }
 
 // Model 只描述模型能力，不描述模型是否免费。
@@ -244,6 +245,9 @@ func (c Catalog) Validate() error {
 		}
 		if !validHTTPSURL(item.Website) || (item.DocsURL != "" && !validHTTPSURL(item.DocsURL)) {
 			return fmt.Errorf("Provider 官方链接必须使用 HTTPS: %s", item.ID)
+		}
+		if err := validateStringList("Provider 认证方式", item.AuthMethods, false); err != nil {
+			return fmt.Errorf("Provider %s: %w", item.ID, err)
 		}
 		providers[item.ID] = struct{}{}
 	}
