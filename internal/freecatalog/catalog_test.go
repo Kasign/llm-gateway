@@ -72,7 +72,7 @@ func TestCatalogValidatePreservesQuotaUnitsAndUnknownValues(t *testing.T) {
 		t.Fatalf("valid fixture rejected: %v", err)
 	}
 	quota := catalog.Plans[0].Quotas[0]
-	if quota.Value == nil || *quota.Value != 10000 || quota.Unit != "neurons" || quota.Period != "day" {
+	if quota.Value == nil || quota.Value.String() != "10000" || quota.Unit != "neurons" || quota.Period != "day" {
 		t.Fatalf("quota unit or value changed: %+v", quota)
 	}
 
@@ -94,7 +94,7 @@ func TestCatalogValidatePreservesQuotaUnitsAndUnknownValues(t *testing.T) {
 
 func TestCatalogValidateAllowsExplicitZeroAndRejectsMissingKnownValue(t *testing.T) {
 	catalog := validCatalogFixture()
-	zero := float64(0)
+	zero := json.Number("0")
 	catalog.Plans[0].Quotas[0].Value = &zero
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("explicit zero quota rejected: %v", err)
