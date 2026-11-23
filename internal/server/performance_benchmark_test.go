@@ -14,6 +14,7 @@ import (
 	"github.com/whl/llm-gateway/internal/config"
 	"github.com/whl/llm-gateway/internal/core"
 	"github.com/whl/llm-gateway/internal/live"
+	"github.com/whl/llm-gateway/internal/llama"
 	"github.com/whl/llm-gateway/internal/settings"
 	"github.com/whl/llm-gateway/internal/store"
 )
@@ -22,6 +23,7 @@ var requestAnalysisBenchmarkSink RequestAnalysis
 var requestAnalysisJSONBenchmarkSink string
 var liveSessionBenchmarkSink *live.Session
 var requestObservationBytesBenchmarkSink int
+var requestRuntimeSnapshotBenchmarkSink *RequestRuntimeSnapshot
 
 // BenchmarkConsumeSSEChunk 是不启用 Gateway 观察器时的 chunk 消费基准，用作同机对照下界。
 func BenchmarkConsumeSSEChunk(b *testing.B) {
@@ -169,6 +171,60 @@ func BenchmarkInferenceObserverOnChunkParallel(b *testing.B) {
 }
 
 // Benchmark 创建同时要求管理员会话与独立的调用方服务密钥，不能用 Authorization 中的管理员凭据代替。
+// BenchmarkRequestTraceRecordStreamChunkWithLiveSession 测量默认观测配置下完整记录 2000 个流事件的请求成本。
+// 每次迭代创建独立 Session，覆盖 SSE 解析、事件构造、Session 锁与事件切片增长；不连接数据库。
+func BenchmarkRequestTraceRecordStreamChunkWithLiveSession(b *testing.B) {
+	const chunksPerRequest = maxStreamEventsPerRequest
+	cfg := &config.Config{}
+	chunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"benchmark token\"}}]}\n\n")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		session := &live.Session{}
+		trace := &requestTrace{
+			s: &Server{cfg: cfg}, id: "benchmark-stream-session",
+			start: time.Now(), stream: true, ttftRecorded: true, session: session,
+		}
+		for n := 0; n < chunksPerRequest; n++ {
+			trace.recordStreamChunk(chunk)
+		}
+		liveSessionBenchmarkSink = session
+	}
+	elapsed := b.Elapsed()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N*chunksPerRequest), "ns/chunk")
+}
+
+// BenchmarkLatestRequestRuntimeSnapshot 测量请求收尾时读取缓存快照、复制模型条目并映射 CPU 状态的成本。
+// 使用预置样本，不触发上游 HTTP 请求、后台采样或 200ms CPU 采样等待。
+func BenchmarkLatestRequestRuntimeSnapshot(b *testing.B) {
+	now := time.Now()
+	snapshot := &llama.RuntimeSnapshot{
+		SampledAt: now, Backend: "llamacpp", ActiveModel: "benchmark-model",
+		Loaded: []llama.CatalogItem{
+			{ID: "model-a", Loaded: true, RAMBytes: 1 << 30},
+			{ID: "model-b", Loaded: true, VRAMBytes: 2 << 30},
+		},
+		Catalog: make([]llama.CatalogItem, 8),
+	}
+	for i := range snapshot.Catalog {
+		snapshot.Catalog[i] = llama.CatalogItem{ID: fmt.Sprintf("model-%d", i), Status: "loaded", DiskBytes: int64(i+1) << 20}
+	}
+	s := &Server{}
+	s.runtimeSnapshotSample = &runtimeSnapshotSample{
+		Snapshot: snapshot, Status: "complete", Source: "runtime_sampler", SampledAt: now,
+	}
+	s.cpuSampleMu.Lock()
+	s.cpuProcLastSample = now
+	s.cpuCachedPercent = 17.5
+	s.cpuSampleMu.Unlock()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		requestRuntimeSnapshotBenchmarkSink = s.latestRequestRuntimeSnapshot()
+	}
+}
+
 func TestAuthenticateBenchmarkKeyRequiresDedicatedClientKey(t *testing.T) {
 	s := &Server{}
 	r := httptest.NewRequest(http.MethodPost, "/api/benchmark", nil)
