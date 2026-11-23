@@ -326,7 +326,7 @@ function renderToolCallsSection(j) {
       ['记录时间', event.created_at ? fmtDate(event.created_at) : '—'],
     ];
     return `<details class="req-fold req-nested-fold"><summary>${label}</summary><div class="req-fold-inner">${reqKv(rows)}</div></details>`;
-  }).join('') + '</div>';
+  }).join('') + '</dl>';
   return reqPanelFold(`工具调用明细 (${events.length})`, inner);
 }
 
@@ -392,14 +392,15 @@ function renderPerformanceDiagnosis(d) {
     provider_queue: 'Provider 并发排队',
     prompt_eval: 'Prompt Eval',
     decode: 'Decode 生成',
-    upstream_headers_wait: '上游响应头等待'
+    upstream_headers_wait: '上游响应头等待',
+    upstream_body_first_byte_wait: '上游响应头到首字节等待'
   };
   const findings = Array.isArray(d.candidates) ? d.candidates : [];
   const limitations = Array.isArray(d.limitations) ? d.limitations : [];
   const findingHtml = findings.map((item) => {
     const evidence = Array.isArray(item.evidence) ? item.evidence : [];
     const evidenceHtml = evidence.length
-      ? '<div class="req-kv">' + evidence.map((e) =>
+      ? '<dl class="req-kv">' + evidence.map((e) =>
           '<dt>' + esc(e.metric || '指标') + '</dt><dd>' + esc(String(e.value)) + ' ' + esc(e.unit || '') +
           '<span class="muted"> · ' + esc(e.source || '') + ' · ' + esc(e.scope || '') +
           (e.note ? ' · ' + esc(e.note) : '') + '</span></dd>'

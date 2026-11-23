@@ -2943,7 +2943,7 @@ components:
       type: object
       required: [category, status, title, summary, evidence]
       properties:
-        category: { type: string, enum: [gateway_pre_inference, provider_queue, prompt_eval, decode, upstream_headers_wait] }
+        category: { type: string, enum: [gateway_pre_inference, provider_queue, prompt_eval, decode, upstream_headers_wait, upstream_body_first_byte_wait] }
         status: { type: string, enum: [candidate] }
         title: { type: string }
         summary: { type: string }

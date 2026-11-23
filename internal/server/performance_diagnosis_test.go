@@ -41,6 +41,34 @@ func TestBuildPerformanceDiagnosisRequiresMeasuredQueueWait(t *testing.T) {
 	}
 }
 
+func TestBuildPerformanceDiagnosisIncludesQueueTimeoutAndCancellation(t *testing.T) {
+	wait := int64(30000)
+	for _, status := range []string{"timeout", "cancelled"} {
+		got := buildPerformanceDiagnosis(analysisInput{
+			ProviderQueueWaitMS: &wait,
+			ProviderQueueWaitStatus: status,
+		})
+		if len(got.Candidates) != 1 || got.Candidates[0].Category != "provider_queue" {
+			t.Fatalf("%s queue wait should remain visible: %+v", status, got)
+		}
+		if !strings.Contains(got.Candidates[0].Evidence[0].Note, status) {
+			t.Fatalf("%s status missing from evidence: %+v", status, got.Candidates[0].Evidence)
+		}
+	}
+}
+
+func TestBuildPerformanceDiagnosisUsesHeadersToFirstByteAnchors(t *testing.T) {
+	headers, firstByte := int64(100), int64(475)
+	got := buildPerformanceDiagnosis(analysisInput{Timeline: []requestTimelineEvent{
+		{Name: "upstream_headers", OffsetMS: &headers, Status: timelineStatusMeasured},
+		{Name: "upstream_first_byte", OffsetMS: &firstByte, Status: timelineStatusMeasured},
+	}})
+	if len(got.Candidates) != 1 || got.Candidates[0].Category != "upstream_body_first_byte_wait" ||
+		got.Candidates[0].Evidence[0].Value != 375 {
+		t.Fatalf("headers-to-first-byte interval not derived: %+v", got)
+	}
+}
+
 func TestBuildPerformanceDiagnosisUsesDispatchAndHeadersAnchors(t *testing.T) {
 	dispatch, headers := int64(100), int64(350)
 	got := buildPerformanceDiagnosis(analysisInput{Timeline: []requestTimelineEvent{

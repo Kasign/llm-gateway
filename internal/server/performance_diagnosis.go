@@ -49,17 +49,30 @@ func buildPerformanceDiagnosis(in analysisInput) *PerformanceDiagnosis {
 		})
 	}
 
-	if in.ProviderQueueWaitMS != nil && *in.ProviderQueueWaitMS > 0 && in.ProviderQueueWaitStatus == "granted" {
-		out.Candidates = append(out.Candidates, PerformanceFinding{
-			Category: "provider_queue",
-			Status:   "candidate",
-			Title:    "Provider 并发许可排队",
-			Summary:  "本次请求确实等待了 Provider 并发许可；单次正值只能证明发生过排队，不能单独证明它是整体性能主瓶颈。",
-			Evidence: []PerformanceEvidence{
-				{Metric: "provider_queue_wait_ms", Value: float64(*in.ProviderQueueWaitMS), Unit: "ms", Source: "provider_admission_callback", Scope: "request"},
-			},
-			NextSteps: []string{"在受控并发负载下比较队列等待分布", "先确认上游模型吞吐和硬件余量，再决定是否调整并发上限"},
-		})
+	if in.ProviderQueueWaitMS != nil && *in.ProviderQueueWaitMS > 0 {
+		switch in.ProviderQueueWaitStatus {
+		case "granted", "timeout", "cancelled":
+			summary := "本次请求确实等待了 Provider 并发许可；单次正值只能证明发生过排队，不能单独证明它是整体性能主瓶颈。"
+			nextSteps := []string{"在受控并发负载下比较队列等待分布", "先确认上游模型吞吐和硬件余量，再决定是否调整并发上限"}
+			switch in.ProviderQueueWaitStatus {
+			case "timeout":
+				summary = "本次请求在 Provider 并发许可队列中等待超时；这是明确的排队失败证据，但仍需结合并发负载判断根因。"
+				nextSteps = []string{"检查 Provider 并发上限、队列容量和等待超时配置", "在受控负载下确认是否持续饱和；不要未经验证直接提高并发上限"}
+			case "cancelled":
+				summary = "本次请求在等待 Provider 并发许可期间被取消；它说明请求在排队阶段结束，不代表 Provider 本身故障。"
+				nextSteps = []string{"结合调用方取消时间与队列等待时长判断是否由客户端超时触发", "若持续发生，再在受控并发负载下检查队列容量与等待时间"}
+			}
+			out.Candidates = append(out.Candidates, PerformanceFinding{
+				Category: "provider_queue",
+				Status:   "candidate",
+				Title:    "Provider 并发许可排队",
+				Summary:  summary,
+				Evidence: []PerformanceEvidence{
+					{Metric: "provider_queue_wait_ms", Value: float64(*in.ProviderQueueWaitMS), Unit: "ms", Source: "provider_admission_callback", Scope: "request", Note: "queue_status=" + in.ProviderQueueWaitStatus},
+				},
+				NextSteps: nextSteps,
+			})
+		}
 	}
 
 	if mt := in.ModelTimings; mt != nil {
@@ -112,6 +125,24 @@ func buildPerformanceDiagnosis(in analysisInput) *PerformanceDiagnosis {
 						{Metric: "upstream_dispatch_to_headers_ms", Value: float64(waitMS), Unit: "ms", Source: "gateway_request_timeline", Scope: "request"},
 					},
 					NextSteps: []string{"与同一请求的 llama.cpp Prompt/Decode timings 对照，区分上游首包等待和模型计算", "检查同一时间窗口是否有并发请求；不要把该区间直接等同于 Prompt Eval"},
+				})
+			}
+		}
+	}
+
+	if headers, okHeaders := requestTimelineOffset(in.Timeline, "upstream_headers"); okHeaders {
+		if firstByte, okFirstByte := requestTimelineOffset(in.Timeline, "upstream_first_byte"); okFirstByte && firstByte >= headers {
+			waitMS := firstByte - headers
+			if waitMS > 0 {
+				out.Candidates = append(out.Candidates, PerformanceFinding{
+					Category: "upstream_body_first_byte_wait",
+					Status:   "candidate",
+					Title:    "上游响应头到首字节等待",
+					Summary:  "已收到上游响应头后，直到读取到首个响应体字节仍存在等待；该区间可能包含上游响应体准备或传输等待，不能直接解释为模型 Decode。",
+					Evidence: []PerformanceEvidence{
+						{Metric: "upstream_headers_to_first_byte_ms", Value: float64(waitMS), Unit: "ms", Source: "gateway_request_timeline", Scope: "request"},
+					},
+					NextSteps: []string{"与 llama.cpp 原生 Prompt/Decode timings 对照，确认等待是否发生在模型计时之外", "对比同一 Provider 的其他请求，排查连接、代理和上游响应体首块延迟"},
 				})
 			}
 		}
