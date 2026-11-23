@@ -19,6 +19,47 @@ import (
 )
 
 var requestAnalysisBenchmarkSink RequestAnalysis
+var requestAnalysisJSONBenchmarkSink string
+var liveSessionBenchmarkSink *live.Session
+var requestObservationBytesBenchmarkSink int
+
+// BenchmarkConsumeSSEChunk 是不启用 Gateway 观察器时的 chunk 消费基准，用作同机对照下界。
+func BenchmarkConsumeSSEChunk(b *testing.B) {
+	chunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"benchmark token\"}}]}\n\n")
+	b.SetBytes(int64(len(chunk)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		requestObservationBytesBenchmarkSink = len(chunk)
+	}
+}
+
+// BenchmarkEncodeRequestAnalysis 测量分析 DTO 构建后的 JSON 编码成本，不包含数据库写入。
+func BenchmarkEncodeRequestAnalysis(b *testing.B) {
+	firstAnyMS, firstContentMS := int64(130), int64(185)
+	inputTokens, outputTokens := int64(768), int64(192)
+	analysis := buildRequestAnalysis(analysisInput{
+		TotalMS: 2300, Stream: true,
+		StreamTiming: streamTimings{FirstAnyMS: &firstAnyMS, FirstContentMS: &firstContentMS, LastEventMS: 2150},
+		InputTokens: &inputTokens, OutputTokens: &outputTokens, TokenSource: "upstream_usage",
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		requestAnalysisJSONBenchmarkSink = encodeRequestAnalysis(analysis)
+	}
+}
+
+// BenchmarkLiveSessionAppendStreamEvent 测量每个请求创建并追加一条事件的分配与锁成本。
+func BenchmarkLiveSessionAppendStreamEvent(b *testing.B) {
+	event := store.StreamEvent{Seq: 1, AtMS: 130, Kind: "delta", Field: "content", DeltaLen: 15}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		session := &live.Session{}
+		session.AppendStreamEvent(event)
+		liveSessionBenchmarkSink = session
+	}
+}
 
 // BenchmarkResolveInferenceAgentRoute 测量固定 Agent Provider/默认模型的解析路径，不包含上游网络请求。
 func BenchmarkResolveInferenceAgentRoute(b *testing.B) {
