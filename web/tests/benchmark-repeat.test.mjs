@@ -18,8 +18,8 @@ test('summary only includes completed samples with one identical non-empty condi
   assert.equal(summary.completed_count, 2);
   assert.equal(summary.attempted_count, 3);
   assert.equal(summary.comparable_count, 2);
-  assert.equal(summary.metrics.latency_ms.median, 200);
-  assert.equal(summary.metrics.ttft_ms.median, 30);
+  assert.equal(summary.cache_metrics.cold.metrics.latency_ms.median, 100);
+  assert.equal(summary.cache_metrics.cold.metrics.ttft_ms.median, 20);
   assert.equal(summary.cache_metrics.cold.count, 1);
   assert.equal(summary.cache_metrics.partial.count, 1);
 });
@@ -30,7 +30,7 @@ test('different condition fingerprints are not pooled', () => {
     { status: 'completed', job_id: 'b', condition_sha256: 'two', latency_ms: 200 }
   ]);
   assert.equal(summary.comparable_count, 0);
-  assert.equal(summary.metrics.latency_ms.count, 0);
+  assert.equal(summary.cache_metrics && Object.keys(summary.cache_metrics).length, 0);
 });
 
 test('Markdown report retains Job IDs and comparability wording', () => {
