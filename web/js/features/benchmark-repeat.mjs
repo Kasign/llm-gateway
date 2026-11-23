@@ -55,7 +55,7 @@ export function buildBenchmarkRepeatMarkdown(report){
   lines.push('','## 单次任务','','| 次数 | 状态 | Job ID | 缓存 | 条件状态 | 输入/输出 Token | 总耗时 ms | TTFT ms | Prompt ms | Decode ms | 输出 tok/s | 错误 |','|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---|');
   for(const sample of samples){
     const error=String(sample.error||'').replace(/\|/g,'\\|');
-    lines.push('| '+sample.index+' | '+(sample.status||'unknown')+' | '+(sample.job_id||'—')+' | '+(labels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
+    lines.push('| '+sample.index+' | '+(sample.status||'unknown')+' | '+(sample.job_id||'—')+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
   }
   lines.push('','说明：每条记录对应独立 Benchmark Job。指标汇总只纳入服务端状态 completed 且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。条件指纹缺失或不一致时不做合并统计。');
   return lines.join('\n');
