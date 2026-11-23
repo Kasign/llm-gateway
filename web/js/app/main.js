@@ -2023,6 +2023,47 @@ function renderBenchmarkModelTimings(analysis){
   }
   return html+'</div></details>';
 }
+function benchmarkHistoryAnalysisPayload(wrap){
+  const job=benchJobPayload(wrap);
+  const analysis=wrap?.analysis||job.analysis||{};
+  const condition=job.condition_snapshot||job.condition||{};
+  const identity=condition.model_identity||{};
+  const timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||null;
+  const pick=(source,keys)=>{
+    const out={};
+    for(const key of keys){
+      const value=source?.[key];
+      if(value!==undefined&&value!==null&&value!=='')out[key]=sanitizeBenchmarkToolArguments(value);
+    }
+    return out;
+  };
+  const payload={
+    task:pick(job,['job_id','request_id','scenario','acceptance_case_id','status','backend','model_id','model_key','llama_model','started_at','finished_at','http_status','error_code','error']),
+    model_identity:pick(identity,['model_key','source_type','sha256']),
+    condition:pick(job,['condition_status','condition_sha256','condition_missing']),
+    condition_snapshot:pick(condition,['model_identity','model_load_state_before','backend','model_id','captured_at','snapshot_at']),
+    metrics:pick(job,['latency_ms','inference_latency_ms','ttft_ms','input_tokens','output_tokens','total_tokens','max_tokens']),
+    phases_ms:pick(analysis.phases_ms||{},Object.keys(analysis.phases_ms||{})),
+    throughput:pick(analysis.throughput||{},['output_tokens_per_sec','input_tokens_per_sec','total_tokens_per_sec','note']),
+    llama_timings:timings?pick(timings,['prompt_n','cache_n','usage_cached_tokens','tokens_cached','tokens_evaluated','prompt_ms','prompt_per_token_ms','prompt_per_second','predicted_n','predicted_ms','predicted_per_token_ms','predicted_per_second']):{},
+    tool_metrics:pick(wrap?.tool_metrics||job.tool_metrics||{},['model_decision_ms','model_decision_status','tool_execution_total_ms','tool_execution_status','model_final_generation_ms','model_final_generation_status','model_rounds','tool_rounds','tool_execution_attempts','tool_execution_successes','tool_execution_failures','tool_execution_success_rate','tool_calls']),
+    acceptance:wrap?.acceptance?pick(wrap.acceptance,['case_id','status','reason_code','rules_version','message']):undefined
+  };
+  for(const key of ['model_identity','condition_snapshot','phases_ms','throughput','llama_timings','tool_metrics']){
+    if(!Object.keys(payload[key]).length)delete payload[key];
+  }
+  if(!payload.acceptance)delete payload.acceptance;
+  return payload;
+}
+async function copyBenchmarkHistoryAnalysis(wrap,button){
+  const copied=await writeClipboard(JSON.stringify(benchmarkHistoryAnalysisPayload(wrap),null,2));
+  if(button){
+    const original=button.textContent;
+    button.textContent=copied?'已复制':'复制失败';
+    button.disabled=true;
+    setTimeout(()=>{button.textContent=original;button.disabled=false;},1600);
+  }
+}
 function renderBenchmarkHistoryDetail(wrap){
   const box=$('benchHistoryDetail');
   if(!box)return;
@@ -2051,7 +2092,7 @@ function renderBenchmarkHistoryDetail(wrap){
     ['正文字符',job.content_chars],['思考字符',job.reasoning_chars],
     ['响应字节',job.response_bytes],['流式事件数',job.stream_event_count]
   ].filter(([,value])=>value!=null&&value!=='');
-  let html='<div class="card-head"><div><h3 tabindex="-1">请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div>';
+  let html='<div class="card-head"><div><h3 tabindex="-1">请求详情</h3><p class="small muted">任务 <code>'+esc(job.job_id||'—')+'</code></p></div><div class="btn-row"><button type="button" class="btn sm" data-bench-history-copy>复制分析数据</button><button type="button" class="btn sm ghost" data-bench-history-detail-close>收起详情</button></div></div>';
   html+='<h4>核心结果</h4><dl class="bench-history-detail-grid">'+coreMetrics.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v??'未知'))+'</dd>').join('')+'</dl>';
   html+='<details class="bench-detail-fold"><summary>测试条件与请求元数据</summary><div class="bench-detail-fold-body">'+renderBenchCondition(job)+
     (metadata.length?'<dl class="bench-history-detail-grid">'+metadata.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(String(v))+'</dd>').join('')+'</dl>':'')+
@@ -2087,6 +2128,7 @@ function renderBenchmarkHistoryDetail(wrap){
   box.querySelector('h3')?.focus({preventScroll:true});
 }
 let benchHistoryDetailTrigger=null;
+let currentBenchmarkHistoryWrap=null;
 async function openBenchmarkHistory(jobId,trigger=null){
   if(!jobId)return;
   if(benchHistoryDetailTrigger&&benchHistoryDetailTrigger!==trigger)benchHistoryDetailTrigger.setAttribute('aria-expanded','false');
@@ -2096,8 +2138,10 @@ async function openBenchmarkHistory(jobId,trigger=null){
   if(box){box.hidden=false;box.innerHTML='<p class="muted">正在加载任务详情…</p>';}
   try{
     const result=await api('/api/benchmark/'+encodeURIComponent(jobId));
+    currentBenchmarkHistoryWrap=result;
     renderBenchmarkHistoryDetail(result);
   }catch(error){
+    currentBenchmarkHistoryWrap=null;
     if(box){box.hidden=false;box.innerHTML='<div class="msg err">'+esc(error.message||'历史任务详情加载失败')+' <button type="button" class="btn sm ghost" data-bench-history-detail-close>关闭详情</button></div>';}
   }
 }
@@ -3177,6 +3221,8 @@ $('benchHistoryList')?.addEventListener('click',event=>{
   if(button)openBenchmarkHistory(button.dataset.benchHistoryId,button);
 });
 $('benchHistoryDetail')?.addEventListener('click',event=>{
+  const copyButton=event.target.closest('[data-bench-history-copy]');
+  if(copyButton&&currentBenchmarkHistoryWrap){copyBenchmarkHistoryAnalysis(currentBenchmarkHistoryWrap,copyButton).catch(()=>{});return;}
   if(!event.target.closest('[data-bench-history-detail-close]'))return;
   $('benchHistoryDetail').hidden=true;
   if(benchHistoryDetailTrigger){
@@ -3300,6 +3346,8 @@ exposeGlobals({
   benchmarkSuiteWarmupCanResume,
   benchmarkSuiteTaskStatus,
   copyBenchmarkSuiteReport,
+  benchmarkHistoryAnalysisPayload,
+  copyBenchmarkHistoryAnalysis,
   renderBenchmarkSuiteReport,
   saveBackend,
   saveKey,

@@ -168,6 +168,7 @@ jobs:
           path: |
             ${{ runner.temp }}/web-ui-artifacts/
             ${{ runner.temp }}/llm-gateway.log
+            web/static/dist/app.js
           if-no-files-found: warn
           retention-days: 7
 

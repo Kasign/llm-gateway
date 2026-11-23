@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LLM Gateway</title>
-<link rel="stylesheet" href="/static/css/app.css?v=20261120-model-test-tabs-1">
+<link rel="stylesheet" href="/static/css/app.css?v=20261123-suite-tab-history-copy-1">
 <link rel="stylesheet" href="/static/css/model-download.css?v=20261028-config-note-contrast-1">
 </head>
 <body>
@@ -464,11 +464,20 @@
         </div>
         <nav class="model-test-tabs" role="tablist" aria-label="模型测试类型">
           <button type="button" class="model-test-tab active" id="modelTestTabPerformance" role="tab" aria-selected="true" aria-controls="modelTestPanelPerformance" data-model-test-tab="performance">性能测试</button>
+          <button type="button" class="model-test-tab" id="modelTestTabSuite" role="tab" aria-selected="false" aria-controls="modelTestPanelSuite" data-model-test-tab="suite">四组测试</button>
           <button type="button" class="model-test-tab" id="modelTestTabTools" role="tab" aria-selected="false" aria-controls="modelTestPanelTools" data-model-test-tab="tools">工具测试</button>
           <button type="button" class="model-test-tab" id="modelTestTabAcceptance" role="tab" aria-selected="false" aria-controls="modelTestPanelAcceptance" data-model-test-tab="acceptance">验收测试</button>
           <button type="button" class="model-test-tab" id="modelTestTabHistory" role="tab" aria-selected="false" aria-controls="modelTestPanelHistory" data-model-test-tab="history">测试历史</button>
         </nav>
 
+        <div class="card compact">
+          <div class="card-head">
+            <div><h2>当前推理模型</h2><p>性能测试与四组测试共用当前已加载的上游模型。</p></div>
+            <button type="button" class="btn sm" onclick="loadBenchPanel()">刷新模型信息</button>
+          </div>
+          <div id="benchTarget" class="bench-target">正在读取当前模型…</div>
+          <p id="benchPresetHint" class="req-note" style="margin:8px 0 0"></p>
+        </div>
         <section id="modelTestPanelPerformance" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabPerformance">
         <div id="modelTestPerformance">
         <div class="card">
@@ -477,21 +486,8 @@
               <h2>性能测试</h2>
               <p>对<strong>当前已加载的上游模型</strong>发一次<strong>流式</strong>请求，实时展示正文/思考与阶段耗时；请在「模型管理」中先加载模型</p>
             </div>
-            <button type="button" class="btn sm" onclick="loadBenchPanel()">刷新模型信息</button>
           </div>
-          <div id="benchTarget" class="bench-target">正在读取当前模型…</div>
-          <p id="benchPresetHint" class="req-note" style="margin:8px 0 0"></p>
-          <section class="card bench-suite-card" aria-labelledby="benchSuiteTitle">
-            <div class="card-head">
-              <div>
-                <h3 id="benchSuiteTitle">PERF-12 四组基线测试</h3>
-                <p>自动预热后串行执行四组固定提示词。短输入目标约 128 tokens，长输入目标约 2,048 tokens；输出上限分别为 64 / 512 tokens。</p>
-              </div>
-              <div class="btn-row"><button type="button" class="btn primary" id="benchSuiteRunBtn" onclick="runBenchmarkSuite()">一键执行四组测试</button><button type="button" class="btn ghost sm" id="benchSuiteResumeBtn" onclick="runBenchmarkSuite(true)" hidden>继续未完成组</button></div>
-            </div>
-            <p class="small muted">测试期间请勿发送其他推理请求。自动固定 temperature=0、top_p=1、top_k=40、seed=42、关闭 thinking；每组保留实际 Token 数和条件指纹。目标长度以服务端实际 Token 数校验，不达标不会伪装成合格样本。</p>
-            <div id="benchSuiteStatus" class="msg muted" role="status" aria-live="polite">固定提示词和四组顺序已就绪。</div>
-          </section>
+
           <div class="field bench-prompt-block" style="margin-top:12px">
             <div class="bench-prompt-head">
               <label for="benchPrompt">提示词</label>
@@ -528,7 +524,21 @@
 
 
 
-      <div class="card bench-suite-report-card" id="benchSuiteReportCard">
+
+        </div>
+        </section>
+        <section id="modelTestPanelSuite" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabSuite" hidden>
+          <div class="card bench-suite-card" aria-labelledby="benchSuiteTitle">
+            <div class="card-head">
+              <div>
+                <h3 id="benchSuiteTitle">PERF-12 四组基线测试</h3>
+                <p>自动预热后串行执行四组固定提示词。短输入目标约 128 tokens，长输入目标约 2,048 tokens；输出上限分别为 64 / 512 tokens。</p>
+              </div>
+              <div class="btn-row"><button type="button" class="btn primary" id="benchSuiteRunBtn" onclick="runBenchmarkSuite()">一键执行四组测试</button><button type="button" class="btn ghost sm" id="benchSuiteResumeBtn" onclick="runBenchmarkSuite(true)" hidden>继续未完成组</button></div>
+            </div>
+            <p class="small muted">测试期间请勿发送其他推理请求。自动固定 temperature=0、top_p=1、top_k=40、seed=42、关闭 thinking；每组保留实际 Token 数和条件指纹。目标长度以服务端实际 Token 数校验，不达标不会伪装成合格样本。</p>
+            <div id="benchSuiteStatus" class="msg muted" role="status" aria-live="polite">固定提示词和四组顺序已就绪。</div>
+          </div>      <div class="card bench-suite-report-card" id="benchSuiteReportCard">
         <div class="card-head">
           <div><h2>四组测试报告</h2><p>报告包含四组指标、Request ID、条件指纹、阶段耗时和前后 Runtime / Metrics 证据。</p></div>
           <div class="btn-row">
@@ -538,9 +548,6 @@
         </div>
         <pre id="benchSuiteReport" class="bench-out" style="max-height:520px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">尚未执行四组测试。</pre>
       </div>
-
-        </div>
-
 
         </section>
         <section id="modelTestPanelTools" class="model-test-subpanel" role="tabpanel" aria-labelledby="modelTestTabTools" hidden>
@@ -732,7 +739,7 @@
 
 <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-<script src="/static/dist/app.js?v=20261120-model-test-tabs-1"></script>
+<script src="/static/dist/app.js?v=20261123-suite-tab-history-copy-1"></script>
 <script src="/static/dist/providers-admin.js?v=20261028-provider-key-contrast-1"></script>
 <script src="/static/dist/password-toggle.js?v=20261027-password-eye-4"></script>
 <script src="/static/dist/key-service-picker.js?v=20261028-key-service-picker-async-close-1"></script>
@@ -752,6 +759,7 @@
   const modelTestTabs = Array.from(document.querySelectorAll('[data-model-test-tab]'));
   const modelTestPanels = {
     performance: document.getElementById('modelTestPanelPerformance'),
+    suite: document.getElementById('modelTestPanelSuite'),
     tools: document.getElementById('modelTestPanelTools'),
     acceptance: document.getElementById('modelTestPanelAcceptance'),
     history: document.getElementById('modelTestPanelHistory')
@@ -766,7 +774,8 @@
     for (const [name, panel] of Object.entries(modelTestPanels)) {
       if (panel) panel.hidden = name !== key;
     }
-    if (loadData && key === 'performance' && typeof globalThis.loadBenchPanel === 'function') globalThis.loadBenchPanel().catch(() => {});
+    if (loadData && (key === 'performance' || key === 'suite') && typeof globalThis.loadBenchPanel === 'function') globalThis.loadBenchPanel().catch(() => {});
+    if (loadData && key === 'suite' && typeof globalThis.renderBenchmarkSuiteReport === 'function') globalThis.renderBenchmarkSuiteReport();
     if (loadData && key === 'history' && typeof globalThis.loadBenchHistory === 'function') globalThis.loadBenchHistory().catch(() => {});
     if (loadData && key === 'acceptance' && typeof globalThis.loadBenchmarkAcceptanceCases === 'function') globalThis.loadBenchmarkAcceptanceCases().catch(() => {});
   };

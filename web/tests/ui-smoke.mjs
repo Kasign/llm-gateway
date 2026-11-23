@@ -262,11 +262,12 @@ try {
   const modelTestKey = page.locator('#modelTestApiKey');
   check('模型测试统一使用密码型客户端服务密钥',
     await modelTestKey.count() === 1 && await modelTestKey.evaluate(el => el.type === 'password'));
-  check('模型测试显示四个横向测试类型 Tab',
-    await page.locator('[data-model-test-tab]').count() === 4 &&
+  check('模型测试显示五个横向测试类型 Tab',
+    await page.locator('[data-model-test-tab]').count() === 5 &&
     await page.locator('#modelTestTabPerformance').getAttribute('aria-selected') === 'true');
   check('默认只显示性能测试面板',
     await page.locator('#modelTestPanelPerformance').isVisible() &&
+    !(await page.locator('#modelTestPanelSuite').isVisible()) &&
     !(await page.locator('#modelTestPanelTools').isVisible()) &&
     !(await page.locator('#modelTestPanelAcceptance').isVisible()) &&
     !(await page.locator('#modelTestPanelHistory').isVisible()));
@@ -355,11 +356,19 @@ try {
     recoveryEligibility);
   check('清除部分报告后隐藏续跑入口',
     !(await page.locator('#benchSuiteResumeBtn').isVisible()));
-  check('性能测试区只包含普通性能与四组基线入口',
+  check('性能测试区只保留普通性能测试入口',
     await page.locator('#benchSuiteRunBtn').count() === 1 &&
     await page.locator('#benchRunBtn').count() === 1 &&
     await page.locator('#benchSuiteReport').count() === 1 &&
+    !(await page.locator('#benchSuiteRunBtn').isVisible()) &&
     !(await page.locator('#benchToolRunBtn').isVisible()));
+  await page.locator('#modelTestTabSuite').click();
+  check('一键四组测试独立 Tab 与工具、验收并列',
+    await page.locator('#modelTestPanelSuite').isVisible() &&
+    await page.locator('#benchSuiteRunBtn').isVisible() &&
+    await page.locator('#benchSuiteReport').isVisible() &&
+    !(await page.locator('#modelTestPanelPerformance').isVisible()) &&
+    !(await page.locator('#modelTestPanelTools').isVisible()));
   const suitePrompts = await page.evaluate(() => {
     const prompts = buildBenchmarkSuitePrompts();
     const shortPrefix = prompts.short.split('\n\n合成记录：')[0];
@@ -455,6 +464,22 @@ try {
   check('历史任务详情在测试历史 Tab 内展示',
     (await page.locator('#benchHistoryDetail').textContent()).includes('历史任务详情正文') &&
     (await page.locator('#benchHistoryDetail').textContent()).includes('smoke-model'));
+  check('历史详情提供复制分析数据按钮',
+    await page.locator('#benchHistoryDetail [data-bench-history-copy]').isVisible());
+  const copiedAnalysis = await page.evaluate(() => benchmarkHistoryAnalysisPayload({
+    job:{job_id:'job-copy',request_id:'req-copy',scenario:'performance',status:'completed',model_id:'model-copy',
+      latency_ms:1200,input_tokens:100,output_tokens:40,response:'RAW_RESPONSE_MUST_NOT_COPY',
+      content_text:'MODEL_CONTENT_MUST_NOT_COPY',condition_status:'complete',condition_sha256:'fingerprint',
+      condition_snapshot:{model_identity:{model_key:'model-key',source_type:'hf',sha256:'abc123'},model_load_state_before:'loaded'}},
+    analysis:{phases_ms:{upstream_ms:900},throughput:{output_tokens_per_sec:33.3,llama_timings:{prompt_n:100,prompt_ms:200,predicted_n:40,predicted_ms:800}}}
+  }));
+  check('历史复制数据包含分析指标和模型身份，不包含正文或原始响应',
+    copiedAnalysis.task.job_id==='job-copy' &&
+    copiedAnalysis.model_identity.sha256==='abc123' &&
+    copiedAnalysis.llama_timings.prompt_ms===200 &&
+    !JSON.stringify(copiedAnalysis).includes('RAW_RESPONSE_MUST_NOT_COPY') &&
+    !JSON.stringify(copiedAnalysis).includes('MODEL_CONTENT_MUST_NOT_COPY'),
+    copiedAnalysis);
   const benchmarkTimingDetail = await page.locator('#benchHistoryDetail').textContent();
   check('Benchmark 历史详情展示缓存、每 Token timing 与 Prompt progress',
     benchmarkTimingDetail.includes('模型原生 Timings') &&
