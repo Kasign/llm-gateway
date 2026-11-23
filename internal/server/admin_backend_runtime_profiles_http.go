@@ -122,6 +122,7 @@ func (s *Server) backendRuntimeProfileSnapshot(ctx context.Context, id, backend,
 	if profile.Parameters.CacheTypeV != "" { parameters["cache_type_v"] = profile.Parameters.CacheTypeV }
 	return map[string]interface{}{
 		"profile_id": profile.ID,
+		"profile_name": profile.Name,
 		"profile_version": profile.Version,
 		"source": profile.Source,
 		"backend": profile.Backend,

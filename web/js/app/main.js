@@ -2342,8 +2342,16 @@ function renderBenchCondition(j){
         ?'核心运行条件完整；以下字段仅影响复现追溯，不阻断同条件性能比较：'+missing.map(x=>BENCH_CONDITION_MISSING_LABELS[x]||x).join('、')
         :'核心运行条件与追溯信息完整；仍需结合具体指标判断测试结果。';
   const fingerprint=typeof j.condition_sha256==='string'?j.condition_sha256:'';
+  const profile=j.condition_snapshot?.backend_runtime_profile||null;
+  const profileParams=profile?.parameters&&typeof profile.parameters==='object'
+    ?Object.entries(profile.parameters).map(([key,value])=>key+'='+String(value)).join(' · ')
+    :'';
+  const profileHtml=profile
+    ?'<p class="req-note" style="margin:4px 0 0">Backend 运行参数档案：'+esc(profile.profile_name||profile.profile_id||'用户声明')+' · v'+esc(String(profile.profile_version||'?'))+' · '+esc(profile.source||'user_declared')+'</p>'+
+      (profileParams?'<p class="req-note" style="margin:2px 0 0">运行参数：'+esc(profileParams)+'</p>':'')
+    :'<p class="req-note" style="margin:4px 0 0">Backend 运行参数档案：未关联（无法证明实际线程、Batch、上下文和 KV Cache 设置一致）</p>';
   return '<section class="bench-condition"><h3 style="margin:0 0 6px;font-size:13px">测试条件：'+esc(labels[status]||labels.unknown)+'</h3>'+
-    '<p class="req-note" style="margin:0">'+esc(detail)+'</p>'+
+    '<p class="req-note" style="margin:0">'+esc(detail)+'</p>'+profileHtml+
     (fingerprint?'<p class="req-note mono" style="margin:4px 0 0">条件指纹：'+esc(fingerprint.slice(0,16))+'</p>':'')+
     '</section>';
 }
@@ -3260,7 +3268,7 @@ function readBenchmarkRepeatReport(){try{const raw=localStorage.getItem(BENCH_RE
 function writeBenchmarkRepeatReport(report){localStorage.setItem(BENCH_REPEAT_STORAGE_KEY,JSON.stringify(report));}
 function benchmarkRepeatSampleFromWrap(wrap,index){
  const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens,profile=job.condition_snapshot?.backend_runtime_profile||{};
- return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',runtime_profile_id:profile.profile_id||'',runtime_profile_version:profile.profile_version??null,runtime_profile_source:profile.source||'',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
+ return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',runtime_profile_id:profile.profile_id||'',runtime_profile_name:profile.profile_name||'',runtime_profile_version:profile.profile_version??null,runtime_profile_source:profile.source||'',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
 }
 function renderBenchmarkRepeatReport(report=readBenchmarkRepeatReport()){
  const output=$('benchRepeatReport'),status=$('benchRepeatStatus'),copy=$('benchRepeatCopyBtn');if(!output)return;
