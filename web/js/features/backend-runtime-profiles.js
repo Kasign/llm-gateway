@@ -146,6 +146,10 @@ async function load() {
 async function loadBenchmarkOptions(backend = '', modelID = '') {
   const select = $('benchRuntimeProfile');
   if (!select) return;
+  if (backend && backend !== 'llamacpp') {
+    select.innerHTML = '<option value="">当前 Backend 暂不支持运行参数档案</option>';
+    return;
+  }
   try {
     const query = new URLSearchParams();
     if (backend) query.set('backend', backend);

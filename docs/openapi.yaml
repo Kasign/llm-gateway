@@ -3910,14 +3910,19 @@ components:
           properties:
             id: { type: string, minLength: 1, maxLength: 64 }
     BackendRuntimeProfile:
-      allOf:
-        - $ref: "#/components/schemas/BackendRuntimeProfileMutation"
-        - type: object
-          required: [id, version, source, updated_at]
-          properties:
-            version: { type: integer, minimum: 1 }
-            source: { type: string, const: user_declared }
-            updated_at: { type: string, format: date-time }
+      type: object
+      required: [id, name, backend, model_id, version, source, parameters, updated_at]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        backend: { type: string, const: llamacpp }
+        model_id: { type: string, minLength: 1, maxLength: 256 }
+        version: { type: integer, minimum: 1 }
+        source: { type: string, const: user_declared }
+        parameters: { $ref: "#/components/schemas/BackendRuntimeParameters" }
+        notes: { type: string, maxLength: 500 }
+        updated_at: { type: string, format: date-time }
+      additionalProperties: false
     InferenceParamsMutation:
       type: object
       properties:

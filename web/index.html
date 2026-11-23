@@ -329,7 +329,7 @@
         </div>
         <div class="card mm-section">
           <div class="card-head"><div><h2>Backend 运行参数档案</h2><p class="small muted">记录 llama.cpp 当前实际启动参数，供 Benchmark 条件快照和优化对照使用</p></div></div>
-          <p class="small muted">这些值由你按实际容器启动配置填写，来源标记为 user_declared。Gateway 只保存档案，不会修改、重启或控制 llama.cpp 进程。未填写的字段保持未知。</p>
+          <p class="small muted">这些值由你按实际容器启动配置填写，来源标记为 user_declared。Gateway 只保存档案，不会修改、重启或控制 llama.cpp 进程。未填写的字段保持未知；要获得严格优化对照资格，9 个运行参数必须全部有明确值，未知值会使 Benchmark 条件标记为 partial。</p>
           <div id="backendRuntimeProfilesRoot">
             <form id="backendRuntimeProfileForm" class="param-field-list">
               <input id="runtimeProfileID" type="hidden">

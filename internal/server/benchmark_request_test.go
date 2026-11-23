@@ -100,6 +100,44 @@ func hasBenchmarkMissingReason(values []string, want string) bool {
 	return false
 }
 
+func TestBenchmarkConditionFingerprintUsesRuntimeParameterValuesNotProfileMetadata(t *testing.T) {
+	snapshot := map[string]interface{}{
+		"backend": "llamacpp",
+		"model_id": "active-model",
+		"model_identity": map[string]interface{}{"model_id": "active-model", "sha256": "abc123"},
+		"environment": map[string]interface{}{"vcs_revision": "deadbeef", "vcs_modified": "false"},
+		"backend_version": "1.2.3",
+		"model_load_state_before": "loaded",
+		"hardware": map[string]interface{}{"cpu_model": "test-cpu", "memory_bytes": int64(32 << 30)},
+		"backend_runtime_profile": map[string]interface{}{
+			"profile_id": "profile-a", "profile_version": 1, "source": "user_declared",
+			"backend": "llamacpp", "model_id": "active-model",
+			"parameters": map[string]interface{}{
+				"threads": 8, "threads_batch": 8, "batch_size": 512, "ubatch_size": 128,
+				"ctx_size": 8192, "n_gpu_layers": 0, "flash_attn": false,
+				"cache_type_k": "q8_0", "cache_type_v": "q8_0",
+			},
+		},
+	}
+	first, status, _, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || status != "complete" {
+		t.Fatalf("baseline runtime profile condition = %q, err=%v", status, err)
+	}
+	profile := snapshot["backend_runtime_profile"].(map[string]interface{})
+	profile["profile_id"] = "profile-b"
+	profile["profile_version"] = 9
+	second, _, _, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || second != first {
+		t.Fatalf("profile identity/version metadata must not change runtime condition fingerprint: %q != %q, err=%v", second, first, err)
+	}
+	params := profile["parameters"].(map[string]interface{})
+	params["threads"] = 12
+	third, _, _, err := benchmarkConditionMetadata(snapshot, "prompt-hash")
+	if err != nil || third == first {
+		t.Fatalf("actual runtime parameter change must change condition fingerprint: %q == %q, err=%v", third, first, err)
+	}
+}
+
 func TestBenchmarkConditionMetadataRequiresCompleteBackendRuntimeProfile(t *testing.T) {
 	snapshot := map[string]interface{}{
 		"backend": "llamacpp",
