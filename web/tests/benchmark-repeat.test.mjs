@@ -20,7 +20,8 @@ test('summary only includes completed samples with one identical non-empty condi
   assert.equal(summary.comparable_count, 2);
   assert.equal(summary.metrics.latency_ms.median, 200);
   assert.equal(summary.metrics.ttft_ms.median, 30);
-  assert.deepEqual(summary.cache, { cold: 1, partial: 1 });
+  assert.equal(summary.cache_metrics.cold.count, 1);
+  assert.equal(summary.cache_metrics.partial.count, 1);
 });
 
 test('different condition fingerprints are not pooled', () => {
