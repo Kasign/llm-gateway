@@ -90,6 +90,18 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 	insertLog(running, "running", old)
 	insertLog(recent, "completed", recentTime)
 
+	// BenchmarkRun 尚在保留期时，不能先删除它引用的 RequestAnalysis。
+	benchmarkRepo := NewBenchmarkRepo(db)
+	benchmarkTaskID := prefix + "-benchmark"
+	benchmarkFinished := old.Add(2 * time.Hour)
+	if err := benchmarkRepo.CreateTaskAndRun(ctx,
+		BenchmarkTask{TaskID: benchmarkTaskID, Scenario: "performance", Status: "completed", StartedAt: old, FinishedAt: &benchmarkFinished},
+		BenchmarkRun{RunID: benchmarkTaskID, TaskID: benchmarkTaskID, RunNo: 1, RequestID: expired1, Status: "completed", StartedAt: old, FinishedAt: &benchmarkFinished},
+	); err != nil {
+		t.Fatalf("create benchmark reference: %v", err)
+	}
+	defer func() { _, _ = db.ExecContext(context.Background(), "DELETE FROM benchmark_tasks WHERE task_id=?", benchmarkTaskID) }()
+
 	if err := repo.InsertToolCallEvents(ctx, recent, []ToolCallEvent{{
 		Seq: 2, Round: 1, ToolName: "web.search", Status: "failed",
 		DurationMS: 7, ErrorCode: "tool_execution_failed",
@@ -118,8 +130,20 @@ func TestDeleteFinishedRequestsBeforeMariaDB(t *testing.T) {
 			break
 		}
 	}
-	if deleted != 2 {
-		t.Fatalf("deleted request count = %d, want 2", deleted)
+	if deleted != 1 {
+		t.Fatalf("deleted request count = %d, want 1 while Benchmark reference is retained", deleted)
+	}
+	var retained int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM request_logs WHERE request_id=?", expired1).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("Benchmark-linked request remains=%d, err=%v; want 1", retained, err)
+	}
+	deletedTasks, err := benchmarkRepo.DeleteFinishedBefore(ctx, cutoff, 10)
+	if err != nil || deletedTasks != 1 {
+		t.Fatalf("delete expired Benchmark task count=%d, err=%v; want 1", deletedTasks, err)
+	}
+	deleted, err = repo.DeleteFinishedRequestsBefore(ctx, cutoff, 10)
+	if err != nil || deleted != 1 {
+		t.Fatalf("delete request after Benchmark expiry count=%d, err=%v; want 1", deleted, err)
 	}
 	for _, tc := range []struct {
 		id   string
