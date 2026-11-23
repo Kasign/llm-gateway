@@ -6,7 +6,7 @@ export function normalizeBenchmarkRepeatCount(value){
   if(!Number.isInteger(raw)||raw<BENCHMARK_REPEAT_MIN||raw>BENCHMARK_REPEAT_MAX)throw new RangeError('重复次数必须是 1～20 之间的整数。');
   return raw;
 }
-function numericValues(samples,key){return(samples||[]).map(sample=>Number(sample?.[key])).filter(Number.isFinite);}
+function numericValues(samples,key){return(samples||[]).map(sample=>sample?.[key]).filter(value=>value!==null&&value!==undefined&&value!=='').map(Number).filter(Number.isFinite);}
 function median(values){
   if(!values.length)return null;
   const sorted=[...values].sort((a,b)=>a-b),middle=Math.floor(sorted.length/2);
