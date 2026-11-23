@@ -3052,6 +3052,10 @@ components:
           items: { type: string }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
+        analysis_status:
+          type: string
+          enum: [persisted, reconstructed, unavailable]
+          description: 分析数据来源状态；persisted 为持久化快照，reconstructed 为由请求日志/流事件重建，unavailable 为不可用
         analysis_note: { type: string }
         stream_events:
           type: array
@@ -3410,6 +3414,11 @@ components:
         payload_persisted: { type: boolean, description: "完整请求/响应正文是否已按 logging.store_payload 持久化" }
         analysis:
           $ref: "#/components/schemas/RequestAnalysis"
+        analysis_status:
+          type: string
+          enum: [persisted, not_recorded, request_log_missing, read_failed, invalid, store_unavailable]
+          description: Benchmark 关联请求分析的可用状态；活动任务尚未读取分析时可不返回
+        analysis_note: { type: string }
       additionalProperties: false
 
     FlexibleObject:
