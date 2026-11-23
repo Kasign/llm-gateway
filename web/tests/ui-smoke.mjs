@@ -280,8 +280,10 @@ try {
     cases:[{case_id:'S-P / S-O',status:'completed'},{case_id:'L-P / S-O',status:'cancelled'}]
   })));
   await clickTab(page, 'model-test', '模型测试');
-  check('部分完成报告显示续跑入口',
+  await page.locator('#modelTestTabSuite').click();
+  check('部分完成报告在四组测试 Tab 显示续跑入口',
     await page.locator('#benchSuiteResumeBtn').isVisible());
+  await page.locator('#modelTestTabPerformance').click();
   const duplicateRecovery = await page.evaluate(() => {
     const suite = {
       suite_version:'perf12-four-case-v2',status:'partial',prompt_version:'perf12-synthetic-dataset-v2',
