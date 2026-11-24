@@ -134,7 +134,7 @@
             <form id="researchCreateForm" class="param-field-list">
               <div class="row">
                 <div class="field"><label for="researchName">实验名称</label><input id="researchName" maxlength="160" required placeholder="例如：线程数 4 与 6 的性能对比"></div>
-                <div class="field"><label for="researchChangedParameter">唯一变化参数</label><input id="researchChangedParameter" maxlength="64" required placeholder="例如 threads"></div>
+                <div class="field"><label for="researchChangedParameter">唯一变化参数</label><select id="researchChangedParameter" required><option value="">请选择运行参数…</option><option value="threads">threads</option><option value="threads_batch">threads_batch</option><option value="batch_size">batch_size</option><option value="ubatch_size">ubatch_size</option><option value="ctx_size">ctx_size</option><option value="n_gpu_layers">n_gpu_layers</option><option value="flash_attn">flash_attn</option><option value="cache_type_k">cache_type_k</option><option value="cache_type_v">cache_type_v</option></select></div>
                 <div class="field"><label for="researchPlannedSamples">每组计划样本数</label><input id="researchPlannedSamples" type="number" min="1" max="20" value="10" required></div>
               </div>
               <div class="row">
