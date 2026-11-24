@@ -145,6 +145,62 @@
               <div class="btn-row"><button type="submit" class="btn primary">创建实验</button><span id="researchCreateMessage" class="small muted" role="status"></span></div>
             </form>
           </details>
+          <details class="card compact" open>
+            <summary>研究运行环境与采样执行</summary>
+            <div class="row">
+              <div class="field"><label for="researchApiKey">客户端服务密钥</label><input id="researchApiKey" type="password" autocomplete="off" placeholder="仅保存在当前页面内存"></div>
+              <div class="field"><label for="researchPrompt">实验提示词</label><textarea id="researchPrompt" rows="3">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea></div>
+              <div class="field"><label for="researchRuntimeProfile">Backend 运行参数档案</label><select id="researchRuntimeProfile"><option value="">不关联档案（运行参数未知）</option></select><small class="muted">选择与当前模型及实际容器启动参数一致的档案。</small></div>
+            </div>
+            <div class="card">
+          <div class="card-head"><div><h2>Backend 运行参数档案</h2><p class="small muted">记录 llama.cpp 当前实际启动参数，供 Benchmark 条件快照和优化对照使用</p></div></div>
+          <p class="small muted">这些值由你按实际容器启动配置填写，来源标记为 user_declared。Gateway 只保存档案，不会修改、重启或控制 llama.cpp 进程。未填写的字段保持未知；要获得严格优化对照资格，9 个运行参数必须全部有明确值，未知值会使 Benchmark 条件标记为 partial。</p>
+          <div id="backendRuntimeProfilesRoot">
+            <form id="backendRuntimeProfileForm" class="param-field-list">
+              <input id="runtimeProfileID" type="hidden">
+              <div class="row">
+                <div class="field"><label for="runtimeProfileName">档案名称</label><input id="runtimeProfileName" maxlength="80" placeholder="例如：NUC CPU baseline" required></div>
+                <div class="field"><label for="runtimeProfileModelID">上游模型 ID</label><input id="runtimeProfileModelID" maxlength="256" placeholder="必须与实际加载模型 ID 完全一致" required></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileThreads">threads</label><input id="runtimeProfileThreads" type="number" min="0" max="256" placeholder="未知留空；0=后端默认"></div>
+                <div class="field"><label for="runtimeProfileThreadsBatch">threads_batch</label><input id="runtimeProfileThreadsBatch" type="number" min="0" max="256" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileBatchSize">batch_size</label><input id="runtimeProfileBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileUBatchSize">ubatch_size</label><input id="runtimeProfileUBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileContextSize">ctx_size</label><input id="runtimeProfileContextSize" type="number" min="1" max="1048576" placeholder="未知留空"></div>
+                <div class="field"><label for="runtimeProfileGPULayers">n_gpu_layers</label><input id="runtimeProfileGPULayers" type="number" min="-1" max="1024" placeholder="未知留空；0=CPU"></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="runtimeProfileFlashAttention">flash_attn</label><select id="runtimeProfileFlashAttention"><option value="">未知</option><option value="true">true</option><option value="false">false</option></select></div>
+                <div class="field"><label for="runtimeProfileCacheTypeK">cache_type_k</label><input id="runtimeProfileCacheTypeK" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
+                <div class="field"><label for="runtimeProfileCacheTypeV">cache_type_v</label><input id="runtimeProfileCacheTypeV" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
+              </div>
+              <div class="field"><label for="runtimeProfileNotes">备注</label><textarea id="runtimeProfileNotes" rows="2" maxlength="500" placeholder="可记录容器版本、启动参数来源等"></textarea></div>
+              <div class="btn-row"><button type="submit" class="btn primary">保存档案</button><button type="button" id="runtimeProfileClearBtn" class="btn ghost">清空表单</button></div>
+              <p id="runtimeProfileMsg" class="small muted" role="status" aria-live="polite">档案只记录实际部署参数，不会修改或重启 llama.cpp。</p>
+            </form>
+            <div id="backendRuntimeProfilesList"></div>
+          </div>
+        </div>
+            <div class="bench-actions">
+              <label class="small" for="benchRepeatCount">重复次数</label>
+            <input id="benchRepeatCount" type="number" min="1" max="20" step="1" value="10" style="width:88px" aria-describedby="benchRepeatHint">
+            <label class="small" for="benchRepeatExperiment">关联研究实验</label>
+            <select id="benchRepeatExperiment" style="max-width:220px"><option value="">仅保存 Benchmark 历史</option></select>
+            <label class="small" for="benchRepeatGroup">实验分组</label>
+            <select id="benchRepeatGroup" style="max-width:130px"><option value="baseline">Baseline</option><option value="candidate">Candidate</option></select>
+            <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runBenchmarkRepeat()">开始串行采样</button>
+              <button type="button" class="btn danger" id="researchStopBtn" onclick="stopBenchmark()" disabled>停止研究采样</button>
+            </div>
+                      <p id="benchRepeatHint" class="small muted">1～20 次，默认 10 次；每次独立保存任务，固定当前推理参数，串行执行。</p>
+          <section class="bench-detail-fold" aria-labelledby="benchRepeatReportTitle">
+            <div class="card-head"><h3 id="benchRepeatReportTitle">重复采样报告</h3><button type="button" class="btn sm" id="benchRepeatCopyBtn" onclick="copyBenchmarkRepeatReport()" disabled>复制 Markdown</button></div>
+            <p id="benchRepeatStatus" class="small muted" role="status" aria-live="polite">默认 10 次；每次独立保存到 Benchmark 历史。</p>
+            <pre id="benchRepeatReport" class="bench-out">尚未执行重复采样。</pre>
+          </section>
+          </details>
           <div id="researchStatus" class="msg muted" role="status" aria-live="polite">正在读取研究实验…</div>
           <div class="table-wrap"><table><thead><tr><th>实验名称</th><th>变化参数</th><th>状态</th><th>计划样本</th><th>已关联 Job</th><th>更新时间</th></tr></thead><tbody id="researchRows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table></div>
           <div id="researchDetail" class="card compact" hidden></div>
@@ -358,38 +414,7 @@
           </div>
           <div id="inferenceParamsRoot" class="inference-params-root muted">加载中…</div>
         </div>
-        <div class="card mm-section">
-          <div class="card-head"><div><h2>Backend 运行参数档案</h2><p class="small muted">记录 llama.cpp 当前实际启动参数，供 Benchmark 条件快照和优化对照使用</p></div></div>
-          <p class="small muted">这些值由你按实际容器启动配置填写，来源标记为 user_declared。Gateway 只保存档案，不会修改、重启或控制 llama.cpp 进程。未填写的字段保持未知；要获得严格优化对照资格，9 个运行参数必须全部有明确值，未知值会使 Benchmark 条件标记为 partial。</p>
-          <div id="backendRuntimeProfilesRoot">
-            <form id="backendRuntimeProfileForm" class="param-field-list">
-              <input id="runtimeProfileID" type="hidden">
-              <div class="row">
-                <div class="field"><label for="runtimeProfileName">档案名称</label><input id="runtimeProfileName" maxlength="80" placeholder="例如：NUC CPU baseline" required></div>
-                <div class="field"><label for="runtimeProfileModelID">上游模型 ID</label><input id="runtimeProfileModelID" maxlength="256" placeholder="必须与实际加载模型 ID 完全一致" required></div>
-              </div>
-              <div class="row">
-                <div class="field"><label for="runtimeProfileThreads">threads</label><input id="runtimeProfileThreads" type="number" min="0" max="256" placeholder="未知留空；0=后端默认"></div>
-                <div class="field"><label for="runtimeProfileThreadsBatch">threads_batch</label><input id="runtimeProfileThreadsBatch" type="number" min="0" max="256" placeholder="未知留空"></div>
-                <div class="field"><label for="runtimeProfileBatchSize">batch_size</label><input id="runtimeProfileBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
-              </div>
-              <div class="row">
-                <div class="field"><label for="runtimeProfileUBatchSize">ubatch_size</label><input id="runtimeProfileUBatchSize" type="number" min="1" max="65536" placeholder="未知留空"></div>
-                <div class="field"><label for="runtimeProfileContextSize">ctx_size</label><input id="runtimeProfileContextSize" type="number" min="1" max="1048576" placeholder="未知留空"></div>
-                <div class="field"><label for="runtimeProfileGPULayers">n_gpu_layers</label><input id="runtimeProfileGPULayers" type="number" min="-1" max="1024" placeholder="未知留空；0=CPU"></div>
-              </div>
-              <div class="row">
-                <div class="field"><label for="runtimeProfileFlashAttention">flash_attn</label><select id="runtimeProfileFlashAttention"><option value="">未知</option><option value="true">true</option><option value="false">false</option></select></div>
-                <div class="field"><label for="runtimeProfileCacheTypeK">cache_type_k</label><input id="runtimeProfileCacheTypeK" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
-                <div class="field"><label for="runtimeProfileCacheTypeV">cache_type_v</label><input id="runtimeProfileCacheTypeV" maxlength="16" placeholder="例如 q8_0；未知留空"></div>
-              </div>
-              <div class="field"><label for="runtimeProfileNotes">备注</label><textarea id="runtimeProfileNotes" rows="2" maxlength="500" placeholder="可记录容器版本、启动参数来源等"></textarea></div>
-              <div class="btn-row"><button type="submit" class="btn primary">保存档案</button><button type="button" id="runtimeProfileClearBtn" class="btn ghost">清空表单</button></div>
-              <p id="runtimeProfileMsg" class="small muted" role="status" aria-live="polite">档案只记录实际部署参数，不会修改或重启 llama.cpp。</p>
-            </form>
-            <div id="backendRuntimeProfilesList"></div>
-          </div>
-        </div>
+        
       </section>
 
       <section id="account" class="panel">
@@ -565,21 +590,8 @@
           </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">单次测试</button>
-            <label class="small" for="benchRepeatCount">重复次数</label>
-            <input id="benchRepeatCount" type="number" min="1" max="20" step="1" value="10" style="width:88px" aria-describedby="benchRepeatHint">
-            <label class="small" for="benchRepeatExperiment">关联研究实验</label>
-            <select id="benchRepeatExperiment" style="max-width:220px"><option value="">仅保存 Benchmark 历史</option></select>
-            <label class="small" for="benchRepeatGroup">实验分组</label>
-            <select id="benchRepeatGroup" style="max-width:130px"><option value="baseline">Baseline</option><option value="candidate">Candidate</option></select>
-            <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runBenchmarkRepeat()">开始串行采样</button>
             <button type="button" class="btn danger" id="benchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
           </div>
-          <p id="benchRepeatHint" class="small muted">1～20 次，默认 10 次；每次独立保存任务，固定当前推理参数，串行执行。</p>
-          <section class="bench-detail-fold" aria-labelledby="benchRepeatReportTitle">
-            <div class="card-head"><h3 id="benchRepeatReportTitle">重复采样报告</h3><button type="button" class="btn sm" id="benchRepeatCopyBtn" onclick="copyBenchmarkRepeatReport()" disabled>复制 Markdown</button></div>
-            <p id="benchRepeatStatus" class="small muted" role="status" aria-live="polite">默认 10 次；每次独立保存到 Benchmark 历史。</p>
-            <pre id="benchRepeatReport" class="bench-out">尚未执行重复采样。</pre>
-          </section>
           <div id="benchMetrics" class="bench-metrics"></div>
           <div id="benchAnalysis" class="bench-analysis" style="display:none"></div>
           <div class="card-head" style="margin-top:8px;margin-bottom:8px"><h2 style="font-size:14px">正文 content</h2></div>
