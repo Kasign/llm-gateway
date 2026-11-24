@@ -80,3 +80,27 @@ func TestBenchmarkExperimentProfileParameterWhitelist(t *testing.T) {
 		if benchmarkExperimentProfileParameter(name){t.Fatalf("unexpected supported parameter %q",name)}
 	}
 }
+
+
+func TestBenchmarkExperimentStatsAndP95(t *testing.T) {
+ values:=[]float64{10,1,9,3,8,2,7,4,6,5}
+ stats:=benchmarkExperimentStats(values)
+ if stats.Count!=10||stats.Min!=1||stats.Max!=10||stats.Median!=5.5||stats.P95!=10{t.Fatalf("unexpected stats: %+v",stats)}
+}
+func TestBenchmarkExperimentMetricConclusionRequiresConsistentChange(t *testing.T) {
+ base:=benchmarkExperimentMetricStats{Count:10,Median:100,P95:120}
+ better:=benchmarkExperimentMetricStats{Count:10,Median:90,P95:108}
+ if got,_,_:=benchmarkExperimentMetricConclusion(base,better,true);got!="improved"{t.Fatalf("latency conclusion=%s",got)}
+ mixed:=benchmarkExperimentMetricStats{Count:10,Median:90,P95:130}
+ if got,_,_:=benchmarkExperimentMetricConclusion(base,mixed,true);got!="inconclusive"{t.Fatalf("mixed conclusion=%s",got)}
+ few:=benchmarkExperimentMetricStats{Count:4,Median:90,P95:108}
+ if got,_,_:=benchmarkExperimentMetricConclusion(base,few,true);got!="insufficient_data"{t.Fatalf("small sample conclusion=%s",got)}
+}
+func TestBenchmarkExperimentCacheStateRequiresCompleteEvidence(t *testing.T) {
+ zero,full,half:=int64(0),int64(100),int64(40)
+ input,prompt:=int64(100),int64(0)
+ if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&zero,PromptN:&input},&input);got!="cold"{t.Fatalf("cold=%s",got)}
+ if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&full,PromptN:&prompt},&input);got!="full"{t.Fatalf("full=%s",got)}
+ if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&half,PromptN:&half},&input);got!="partial"{t.Fatalf("partial=%s",got)}
+ if got:=benchmarkExperimentCacheState(nil,&input);got!="unknown"{t.Fatalf("unknown=%s",got)}
+}

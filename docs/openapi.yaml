@@ -2123,6 +2123,31 @@ paths:
         "200": { description: Job 已关联；重复关联幂等 }
         "400": { $ref: "#/components/responses/AdminError" }
         "404": { $ref: "#/components/responses/AdminError" }
+  /api/admin/research/experiments/{experiment_id}/compare:
+    get:
+      operationId: compareResearchExperiment
+      tags: [Admin]
+      summary: 基于真实 Benchmark Job 比较单变量研究实验
+      description: 从服务端持久化的 Task、Run 和请求分析读取样本；按 Prompt Cache 状态分组计算中位数、P95、最小值、最大值及变化方向。样本不足或证据不完整时不输出优化结论。
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 服务端单变量比较报告
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [comparison]
+                properties:
+                  comparison: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "404": { $ref: "#/components/responses/AdminError" }
+        "409": { $ref: "#/components/responses/AdminError" }
+        "500": { $ref: "#/components/responses/AdminError" }
   /api/admin/backend-runtime-profiles:
     get:
       operationId: getApiAdminBackendRuntimeProfiles

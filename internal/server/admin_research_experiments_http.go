@@ -182,6 +182,20 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 			if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found")}else{jsonError(w,400,"invalid_experiment_state",err.Error())};return}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok":true});return
 	}
+	if len(parts)==2&&parts[1]=="compare"&&r.Method==http.MethodGet{
+		e,err:=s.benchmarkExperimentRepo.Get(r.Context(),id)
+		if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found");return}
+		if err!=nil{jsonError(w,500,"research_read_failed","failed to read research experiment");return}
+		if e.Status=="draft"||e.Status=="queued"||e.Status=="running"{jsonError(w,409,"experiment_not_finished","finish or stop both experiment groups before comparison");return}
+		comparison,err:=s.buildBenchmarkExperimentComparison(r.Context(),e)
+		if err!=nil{jsonError(w,500,"research_comparison_failed","failed to build research comparison");return}
+		report:=map[string]interface{}{}
+		if strings.TrimSpace(e.ReportJSON)!=""{if json.Unmarshal([]byte(e.ReportJSON),&report)!=nil{report=map[string]interface{}{"sampling_report_raw":e.ReportJSON}}}
+		report["comparison"]=comparison
+		encoded,marshalErr:=json.Marshal(report);if marshalErr!=nil{jsonError(w,500,"research_comparison_failed","failed to encode research comparison");return}
+		if err:=s.benchmarkExperimentRepo.UpdateState(r.Context(),id,e.Status,string(encoded),e.ErrorCode,e.ErrorMessage,e.StartedAt,e.FinishedAt);err!=nil{jsonError(w,500,"research_persist_failed","failed to persist research comparison");return}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"comparison":comparison});return
+	}
 	if len(parts)==2&&parts[1]=="jobs"&&r.Method==http.MethodPost{
 		var in benchmarkExperimentJobRequest;if err:=decodeResearchJSON(w,r,&in);err!=nil{jsonError(w,400,"invalid_request","invalid experiment job JSON");return}
 		experiment, loadErr := s.benchmarkExperimentRepo.Get(r.Context(), id)

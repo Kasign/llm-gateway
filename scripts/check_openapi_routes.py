@@ -44,6 +44,7 @@ ROUTE_FAMILIES = {
         "/api/admin/research/experiments/{experiment_id}",
         "/api/admin/research/experiments/{experiment_id}/state",
         "/api/admin/research/experiments/{experiment_id}/jobs",
+        "/api/admin/research/experiments/{experiment_id}/compare",
     ),
     "/api/admin/keys/": (
         "/api/admin/keys/{id}",
