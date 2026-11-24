@@ -3695,6 +3695,7 @@ exposeGlobals({
   resumeBenchmarkSession,
   rotateKey,
   runBenchmark,
+  runResearchExperimentRepeat,
   runBenchmarkRepeat,
   renderBenchmarkRepeatReport,
   copyBenchmarkRepeatReport,
