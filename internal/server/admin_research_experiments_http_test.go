@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http/httptest"
 	"encoding/json"
 	"strings"
@@ -125,3 +126,34 @@ func TestBenchmarkExperimentOverallConclusionIsConservative(t *testing.T) {
  }
  for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){if got:=benchmarkExperimentOverallConclusion(tc.values);got!=tc.want{t.Fatalf("got %q, want %q",got,tc.want)}})}
 }
+
+func TestValidateBenchmarkExperimentJobAcceptsMatchingRuntimeProfileAndRejectsWrongGroup(t *testing.T) {
+	parameters:=map[string]interface{}{
+		"threads":4,"threads_batch":4,"batch_size":512,"ubatch_size":128,
+		"ctx_size":8192,"n_gpu_layers":0,"flash_attn":true,
+		"cache_type_k":"q8_0","cache_type_v":"q8_0",
+	}
+	config:=map[string]interface{}{
+		"backend":"llama.cpp","model_id":"smoke-model","scenario":"performance",
+		"backend_runtime_profile":map[string]interface{}{
+			"backend":"llama.cpp","model_id":"smoke-model","parameters":parameters,
+			"profile_id":"profile-baseline","profile_version":1,"profile_name":"Baseline",
+		},
+		"prompt_sha256":"prompt-sha256","max_tokens":256,
+	}
+	encoded,err:=json.Marshal(config)
+	if err!=nil{t.Fatalf("marshal task config: %v",err)}
+	task:=&store.BenchmarkTask{TaskID:"job-baseline",Status:"running",ConfigJSON:string(encoded),PromptSHA256:"prompt-sha256"}
+	experiment:=&store.BenchmarkExperiment{
+		ExperimentID:"experiment-test",Status:"running",ChangedParameter:"threads",
+		BaselineValueJSON:"4",CandidateValueJSON:"6",
+		BaselineJobIDsJSON:"[]",CandidateJobIDsJSON:"[]",
+	}
+	if err:=validateBenchmarkExperimentJob(context.Background(),nil,experiment,"baseline",task);err!=nil{
+		t.Fatalf("matching baseline Job should be associable: %v",err)
+	}
+	if err:=validateBenchmarkExperimentJob(context.Background(),nil,experiment,"candidate",task);err==nil{
+		t.Fatal("Job whose threads value matches Baseline must not be associated with Candidate")
+	}
+}
+
