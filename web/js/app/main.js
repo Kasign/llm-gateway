@@ -26,6 +26,7 @@ import {
 import { exposeGlobals } from '../expose.js';
 import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsActiveStatus, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
 import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown } from '../features/benchmark-repeat.mjs';
+import { buildCandidateRuntimeProfile, parseResearchCandidateValue, RESEARCH_DECODE_PROMPT, RESEARCH_DECODE_REQUEST_PARAMS, RESEARCH_REQUIRED_PROFILE_PARAMETERS } from '../features/research-workflow.mjs';
 
 // 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
 initAdminKey();
@@ -211,18 +212,73 @@ async function inferenceOp(backend,action,{model_id='',model_key=''}={},title){
 }
 
 
+let researchRuntimeProfileItems=[];
+function updateResearchBaselineValuePreview(){
+  const profileID=$('researchRuntimeProfile')?.value||'';
+  const parameter=$('researchChangedParameter')?.value||'';
+  const profile=researchRuntimeProfileItems.find(item=>item.id===profileID);
+  const value=profile?.parameters?.[parameter];
+  const preview=$('researchBaselineValuePreview');
+  if(preview)preview.value=value===undefined||value===null?'未知':String(value);
+}
 async function createResearchExperiment(event){
-  event.preventDefault();const message=$('researchCreateMessage');if(message)message.textContent='正在创建…';
+  event.preventDefault();
+  const message=$('researchCreateMessage'),submit=$('researchCreateRunBtn');
+  if(message)message.textContent='正在准备实验…';
+  if(submit)submit.disabled=true;
+  let createdExperimentID='',createdCandidateProfileID='';
   try{
-    const parse=(id)=>JSON.parse($(id)?.value||'');
-    const body={name:$('researchName').value.trim(),changed_parameter:$('researchChangedParameter').value.trim(),
-      baseline_value:parse('researchBaselineValue'),candidate_value:parse('researchCandidateValue'),
-      planned_samples:Number($('researchPlannedSamples').value||10)};
-    const result=await api('/api/admin/research/experiments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(message)message.textContent='实验已创建：'+result.experiment.experiment_id;
-    $('researchCreateForm')?.reset();await loadResearchExperiments();
-    const select=$('benchRepeatExperiment');if(select)select.value=result.experiment.experiment_id;
-  }catch(error){if(message)message.textContent='创建失败：'+(error?.message||'请检查输入');}
+    const clientKey=($('researchApiKey')?.value||'').trim();
+    if(!clientKey)throw new Error('请先填写客户端服务密钥。');
+    const target=await loadBenchPanel({resume:false});
+    if(!target?.upstream)throw new Error('当前没有已加载模型。');
+    const backendResult=await api('/api/admin/backend');
+    const backend=(backendResult.active||{}).backend||'llamacpp';
+    if(backend!=='llamacpp')throw new Error('性能研究目前只支持 llama.cpp Backend。');
+    const query=new URLSearchParams({backend,model_id:target.upstream});
+    const profileResult=await api('/api/admin/backend-runtime-profiles?'+query.toString());
+    researchRuntimeProfileItems=Array.isArray(profileResult.items)?profileResult.items:[];
+    const baselineProfile=researchRuntimeProfileItems.find(item=>item.id===$('researchRuntimeProfile')?.value);
+    if(!baselineProfile)throw new Error('请选择与当前模型匹配的 Baseline 运行参数档案。');
+    const parameter=$('researchChangedParameter')?.value||'';
+    const candidateValue=parseResearchCandidateValue(parameter,$('researchCandidateValue')?.value);
+    const baselineValue=baselineProfile.parameters?.[parameter];
+    if(baselineValue===undefined||baselineValue===null)throw new Error('Baseline 档案没有记录 '+parameter+'。');
+    const candidatePayload=buildCandidateRuntimeProfile(baselineProfile,parameter,candidateValue);
+    const plannedSamples=Number($('researchPlannedSamples')?.value||10);
+    if(!Number.isInteger(plannedSamples)||plannedSamples<5||plannedSamples>20)throw new Error('每组采样次数必须是 5～20 次。');
+    const defaultName=baselineProfile.name+' · '+parameter+' '+String(baselineValue)+' → '+String(candidateValue);
+    const createResult=await api('/api/admin/research/experiments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name:($('researchName')?.value||'').trim()||defaultName,
+      changed_parameter:parameter,baseline_value:baselineValue,candidate_value:candidateValue,planned_samples:plannedSamples
+    })});
+    createdExperimentID=createResult.experiment.experiment_id;
+    const candidateResult=await api('/api/admin/backend-runtime-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(candidatePayload)});
+    createdCandidateProfileID=candidateResult.profile.id;
+    const workflow={version:1,phase:'baseline_pending',parameter,baseline_profile_id:baselineProfile.id,
+      baseline_profile_name:baselineProfile.name,candidate_profile_id:createdCandidateProfileID,
+      candidate_profile_name:candidateResult.profile.name,planned_samples:plannedSamples,min_output_tokens:256,
+      test_profile:'llama-cpp-decode-v1'};
+    await api('/api/admin/research/experiments/'+encodeURIComponent(createdExperimentID)+'/state',{
+      method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'draft',report:{workflow}})
+    });
+    const experimentSelect=$('benchRepeatExperiment');
+    if(experimentSelect){
+      if(![...experimentSelect.options].some(option=>option.value===createdExperimentID))experimentSelect.add(new Option(defaultName,createdExperimentID));
+      experimentSelect.value=createdExperimentID;
+    }
+    const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value='baseline';
+    const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(plannedSamples);
+    if($('researchPrompt'))$('researchPrompt').value=RESEARCH_DECODE_PROMPT;
+    if(message)message.textContent='实验已建立，正在自动执行 Baseline（'+plannedSamples+' 次）。';
+    await globalThis.BackendRuntimeProfiles?.load().catch(()=>{});
+    await loadResearchExperiments();
+    await runResearchExperimentRepeat({experimentID:createdExperimentID,group:'baseline',profileID:baselineProfile.id,workflow});
+  }catch(error){
+    if(createdExperimentID)await api('/api/admin/research/experiments/'+encodeURIComponent(createdExperimentID),{method:'DELETE'}).catch(()=>{});
+    if(createdCandidateProfileID)await api('/api/admin/backend-runtime-profiles/'+encodeURIComponent(createdCandidateProfileID),{method:'DELETE'}).catch(()=>{});
+    if(message)message.textContent='创建失败：'+(error?.message||'请检查输入');
+  }finally{if(submit)submit.disabled=false;}
 }
 $('researchCreateForm')?.addEventListener('submit',createResearchExperiment);
 
@@ -230,14 +286,27 @@ async function loadResearchRuntimeOptions(){
   const select=$('researchRuntimeProfile');if(!select)return;
   try{
     const target=await loadBenchPanel({resume:false});
-    if(!target?.upstream){select.innerHTML='<option value="">当前没有已加载模型</option>';return;}
+    if(!target?.upstream){select.innerHTML='<option value="">当前没有已加载模型</option>';researchRuntimeProfileItems=[];updateResearchBaselineValuePreview();return;}
     const backendResult=await api('/api/admin/backend');
     const backend=(backendResult.active||{}).backend||'llamacpp';
-    await globalThis.BackendRuntimeProfiles?.loadBenchmarkOptions(backend,target.upstream,'researchRuntimeProfile');
+    if(backend!=='llamacpp'){select.innerHTML='<option value="">当前 Backend 不支持 llama.cpp 研究</option>';return;}
+    const query=new URLSearchParams({backend,model_id:target.upstream});
+    const result=await api('/api/admin/backend-runtime-profiles?'+query.toString());
+    researchRuntimeProfileItems=Array.isArray(result.items)?result.items:[];
+    const previous=select.value;
+    select.innerHTML='<option value="">选择当前运行参数档案…</option>'+researchRuntimeProfileItems.map(profile=>
+      '<option value="'+esc(profile.id)+'">'+esc(profile.name)+' · v'+esc(String(profile.version||1))+'</option>'
+    ).join('');
+    if(researchRuntimeProfileItems.some(profile=>profile.id===previous))select.value=previous;
+    else if(researchRuntimeProfileItems.length===1)select.value=researchRuntimeProfileItems[0].id;
+    updateResearchBaselineValuePreview();
   }catch(error){
-    select.innerHTML='<option value="">运行参数档案加载失败：'+esc(error?.message||'未知错误')+'</option>';
+    researchRuntimeProfileItems=[];select.innerHTML='<option value="">运行参数档案加载失败：'+esc(error?.message||'未知错误')+'</option>';
   }
 }
+$('researchRuntimeProfile')?.addEventListener('change',updateResearchBaselineValuePreview);
+$('researchChangedParameter')?.addEventListener('change',updateResearchBaselineValuePreview);
+
 async function loadResearchExperiments(){
   const status=$('researchStatus'),rows=$('researchRows');if(!status||!rows)return;
   status.textContent='正在读取研究实验…';
@@ -260,7 +329,7 @@ function renderResearchComparison(report){
   const conclusionLabels={improved:'改善',regressed:'退化',no_material_change:'无明显变化',inconclusive:'结论不确定',insufficient_data:'样本不足'};
   const statusLabels={completed:'完成',partial:'部分完成',insufficient_data:'样本不足'};
   const cacheLabels={cold:'冷缓存',partial:'部分缓存',full:'全命中缓存'};
-  const metricLabels={latency_ms:'总延迟（ms）',inference_latency_ms:'推理延迟（ms）',ttft_ms:'首 Token 延迟（ms）',prompt_ms:'Prompt 处理（ms）',decode_ms:'Decode（ms）',output_tokens_per_sec:'输出吞吐（Token/s）',prompt_tokens_per_sec:'Prompt 吞吐（Token/s）',decode_tokens_per_sec:'Decode 吞吐（Token/s）'};
+  const metricLabels={decode_tokens_per_sec:'Decode 生成速度（Token/s）',output_tokens_per_sec:'输出吞吐（Token/s）',latency_ms:'总延迟（ms）',inference_latency_ms:'推理延迟（ms）',ttft_ms:'首 Token 延迟（ms）',prompt_ms:'Prompt 处理（ms）',prompt_tokens_per_sec:'Prompt 吞吐（Token/s）',decode_ms:'Decode 耗时（ms）'};
   const number=v=>v===null||v===undefined||v===''?'—':(Number.isFinite(Number(v))?Number(v).toFixed(2):'—');
   const stat=(stats,key)=>stats?.count>0?number(stats[key]):'—';
   const comparabilityLabels={strict:'严格可比',limited:'有限可比',not_comparable:'不可比较'};
@@ -274,7 +343,9 @@ function renderResearchComparison(report){
     return '<section class="card"><h4>'+esc(cacheLabels[cache]||cache)+'</h4><p class="small muted">有效 Job：Baseline '+esc(group.baseline_sample_count||0)+' · Candidate '+esc(group.candidate_sample_count||0)+'</p>'+wrapTable('<tr><th>指标</th><th>样本数 B / C</th><th>Baseline 统计</th><th>Candidate 统计</th><th>变化 Median / P95</th><th>结论</th></tr>'+(rows||'<tr><td colspan="6">没有可比较指标</td></tr>'))+'</section>';
   }).join('');
   const excluded=(comparison.excluded_samples||[]).map(x=>'<li><code>'+esc(x.job_id||'')+'</code> · '+esc(x.group||'')+' · '+esc(x.reason||'unknown')+'</li>').join('');
+  const primaryConclusionLabels={improved:'改善',regressed:'退化',no_material_change:'无明显变化',inconclusive:'结论不确定',insufficient_data:'样本不足'};
   return '<section class="card"><div class="card-head"><h4>单变量比较结论</h4><span class="pill">'+esc(conclusionLabels[comparison.conclusion]||comparison.conclusion||'—')+'</span></div>'+
+    '<p><strong>Decode 主指标：</strong>'+esc(primaryConclusionLabels[comparison.primary_conclusion]||comparison.primary_conclusion||'样本不足')+' · 最低输出长度 '+esc(comparison.minimum_output_tokens||256)+' Token</p>'+
     '<p>可比等级：'+esc(comparabilityLabels[comparison.comparability_level]||comparison.comparability_level||'—')+'；状态：'+esc(statusLabels[comparison.status]||comparison.status||'—')+'</p>'+
     '<p>变化参数：<code>'+esc(comparison.changed_parameter||'')+'</code>；阈值：'+esc(number(comparison.material_delta_threshold_percent))+'%</p>'+
     sections+
@@ -286,29 +357,47 @@ async function openResearchExperiment(id){
   const root=$('researchDetail');if(!root)return;root.hidden=false;root.textContent='正在读取实验详情…';
   try{
     const result=await api('/api/admin/research/experiments/'+encodeURIComponent(id)),e=result.experiment||{};
-    const jobs=[...(e.baseline_job_ids||[]).map(x=>'Baseline: '+x),...(e.candidate_job_ids||[]).map(x=>'Candidate: '+x)];
     const canCompare=!['draft','queued','running'].includes(e.status)&&(e.baseline_job_ids||[]).length>0&&(e.candidate_job_ids||[]).length>0;
     const active=['queued','running'].includes(e.status);
+    const workflow=e.report?.workflow||null;
+    let workflowAction='';
+    if(workflow?.version===1){
+      const phase=workflow.phase||'baseline_pending';
+      if(phase==='awaiting_candidate'||phase==='candidate_pending'){
+        workflowAction='<div class="card"><p><strong>下一步：切换 Backend 参数</strong></p><p>请只把 llama.cpp 的 <code>'+esc(workflow.parameter)+'</code> 从 <code>'+esc(JSON.stringify(e.baseline_value))+'</code> 改为 <code>'+esc(JSON.stringify(e.candidate_value))+'</code>，重启 llama.cpp。然后点击下方按钮，系统会自动使用已生成的 Candidate 档案执行 '+esc(e.planned_samples)+' 次采样并生成比较报告。</p><button type="button" class="btn primary" data-research-run-group="candidate" data-research-id="'+esc(e.experiment_id)+'">已修改并重启，开始 Candidate</button></div>';
+      }else if(phase==='baseline_pending'){
+        workflowAction='<div class="btn-row"><button type="button" class="btn primary" data-research-run-group="baseline" data-research-id="'+esc(e.experiment_id)+'">继续 Baseline 采样</button></div>';
+      }else if(phase==='candidate_complete'){
+        workflowAction='<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">重新计算比较报告</button></div>';
+      }else if(phase==='completed'){
+        workflowAction='<p class="small muted">Baseline / Candidate 均已完成，比较报告已自动生成。</p>';
+      }else if(phase==='baseline_running'||phase==='candidate_running'){
+        workflowAction='<p class="small muted">研究采样正在执行；每个 Benchmark Job 会自动关联到对应分组。</p>';
+      }
+    }else if(['interrupted','partial','failed','cancelled'].includes(e.status)){
+      workflowAction='<div class="btn-row"><span class="small muted">这是旧版实验，可选择分组继续追加采样：</span><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="baseline">继续 Baseline</button><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="candidate">继续 Candidate</button></div>';
+    }
     root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><div class="btn-row"><span class="pill">'+esc(e.status)+'</span><button type="button" class="btn sm danger" data-research-delete="'+esc(e.experiment_id)+'" '+(active?'disabled title="运行中的实验不能删除"':'')+'>删除实验</button></div></div>'+
       '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
-      '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code></p><p>Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
-      '<p>关联 Job：</p><ul>'+jobs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+
-      (canCompare?'<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">计算 / 刷新比较报告</button><span id="researchCompareStatus" class="small muted" role="status"></span></div>':'')+
-      (['interrupted','partial','failed','cancelled'].includes(e.status)?'<div class="btn-row"><span class="small muted">实验未完成，可从任一分组继续追加采样：</span><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="baseline">继续 Baseline</button><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="candidate">继续 Candidate</button></div>':'')+
+      '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code> · Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
+      (workflow?'<p class="small muted">运行阶段：'+esc(workflow.phase||'unknown')+' · Baseline 档案：'+esc(workflow.baseline_profile_name||workflow.baseline_profile_id||'—')+' · Candidate 档案：'+esc(workflow.candidate_profile_name||workflow.candidate_profile_id||'—')+'</p>':'')+
+      '<p>已关联任务：Baseline '+esc((e.baseline_job_ids||[]).length)+' · Candidate '+esc((e.candidate_job_ids||[]).length)+'</p>'+
+      workflowAction+
+      (canCompare&&!workflow?'<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">计算 / 刷新比较报告</button><span id="researchCompareStatus" class="small muted" role="status"></span></div>':'')+
       renderResearchComparison(e.report);
   }catch(error){root.textContent='读取实验详情失败：'+(error?.message||'未知错误');}
 }
 document.addEventListener('click',event=>{
   const openButton=event.target.closest('[data-research-open]');
   if(openButton){openResearchExperiment(openButton.dataset.researchOpen).catch(()=>{});return;}
+  const runGroupButton=event.target.closest('[data-research-run-group]');
+  if(runGroupButton){
+    startResearchExperimentGroup(runGroupButton.dataset.researchId,runGroupButton.dataset.researchRunGroup).catch(error=>{const status=$('benchRepeatStatus');if(status)status.textContent='研究采样启动失败：'+(error?.message||'未知错误');});
+    return;
+  }
   const continueButton=event.target.closest('[data-research-continue]');
   if(continueButton){
-    const experimentSelect=$('benchRepeatExperiment'),groupSelect=$('benchRepeatGroup');
-    if(experimentSelect)experimentSelect.value=continueButton.dataset.researchContinue;
-    if(groupSelect)groupSelect.value=continueButton.dataset.researchGroup;
-    $('benchRepeatCount')?.focus();
-    const status=$('researchStatus');
-    if(status)status.textContent='已选择 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；请核对研究运行环境和参数档案后开始采样。';
+    startResearchExperimentGroup(continueButton.dataset.researchContinue,continueButton.dataset.researchGroup,{legacy:true}).catch(error=>{const status=$('benchRepeatStatus');if(status)status.textContent='研究采样启动失败：'+(error?.message||'未知错误');});
     return;
   }
   const deleteButton=event.target.closest('[data-research-delete]');
@@ -333,7 +422,15 @@ document.addEventListener('click',event=>{
   const id=compareButton.dataset.researchCompare,status=$('researchCompareStatus');
   compareButton.disabled=true;if(status)status.textContent='正在读取真实 Benchmark 样本并计算…';
   api('/api/admin/research/experiments/'+encodeURIComponent(id)+'/compare',{method:'POST'})
-    .then(()=>openResearchExperiment(id))
+    .then(async()=>{
+      const latest=await api('/api/admin/research/experiments/'+encodeURIComponent(id));
+      const experiment=latest.experiment||{},workflow=experiment.report?.workflow;
+      if(workflow?.version===1){
+        const report={...experiment.report,workflow:{...workflow,phase:'completed'}};
+        await api('/api/admin/research/experiments/'+encodeURIComponent(id)+'/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'completed',report,finished_at:experiment.finished_at||new Date().toISOString()})});
+      }
+      await openResearchExperiment(id);
+    })
     .catch(error=>{if(status)status.textContent='比较失败：'+(error?.message||'未知错误');})
     .finally(()=>{compareButton.disabled=false;});
 });
@@ -1909,7 +2006,7 @@ let researchExecutionContext=null;
 function benchPayloadForApi(target,scenario='performance',promptOverride='',acceptanceCaseID=''){
   const upstream=typeof target==='string'?target:(target?.upstream||'');
   const gatewayKey=(typeof target==='string'?'':(target?.gatewayKey||'')).trim();
-  const p=collectBenchParams();
+  const p={...collectBenchParams(),...(researchExecutionContext?.params||{})};
   if(typeof promptOverride==='string'&&promptOverride.trim())p.prompt=promptOverride.trim();
   // 有网关 model_key 时优先用它（小写业务键）；否则 fallback 到上游 loaded 的 model_id。
   // 发往 llama 的 chat body 里 "model" 仍是上游注册名，见 updateBenchReqPreview。
@@ -3425,18 +3522,54 @@ async function copyBenchmarkRepeatReport(){
 function setBenchmarkRepeatControlsDisabled(disabled){
  ['researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchRepeatExperiment','benchRepeatGroup','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
-async function runResearchExperimentRepeat(){
-  const status=$('benchRepeatStatus');
-  const key=($('researchApiKey')?.value||'').trim();
+async function startResearchExperimentGroup(experimentID,group,{legacy=false}={}){
+  const result=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+  const experiment=result.experiment||{},workflow=experiment.report?.workflow||null;
+  if(group==='candidate'&&!legacy&&!confirm('请确认已在 NUC 上只修改 '+experiment.changed_parameter+' 为 '+JSON.stringify(experiment.candidate_value)+'，并已重启 llama.cpp。Gateway 不会代替你修改或重启 Backend。确认后开始 Candidate 采样？'))return;
+  const profileID=legacy?($('researchRuntimeProfile')?.value||''):(workflow?.[group+'_profile_id']||'');
+  if(!profileID)throw new Error('实验没有可用的 '+group+' 运行参数档案。');
+  const experimentSelect=$('benchRepeatExperiment');if(experimentSelect)experimentSelect.value=experimentID;
+  const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value=group;
+  const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(experiment.planned_samples||10);
+  return runResearchExperimentRepeat({experimentID,group,profileID,workflow,legacy});
+}
+
+async function finalizeResearchExperimentGroup(experimentID,group,workflow){
+  const latest=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+  const experiment=latest.experiment||{},samplingReport=experiment.report||{};
+  const completed=samplingReport.status==='completed';
+  const nextWorkflow={...(samplingReport.workflow||workflow||{}),phase:group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending')};
+  const report={...samplingReport,workflow:nextWorkflow};
+  await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
+    method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:'partial',report,finished_at:samplingReport.finished_at||new Date().toISOString()})
+  });
+  if(group==='candidate'&&completed){
+    await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/compare',{method:'POST'});
+    const compared=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+    const finalReport={...(compared.experiment?.report||report),workflow:{...nextWorkflow,phase:'completed'}};
+    await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status:'completed',report:finalReport,finished_at:samplingReport.finished_at||new Date().toISOString()})
+    });
+  }
+  await loadResearchExperiments();
+  await openResearchExperiment(experimentID);
+}
+
+async function runResearchExperimentRepeat(options={}){
+  const status=$('benchRepeatStatus'),key=($('researchApiKey')?.value||'').trim();
   if(!key){if(status)status.textContent='请先填写研究工作区的客户端服务密钥。';$('researchApiKey')?.focus();return;}
-  const prompt=($('researchPrompt')?.value||'').trim();
-  if(!prompt){if(status)status.textContent='研究提示词不能为空。';$('researchPrompt')?.focus();return;}
-  const experimentID=$('benchRepeatExperiment')?.value||'';
-  if(!experimentID){if(status)status.textContent='研究采样必须先创建并选择一个实验。';$('benchRepeatExperiment')?.focus();return;}
-  const group=$('benchRepeatGroup')?.value||'baseline';
-  const profileID=$('researchRuntimeProfile')?.value||'';
-  if(!profileID){if(status)status.textContent='请选择与当前 Backend 和模型匹配的运行参数档案。';$('researchRuntimeProfile')?.focus();return;}
+  const experimentID=options.experimentID||$('benchRepeatExperiment')?.value||'';
+  if(!experimentID){if(status)status.textContent='请先创建研究实验。';return;}
+  const group=options.group||$('benchRepeatGroup')?.value||'baseline';
   try{
+    const experimentResult=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+    const experiment=experimentResult.experiment||{},workflow=options.workflow||experiment.report?.workflow||null;
+    const profileID=options.profileID||(workflow?.[group+'_profile_id']||$('researchRuntimeProfile')?.value||'');
+    if(!profileID)throw new Error('没有可用的 '+group+' 运行参数档案。');
+    const prompt=workflow?.version===1?RESEARCH_DECODE_PROMPT:($('researchPrompt')?.value||'').trim();
+    if(!prompt)throw new Error('研究提示词不能为空。');
     const target=await loadBenchPanel({resume:false});
     if(!target?.upstream)throw new Error('当前没有已加载的上游模型。');
     const backendResult=await api('/api/admin/backend');
@@ -3446,32 +3579,37 @@ async function runResearchExperimentRepeat(){
     const profileResult=await api('/api/admin/backend-runtime-profiles?'+query.toString());
     const profile=(profileResult.items||[]).find(item=>item.id===profileID);
     if(!profile)throw new Error('所选运行参数档案与当前 Backend / 模型不匹配，请重新选择。');
-    const experimentResult=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
-    const experiment=experimentResult.experiment||{};
     const parameters=profile.parameters||{};
-    const required=['threads','threads_batch','batch_size','ubatch_size','ctx_size','n_gpu_layers','flash_attn','cache_type_k','cache_type_v'];
-    const missing=required.filter(name=>!Object.prototype.hasOwnProperty.call(parameters,name)||parameters[name]===null||parameters[name]===undefined||parameters[name]==='');
-    if(missing.length)throw new Error('运行参数档案缺少明确值：'+missing.join('、')+'。补齐后再执行，避免产生不可比较样本。');
+    const missing=RESEARCH_REQUIRED_PROFILE_PARAMETERS.filter(name=>!Object.prototype.hasOwnProperty.call(parameters,name)||parameters[name]===null||parameters[name]===undefined||parameters[name]==='');
+    if(missing.length)throw new Error('运行参数档案缺少明确值：'+missing.join('、')+'。');
     const expected=group==='candidate'?experiment.candidate_value:experiment.baseline_value;
     if(!Object.prototype.hasOwnProperty.call(parameters,experiment.changed_parameter))throw new Error('运行参数档案没有变化参数 '+experiment.changed_parameter+'。');
     if(JSON.stringify(parameters[experiment.changed_parameter])!==JSON.stringify(expected)){
-      throw new Error(group+' 分组声明值为 '+JSON.stringify(expected)+'，但当前档案 '+experiment.name+' 的 '+experiment.changed_parameter+'='+JSON.stringify(parameters[experiment.changed_parameter])+'；请切换到对应档案。');
+      throw new Error(group+' 分组声明值为 '+JSON.stringify(expected)+'，但当前档案 '+experiment.name+' 的 '+experiment.changed_parameter+'='+JSON.stringify(parameters[experiment.changed_parameter])+'；拒绝创建 Benchmark Job。');
     }
-    researchExecutionContext={key,prompt,profileID};
+    const activeWorkflow=workflow?.version===1?{...workflow,phase:group==='baseline'?'baseline_running':'candidate_running'}:workflow;
+    const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(experiment.planned_samples||10);
+    const experimentSelect=$('benchRepeatExperiment');if(experimentSelect)experimentSelect.value=experimentID;
+    const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value=group;
+    if($('researchPrompt'))$('researchPrompt').value=prompt;
+    researchExecutionContext={key,prompt,profileID,params:workflow?.version===1?RESEARCH_DECODE_REQUEST_PARAMS:undefined,workflow:activeWorkflow};
     try{await runBenchmarkRepeat();}
     finally{researchExecutionContext=null;}
+    if(workflow?.version===1)await finalizeResearchExperimentGroup(experimentID,group,activeWorkflow);
   }catch(error){
     if(status)status.textContent='研究采样预检失败：'+(error?.message||'未知错误');
   }
 }
+
+
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
  try{count=normalizeBenchmarkRepeatCount($('benchRepeatCount')?.value);}catch(error){const status=$('benchRepeatStatus');if(status)status.textContent=error.message;$('benchRepeatCount')?.focus();return;}
  const clientKey=(researchExecutionContext?.key||$('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
- if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。'+($('benchRepeatExperiment')?.value?'本次 Job 会自动关联到所选研究实验和分组。':'')+'期间请勿发送其他推理请求。可以随时停止。继续？'))return;
+ if(!researchExecutionContext&&!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。'+($('benchRepeatExperiment')?.value?'本次 Job 会自动关联到所选研究实验和分组。':'')+'期间请勿发送其他推理请求。可以随时停止。继续？'))return;
  benchRepeatExperimentID=$('benchRepeatExperiment')?.value||'';
  benchRepeatExperimentGroup=$('benchRepeatGroup')?.value||'baseline';
- const fixedParams=collectBenchParams(),fixedPrompt=researchExecutionContext?.prompt||$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[]};
+ const fixedParams={...collectBenchParams(),...(researchExecutionContext?.params||{})},fixedPrompt=researchExecutionContext?.prompt||$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[],...(researchExecutionContext?.workflow?{workflow:researchExecutionContext.workflow}:{})};
  let baselineConditionHash='',baselineModel='';
  benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
@@ -3701,6 +3839,7 @@ exposeGlobals({
   rotateKey,
   runBenchmark,
   runResearchExperimentRepeat,
+  startResearchExperimentGroup,
   runBenchmarkRepeat,
   renderBenchmarkRepeatReport,
   copyBenchmarkRepeatReport,

@@ -308,11 +308,13 @@ try {
   await page.locator('#researchRuntimeProfile option[value="profile-candidate"]').waitFor({ state: 'attached' });
   await page.locator('#benchRepeatExperiment option[value="research-smoke-1"]').waitFor({ state: 'attached' });
   await page.locator('#researchApiKey').fill('smoke-client-key');
-  await page.locator('#researchPrompt').fill('Research smoke prompt');
   await page.locator('#researchRuntimeProfile').selectOption('profile-candidate');
-  await page.locator('#benchRepeatExperiment').selectOption('research-smoke-1');
-  await page.locator('#benchRepeatGroup').selectOption('baseline');
-  await page.locator('#benchRepeatRunBtn').click();
+  await page.evaluate(() => {
+    document.querySelector('#researchPrompt').value = 'Research smoke prompt';
+    document.querySelector('#benchRepeatExperiment').value = 'research-smoke-1';
+    document.querySelector('#benchRepeatGroup').value = 'baseline';
+  });
+  await page.evaluate(() => globalThis.runResearchExperimentRepeat());
   await page.locator('#benchRepeatStatus').getByText('研究采样预检失败').waitFor();
   check('运行参数不符合实验分组时在创建 Job 前阻止采样',
     researchBenchmarkCreateCount===0&&
@@ -330,7 +332,10 @@ try {
   check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1&&researchCompareResult.status()===200,{count:researchComparePostCount,status:researchCompareResult.status()});
   await page.locator('[data-research-open="research-smoke-interrupted"]').click();
   await page.locator('[data-research-continue="research-smoke-interrupted"][data-research-group="candidate"]').click();
-  check('研究工作区独立承载运行参数档案和实验采样',
+  await page.waitForFunction(() => document.querySelector('#benchRepeatExperiment')?.value === 'research-smoke-interrupted' &&
+    document.querySelector('#benchRepeatGroup')?.value === 'candidate');
+  check('研究工作区独立承载 Decode 实验向导与运行参数档案',
+    await page.locator('#researchCreateRunBtn').count()===1&&
     await page.locator('#research #backendRuntimeProfilesRoot').count()===1&&
     await page.locator('#models-inference #backendRuntimeProfilesRoot').count()===0&&
     await page.locator('#research #benchRepeatRunBtn').count()===1&&
