@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"net/http/httptest"
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
