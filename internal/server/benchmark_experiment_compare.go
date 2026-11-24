@@ -88,7 +88,8 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
    if task.Status!="completed"{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"task_not_completed"});continue}
    _,conditionStatus,missing:=benchmarkConditionFromConfigJSON(task.ConfigJSON)
    if conditionStatus=="partial"{if !benchmarkExperimentTraceabilityOnlyMissing(missing){excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"condition_incomplete"});continue};limited=true
-   }else if conditionStatus!="complete"{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"condition_unknown"});continue}
+   }else if conditionStatus=="complete"{if len(missing)>0{limited=true}
+   }else{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"condition_unknown"});continue}
    runs,err:=s.benchmarkRepo.ListRuns(ctx,jobID)
    if err!=nil||len(runs)==0{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"benchmark_run_unavailable"});continue}
    run:=runs[len(runs)-1]

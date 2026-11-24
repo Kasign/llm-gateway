@@ -97,10 +97,10 @@ func TestBenchmarkExperimentMetricConclusionRequiresConsistentChange(t *testing.
  if got,_,_:=benchmarkExperimentMetricConclusion(base,few,true);got!="insufficient_data"{t.Fatalf("small sample conclusion=%s",got)}
 }
 func TestBenchmarkExperimentCacheStateRequiresCompleteEvidence(t *testing.T) {
- zero,full,cached,prompt:=int64(0),int64(100),int64(60),int64(40)
+ zero,full,cached,prompt,zeroPrompt:=int64(0),int64(100),int64(60),int64(40),int64(0)
  input:=int64(100)
  if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&zero,PromptN:&input},&input);got!="cold"{t.Fatalf("cold=%s",got)}
- if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&full,PromptN:&prompt},&input);got!="full"{t.Fatalf("full=%s",got)}
+ if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&full,PromptN:&zeroPrompt},&input);got!="full"{t.Fatalf("full=%s",got)}
  if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&cached,PromptN:&prompt},&input);got!="partial"{t.Fatalf("partial=%s",got)}
  if got:=benchmarkExperimentCacheState(nil,&input);got!="unknown"{t.Fatalf("unknown=%s",got)}
 }
