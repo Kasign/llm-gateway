@@ -235,5 +235,5 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 			if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found")}else{jsonError(w,400,"invalid_experiment_job",err.Error())};return}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok":true});return
 	}
-	w.Header().Set("Allow","GET, PATCH, POST");jsonError(w,405,"method_not_allowed","unsupported research experiment action")
+	w.Header().Set("Allow","GET, DELETE, PATCH, POST");jsonError(w,405,"method_not_allowed","unsupported research experiment action")
 }
