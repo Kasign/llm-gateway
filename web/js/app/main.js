@@ -248,14 +248,27 @@ async function openResearchExperiment(id){
   try{
     const result=await api('/api/admin/research/experiments/'+encodeURIComponent(id)),e=result.experiment||{};
     const jobs=[...(e.baseline_job_ids||[]).map(x=>'Baseline: '+x),...(e.candidate_job_ids||[]).map(x=>'Candidate: '+x)];
+    const canCompare=!['draft','queued','running'].includes(e.status)&&(e.baseline_job_ids||[]).length>0&&(e.candidate_job_ids||[]).length>0;
     root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><span class="pill">'+esc(e.status)+'</span></div>'+
       '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
       '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code></p><p>Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
       '<p>关联 Job：</p><ul>'+jobs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+
+      (canCompare?'<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">计算 / 刷新比较报告</button><span id="researchCompareStatus" class="small muted" role="status"></span></div>':'')+
       (e.report?'<pre>'+esc(JSON.stringify(e.report,null,2))+'</pre>':'<p class="small muted">尚无分析报告</p>');
   }catch(error){root.textContent='读取实验详情失败：'+(error?.message||'未知错误');}
 }
-document.addEventListener('click',event=>{const button=event.target.closest('[data-research-open]');if(button)openResearchExperiment(button.dataset.researchOpen).catch(()=>{});});
+document.addEventListener('click',event=>{
+  const openButton=event.target.closest('[data-research-open]');
+  if(openButton){openResearchExperiment(openButton.dataset.researchOpen).catch(()=>{});return;}
+  const compareButton=event.target.closest('[data-research-compare]');
+  if(!compareButton)return;
+  const id=compareButton.dataset.researchCompare,status=$('researchCompareStatus');
+  compareButton.disabled=true;if(status)status.textContent='正在读取真实 Benchmark 样本并计算…';
+  api('/api/admin/research/experiments/'+encodeURIComponent(id)+'/compare')
+    .then(()=>openResearchExperiment(id))
+    .catch(error=>{if(status)status.textContent='比较失败：'+(error?.message||'未知错误');})
+    .finally(()=>{compareButton.disabled=false;});
+});
 $('researchRefresh')?.addEventListener('click',()=>loadResearchExperiments().catch(()=>{}));
 
 function goTab(name){
