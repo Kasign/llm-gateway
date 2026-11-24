@@ -275,7 +275,8 @@ async function openResearchExperiment(id){
     const result=await api('/api/admin/research/experiments/'+encodeURIComponent(id)),e=result.experiment||{};
     const jobs=[...(e.baseline_job_ids||[]).map(x=>'Baseline: '+x),...(e.candidate_job_ids||[]).map(x=>'Candidate: '+x)];
     const canCompare=!['draft','queued','running'].includes(e.status)&&(e.baseline_job_ids||[]).length>0&&(e.candidate_job_ids||[]).length>0;
-    root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><span class="pill">'+esc(e.status)+'</span></div>'+
+    const active=['queued','running'].includes(e.status);
+    root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><div class="btn-row"><span class="pill">'+esc(e.status)+'</span><button type="button" class="btn sm danger" data-research-delete="'+esc(e.experiment_id)+'" '+(active?'disabled title="运行中的实验不能删除"':'')+'>删除实验</button></div></div>'+
       '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
       '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code></p><p>Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
       '<p>关联 Job：</p><ul>'+jobs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+
@@ -296,6 +297,23 @@ document.addEventListener('click',event=>{
     $('benchRepeatCount')?.focus();
     const status=$('benchRepeatStatus');
     if(status)status.textContent='已选择历史实验和 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；确认当前模型、Prompt、运行参数档案与目标分组一致后再开始采样。';
+    return;
+  }
+  const deleteButton=event.target.closest('[data-research-delete]');
+  if(deleteButton){
+    const id=deleteButton.dataset.researchDelete;
+    if(!confirm('删除这个研究实验？只删除实验定义、分组关联和比较报告；Benchmark 历史任务、请求审计及原始样本均会保留。运行中的实验不能删除。'))return;
+    deleteButton.disabled=true;
+    api('/api/admin/research/experiments/'+encodeURIComponent(id),{method:'DELETE'})
+      .then(async()=>{
+        const detail=$('researchDetail');
+        if(detail){detail.hidden=true;detail.innerHTML='';}
+        await loadResearchExperiments();
+        const status=$('researchStatus');
+        if(status)status.textContent='实验已删除；Benchmark 历史和请求审计均已保留。';
+      })
+      .catch(error=>{const status=$('researchStatus');if(status)status.textContent='删除失败：'+(error?.message||'未知错误');})
+      .finally(()=>{deleteButton.disabled=false;});
     return;
   }
   const compareButton=event.target.closest('[data-research-compare]');
