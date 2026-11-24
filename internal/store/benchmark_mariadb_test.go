@@ -292,4 +292,39 @@ func TestBenchmarkExperimentRepoMariaDB(t *testing.T) {
 	if err:=NewBenchmarkRepo(db).CreateTaskAndRun(ctx,task,run);err!=nil { t.Fatalf("create referenced benchmark task: %v",err) }
 	if _,err:=db.ExecContext(ctx,"DELETE FROM benchmark_tasks WHERE task_id=?",taskID);err!=nil { t.Fatalf("delete referenced benchmark task: %v",err) }
 	if _,err:=repo.Get(ctx,id);err!=nil { t.Fatalf("experiment must survive benchmark task cleanup: %v",err) }
+
+	// 删除实验只清理实验元数据；活动实验必须被拒绝，Benchmark Task/Run 必须保留。
+	activeDeleteID := id + "-active-delete"
+	activeDelete := experiment
+	activeDelete.ExperimentID = activeDeleteID
+	activeDelete.Name = "活动实验禁止删除"
+	activeDelete.Status = "running"
+	if err := repo.Create(ctx, activeDelete); err != nil { t.Fatalf("create active delete fixture: %v", err) }
+	if err := repo.Delete(ctx, activeDeleteID); err != ErrBenchmarkExperimentActive {
+		t.Fatalf("deleting running experiment error = %v, want ErrBenchmarkExperimentActive", err)
+	}
+	if err := repo.UpdateState(ctx, activeDeleteID, "interrupted", "", "", "", nil, &now); err != nil {
+		t.Fatalf("mark active delete fixture interrupted: %v", err)
+	}
+	if err := repo.Delete(ctx, activeDeleteID); err != nil {
+		t.Fatalf("delete interrupted experiment: %v", err)
+	}
+	if _, err := repo.Get(ctx, activeDeleteID); err != sql.ErrNoRows {
+		t.Fatalf("deleted experiment lookup error = %v, want sql.ErrNoRows", err)
+	}
+
+	deleteID := id + "-preserve-benchmark"
+	deleteTaskID := deleteID + "-job"
+	deleteExperiment := experiment
+	deleteExperiment.ExperimentID = deleteID
+	deleteExperiment.Name = "删除实验保留 Benchmark"
+	if err := repo.Create(ctx, deleteExperiment); err != nil { t.Fatalf("create delete fixture: %v", err) }
+	deleteTask := BenchmarkTask{TaskID: deleteTaskID, Scenario: "performance", Status: "completed", StartedAt: now, FinishedAt: &now}
+	deleteRun := BenchmarkRun{RunID: deleteTaskID, TaskID: deleteTaskID, RunNo: 1, RequestID: deleteTaskID, Status: "completed", StartedAt: now, FinishedAt: &now}
+	if err := NewBenchmarkRepo(db).CreateTaskAndRun(ctx, deleteTask, deleteRun); err != nil { t.Fatalf("create benchmark task to preserve: %v", err) }
+	if err := repo.AddJob(ctx, deleteID, "baseline", deleteTaskID); err != nil { t.Fatalf("associate benchmark task to delete fixture: %v", err) }
+	if err := repo.Delete(ctx, deleteID); err != nil { t.Fatalf("delete experiment metadata: %v", err) }
+	if _, err := repo.Get(ctx, deleteID); err != sql.ErrNoRows { t.Fatalf("deleted experiment lookup error = %v, want sql.ErrNoRows", err) }
+	if _, err := NewBenchmarkRepo(db).GetTask(ctx, deleteTaskID); err != nil { t.Fatalf("Benchmark Task must survive experiment deletion: %v", err) }
+	_, _ = db.ExecContext(ctx, "DELETE FROM benchmark_tasks WHERE task_id=?", deleteTaskID)
 }
