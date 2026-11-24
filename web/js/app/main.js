@@ -248,19 +248,21 @@ function renderResearchComparison(report){
   const statusLabels={completed:'完成',partial:'部分完成',insufficient_data:'样本不足'};
   const cacheLabels={cold:'冷缓存',partial:'部分缓存',full:'全命中缓存'};
   const metricLabels={latency_ms:'总延迟（ms）',inference_latency_ms:'推理延迟（ms）',ttft_ms:'首 Token 延迟（ms）',prompt_ms:'Prompt 处理（ms）',decode_ms:'Decode（ms）',output_tokens_per_sec:'输出吞吐（Token/s）',prompt_tokens_per_sec:'Prompt 吞吐（Token/s）',decode_tokens_per_sec:'Decode 吞吐（Token/s）'};
-  const number=v=>Number.isFinite(Number(v))?Number(v).toFixed(2):'—';
+  const number=v=>v===null||v===undefined||v===''?'—':(Number.isFinite(Number(v))?Number(v).toFixed(2):'—');
+  const stat=(stats,key)=>stats?.count>0?number(stats[key]):'—';
+  const comparabilityLabels={strict:'严格可比',limited:'有限可比',not_comparable:'不可比较'};
   const delta=v=>v===null||v===undefined?'—':(Number(v)>0?'+':'')+number(v)+'%';
   const groups=Object.entries(comparison.cache_groups||{});
   const sections=groups.map(([cache,group])=>{
     const rows=Object.entries(group.metrics||{}).map(([key,m])=>{
       const b=m.baseline||{},c=m.candidate||{};
-      return '<tr><td>'+esc(metricLabels[key]||key)+'</td><td>'+esc(number(b.median))+' / '+esc(number(b.p95))+'</td><td>'+esc(number(c.median))+' / '+esc(number(c.p95))+'</td><td>'+esc(delta(m.median_delta_percent))+' / '+esc(delta(m.p95_delta_percent))+'</td><td>'+esc(conclusionLabels[m.conclusion]||m.conclusion||'—')+'</td></tr>';
+      return '<tr><td>'+esc(metricLabels[key]||key)+'</td><td>'+esc(b.count||0)+' / '+esc(c.count||0)+'</td><td>Median '+esc(stat(b,'median'))+' · P95 '+esc(stat(b,'p95'))+'<small class="muted">Min / Max '+esc(stat(b,'min'))+' / '+esc(stat(b,'max'))+'</small></td><td>Median '+esc(stat(c,'median'))+' · P95 '+esc(stat(c,'p95'))+'<small class="muted">Min / Max '+esc(stat(c,'min'))+' / '+esc(stat(c,'max'))+'</small></td><td>'+esc(delta(m.median_delta_percent))+' / '+esc(delta(m.p95_delta_percent))+'</td><td>'+esc(conclusionLabels[m.conclusion]||m.conclusion||'—')+'</td></tr>';
     }).join('');
-    return '<section class="card"><h4>'+esc(cacheLabels[cache]||cache)+'</h4><p class="small muted">有效 Job：Baseline '+esc(group.baseline_sample_count||0)+' · Candidate '+esc(group.candidate_sample_count||0)+'</p>'+wrapTable('<tr><th>指标</th><th>Baseline Median / P95</th><th>Candidate Median / P95</th><th>变化 Median / P95</th><th>结论</th></tr>'+(rows||'<tr><td colspan="5">没有可比较指标</td></tr>'))+'</section>';
+    return '<section class="card"><h4>'+esc(cacheLabels[cache]||cache)+'</h4><p class="small muted">有效 Job：Baseline '+esc(group.baseline_sample_count||0)+' · Candidate '+esc(group.candidate_sample_count||0)+'</p>'+wrapTable('<tr><th>指标</th><th>样本数 B / C</th><th>Baseline 统计</th><th>Candidate 统计</th><th>变化 Median / P95</th><th>结论</th></tr>'+(rows||'<tr><td colspan="6">没有可比较指标</td></tr>'))+'</section>';
   }).join('');
   const excluded=(comparison.excluded_samples||[]).map(x=>'<li><code>'+esc(x.job_id||'')+'</code> · '+esc(x.group||'')+' · '+esc(x.reason||'unknown')+'</li>').join('');
   return '<section class="card"><div class="card-head"><h4>单变量比较结论</h4><span class="pill">'+esc(conclusionLabels[comparison.conclusion]||comparison.conclusion||'—')+'</span></div>'+
-    '<p>可比等级：'+esc(comparison.comparability_level||'—')+'；状态：'+esc(statusLabels[comparison.status]||comparison.status||'—')+'</p>'+
+    '<p>可比等级：'+esc(comparabilityLabels[comparison.comparability_level]||comparison.comparability_level||'—')+'；状态：'+esc(statusLabels[comparison.status]||comparison.status||'—')+'</p>'+
     '<p>变化参数：<code>'+esc(comparison.changed_parameter||'')+'</code>；阈值：'+esc(number(comparison.material_delta_threshold_percent))+'%</p>'+
     sections+
     (excluded?'<details><summary>排除样本（'+(comparison.excluded_samples||[]).length+'）</summary><ul>'+excluded+'</ul></details>':'')+
