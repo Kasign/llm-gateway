@@ -230,8 +230,20 @@ try {
     planned_samples:5,baseline_job_ids:['baseline-job-1'],candidate_job_ids:[],
     report:{}
   };
+  const researchProfileFixture={
+    id:'profile-candidate',name:'Candidate profile',version:1,backend:'llamacpp',model_id:'smoke-model',
+    parameters:{threads:6,threads_batch:4,batch_size:512,ubatch_size:128,ctx_size:8192,n_gpu_layers:0,flash_attn:true,cache_type_k:'q8_0',cache_type_v:'q8_0'}
+  };
+  await page.route('**/api/admin/backend',async route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({active:{backend:'llamacpp'},inference_active_model_id:'smoke-model'})}));
+  await page.route('**/api/admin/runtime',async route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({gateway_model_key:'smoke-model-key'})}));
+  await page.route('**/api/admin/backend-runtime-profiles**',async route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[researchProfileFixture]})}));
   let researchComparePostCount=0;
   let researchDeleteCount=0;
+  let researchBenchmarkCreateCount=0;
+  page.on('request',request=>{
+    const url=new URL(request.url());
+    if(url.pathname==='/api/benchmark'&&request.method()==='POST')researchBenchmarkCreateCount++;
+  });
   await page.route('**/api/admin/research/experiments**',async route=>{
     const request=route.request(),url=new URL(request.url());
     if(url.pathname==='/api/admin/research/experiments'&&request.method()==='GET'){
@@ -254,6 +266,18 @@ try {
     await route.continue();
   });
   await clickTab(page,'research','研究');
+  await page.locator('#researchRuntimeProfile option[value="profile-candidate"]').waitFor();
+  await page.locator('#benchRepeatExperiment option[value="research-smoke-1"]').waitFor();
+  await page.locator('#researchApiKey').fill('smoke-client-key');
+  await page.locator('#researchPrompt').fill('Research smoke prompt');
+  await page.locator('#researchRuntimeProfile').selectOption('profile-candidate');
+  await page.locator('#benchRepeatExperiment').selectOption('research-smoke-1');
+  await page.locator('#benchRepeatGroup').selectOption('baseline');
+  await page.locator('#benchRepeatRunBtn').click();
+  await page.locator('#benchRepeatStatus').getByText('研究采样预检失败').waitFor();
+  check('运行参数不符合实验分组时在创建 Job 前阻止采样',
+    researchBenchmarkCreateCount===0&&
+    (await page.locator('#benchRepeatStatus').innerText()).includes('Baseline 分组声明值'));
   await page.locator('[data-research-open="research-smoke-1"]').click();
   await page.locator('#researchDetail').getByText('单变量比较结论').waitFor({state:'visible'});
   const researchDetailText=await page.locator('#researchDetail').innerText();
