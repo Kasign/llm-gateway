@@ -133,19 +133,19 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
 func benchmarkExperimentOverallConclusion(conclusions []string) string {
  if len(conclusions)==0{return "insufficient_data"}
  allImproved,allRegressed,allNoChange:=true,true,true
- hasEvidence,hasInsufficient:=false,false
+ hasEvidence,hasInsufficient,hasUncertain:=false,false,false
  for _,v:=range conclusions{
   switch v{
   case "improved":allRegressed=false;allNoChange=false;hasEvidence=true
   case "regressed":allImproved=false;allNoChange=false;hasEvidence=true
   case "no_material_change":allImproved=false;allRegressed=false;hasEvidence=true
   case "insufficient_data":allImproved=false;allRegressed=false;allNoChange=false;hasInsufficient=true
-  default:allImproved=false;allRegressed=false;allNoChange=false
+  default:allImproved=false;allRegressed=false;allNoChange=false;hasUncertain=true
   }
  }
  if allImproved{return "improved"}
  if allRegressed{return "regressed"}
  if allNoChange{return "no_material_change"}
- if hasInsufficient&&!hasEvidence{return "insufficient_data"}
+ if hasInsufficient&&!hasEvidence&&!hasUncertain{return "insufficient_data"}
  return "inconclusive"
 }

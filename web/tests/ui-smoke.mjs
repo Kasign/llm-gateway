@@ -206,7 +206,7 @@ try {
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
   const researchComparisonFixture = {
-    status:'partial', conclusion:'improved', comparability_level:'strict',
+    status:'completed', conclusion:'improved', comparability_level:'strict',
     changed_parameter:'threads', material_delta_threshold_percent:5,
     cache_groups:{cold:{
       baseline_sample_count:5,candidate_sample_count:5,
