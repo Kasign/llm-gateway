@@ -280,12 +280,24 @@ async function openResearchExperiment(id){
       '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code></p><p>Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
       '<p>关联 Job：</p><ul>'+jobs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+
       (canCompare?'<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">计算 / 刷新比较报告</button><span id="researchCompareStatus" class="small muted" role="status"></span></div>':'')+
+      (['interrupted','partial','failed','cancelled'].includes(e.status)?'<div class="btn-row"><span class="small muted">实验未完成，可从任一分组继续追加采样：</span><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="baseline">继续 Baseline</button><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="candidate">继续 Candidate</button></div>':'')+
       renderResearchComparison(e.report);
   }catch(error){root.textContent='读取实验详情失败：'+(error?.message||'未知错误');}
 }
 document.addEventListener('click',event=>{
   const openButton=event.target.closest('[data-research-open]');
   if(openButton){openResearchExperiment(openButton.dataset.researchOpen).catch(()=>{});return;}
+  const continueButton=event.target.closest('[data-research-continue]');
+  if(continueButton){
+    const experimentSelect=$('benchRepeatExperiment'),groupSelect=$('benchRepeatGroup');
+    if(experimentSelect)experimentSelect.value=continueButton.dataset.researchContinue;
+    if(groupSelect)groupSelect.value=continueButton.dataset.researchGroup;
+    goTab('model-test');
+    $('benchRepeatCount')?.focus();
+    const status=$('benchRepeatStatus');
+    if(status)status.textContent='已选择历史实验和 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；确认当前模型、Prompt、运行参数档案与目标分组一致后再开始采样。';
+    return;
+  }
   const compareButton=event.target.closest('[data-research-compare]');
   if(!compareButton)return;
   const id=compareButton.dataset.researchCompare,status=$('researchCompareStatus');

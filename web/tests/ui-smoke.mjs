@@ -224,14 +224,23 @@ try {
     planned_samples:5,baseline_job_ids:['baseline-job-1'],candidate_job_ids:['candidate-job-1'],
     report:{comparison:researchComparisonFixture}
   };
+  const interruptedResearchFixture={
+    experiment_id:'research-smoke-interrupted',name:'中断实验恢复',status:'interrupted',
+    changed_parameter:'threads',baseline_value:4,candidate_value:6,
+    planned_samples:5,baseline_job_ids:['baseline-job-1'],candidate_job_ids:[],
+    report:{}
+  };
   let researchComparePostCount=0;
   await page.route('**/api/admin/research/experiments**',async route=>{
     const request=route.request(),url=new URL(request.url());
     if(url.pathname==='/api/admin/research/experiments'&&request.method()==='GET'){
-      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[researchExperimentFixture],total:1})});return;
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[researchExperimentFixture,interruptedResearchFixture],total:2})});return;
     }
     if(url.pathname.endsWith('/research-smoke-1')&&request.method()==='GET'){
       await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({experiment:researchExperimentFixture})});return;
+    }
+    if(url.pathname.endsWith('/research-smoke-interrupted')&&request.method()==='GET'){
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({experiment:interruptedResearchFixture})});return;
     }
     if(url.pathname.endsWith('/research-smoke-1/compare')&&request.method()==='POST'){
       researchComparePostCount++;
@@ -251,6 +260,12 @@ try {
   const researchCompareResult=await researchCompareResponse;
   await researchCompareResult.finished();
   check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1&&researchCompareResult.status()===200,{count:researchComparePostCount,status:researchCompareResult.status()});
+  await page.locator('[data-research-open="research-smoke-interrupted"]').click();
+  await page.locator('[data-research-continue="research-smoke-interrupted"][data-research-group="candidate"]').click();
+  check('中断实验可恢复到指定分组继续采样',
+    await page.locator('#benchRepeatExperiment').inputValue()==='research-smoke-interrupted'&&
+    await page.locator('#benchRepeatGroup').inputValue()==='candidate'&&
+    await page.locator('#model-test').evaluate(el=>!el.hidden));
 
   await page.route('**/api/benchmark**', async route => {
     const url = new URL(route.request().url());
