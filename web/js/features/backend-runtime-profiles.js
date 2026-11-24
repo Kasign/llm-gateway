@@ -143,8 +143,8 @@ async function load() {
     root.innerHTML = '<span class="err">' + esc(error.message || '运行参数档案加载失败') + '</span>';
   }
 }
-async function loadBenchmarkOptions(backend = '', modelID = '') {
-  const select = $('benchRuntimeProfile');
+async function loadBenchmarkOptions(backend = '', modelID = '', selectID = 'benchRuntimeProfile') {
+  const select = $(selectID);
   if (!select) return;
   if (backend && backend !== 'llamacpp') {
     select.innerHTML = '<option value="">当前 Backend 暂不支持运行参数档案</option>';
