@@ -583,11 +583,6 @@
             </div>
             <textarea id="benchPrompt" rows="4">Write a small, correct Objective-C function and explain why it is thread-safe.</textarea>
           </div>
-          <div class="field" style="margin-top:10px">
-            <label for="benchRuntimeProfile">Backend 运行参数档案</label>
-            <select id="benchRuntimeProfile"><option value="">不关联档案（运行参数未知）</option></select>
-            <small class="muted">选择与当前模型、当前容器实际启动参数一致的档案。仅记录条件，不会修改 Backend。</small>
-          </div>
           <div class="bench-actions">
             <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">单次测试</button>
             <button type="button" class="btn danger" id="benchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
