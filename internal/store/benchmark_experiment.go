@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -31,6 +32,8 @@ type BenchmarkExperiment struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+var ErrBenchmarkExperimentActive = errors.New("benchmark experiment is active")
 
 // BenchmarkExperimentRepo 管理研究实验元数据；原始性能样本仍由 BenchmarkRepo 管理。
 type BenchmarkExperimentRepo struct { db *sql.DB }
@@ -208,6 +211,34 @@ func (r *BenchmarkExperimentRepo) UpdateState(ctx context.Context,id,status,repo
 		if exists==0{return sql.ErrNoRows}
 	}
 	return nil
+}
+
+// Delete 删除实验元数据，不级联删除 Benchmark Task/Run、请求审计或原始样本。
+// queued / running 实验受保护；状态判断与删除在同一 SQL 语句中完成，避免并发启动时误删。
+func (r *BenchmarkExperimentRepo) Delete(ctx context.Context, id string) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM benchmark_experiments
+		WHERE experiment_id=? AND status NOT IN ('queued','running')`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	var status string
+	if err := r.db.QueryRowContext(ctx, `SELECT status FROM benchmark_experiments WHERE experiment_id=?`, id).Scan(&status); err != nil {
+		return err
+	}
+	if status == "queued" || status == "running" {
+		return ErrBenchmarkExperimentActive
+	}
+	return sql.ErrNoRows
 }
 
 // MarkRunningInterrupted 在 Gateway 启动恢复时结束上次进程遗留的运行中实验。
