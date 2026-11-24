@@ -215,11 +215,9 @@ async function createResearchExperiment(event){
   event.preventDefault();const message=$('researchCreateMessage');if(message)message.textContent='正在创建…';
   try{
     const parse=(id)=>JSON.parse($(id)?.value||'');
-    const baselineCondition=parse('researchBaselineCondition'),candidateCondition=parse('researchCandidateCondition');
-    if(!baselineCondition||typeof baselineCondition!=='object'||Array.isArray(baselineCondition)||!candidateCondition||typeof candidateCondition!=='object'||Array.isArray(candidateCondition))throw new Error('两组其余条件必须是 JSON 对象');
     const body={name:$('researchName').value.trim(),changed_parameter:$('researchChangedParameter').value.trim(),
       baseline_value:parse('researchBaselineValue'),candidate_value:parse('researchCandidateValue'),
-      baseline_condition:baselineCondition,candidate_condition:candidateCondition,planned_samples:Number($('researchPlannedSamples').value||10)};
+      planned_samples:Number($('researchPlannedSamples').value||10)};
     const result=await api('/api/admin/research/experiments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(message)message.textContent='实验已创建：'+result.experiment.experiment_id;
     $('researchCreateForm')?.reset();await loadResearchExperiments();

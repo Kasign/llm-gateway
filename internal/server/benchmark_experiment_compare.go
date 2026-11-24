@@ -115,14 +115,16 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
    if bs.Count==0&&cs.Count==0{continue}
    conclusion,md,pd:=benchmarkExperimentMetricConclusion(bs,cs,lower);conclusions=append(conclusions,conclusion)
    direction:="higher_is_better";if lower{direction="lower_is_better"}
-   results[key]=map[string]interface{}{"baseline":bs,"candidate":cs,"median_delta_percent":md,"p95_delta_percent":pd,"conclusion":conclusion,"direction":direction}
+   var medianDeltaValue,p95DeltaValue interface{}=md,pd
+   if conclusion=="insufficient_data"{medianDeltaValue=nil;p95DeltaValue=nil}
+   results[key]=map[string]interface{}{"baseline":bs,"candidate":cs,"median_delta_percent":medianDeltaValue,"p95_delta_percent":p95DeltaValue,"conclusion":conclusion,"direction":direction}
   }
   cacheGroups[cache]=map[string]interface{}{"baseline_sample_count":len(baseSamples),"candidate_sample_count":len(candSamples),"metrics":results}
  }
- improved,regressed,noChange,inconclusive:=false,false,false,false
- for _,v:=range conclusions{switch v{case "improved":improved=true;case "regressed":regressed=true;case "no_material_change":noChange=true;case "inconclusive":inconclusive=true}}
+ improved,regressed,noChange,inconclusive,insufficient:=false,false,false,false,false
+ for _,v:=range conclusions{switch v{case "improved":improved=true;case "regressed":regressed=true;case "no_material_change":noChange=true;case "inconclusive":inconclusive=true;case "insufficient_data":insufficient=true}}
  conclusion:="insufficient_data"
- switch{case improved&&regressed:conclusion="inconclusive";case improved:conclusion="improved";case regressed:conclusion="regressed";case inconclusive:conclusion="inconclusive";case noChange:conclusion="no_material_change"}
+ switch{case improved&&regressed:conclusion="inconclusive";case insufficient&&(improved||regressed||noChange):conclusion="inconclusive";case improved:conclusion="improved";case regressed:conclusion="regressed";case inconclusive:conclusion="inconclusive";case noChange&&!insufficient:conclusion="no_material_change"}
  comparability:="strict";if limited||len(excluded)>0{comparability="limited"};if len(cacheGroups)==0{comparability="not_comparable"}
  status:="completed";if len(excluded)>0||conclusion=="insufficient_data"||conclusion=="inconclusive"{status="partial"}
  return map[string]interface{}{"status":status,"conclusion":conclusion,"comparability_level":comparability,"changed_parameter":e.ChangedParameter,"baseline_value":json.RawMessage(e.BaselineValueJSON),"candidate_value":json.RawMessage(e.CandidateValueJSON),"minimum_samples_per_metric":benchmarkExperimentMinimumSamples,"material_delta_threshold_percent":benchmarkExperimentMaterialDeltaPercent,"attempted":attempted,"cache_groups":cacheGroups,"excluded_samples":excluded},nil

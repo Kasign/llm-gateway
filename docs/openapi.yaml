@@ -4082,7 +4082,7 @@ components:
         updated_at: { type: string, format: date-time }
     BenchmarkExperimentCreate:
       type: object
-      required: [name, changed_parameter, baseline_value, candidate_value, baseline_condition, candidate_condition]
+      required: [name, changed_parameter, baseline_value, candidate_value]
       properties:
         name: { type: string, maxLength: 160 }
         changed_parameter: { type: string, maxLength: 64 }

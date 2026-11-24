@@ -43,15 +43,18 @@ func decodeResearchJSON(w http.ResponseWriter,r *http.Request,dst interface{}) e
 	return nil
 }
 func validateBenchmarkExperimentCreateRequest(in benchmarkExperimentCreateRequest) error {
-	if len(in.BaselineValue)==0||len(in.CandidateValue)==0||len(in.BaselineCondition)==0||len(in.CandidateCondition)==0{return errors.New("baseline/candidate values and condition snapshots are required")}
+	if len(in.BaselineValue)==0||len(in.CandidateValue)==0{return errors.New("baseline and candidate values are required")}
+	if (len(in.BaselineCondition)==0)!=(len(in.CandidateCondition)==0){return errors.New("optional condition snapshots must be supplied as a pair")}
 	var baselineValue,candidateValue interface{}
 	if err:=json.Unmarshal(in.BaselineValue,&baselineValue);err!=nil{return errors.New("baseline value must be valid JSON")}
 	if err:=json.Unmarshal(in.CandidateValue,&candidateValue);err!=nil{return errors.New("candidate value must be valid JSON")}
 	if reflect.DeepEqual(baselineValue,candidateValue){return errors.New("baseline and candidate values must differ")}
-	var baselineCondition,candidateCondition map[string]interface{}
-	if err:=json.Unmarshal(in.BaselineCondition,&baselineCondition);err!=nil||baselineCondition==nil{return errors.New("baseline condition must be a JSON object")}
-	if err:=json.Unmarshal(in.CandidateCondition,&candidateCondition);err!=nil||candidateCondition==nil{return errors.New("candidate condition must be a JSON object")}
-	if !reflect.DeepEqual(baselineCondition,candidateCondition){return errors.New("baseline and candidate conditions must be identical; only changed_parameter may differ")}
+	if len(in.BaselineCondition)>0 {
+		var baselineCondition,candidateCondition map[string]interface{}
+		if err:=json.Unmarshal(in.BaselineCondition,&baselineCondition);err!=nil||baselineCondition==nil{return errors.New("baseline condition must be a JSON object")}
+		if err:=json.Unmarshal(in.CandidateCondition,&candidateCondition);err!=nil||candidateCondition==nil{return errors.New("candidate condition must be a JSON object")}
+		if !reflect.DeepEqual(baselineCondition,candidateCondition){return errors.New("baseline and candidate conditions must be identical; only changed_parameter may differ")}
+	}
 	return nil
 }
 
@@ -189,6 +192,7 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 		if err!=nil{jsonError(w,500,"research_comparison_failed","failed to build research comparison");return}
 		report:=map[string]interface{}{}
 		if strings.TrimSpace(e.ReportJSON)!=""{if json.Unmarshal([]byte(e.ReportJSON),&report)!=nil{report=map[string]interface{}{"sampling_report_raw":e.ReportJSON}}}
+		if report==nil{report=map[string]interface{}{}}
 		report["comparison"]=comparison
 		encoded,marshalErr:=json.Marshal(report);if marshalErr!=nil{jsonError(w,500,"research_comparison_failed","failed to encode research comparison");return}
 		if err:=s.benchmarkExperimentRepo.UpdateState(r.Context(),id,e.Status,string(encoded),e.ErrorCode,e.ErrorMessage,e.StartedAt,e.FinishedAt);err!=nil{jsonError(w,500,"research_persist_failed","failed to persist research comparison");return}

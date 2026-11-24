@@ -97,10 +97,16 @@ func TestBenchmarkExperimentMetricConclusionRequiresConsistentChange(t *testing.
  if got,_,_:=benchmarkExperimentMetricConclusion(base,few,true);got!="insufficient_data"{t.Fatalf("small sample conclusion=%s",got)}
 }
 func TestBenchmarkExperimentCacheStateRequiresCompleteEvidence(t *testing.T) {
- zero,full,half:=int64(0),int64(100),int64(40)
- input,prompt:=int64(100),int64(0)
+ zero,full,cached,prompt:=int64(0),int64(100),int64(60),int64(40)
+ input:=int64(100)
  if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&zero,PromptN:&input},&input);got!="cold"{t.Fatalf("cold=%s",got)}
  if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&full,PromptN:&prompt},&input);got!="full"{t.Fatalf("full=%s",got)}
- if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&half,PromptN:&half},&input);got!="partial"{t.Fatalf("partial=%s",got)}
+ if got:=benchmarkExperimentCacheState(&RequestModelTimings{CacheN:&cached,PromptN:&prompt},&input);got!="partial"{t.Fatalf("partial=%s",got)}
  if got:=benchmarkExperimentCacheState(nil,&input);got!="unknown"{t.Fatalf("unknown=%s",got)}
+}
+
+
+func TestValidateBenchmarkExperimentCreateRequestAllowsServerCapturedConditions(t *testing.T) {
+	in:=benchmarkExperimentCreateRequest{Name:"server captured conditions",ChangedParameter:"threads",BaselineValue:json.RawMessage(`4`),CandidateValue:json.RawMessage(`6`),PlannedSamples:10}
+	if err:=validateBenchmarkExperimentCreateRequest(in);err!=nil{t.Fatalf("server-captured conditions should not require manual JSON: %v",err)}
 }

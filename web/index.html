@@ -141,11 +141,7 @@
                 <div class="field"><label for="researchBaselineValue">Baseline 参数值（JSON）</label><input id="researchBaselineValue" value="4" required></div>
                 <div class="field"><label for="researchCandidateValue">Candidate 参数值（JSON）</label><input id="researchCandidateValue" value="6" required></div>
               </div>
-              <div class="row">
-                <div class="field"><label for="researchBaselineCondition">Baseline 其余条件快照（JSON 对象）</label><textarea id="researchBaselineCondition" rows="3">{}</textarea></div>
-                <div class="field"><label for="researchCandidateCondition">Candidate 其余条件快照（JSON 对象）</label><textarea id="researchCandidateCondition" rows="3">{}</textarea></div>
-              </div>
-              <p class="small muted">两组快照应保持模型、提示词、Token 上限、缓存策略和服务环境一致；只允许上方声明的参数不同。当前表单只保存实验定义，不会自动修改 Backend 运行参数。</p>
+              <p class="small muted">其他运行条件由服务端从每个 Benchmark Job 的真实快照自动读取并核对；只允许上方声明的 llama.cpp 档案参数不同。请先在运行参数档案中设置对应值。Gateway 不会自动修改或重启 Backend。</p>
               <div class="btn-row"><button type="submit" class="btn primary">创建实验</button><span id="researchCreateMessage" class="small muted" role="status"></span></div>
             </form>
           </details>
