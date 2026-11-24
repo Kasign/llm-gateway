@@ -172,6 +172,21 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 	if !s.requireAdmin(w,r){return};if s.benchmarkExperimentRepo==nil{jsonError(w,503,"research_unavailable","research experiment storage is unavailable");return}
 	w.Header().Set("Cache-Control","no-store");path:=strings.Trim(strings.TrimPrefix(r.URL.Path,"/api/admin/research/experiments/"),"/");parts:=strings.Split(path,"/")
 	if len(parts)==0||parts[0]==""||len(parts[0])>64{jsonError(w,400,"invalid_request","experiment id is required");return};id:=parts[0]
+	if len(parts)==1&&r.Method==http.MethodDelete{
+		if err:=s.benchmarkExperimentRepo.Delete(r.Context(),id);err!=nil{
+			switch{
+			case errors.Is(err,store.ErrBenchmarkExperimentActive):
+				jsonError(w,http.StatusConflict,"experiment_active","queued or running research experiments cannot be deleted")
+			case errors.Is(err,sql.ErrNoRows):
+				jsonError(w,http.StatusNotFound,"not_found","research experiment not found")
+			default:
+				jsonError(w,http.StatusInternalServerError,"database_error","failed to delete research experiment")
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success":true})
+		return
+	}
 	if len(parts)==1&&r.Method==http.MethodGet{
 		e,err:=s.benchmarkExperimentRepo.Get(r.Context(),id);if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found");return}
 		if err!=nil{jsonError(w,500,"research_read_failed","failed to read research experiment");return};_ = json.NewEncoder(w).Encode(map[string]interface{}{"experiment":benchmarkExperimentView(e)});return
