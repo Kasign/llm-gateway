@@ -142,9 +142,14 @@ try {
   });
   
   page.on('dialog', async dialog => {
-    const expected = expectedResearchDeleteDialog && dialog.type() === 'confirm';
-    traceBrowserLifecycle('dialog', { type: dialog.type(), message: dialog.message(), expected });
-    if (expected) {
+    const expectedResearchDelete = expectedResearchDeleteDialog && dialog.type() === 'confirm';
+    const expectedRepeatConfirmation = dialog.type() === 'confirm' &&
+      dialog.message().startsWith('将按当前模型和推理参数串行执行');
+    traceBrowserLifecycle('dialog', {
+      type: dialog.type(), message: dialog.message(),
+      expected: expectedResearchDelete || expectedRepeatConfirmation
+    });
+    if (expectedResearchDelete) {
       expectedResearchDeleteDialog = false;
       try {
         await dialog.accept();
@@ -153,6 +158,11 @@ try {
         traceBrowserLifecycle('research-delete-confirm-accept-failed', String(error));
         throw error;
       }
+      return;
+    }
+    if (expectedRepeatConfirmation) {
+      await dialog.dismiss();
+      traceBrowserLifecycle('benchmark-repeat-confirmation-dismissed');
       return;
     }
     report.unexpectedDialogs.push(dialog.type() + ': ' + dialog.message());
@@ -516,9 +526,14 @@ try {
     await page.locator('#benchRepeatReport').isVisible());
   await page.locator('#benchRepeatCount').fill('0');
   await page.locator('#benchRepeatRunBtn').click();
-  check('重复采样拒绝超出范围的次数且不提交任务',
-    (await page.locator('#benchRepeatStatus').textContent()).includes('1～20') &&
-    !(await page.locator('#benchStopBtn').isEnabled()));
+  const repeatCountValidity = await page.locator('#benchRepeatCount').evaluate(el => ({
+    rangeUnderflow: el.validity.rangeUnderflow,
+    valid: el.checkValidity()
+  }));
+  check('重复采样通过原生数字输入约束拒绝范围外次数且不提交任务',
+    repeatCountValidity.rangeUnderflow && !repeatCountValidity.valid &&
+    !(await page.locator('#benchStopBtn').isEnabled()) &&
+    researchBenchmarkCreateCount === 0, repeatCountValidity);
   await page.locator('#benchRepeatCount').fill('10');
   const repeatReportSmoke = await page.evaluate(() => {
     const key='llm-gateway.bench-repeat.v1';
@@ -931,6 +946,8 @@ try {
   await page.locator('#authScreen.show').waitFor({ state: 'visible', timeout: 10000 });
   check('已有管理员 Key 不能绕过 Web 密码登录', await page.locator('#authScreen').isVisible() &&
     await page.evaluate(expected => localStorage.getItem('llm_gateway_admin_key') === expected, adminKey));
+  // 先移除布局测试阶段的 runtime API 夹具，确保权限探测命中真实 Gateway。
+  await page.unroute('**/api/admin/runtime');
   expectedNonServiceKeyRejection = true;
   const keyOnlyRuntimeResponse = await page.evaluate(async key => {
     const response = await fetch('/api/admin/runtime', { headers: { 'X-Admin-Key': key }, cache: 'no-store' });
@@ -1408,8 +1425,8 @@ try {
     }
 
     if (tab === 'model-test') {
-      check('模型测试页包含 Backend 运行参数档案选择器',
-        await page.locator('#benchRuntimeProfile').count() === 1);
+      check('模型测试页不再承载研究用 Backend 运行参数档案',
+        await page.locator('#benchRuntimeProfile').count() === 0);
     }
 
     if (tab === 'models-local') {
