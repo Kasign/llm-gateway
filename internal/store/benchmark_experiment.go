@@ -201,7 +201,7 @@ func (r *BenchmarkExperimentRepo) UpdateState(ctx context.Context,id,status,repo
 	if err:=r.ready();err!=nil{return err}
 	if _,ok:=benchmarkExperimentStatuses[status];!ok{return fmt.Errorf("unsupported benchmark experiment status %q",status)}
 	if err:=validateExperimentJSON("report",reportJSON,false);err!=nil{return err}
-	res,err:=r.db.ExecContext(ctx,`UPDATE benchmark_experiments SET status=?,report_json=?,error_code=?,error_message=?,
+	res,err:=r.db.ExecContext(ctx,`UPDATE benchmark_experiments SET status=?,report_json=COALESCE(?,report_json),error_code=?,error_message=?,
 		started_at=COALESCE(started_at,?),finished_at=?,updated_at=? WHERE experiment_id=?`,
 		status,nullIfEmpty(reportJSON),nullIfEmpty(errorCode),nullIfEmpty(errorMessage),startedAt,finishedAt,time.Now(),id)
 	if err!=nil{return err}
