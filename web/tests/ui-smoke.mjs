@@ -205,6 +205,51 @@ try {
     Boolean(await page.evaluate(() => localStorage.getItem('llm_gateway_session_token'))) &&
     await page.evaluate(() => localStorage.getItem('llm_gateway_admin_key')) === null);
 
+  const researchComparisonFixture = {
+    status:'partial', conclusion:'improved', comparability_level:'strict',
+    changed_parameter:'threads', material_delta_threshold_percent:5,
+    cache_groups:{cold:{
+      baseline_sample_count:5,candidate_sample_count:5,
+      metrics:{latency_ms:{
+        baseline:{count:5,min:900,median:1000,p95:1100,max:1200},
+        candidate:{count:5,min:800,median:900,p95:990,max:1000},
+        median_delta_percent:-10,p95_delta_percent:-10,conclusion:'improved',direction:'lower_is_better'
+      }}
+    }},
+    excluded_samples:[]
+  };
+  const researchExperimentFixture={
+    experiment_id:'research-smoke-1',name:'线程数单变量比较',status:'completed',
+    changed_parameter:'threads',baseline_value:4,candidate_value:6,
+    planned_samples:5,baseline_job_ids:['baseline-job-1'],candidate_job_ids:['candidate-job-1'],
+    report:{comparison:researchComparisonFixture}
+  };
+  let researchComparePostCount=0;
+  await page.route('**/api/admin/research/experiments**',async route=>{
+    const request=route.request(),url=new URL(request.url());
+    if(url.pathname==='/api/admin/research/experiments'&&request.method()==='GET'){
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[researchExperimentFixture],total:1})});return;
+    }
+    if(url.pathname.endsWith('/research-smoke-1')&&request.method()==='GET'){
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({experiment:researchExperimentFixture})});return;
+    }
+    if(url.pathname.endsWith('/research-smoke-1/compare')&&request.method()==='POST'){
+      researchComparePostCount++;
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({comparison:researchComparisonFixture})});return;
+    }
+    await route.continue();
+  });
+  await clickTab(page,'research','研究');
+  await page.locator('[data-research-open="research-smoke-1"]').click();
+  await page.locator('#researchDetail').getByText('单变量比较结论').waitFor({state:'visible'});
+  const researchDetailText=await page.locator('#researchDetail').innerText();
+  check('研究详情展示结构化性能比较指标',
+    researchDetailText.includes('总延迟（ms）')&&researchDetailText.includes('1000.00')&&researchDetailText.includes('改善'),
+    researchDetailText);
+  await page.locator('[data-research-compare="research-smoke-1"]').click();
+  await page.waitForFunction(()=>document.querySelector('#researchDetail')?.textContent.includes('总延迟（ms）')&&researchComparePostCount===1);
+  check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1,researchComparePostCount);
+
   await page.route('**/api/benchmark**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/benchmark' && route.request().method() === 'GET') {

@@ -122,11 +122,30 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
   }
   cacheGroups[cache]=map[string]interface{}{"baseline_sample_count":len(baseSamples),"candidate_sample_count":len(candSamples),"metrics":results}
  }
- improved,regressed,noChange,inconclusive,insufficient:=false,false,false,false,false
- for _,v:=range conclusions{switch v{case "improved":improved=true;case "regressed":regressed=true;case "no_material_change":noChange=true;case "inconclusive":inconclusive=true;case "insufficient_data":insufficient=true}}
- conclusion:="insufficient_data"
- switch{case improved&&regressed:conclusion="inconclusive";case insufficient&&(improved||regressed||noChange):conclusion="inconclusive";case improved:conclusion="improved";case regressed:conclusion="regressed";case inconclusive:conclusion="inconclusive";case noChange&&!insufficient:conclusion="no_material_change"}
+ conclusion:=benchmarkExperimentOverallConclusion(conclusions)
  comparability:="strict";if limited||len(excluded)>0{comparability="limited"};if len(cacheGroups)==0{comparability="not_comparable"}
  status:="completed";if len(excluded)>0||conclusion=="insufficient_data"||conclusion=="inconclusive"{status="partial"}
  return map[string]interface{}{"status":status,"conclusion":conclusion,"comparability_level":comparability,"changed_parameter":e.ChangedParameter,"baseline_value":json.RawMessage(e.BaselineValueJSON),"candidate_value":json.RawMessage(e.CandidateValueJSON),"minimum_samples_per_metric":benchmarkExperimentMinimumSamples,"material_delta_threshold_percent":benchmarkExperimentMaterialDeltaPercent,"attempted":attempted,"cache_groups":cacheGroups,"excluded_samples":excluded},nil
+}
+
+
+// benchmarkExperimentOverallConclusion 只有全部可比较指标方向一致时才给出整体改善/退化结论。
+func benchmarkExperimentOverallConclusion(conclusions []string) string {
+ if len(conclusions)==0{return "insufficient_data"}
+ allImproved,allRegressed,allNoChange:=true,true,true
+ hasEvidence,hasInsufficient:=false,false
+ for _,v:=range conclusions{
+  switch v{
+  case "improved":allRegressed=false;allNoChange=false;hasEvidence=true
+  case "regressed":allImproved=false;allNoChange=false;hasEvidence=true
+  case "no_material_change":allImproved=false;allRegressed=false;hasEvidence=true
+  case "insufficient_data":allImproved=false;allRegressed=false;allNoChange=false;hasInsufficient=true
+  default:allImproved=false;allRegressed=false;allNoChange=false
+  }
+ }
+ if allImproved{return "improved"}
+ if allRegressed{return "regressed"}
+ if allNoChange{return "no_material_change"}
+ if hasInsufficient&&!hasEvidence{return "insufficient_data"}
+ return "inconclusive"
 }

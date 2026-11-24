@@ -110,3 +110,18 @@ func TestValidateBenchmarkExperimentCreateRequestAllowsServerCapturedConditions(
 	in:=benchmarkExperimentCreateRequest{Name:"server captured conditions",ChangedParameter:"threads",BaselineValue:json.RawMessage(`4`),CandidateValue:json.RawMessage(`6`),PlannedSamples:10}
 	if err:=validateBenchmarkExperimentCreateRequest(in);err!=nil{t.Fatalf("server-captured conditions should not require manual JSON: %v",err)}
 }
+
+
+func TestBenchmarkExperimentOverallConclusionIsConservative(t *testing.T) {
+ cases:=[]struct{name string;values []string;want string}{
+  {"all improved",[]string{"improved","improved"},"improved"},
+  {"all regressed",[]string{"regressed","regressed"},"regressed"},
+  {"all unchanged",[]string{"no_material_change","no_material_change"},"no_material_change"},
+  {"mixed direction",[]string{"improved","regressed"},"inconclusive"},
+  {"improved with inconclusive metric",[]string{"improved","inconclusive"},"inconclusive"},
+  {"improved with insufficient metric",[]string{"improved","insufficient_data"},"inconclusive"},
+  {"only insufficient",[]string{"insufficient_data"},"insufficient_data"},
+  {"no metrics",nil,"insufficient_data"},
+ }
+ for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){if got:=benchmarkExperimentOverallConclusion(tc.values);got!=tc.want{t.Fatalf("got %q, want %q",got,tc.want)}})}
+}

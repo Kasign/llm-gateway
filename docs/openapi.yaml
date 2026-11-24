@@ -2147,6 +2147,7 @@ paths:
         "400": { $ref: "#/components/responses/AdminError" }
         "404": { $ref: "#/components/responses/AdminError" }
         "409": { $ref: "#/components/responses/AdminError" }
+        "405": { $ref: "#/components/responses/AdminError" }
         "500": { $ref: "#/components/responses/AdminError" }
   /api/admin/backend-runtime-profiles:
     get:
