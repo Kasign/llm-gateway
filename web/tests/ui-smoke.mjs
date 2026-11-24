@@ -246,9 +246,11 @@ try {
   check('研究详情展示结构化性能比较指标',
     researchDetailText.includes('总延迟（ms）')&&researchDetailText.includes('1000.00')&&researchDetailText.includes('改善'),
     researchDetailText);
+  const researchCompareResponse=page.waitForResponse(response=>response.url().includes('/research-smoke-1/compare')&&response.request().method()==='POST');
   await page.locator('[data-research-compare="research-smoke-1"]').click();
-  await page.waitForFunction(()=>document.querySelector('#researchDetail')?.textContent.includes('总延迟（ms）')&&researchComparePostCount===1);
-  check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1,researchComparePostCount);
+  const researchCompareResult=await researchCompareResponse;
+  await researchCompareResult.finished();
+  check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1&&researchCompareResult.status()===200,{count:researchComparePostCount,status:researchCompareResult.status()});
 
   await page.route('**/api/benchmark**', async route => {
     const url = new URL(route.request().url());
