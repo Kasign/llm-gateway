@@ -296,6 +296,7 @@ try {
     await page.locator('#models-inference #backendRuntimeProfilesRoot').count()===0&&
     await page.locator('#research #benchRepeatRunBtn').count()===1&&
     await page.locator('#model-test #benchRepeatRunBtn').count()===0&&
+    await page.locator('#model-test #benchRuntimeProfile').count()===0&&
     await page.locator('#researchRuntimeProfile').count()===1&&
     await page.locator('#researchApiKey').count()===1&&
     await page.locator('#benchRepeatExperiment').inputValue()==='research-smoke-interrupted'&&
