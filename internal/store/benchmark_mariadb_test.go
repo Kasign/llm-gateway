@@ -265,6 +265,10 @@ func TestBenchmarkExperimentRepoMariaDB(t *testing.T) {
 	if err!=nil||got.Status!="completed"||got.ReportJSON==""||got.FinishedAt==nil {
 		t.Fatalf("updated experiment = %+v err=%v",got,err)
 	}
+	// 继续实验时只更新状态，不应清空上一轮已持久化的比较报告。
+	if err:=repo.UpdateState(ctx,id,"completed","","","",nil,&now);err!=nil{t.Fatalf("update state without report: %v",err)}
+	got,err=repo.Get(ctx,id)
+	if err!=nil||got.ReportJSON==""{t.Fatalf("state-only update must preserve previous report: %+v err=%v",got,err)}
 	// Gateway 重启后，运行中的实验必须进入 interrupted，已完成实验不能被覆盖。
 	runningID := id + "-running"
 	runningExperiment := experiment
