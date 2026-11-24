@@ -47,7 +47,6 @@ llama:
   warm_start: true
   warm_start_comment: keepalive
   warm_start_interval_seconds: 15
-  max_output_tokens: 8192
 
 
 # 工具调用默认关闭。启用后，仍需在 Web「服务密钥」中配置调用方的模型与工具授权。

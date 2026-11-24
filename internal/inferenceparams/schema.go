@@ -18,7 +18,6 @@ const (
 
 // Params holds optional overrides; nil/omitted fields mean "do not inject".
 type Params struct {
-	MaxTokens        *int     `json:"max_tokens,omitempty"`
 	Temperature      *float64 `json:"temperature,omitempty"`
 	TopP             *float64 `json:"top_p,omitempty"`
 	TopK             *int     `json:"top_k,omitempty"`
@@ -30,7 +29,6 @@ type Params struct {
 	EnableThinking   *string  `json:"enable_thinking,omitempty"`
 	Stop             []string `json:"stop,omitempty"`
 	KeepAlive        *string  `json:"keep_alive,omitempty"`
-	MaxOutputCap     *int     `json:"max_output_cap,omitempty"`
 }
 
 // Field describes one admin form control.
@@ -93,12 +91,6 @@ func Schema() []Field {
 				{Value: ModeGatewayOnly, Label: "仅网关配置（忽略客户端同名字段）"},
 			},
 		},
-		fnum("max_tokens", "max_tokens",
-			"单次 completion 最多生成的 token 数上限。",
-			"越大输出越长、耗时与显存占用越高；过小会截断回答。",
-			"整数，通常 256～8192；具体还受模型 context 限制。",
-			"对话 2048～4096；代码生成可 8192。留空表示网关不注入该字段。",
-			"4096", "4096", "chat", both),
 		fnum("temperature", "temperature",
 			"采样温度，控制随机性。",
 			"越高越发散、创意更强；越低越稳定、可复现。",
@@ -175,12 +167,6 @@ func Schema() []Field {
 			Example:     "24h",
 			Hint:        "Ollama keep_alive",
 		},
-		fnum("max_output_cap", "max_output_cap",
-			"单次输出 token 上限。同时裁剪 max_tokens 和 Responses 的 max_output_tokens。",
-			"客户端要得再大也会被截到这个值。出厂来自 config.yaml 的 max_output_tokens。",
-			"整数 >0。",
-			"给 Codex 写代码常用 8192。",
-			"8192", "8192", "gateway", both),
 	}
 }
 
@@ -190,7 +176,6 @@ func SectionTitles() map[string]string {
 		"policy":  "合并策略",
 		"chat":    "Chat · 采样",
 		"load":    "加载与保活",
-		"gateway": "网关整理",
 	}
 }
 
@@ -200,6 +185,5 @@ func SectionDescriptions() map[string]string {
 		"policy":  "控制「网关默认值」与「客户端 JSON」谁说了算。保存后立即影响经网关转发的 /v1 请求（在 sanitize 之后合并）。",
 		"chat":    "OpenAI 兼容 chat/completions 常见采样字段。留空表示网关不向请求体写入该字段（完全透传客户端）。",
 		"load":    "只影响 Ollama 加载模型时在内存里保留多久，不写入 /v1 请求。",
-		"gateway": "网关自己的输出长度保护，会同时作用在 max_tokens 和 max_output_tokens 上。",
 	}
 }

@@ -11,18 +11,9 @@ func DefaultPolicy() Policy {
 	return Policy{Mode: ModeClientFirst}
 }
 
-func applyConfigGatewayFields(c *config.Config, p *Params) {
-	if c == nil || p == nil {
-		return
-	}
-	cap := c.Llama.MaxOutputTokens
-	p.MaxOutputCap = &cap
-}
-
 // DefaultsLlamaCpp returns factory defaults for llama.cpp 路径（还原默认 / UI 对照）。
 func DefaultsLlamaCpp(c *config.Config) Params {
 	var p Params
-	applyConfigGatewayFields(c, &p)
 	p.EnableThinking = sp("false")
 	// llama.cpp server 常见采样默认（与 Ollama 数值 intentionally 区分）
 	p.Temperature = fp(0.7)

@@ -1,6 +1,9 @@
 package inferenceparams
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestMergeChatBody_clientFirst(t *testing.T) {
 	temp := 0.2
@@ -143,13 +146,28 @@ func TestApplyThinkingInheritLeavesReasoning(t *testing.T) {
 	}
 }
 
-func TestCapMaxOutputTokens(t *testing.T) {
-	capN := 8192
+func TestMergeChatBodyPreservesClientOutputLimits(t *testing.T) {
+	for _, mode := range []string{ModeClientFirst, ModeGatewayOnly} {
+		raw := []byte(`{"max_output_tokens":20000,"max_tokens":9000}`)
+		out := MergeChatBody("llamacpp", mode, Params{}, raw)
+		if string(out) != string(raw) {
+			t.Fatalf("%s changed client output limits: %s", mode, out)
+		}
+	}
+}
+
+func TestLegacyOutputCapSettingsAreIgnored(t *testing.T) {
+	var saved Params
+	if err := json.Unmarshal([]byte(`{"max_output_cap":8192,"max_tokens":4096,"temperature":0.2}`), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Temperature == nil || *saved.Temperature != 0.2 {
+		t.Fatalf("unrelated saved parameters should still load: %+v", saved)
+	}
 	raw := []byte(`{"max_output_tokens":20000,"max_tokens":9000}`)
-	out := MergeChatBody("llamacpp", ModeClientFirst, Params{MaxOutputCap: &capN}, raw)
-	s := string(out)
-	if !containsStr(s, `"max_output_tokens":8192`) || !containsStr(s, `"max_tokens":8192`) {
-		t.Fatalf("cap not applied: %s", s)
+	out := MergeChatBody("llamacpp", ModeGatewayOnly, saved, raw)
+	if !containsStr(string(out), `"max_output_tokens":20000`) || !containsStr(string(out), `"max_tokens":9000`) {
+		t.Fatalf("legacy settings must not cap or replace client values: %s", out)
 	}
 }
 

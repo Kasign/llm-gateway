@@ -69,7 +69,6 @@ type Config struct {
 		WarmStart         bool   `yaml:"warm_start"`
 		WarmStartComment  string `yaml:"warm_start_comment"`
 		WarmStartInterval int    `yaml:"warm_start_interval_seconds"`
-		MaxOutputTokens   int    `yaml:"max_output_tokens"`
 	} `yaml:"llama"`
 	Storage struct {
 		ModelsDir string `yaml:"models_dir"`
@@ -461,9 +460,6 @@ func Load(path string) (*Config, error) {
 		c.Llama.ModelName = ""
 	}
 	c.Llama.ModelName = strings.TrimSpace(c.Llama.ModelName)
-	if c.Llama.MaxOutputTokens <= 0 {
-		c.Llama.MaxOutputTokens = 8192
-	}
 	if c.Llama.ModelsDir == "" || strings.Contains(c.Llama.ModelsDir, "${") {
 		c.Llama.ModelsDir = c.Storage.ModelsDir
 	}

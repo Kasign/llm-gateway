@@ -40,16 +40,11 @@ func ApplyChat(mode string, defs Params, body map[string]interface{}) {
 	setFloat("frequency_penalty", defs.FrequencyPenalty)
 	setFloat("presence_penalty", defs.PresencePenalty)
 	setFloat("repeat_penalty", defs.RepeatPenalty)
-	setInt("max_tokens", defs.MaxTokens)
 	setInt("seed", defs.Seed)
 	if len(defs.Stop) > 0 {
 		if gatewayOnly || body["stop"] == nil {
 			body["stop"] = defs.Stop
 		}
-	}
-	if defs.MaxOutputCap != nil && *defs.MaxOutputCap > 0 {
-		capOutput(body, "max_tokens", *defs.MaxOutputCap)
-		capOutput(body, "max_output_tokens", *defs.MaxOutputCap)
 	}
 }
 
@@ -316,25 +311,9 @@ func stripReasoningInclude(body map[string]interface{}) {
 	body["include"] = kept
 }
 
-func capOutput(body map[string]interface{}, key string, capMax int) {
-	switch n := body[key].(type) {
-	case float64:
-		if int(n) > capMax {
-			body[key] = capMax
-		}
-	case int:
-		if n > capMax {
-			body[key] = capMax
-		}
-	}
-}
-
 // MergeEffective overlays saved admin overrides onto backend factory defaults (proxy 用).
 func MergeEffective(factory, saved Params) Params {
 	out := factory
-	if saved.MaxTokens != nil {
-		out.MaxTokens = saved.MaxTokens
-	}
 	if saved.Temperature != nil {
 		out.Temperature = saved.Temperature
 	}
@@ -371,9 +350,6 @@ func MergeEffective(factory, saved Params) Params {
 	}
 	if saved.KeepAlive != nil {
 		out.KeepAlive = saved.KeepAlive
-	}
-	if saved.MaxOutputCap != nil {
-		out.MaxOutputCap = saved.MaxOutputCap
 	}
 	return out
 }

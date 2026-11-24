@@ -70,12 +70,9 @@ function factoryValueForKey(key) {
 /** 当前后端的出厂默认（还原默认会写入）；未保存时输入框可留空表示不注入 */
 function fieldInputHints(f) {
   const factory = factoryValueForKey(f.key);
-  const gatewayKeys = new Set(['max_output_cap']);
   if (factory != null) {
-    const note = gatewayKeys.has(f.key)
-      ? '来自 config.yaml，与「' + backendLabel() + ' · 还原出厂默认」一致'
-      : backendLabel() + ' 出厂默认（点「还原出厂默认」写入当前后端；未保存前留空=不注入）';
-    return { placeholder: factory, note, noteClass: gatewayKeys.has(f.key) ? 'from-config' : 'from-factory' };
+    const note = backendLabel() + ' 出厂默认（点「还原出厂默认」写入当前后端；未保存前留空=不注入）';
+    return { placeholder: factory, note, noteClass: 'from-factory' };
   }
   const ex = exampleForBackend(f);
   let note =

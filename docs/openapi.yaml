@@ -4021,7 +4021,6 @@ components:
           type: array
           items: { type: string }
         keep_alive: { type: string }
-        max_output_cap: { type: integer, format: int64 }
       additionalProperties: true
     InferenceParamsPolicy:
       type: object
@@ -5236,7 +5235,6 @@ components:
           type: array
           items: { type: string }
         keep_alive: { type: string }
-        max_output_cap: { type: integer, format: int64 }
       additionalProperties: true
     InferenceParamsPolicy:
       type: object
@@ -6339,7 +6337,6 @@ components:
           type: array
           items: { type: string }
         keep_alive: { type: string }
-        max_output_cap: { type: integer, format: int64 }
       additionalProperties: true
     InferenceParamsPolicy:
       type: object
@@ -7476,7 +7473,6 @@ components:
           type: array
           items: { type: string }
         keep_alive: { type: string }
-        max_output_cap: { type: integer, format: int64 }
       additionalProperties: true
     InferenceParamsPolicy:
       type: object
