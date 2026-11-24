@@ -1282,7 +1282,6 @@ func (s *Server) benchmarkAPI(w http.ResponseWriter, r *http.Request) {
 			"warm_start": s.cfg.Llama.WarmStart,
 			"warm_start_interval_seconds": s.cfg.Llama.WarmStartInterval,
 			"request_timeout_seconds": s.cfg.Llama.RequestTimeout,
-			"max_output_tokens": s.cfg.Llama.MaxOutputTokens,
 			"models_max": s.cfg.Llama.ModelsMax,
 			"auto_load_on_proxy": s.cfg.Llama.AutoLoadOnProxy,
 		},
