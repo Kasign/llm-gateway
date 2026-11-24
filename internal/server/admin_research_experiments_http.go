@@ -132,9 +132,8 @@ func validateBenchmarkExperimentJob(ctx context.Context, repo *store.BenchmarkRe
 		if err != nil { return errors.New("an existing experiment job cannot be read; refusing to mix unverifiable samples") }
 		previousSnapshot, previousValue, err := benchmarkExperimentActualSnapshot(previous, experiment.ChangedParameter)
 		if err != nil { return errors.New("an existing experiment job has incomplete runtime parameter evidence") }
-		previousGroup := "baseline"
 		previousExpectedRaw := experiment.BaselineValueJSON
-		for _, candidateID := range candidateIDs { if candidateID == existing { previousGroup = "candidate"; previousExpectedRaw = experiment.CandidateValueJSON; break } }
+		for _, candidateID := range candidateIDs { if candidateID == existing { previousExpectedRaw = experiment.CandidateValueJSON; break } }
 		previousExpected, err := benchmarkExperimentExpectedValue(previousExpectedRaw)
 		if err != nil || !reflect.DeepEqual(previousValue, previousExpected) { return errors.New("an existing experiment job does not match its declared group") }
 		if !reflect.DeepEqual(actual, previousSnapshot) { return errors.New("benchmark job conditions differ beyond the declared experiment parameter") }
