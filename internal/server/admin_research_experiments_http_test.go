@@ -73,6 +73,19 @@ func TestBenchmarkExperimentActualSnapshotRemovesOnlyDeclaredParameter(t *testin
 	if _,ok:=actual["condition_sha256"];ok{t.Fatal("derived condition fingerprint must not be compared as a raw condition")}
 }
 
+func TestBenchmarkExperimentJobAssociablePreservesAllPersistedOutcomes(t *testing.T) {
+	for _, status := range []string{"running", "cancelling", "completed", "failed", "cancelled", "interrupted"} {
+		if !benchmarkExperimentJobAssociable(status) {
+			t.Errorf("persisted Job status %q should remain associable", status)
+		}
+	}
+	for _, status := range []string{"", "queued", "unknown"} {
+		if benchmarkExperimentJobAssociable(status) {
+			t.Errorf("unsupported Job status %q must not be associable", status)
+		}
+	}
+}
+
 func TestBenchmarkExperimentProfileParameterWhitelist(t *testing.T) {
 	for _,name:=range []string{"threads","threads_batch","batch_size","ubatch_size","ctx_size","n_gpu_layers","flash_attn","cache_type_k","cache_type_v"}{
 		if !benchmarkExperimentProfileParameter(name){t.Fatalf("expected supported parameter %q",name)}
