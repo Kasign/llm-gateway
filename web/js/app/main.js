@@ -3425,15 +3425,45 @@ function setBenchmarkRepeatControlsDisabled(disabled){
  ['modelTestApiKey','modelTestClearKeyBtn','researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchPrompt','benchRuntimeProfile','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
 async function runResearchExperimentRepeat(){
+  const status=$('benchRepeatStatus');
   const key=($('researchApiKey')?.value||'').trim();
-  if(!key){const status=$('benchRepeatStatus');if(status)status.textContent='请先填写研究工作区的客户端服务密钥。';$('researchApiKey')?.focus();return;}
+  if(!key){if(status)status.textContent='请先填写研究工作区的客户端服务密钥。';$('researchApiKey')?.focus();return;}
   const prompt=($('researchPrompt')?.value||'').trim();
-  if(!prompt){const status=$('benchRepeatStatus');if(status)status.textContent='研究提示词不能为空。';$('researchPrompt')?.focus();return;}
-  const keyInput=$('modelTestApiKey'),promptInput=$('benchPrompt'),profileInput=$('benchRuntimeProfile');
-  if(keyInput)keyInput.value=key;
-  if(promptInput)promptInput.value=prompt;
-  if(profileInput)profileInput.value=$('researchRuntimeProfile')?.value||'';
-  await runBenchmarkRepeat();
+  if(!prompt){if(status)status.textContent='研究提示词不能为空。';$('researchPrompt')?.focus();return;}
+  const experimentID=$('benchRepeatExperiment')?.value||'';
+  if(!experimentID){if(status)status.textContent='研究采样必须先创建并选择一个实验。';$('benchRepeatExperiment')?.focus();return;}
+  const group=$('benchRepeatGroup')?.value||'baseline';
+  const profileID=$('researchRuntimeProfile')?.value||'';
+  if(!profileID){if(status)status.textContent='请选择与当前 Backend 和模型匹配的运行参数档案。';$('researchRuntimeProfile')?.focus();return;}
+  try{
+    const target=await loadBenchPanel({resume:false});
+    if(!target?.upstream)throw new Error('当前没有已加载的上游模型。');
+    const backendResult=await api('/api/admin/backend');
+    const backend=(backendResult.active||{}).backend||'llamacpp';
+    if(backend!=='llamacpp')throw new Error('单变量研究目前只支持 llama.cpp Backend。');
+    const query=new URLSearchParams({backend,model_id:target.upstream});
+    const profileResult=await api('/api/admin/backend-runtime-profiles?'+query.toString());
+    const profile=(profileResult.items||[]).find(item=>item.id===profileID);
+    if(!profile)throw new Error('所选运行参数档案与当前 Backend / 模型不匹配，请重新选择。');
+    const experimentResult=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+    const experiment=experimentResult.experiment||{};
+    const parameters=profile.parameters||{};
+    const required=['threads','threads_batch','batch_size','ubatch_size','ctx_size','n_gpu_layers','flash_attn','cache_type_k','cache_type_v'];
+    const missing=required.filter(name=>!Object.prototype.hasOwnProperty.call(parameters,name)||parameters[name]===null||parameters[name]===undefined||parameters[name]==='');
+    if(missing.length)throw new Error('运行参数档案缺少明确值：'+missing.join('、')+'。补齐后再执行，避免产生不可比较样本。');
+    const expected=group==='candidate'?experiment.candidate_value:experiment.baseline_value;
+    if(!Object.prototype.hasOwnProperty.call(parameters,experiment.changed_parameter))throw new Error('运行参数档案没有变化参数 '+experiment.changed_parameter+'。');
+    if(JSON.stringify(parameters[experiment.changed_parameter])!==JSON.stringify(expected)){
+      throw new Error(group+' 分组声明值为 '+JSON.stringify(expected)+'，但当前档案 '+experiment.name+' 的 '+experiment.changed_parameter+'='+JSON.stringify(parameters[experiment.changed_parameter])+'；请切换到对应档案。');
+    }
+    const keyInput=$('modelTestApiKey'),promptInput=$('benchPrompt'),profileInput=$('benchRuntimeProfile');
+    if(keyInput)keyInput.value=key;
+    if(promptInput)promptInput.value=prompt;
+    if(profileInput)profileInput.value=profileID;
+    await runBenchmarkRepeat();
+  }catch(error){
+    if(status)status.textContent='研究采样预检失败：'+(error?.message||'未知错误');
+  }
 }
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
