@@ -231,6 +231,7 @@ try {
     report:{}
   };
   let researchComparePostCount=0;
+  let researchDeleteCount=0;
   await page.route('**/api/admin/research/experiments**',async route=>{
     const request=route.request(),url=new URL(request.url());
     if(url.pathname==='/api/admin/research/experiments'&&request.method()==='GET'){
@@ -241,6 +242,10 @@ try {
     }
     if(url.pathname.endsWith('/research-smoke-interrupted')&&request.method()==='GET'){
       await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({experiment:interruptedResearchFixture})});return;
+    }
+    if(url.pathname.endsWith('/research-smoke-interrupted')&&request.method()==='DELETE'){
+      researchDeleteCount++;
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true})});return;
     }
     if(url.pathname.endsWith('/research-smoke-1/compare')&&request.method()==='POST'){
       researchComparePostCount++;
@@ -262,10 +267,17 @@ try {
   check('研究比较操作使用 POST 并刷新报告',researchComparePostCount===1&&researchCompareResult.status()===200,{count:researchComparePostCount,status:researchCompareResult.status()});
   await page.locator('[data-research-open="research-smoke-interrupted"]').click();
   await page.locator('[data-research-continue="research-smoke-interrupted"][data-research-group="candidate"]').click();
-  check('中断实验可恢复到指定分组继续采样',
+  check('研究工作区独立承载运行参数档案和实验采样',
+    await page.locator('#researchRuntimeProfile').count()===1&&
+    await page.locator('#researchApiKey').count()===1&&
     await page.locator('#benchRepeatExperiment').inputValue()==='research-smoke-interrupted'&&
     await page.locator('#benchRepeatGroup').inputValue()==='candidate'&&
-    await page.locator('#model-test').evaluate(el=>!el.hidden));
+    await page.locator('#research').evaluate(el=>el.classList.contains('active')));
+  page.once('dialog',dialog=>dialog.accept());
+  const deleteResponse=page.waitForResponse(response=>response.url().endsWith('/research-smoke-interrupted')&&response.request().method()==='DELETE');
+  await page.locator('[data-research-delete="research-smoke-interrupted"]').click();
+  const deleteResult=await deleteResponse;
+  check('研究实验删除只调用实验 DELETE API',researchDeleteCount===1&&deleteResult.status()===200);
 
   await page.route('**/api/benchmark**', async route => {
     const url = new URL(route.request().url());
