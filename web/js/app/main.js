@@ -246,8 +246,9 @@ async function loadResearchExperiments(){
     const items=Array.isArray(result.items)?result.items:[];
     rows.innerHTML=items.length?items.map(item=>{
       const jobs=(item.baseline_job_ids||[]).length+(item.candidate_job_ids||[]).length;
-      return '<tr><td><button type="button" class="btn link sm" data-research-open="'+esc(item.experiment_id)+'">'+esc(item.name)+'</button></td><td>'+esc(item.changed_parameter)+'</td><td>'+esc(item.status)+'</td><td>'+esc(item.planned_samples)+'</td><td>'+esc(jobs)+'</td><td>'+esc(item.updated_at||'—')+'</td></tr>';
-    }).join(''):'<tr><td colspan="6" class="muted">暂无研究实验。后续创建实验后会在此保留记录。</td></tr>';
+      const active=['queued','running'].includes(item.status);
+      return '<tr><td><button type="button" class="btn link sm" data-research-open="'+esc(item.experiment_id)+'">'+esc(item.name)+'</button></td><td>'+esc(item.changed_parameter)+'</td><td>'+esc(item.status)+'</td><td>'+esc(item.planned_samples)+'</td><td>'+esc(jobs)+'</td><td>'+esc(item.updated_at||'—')+'</td><td><button type="button" class="btn sm danger" data-research-delete="'+esc(item.experiment_id)+'" '+(active?'disabled title="运行中的实验不能删除"':'')+'>删除</button></td></tr>';
+    }).join(''):'<tr><td colspan="7" class="muted">暂无研究实验。后续创建实验后会在此保留记录。</td></tr>';
     const selector=$('benchRepeatExperiment');
     if(selector){const previous=selector.value;selector.innerHTML='<option value="">仅保存 Benchmark 历史</option>'+items.map(item=>'<option value="'+esc(item.experiment_id)+'">'+esc(item.name)+'（'+esc(item.status)+'）</option>').join('');if(items.some(item=>item.experiment_id===previous))selector.value=previous;}
     status.textContent='共 '+Number(result.total||0)+' 项研究实验';
