@@ -41,8 +41,8 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
-  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();renderBenchmarkRepeatReport();}
-  if(b.dataset.tab==='research'){loadResearchExperiments().catch(()=>{});globalThis.BackendRuntimeProfiles?.load().catch(()=>{});loadResearchRuntimeOptions().catch(()=>{});}
+  if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();}
+  if(b.dataset.tab==='research'){loadResearchExperiments().catch(()=>{});renderBenchmarkRepeatReport();globalThis.BackendRuntimeProfiles?.load().catch(()=>{});loadResearchRuntimeOptions().catch(()=>{});}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference')globalThis.InferenceParams?.load().catch(()=>{});
