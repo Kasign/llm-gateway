@@ -46,6 +46,7 @@ let expectedProviderListRefreshResponseCount = 0;
 let expectedSilentRequestPollFailure = false;
 let expectedSilentRequestPollConsoleCount = 0;
 let expectedSilentRequestPollResponseCount = 0;
+let expectedResearchDeleteDialog = false;
 
 function check(name, condition, detail) {
   report.checks.push({ name, passed: Boolean(condition), detail: detail ?? null });
@@ -126,6 +127,11 @@ try {
   });
   
   page.on('dialog', dialog => {
+    if (expectedResearchDeleteDialog && dialog.type() === 'confirm') {
+      expectedResearchDeleteDialog = false;
+      dialog.accept().catch(() => {});
+      return;
+    }
     report.unexpectedDialogs.push(dialog.type() + ': ' + dialog.message());
     dialog.dismiss().catch(() => {});
   });
@@ -302,7 +308,7 @@ try {
     await page.locator('#benchRepeatExperiment').inputValue()==='research-smoke-interrupted'&&
     await page.locator('#benchRepeatGroup').inputValue()==='candidate'&&
     await page.locator('#research').evaluate(el=>el.classList.contains('active')));
-  page.once('dialog',dialog=>dialog.accept());
+  expectedResearchDeleteDialog = true;
   const deleteResponse=page.waitForResponse(response=>response.url().endsWith('/research-smoke-interrupted')&&response.request().method()==='DELETE');
   await page.locator('[data-research-delete="research-smoke-interrupted"]').click();
   const deleteResult=await deleteResponse;
