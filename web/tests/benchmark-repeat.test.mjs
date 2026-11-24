@@ -81,7 +81,9 @@ test('Decode research sample qualification requires long output, native timing a
   };
   assert.equal(isResearchDecodeSampleEligible(base), true);
   assert.equal(isResearchDecodeSampleEligible({ ...base, output_tokens: 255 }), false);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, output_tokens: undefined }), false);
   assert.equal(isResearchDecodeSampleEligible({ ...base, decode_tokens: null }), false);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, decode_tokens: undefined }), false);
   assert.equal(isResearchDecodeSampleEligible({ ...base, cache_state: 'unknown' }), false);
   assert.equal(isResearchDecodeSampleEligible({ ...base, condition_status: 'partial', condition_missing: ['model_load_state_unknown'] }), false);
 });

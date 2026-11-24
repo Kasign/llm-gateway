@@ -371,6 +371,8 @@ async function openResearchExperiment(id){
         workflowAction='<div class="btn-row"><button type="button" class="btn primary" data-research-run-group="baseline" data-research-id="'+esc(e.experiment_id)+'">继续 Baseline 采样</button></div>';
       }else if(phase==='candidate_complete'){
         workflowAction='<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">重新计算比较报告</button></div>';
+      }else if(phase==='conditions_changed'){
+        workflowAction='<p class="small" role="alert">检测到运行条件指纹变化，本次实验不再追加采样或生成结论。请检查 Backend、模型或运行环境是否发生了非目标变化，然后创建新实验。</p>';
       }else if(phase==='completed'){
         workflowAction='<p class="small muted">Baseline / Candidate 均已完成，比较报告已自动生成。</p>';
       }else if(phase==='baseline_running'||phase==='candidate_running'){
@@ -3569,14 +3571,15 @@ async function finalizeResearchExperimentGroup(experimentID,group,workflow){
   const planned=Number(currentWorkflow.planned_samples||experiment.planned_samples||10);
   const completed=totalValid>=planned;
   const previousAttempts=Number(currentWorkflow[group+'_attempted_samples']||0);
+  const conditionsChanged=samplingReport.status==='conditions_changed';
   const nextWorkflow={...currentWorkflow,[group+'_valid_samples']:totalValid,[group+'_attempted_samples']:previousAttempts+(samplingReport.samples||[]).length,
-    phase:group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending')};
+    phase:conditionsChanged?'conditions_changed':(group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending'))};
   const report={...samplingReport,workflow:nextWorkflow};
   await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
     method:'PATCH',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({status:'partial',report,finished_at:samplingReport.finished_at||new Date().toISOString()})
+    body:JSON.stringify({status:conditionsChanged?'failed':'partial',report,finished_at:samplingReport.finished_at||new Date().toISOString()})
   });
-  if(group==='candidate'&&completed){
+  if(group==='candidate'&&completed&&!conditionsChanged){
     await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/compare',{method:'POST'});
     const compared=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
     const finalReport={...(compared.experiment?.report||report),workflow:{...nextWorkflow,phase:'completed'}};
