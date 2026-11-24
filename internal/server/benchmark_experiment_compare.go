@@ -153,6 +153,9 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
   groupMap,ok:=group.(map[string]interface{});if !ok{continue}
   metricsMap,ok:=groupMap["metrics"].(map[string]interface{});if !ok{continue}
   decodeMetric,ok:=metricsMap["decode_tokens_per_sec"].(map[string]interface{});if !ok{continue}
+  baselineStats,baselineOK:=decodeMetric["baseline"].(benchmarkExperimentMetricStats)
+  candidateStats,candidateOK:=decodeMetric["candidate"].(benchmarkExperimentMetricStats)
+  if !baselineOK||!candidateOK||baselineStats.Count<benchmarkExperimentMinimumSamples||candidateStats.Count<benchmarkExperimentMinimumSamples{continue}
   if value,ok:=decodeMetric["conclusion"].(string);ok{decodeConclusions=append(decodeConclusions,value)}
  }
  primaryConclusion:=benchmarkExperimentOverallConclusion(decodeConclusions)

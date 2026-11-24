@@ -363,9 +363,11 @@ async function openResearchExperiment(id){
     let workflowAction='';
     if(workflow?.version===1){
       const phase=workflow.phase||'baseline_pending';
-      if(phase==='awaiting_candidate'||phase==='candidate_pending'){
-        workflowAction='<div class="card"><p><strong>下一步：切换 Backend 参数</strong></p><p>请只把 llama.cpp 的 <code>'+esc(workflow.parameter)+'</code> 从 <code>'+esc(JSON.stringify(e.baseline_value))+'</code> 改为 <code>'+esc(JSON.stringify(e.candidate_value))+'</code>，重启 llama.cpp。然后点击下方按钮，系统会自动使用已生成的 Candidate 档案执行 '+esc(e.planned_samples)+' 次采样并生成比较报告。</p><button type="button" class="btn primary" data-research-run-group="candidate" data-research-id="'+esc(e.experiment_id)+'">已修改并重启，开始 Candidate</button></div>';
-      }else if(phase==='baseline_pending'){
+      if(phase==='awaiting_candidate'){
+        workflowAction='<div class="card"><p><strong>下一步：切换 Backend 参数</strong></p><p>请只把 llama.cpp 的 <code>'+esc(workflow.parameter)+'</code> 从 <code>'+esc(JSON.stringify(e.baseline_value))+'</code> 改为 <code>'+esc(JSON.stringify(e.candidate_value))+'</code>，重启 llama.cpp。然后点击下方按钮，系统会自动执行剩余 Candidate 采样并生成比较报告。</p><button type="button" class="btn primary" data-research-run-group="candidate" data-research-id="'+esc(e.experiment_id)+'">已修改并重启，开始 Candidate</button></div>';
+      }else if(phase==='candidate_pending'||(phase==='candidate_running'&&!active)){
+        workflowAction='<div class="card"><p><strong>Candidate 采样尚未达到有效样本目标</strong></p><p>请保持 llama.cpp 当前参数为 <code>'+esc(workflow.parameter)+'='+esc(JSON.stringify(e.candidate_value))+'</code>，无需再次修改或重启。系统将自动补足剩余有效样本。</p><button type="button" class="btn primary" data-research-run-group="candidate" data-research-id="'+esc(e.experiment_id)+'">继续 Candidate 采样</button></div>';
+      }else if(phase==='baseline_pending'||(phase==='baseline_running'&&!active)){
         workflowAction='<div class="btn-row"><button type="button" class="btn primary" data-research-run-group="baseline" data-research-id="'+esc(e.experiment_id)+'">继续 Baseline 采样</button></div>';
       }else if(phase==='candidate_complete'){
         workflowAction='<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">重新计算比较报告</button></div>';
@@ -3534,12 +3536,17 @@ async function copyBenchmarkRepeatReport(){
  const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
 }
 function setBenchmarkRepeatControlsDisabled(disabled){
- ['researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchRepeatExperiment','benchRepeatGroup','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+ ['researchApiKey','researchPrompt','researchRuntimeProfile','researchName','researchChangedParameter','researchCandidateValue','researchPlannedSamples','researchCreateRunBtn','benchRepeatCount','benchRepeatExperiment','benchRepeatGroup','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
 async function startResearchExperimentGroup(experimentID,group,{legacy=false}={}){
   const result=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
   const experiment=result.experiment||{},workflow=experiment.report?.workflow||null;
-  if(group==='candidate'&&!legacy&&!confirm('请确认已在 NUC 上只修改 '+experiment.changed_parameter+' 为 '+JSON.stringify(experiment.candidate_value)+'，并已重启 llama.cpp。Gateway 不会代替你修改或重启 Backend。确认后开始 Candidate 采样？'))return;
+  if(group==='candidate'&&!legacy){
+    const message=workflow?.phase==='awaiting_candidate'
+      ?'请确认已在 NUC 上只修改 '+experiment.changed_parameter+' 为 '+JSON.stringify(experiment.candidate_value)+'，并已重启 llama.cpp。Gateway 不会代替你修改或重启 Backend。确认后开始 Candidate 采样？'
+      :'请确认 llama.cpp 当前仍保持 Candidate 参数 '+experiment.changed_parameter+'='+JSON.stringify(experiment.candidate_value)+'。本次只补足剩余有效样本，不需要再次修改或重启 Backend。继续？';
+    if(!confirm(message))return;
+  }
   const profileID=legacy?($('researchRuntimeProfile')?.value||''):(workflow?.[group+'_profile_id']||'');
   if(!profileID)throw new Error('实验没有可用的 '+group+' 运行参数档案。');
   const experimentSelect=$('benchRepeatExperiment');if(experimentSelect)experimentSelect.value=experimentID;
@@ -3622,6 +3629,14 @@ async function runResearchExperimentRepeat(options={}){
     const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value=group;
     if($('researchPrompt'))$('researchPrompt').value=prompt;
     researchExecutionContext={key,prompt,profileID,params:workflow?.version===1?RESEARCH_DECODE_REQUEST_PARAMS:undefined,workflow:activeWorkflow};
+    if(workflow?.version===1){
+      const latest=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
+      const persistedReport={...(latest.experiment?.report||{}),workflow:activeWorkflow};
+      await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
+        method:'PATCH',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({status:'running',report:persistedReport,started_at:new Date().toISOString()})
+      });
+    }
     try{await runBenchmarkRepeat();}
     finally{researchExecutionContext=null;}
     if(workflow?.version===1)await finalizeResearchExperimentGroup(experimentID,group,activeWorkflow);

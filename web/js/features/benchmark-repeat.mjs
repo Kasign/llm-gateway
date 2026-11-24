@@ -19,8 +19,12 @@ function traceabilityOnlyMissing(missing=[]){
 }
 export function isResearchDecodeSampleEligible(sample,minimumOutputTokens=256){
   if(sample?.status!=='completed'||sample?.condition_mismatch===true)return false;
-  if(Number(sample?.output_tokens)<minimumOutputTokens||Number(sample?.decode_tokens)<=0||
-    Number(sample?.decode_ms)<=0||Number(sample?.decode_tokens_per_sec)<=0)return false;
+  const outputTokens=Number(sample?.output_tokens),decodeTokens=Number(sample?.decode_tokens);
+  const decodeMS=Number(sample?.decode_ms),decodeTPS=Number(sample?.decode_tokens_per_sec);
+  if(!Number.isFinite(outputTokens)||outputTokens<minimumOutputTokens||
+    !Number.isFinite(decodeTokens)||decodeTokens<=0||
+    !Number.isFinite(decodeMS)||decodeMS<=0||
+    !Number.isFinite(decodeTPS)||decodeTPS<=0)return false;
   if(!['cold','partial','full'].includes(sample?.cache_state))return false;
   if(String(sample?.condition_sha256||'').trim()==='')return false;
   return sample?.condition_status==='complete'||
