@@ -306,7 +306,7 @@ try {
   await page.locator('#benchRepeatStatus').getByText('研究采样预检失败').waitFor();
   check('运行参数不符合实验分组时在创建 Job 前阻止采样',
     researchBenchmarkCreateCount===0&&
-    (await page.locator('#benchRepeatStatus').innerText()).includes('Baseline 分组声明值'));
+    (await page.locator('#benchRepeatStatus').innerText()).toLowerCase().includes('baseline 分组声明值'));
   await page.locator('[data-research-open="research-smoke-1"]').click();
   await page.locator('#researchDetail').getByText('单变量比较结论').waitFor({state:'visible'});
   const researchDetailText=await page.locator('#researchDetail').innerText();
