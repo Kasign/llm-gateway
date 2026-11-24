@@ -1904,6 +1904,7 @@ function applyBenchParams(p){
   }
   if($('benchStop'))$('benchStop').value=(m.stop&&m.stop.length)?m.stop.join('\n'):'';
 }
+let researchExecutionContext=null;
 function benchPayloadForApi(target,scenario='performance',promptOverride='',acceptanceCaseID=''){
   const upstream=typeof target==='string'?target:(target?.upstream||'');
   const gatewayKey=(typeof target==='string'?'':(target?.gatewayKey||'')).trim();
@@ -1916,7 +1917,7 @@ function benchPayloadForApi(target,scenario='performance',promptOverride='',acce
     :{use_active:true,model_id:upstream,prompt:p.prompt,max_tokens:p.max_tokens};
   if(scenario==='tool_performance'||scenario==='tool_performance_auto')body.scenario=scenario;
   if(acceptanceCaseID)body.acceptance_case_id=acceptanceCaseID;
-  const runtimeProfileID=String($('benchRuntimeProfile')?.value||'').trim();
+  const runtimeProfileID=String(researchExecutionContext?.profileID||$('benchRuntimeProfile')?.value||'').trim();
   if(runtimeProfileID)body.runtime_profile_id=runtimeProfileID;
   if(p.temperature!=null)body.temperature=p.temperature;
   if(p.top_p!=null)body.top_p=p.top_p;
@@ -3069,7 +3070,7 @@ async function runBenchmarkSuite(resumeExisting=false){
     renderBenchmarkSuiteReport();
     return;
   }
-  const clientKey=($('modelTestApiKey')?.value||'').trim();
+  const clientKey=(researchExecutionContext?.key||$('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const status=$('benchSuiteStatus');
     if(status)status.textContent='请先输入客户端服务密钥。';
@@ -3350,9 +3351,9 @@ async function runBenchmark(scenario='performance'){
   }
   const toolScenario=scenario==='tool_performance'||scenario==='tool_performance_auto';
   if(!isAcceptance)benchResultScope=toolScenario?'tools':'performance';
-  const promptOverride=toolScenario?($(isAcceptance?'benchAcceptancePrompt':'benchToolPrompt')?.value||'').trim():'';
+  const promptOverride=toolScenario?($(isAcceptance?'benchAcceptancePrompt':'benchToolPrompt')?.value||'').trim():(researchExecutionContext?.prompt||'');
   if(toolScenario&&!promptOverride){const answer=benchResultElement('answer');if(answer){answer.className='bench-answer err';answer.textContent='工具性能测试提示词不能为空。';}return;}
-  const clientKey=($('modelTestApiKey')?.value||'').trim();
+  const clientKey=(researchExecutionContext?.key||$('modelTestApiKey')?.value||'').trim();
   if(!clientKey){
     const answer=benchResultElement('answer');
     if(answer){answer.className='bench-answer err';answer.textContent='请先在模型测试页面输入客户端服务密钥。';}
@@ -3422,7 +3423,7 @@ async function copyBenchmarkRepeatReport(){
  const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
 }
 function setBenchmarkRepeatControlsDisabled(disabled){
- ['modelTestApiKey','modelTestClearKeyBtn','researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchPrompt','benchRuntimeProfile','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+ ['researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchRepeatExperiment','benchRepeatGroup','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
 }
 async function runResearchExperimentRepeat(){
   const status=$('benchRepeatStatus');
@@ -3456,11 +3457,9 @@ async function runResearchExperimentRepeat(){
     if(JSON.stringify(parameters[experiment.changed_parameter])!==JSON.stringify(expected)){
       throw new Error(group+' 分组声明值为 '+JSON.stringify(expected)+'，但当前档案 '+experiment.name+' 的 '+experiment.changed_parameter+'='+JSON.stringify(parameters[experiment.changed_parameter])+'；请切换到对应档案。');
     }
-    const keyInput=$('modelTestApiKey'),promptInput=$('benchPrompt'),profileInput=$('benchRuntimeProfile');
-    if(keyInput)keyInput.value=key;
-    if(promptInput)promptInput.value=prompt;
-    if(profileInput)profileInput.value=profileID;
-    await runBenchmarkRepeat();
+    researchExecutionContext={key,prompt,profileID};
+    try{await runBenchmarkRepeat();}
+    finally{researchExecutionContext=null;}
   }catch(error){
     if(status)status.textContent='研究采样预检失败：'+(error?.message||'未知错误');
   }
@@ -3468,11 +3467,11 @@ async function runResearchExperimentRepeat(){
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
  try{count=normalizeBenchmarkRepeatCount($('benchRepeatCount')?.value);}catch(error){const status=$('benchRepeatStatus');if(status)status.textContent=error.message;$('benchRepeatCount')?.focus();return;}
- const clientKey=($('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
+ const clientKey=(researchExecutionContext?.key||$('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
  if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。'+($('benchRepeatExperiment')?.value?'本次 Job 会自动关联到所选研究实验和分组。':'')+'期间请勿发送其他推理请求。可以随时停止。继续？'))return;
  benchRepeatExperimentID=$('benchRepeatExperiment')?.value||'';
  benchRepeatExperimentGroup=$('benchRepeatGroup')?.value||'baseline';
- const fixedParams=collectBenchParams(),fixedPrompt=$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[]};
+ const fixedParams=collectBenchParams(),fixedPrompt=researchExecutionContext?.prompt||$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[]};
  let baselineConditionHash='',baselineModel='';
  benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
@@ -3490,7 +3489,7 @@ async function runBenchmarkRepeat(){
  try{
   for(let index=1;index<=count;index++){
    if(benchRepeatCancelRequested)break;const status=$('benchRepeatStatus');if(status)status.textContent='正在执行第 '+index+'/'+count+' 次串行采样…';
-   applyBenchParams(fixedParams);if($('benchPrompt'))$('benchPrompt').value=fixedPrompt;persistBenchParams();
+   applyBenchParams(fixedParams);if($('benchPrompt')&&!researchExecutionContext)$('benchPrompt').value=fixedPrompt;persistBenchParams();
    const previousJobID=readBenchStore().jobId||'';benchRepeatCurrentJobID='';benchRepeatInRequest=true;
    await runBenchmark('performance');benchRepeatInRequest=false;benchRepeatCurrentJobID='';
    const currentJobID=readBenchStore().jobId||'';
