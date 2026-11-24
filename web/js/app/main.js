@@ -42,10 +42,10 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
   if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();renderBenchmarkRepeatReport();}
-  if(b.dataset.tab==='research')loadResearchExperiments().catch(()=>{});
+  if(b.dataset.tab==='research'){loadResearchExperiments().catch(()=>{});globalThis.BackendRuntimeProfiles?.load().catch(()=>{});loadResearchRuntimeOptions().catch(()=>{});}
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
-  if(b.dataset.tab==='models-inference'){globalThis.InferenceParams?.load().catch(()=>{});globalThis.BackendRuntimeProfiles?.load().catch(()=>{});}
+  if(b.dataset.tab==='models-inference')globalThis.InferenceParams?.load().catch(()=>{});
   if(b.dataset.tab==='dashboard'){
     loadDashboardRecent().catch(()=>{});
     loadDashboardStats().catch(()=>{});
@@ -226,6 +226,18 @@ async function createResearchExperiment(event){
 }
 $('researchCreateForm')?.addEventListener('submit',createResearchExperiment);
 
+async function loadResearchRuntimeOptions(){
+  const select=$('researchRuntimeProfile');if(!select)return;
+  try{
+    const target=await loadBenchPanel({resume:false});
+    if(!target?.upstream){select.innerHTML='<option value="">当前没有已加载模型</option>';return;}
+    const backendResult=await api('/api/admin/backend');
+    const backend=(backendResult.active||{}).backend||'llamacpp';
+    await globalThis.BackendRuntimeProfiles?.loadBenchmarkOptions(backend,target.upstream,'researchRuntimeProfile');
+  }catch(error){
+    select.innerHTML='<option value="">运行参数档案加载失败：'+esc(error?.message||'未知错误')+'</option>';
+  }
+}
 async function loadResearchExperiments(){
   const status=$('researchStatus'),rows=$('researchRows');if(!status||!rows)return;
   status.textContent='正在读取研究实验…';
@@ -293,10 +305,9 @@ document.addEventListener('click',event=>{
     const experimentSelect=$('benchRepeatExperiment'),groupSelect=$('benchRepeatGroup');
     if(experimentSelect)experimentSelect.value=continueButton.dataset.researchContinue;
     if(groupSelect)groupSelect.value=continueButton.dataset.researchGroup;
-    goTab('model-test');
     $('benchRepeatCount')?.focus();
-    const status=$('benchRepeatStatus');
-    if(status)status.textContent='已选择历史实验和 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；确认当前模型、Prompt、运行参数档案与目标分组一致后再开始采样。';
+    const status=$('researchStatus');
+    if(status)status.textContent='已选择 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；请核对研究运行环境和参数档案后开始采样。';
     return;
   }
   const deleteButton=event.target.closest('[data-research-delete]');
@@ -1931,6 +1942,7 @@ function setBenchRunning(running){
   const ids=['benchRunBtn','benchSuiteRunBtn','benchToolRunBtn','benchToolForceRunBtn','benchAcceptanceRunBtn'];
   ids.forEach(id=>{const button=$(id);if(button)button.disabled=!!running||benchRepeatActive;});
   const repeatButton=$('benchRepeatRunBtn');if(repeatButton)repeatButton.disabled=!!running||benchRepeatActive;
+  const researchStop=$('researchStopBtn');if(researchStop)researchStop.disabled=!(running||benchRepeatActive);
   ['benchStopBtn','toolBenchStopBtn','acceptanceBenchStopBtn'].forEach(id=>{const button=$(id);if(button)button.disabled=!(running||benchRepeatActive);});
 }
 
@@ -3410,7 +3422,18 @@ async function copyBenchmarkRepeatReport(){
  const status=$('benchRepeatStatus');if(status)status.textContent=copied?'重复采样 Markdown 报告已复制。':'复制失败，可在报告区域手动选择复制。';
 }
 function setBenchmarkRepeatControlsDisabled(disabled){
- ['modelTestApiKey','modelTestClearKeyBtn','benchRepeatCount','benchPrompt','benchRuntimeProfile','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+ ['modelTestApiKey','modelTestClearKeyBtn','researchApiKey','researchPrompt','researchRuntimeProfile','benchRepeatCount','benchPrompt','benchRuntimeProfile','benchParamsOpenBtn','benchTokens','benchTemperature','benchTopP','benchTopK','benchMinP','benchFreqPen','benchPresPen','benchRepeatPen','benchSeed','benchThinking','benchStop'].forEach(id=>{const el=$(id);if(el)el.disabled=!!disabled;});
+}
+async function runResearchExperimentRepeat(){
+  const key=($('researchApiKey')?.value||'').trim();
+  if(!key){const status=$('benchRepeatStatus');if(status)status.textContent='请先填写研究工作区的客户端服务密钥。';$('researchApiKey')?.focus();return;}
+  const prompt=($('researchPrompt')?.value||'').trim();
+  if(!prompt){const status=$('benchRepeatStatus');if(status)status.textContent='研究提示词不能为空。';$('researchPrompt')?.focus();return;}
+  const keyInput=$('modelTestApiKey'),promptInput=$('benchPrompt'),profileInput=$('benchRuntimeProfile');
+  if(keyInput)keyInput.value=key;
+  if(promptInput)promptInput.value=prompt;
+  if(profileInput)profileInput.value=$('researchRuntimeProfile')?.value||'';
+  await runBenchmarkRepeat();
 }
 async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
