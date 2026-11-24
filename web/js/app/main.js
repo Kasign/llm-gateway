@@ -3695,7 +3695,12 @@ async function runBenchmarkRepeat(){
     }
     break;
    }
-   if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
+   if(!currentJobID||currentJobID===previousJobID){
+    report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});
+    writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
+    if(researchDecodeMode){report.status='failed';report.error='Benchmark Job 未创建，已停止后续尝试。请先处理客户端密钥、请求参数或服务端错误。';break;}
+    continue;
+   }
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
    const sample=benchmarkRepeatSampleFromWrap(wrap,index);
    if(benchRepeatAssociationError){sample.experiment_association_error=benchRepeatAssociationError;sample.error=sample.error||benchRepeatAssociationError;}
