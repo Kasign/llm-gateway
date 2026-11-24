@@ -20,6 +20,8 @@ test('Decode 实验固定输出规模与推理条件', () => {
   assert.equal(RESEARCH_DECODE_MIN_OUTPUT_TOKENS, 256);
   assert.equal(RESEARCH_DECODE_REQUEST_PARAMS.max_tokens, 512);
   assert.equal(RESEARCH_DECODE_REQUEST_PARAMS.temperature, 0);
+  assert.equal(RESEARCH_DECODE_REQUEST_PARAMS.top_k, 0);
+  assert.equal(RESEARCH_DECODE_REQUEST_PARAMS.min_p, 0);
   assert.equal(RESEARCH_DECODE_REQUEST_PARAMS.seed, 42);
 });
 
