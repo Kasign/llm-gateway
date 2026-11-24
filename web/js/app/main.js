@@ -25,7 +25,7 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsActiveStatus, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
-import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown, isResearchDecodeSampleEligible } from '../features/benchmark-repeat.mjs';
+import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown, isResearchDecodeSampleEligible, researchDecodeSampleFailureReason } from '../features/benchmark-repeat.mjs';
 import { buildCandidateRuntimeProfile, parseResearchCandidateValue, RESEARCH_DECODE_PROMPT, RESEARCH_DECODE_REQUEST_PARAMS, RESEARCH_REQUIRED_PROFILE_PARAMETERS } from '../features/research-workflow.mjs';
 
 // 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
@@ -373,6 +373,8 @@ async function openResearchExperiment(id){
         workflowAction='<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">重新计算比较报告</button></div>';
       }else if(phase==='conditions_changed'){
         workflowAction='<p class="small" role="alert">检测到运行条件指纹变化，本次实验不再追加采样或生成结论。请检查 Backend、模型或运行环境是否发生了非目标变化，然后创建新实验。</p>';
+      }else if(phase==='sample_not_eligible'){
+        workflowAction='<p class="small" role="alert">首个完成样本不满足 Decode 测试要求（输出长度、原生 timing、缓存或条件证据）。系统已停止后续请求，避免重复浪费时间。请先检查采样报告中的排除原因，再重新创建实验。</p>';
       }else if(phase==='completed'){
         workflowAction='<p class="small muted">Baseline / Candidate 均已完成，比较报告已自动生成。</p>';
       }else if(phase==='baseline_running'||phase==='candidate_running'){
@@ -3572,14 +3574,16 @@ async function finalizeResearchExperimentGroup(experimentID,group,workflow){
   const completed=totalValid>=planned;
   const previousAttempts=Number(currentWorkflow[group+'_attempted_samples']||0);
   const conditionsChanged=samplingReport.status==='conditions_changed';
+  const sampleNotEligible=samplingReport.status==='sample_not_eligible';
+  const terminalFailure=conditionsChanged||sampleNotEligible;
   const nextWorkflow={...currentWorkflow,[group+'_valid_samples']:totalValid,[group+'_attempted_samples']:previousAttempts+(samplingReport.samples||[]).length,
-    phase:conditionsChanged?'conditions_changed':(group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending'))};
+    phase:conditionsChanged?'conditions_changed':(sampleNotEligible?'sample_not_eligible':(group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending')))};
   const report={...samplingReport,workflow:nextWorkflow};
   await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
     method:'PATCH',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({status:conditionsChanged?'failed':'partial',report,finished_at:samplingReport.finished_at||new Date().toISOString()})
+    body:JSON.stringify({status:terminalFailure?'failed':'partial',report,finished_at:samplingReport.finished_at||new Date().toISOString()})
   });
-  if(group==='candidate'&&completed&&!conditionsChanged){
+  if(group==='candidate'&&completed&&!terminalFailure){
     await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/compare',{method:'POST'});
     const compared=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
     const finalReport={...(compared.experiment?.report||report),workflow:{...nextWorkflow,phase:'completed'}};
@@ -3705,6 +3709,10 @@ async function runBenchmarkRepeat(){
    report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
    if(benchRepeatAssociationError){report.status='failed';report.error=benchRepeatAssociationError;writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);break;}
    if(['running','cancelling'].includes(sample.status)||sample.status==='unknown'){report.status='interrupted';break;}
+   if(researchDecodeMode&&sample.status==='completed'){
+    const reason=researchDecodeSampleFailureReason(sample,researchExecutionContext?.workflow?.min_output_tokens||256);
+    if(reason){report.status='sample_not_eligible';report.error='首个完成样本不满足 Decode 有效性要求：'+reason+'；为避免无效重复请求，已停止本组采样。';writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);break;}
+   }
    if(researchDecodeMode&&report.samples.filter(item=>isResearchDecodeSampleEligible(item,researchExecutionContext?.workflow?.min_output_tokens||256)).length>=count)break;
   }
  }catch(error){report.error=error?.message||'重复采样执行失败';report.status='failed';}

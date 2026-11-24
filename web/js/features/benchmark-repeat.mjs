@@ -17,18 +17,22 @@ function traceabilityOnlyMissing(missing=[]){
   const allowed=new Set(['model_sha256_unknown','gateway_revision_unknown','gateway_build_cleanliness_unknown']);
   return missing.every(item=>allowed.has(item));
 }
-export function isResearchDecodeSampleEligible(sample,minimumOutputTokens=256){
-  if(sample?.status!=='completed'||sample?.condition_mismatch===true)return false;
+export function researchDecodeSampleFailureReason(sample,minimumOutputTokens=256){
+  if(sample?.status!=='completed')return '';
+  if(sample?.condition_mismatch===true)return 'condition_mismatch';
   const outputTokens=Number(sample?.output_tokens),decodeTokens=Number(sample?.decode_tokens);
   const decodeMS=Number(sample?.decode_ms),decodeTPS=Number(sample?.decode_tokens_per_sec);
-  if(!Number.isFinite(outputTokens)||outputTokens<minimumOutputTokens||
-    !Number.isFinite(decodeTokens)||decodeTokens<=0||
-    !Number.isFinite(decodeMS)||decodeMS<=0||
-    !Number.isFinite(decodeTPS)||decodeTPS<=0)return false;
-  if(!['cold','partial','full'].includes(sample?.cache_state))return false;
-  if(String(sample?.condition_sha256||'').trim()==='')return false;
-  return sample?.condition_status==='complete'||
-    (sample?.condition_status==='partial'&&traceabilityOnlyMissing(sample?.condition_missing));
+  if(!Number.isFinite(outputTokens)||outputTokens<minimumOutputTokens)return 'decode_output_tokens_below_minimum';
+  if(!Number.isFinite(decodeTokens)||decodeTokens<=0||!Number.isFinite(decodeMS)||decodeMS<=0||
+    !Number.isFinite(decodeTPS)||decodeTPS<=0)return 'native_decode_timing_unavailable';
+  if(!['cold','partial','full'].includes(sample?.cache_state))return 'cache_state_unknown';
+  if(String(sample?.condition_sha256||'').trim()==='')return 'condition_fingerprint_missing';
+  if(!(sample?.condition_status==='complete'||
+    (sample?.condition_status==='partial'&&traceabilityOnlyMissing(sample?.condition_missing))))return 'condition_not_comparable';
+  return '';
+}
+export function isResearchDecodeSampleEligible(sample,minimumOutputTokens=256){
+  return sample?.status==='completed'&&researchDecodeSampleFailureReason(sample,minimumOutputTokens)==='';
 }
 export function summarizeBenchmarkRepeat(samples=[],options={}){
   const completed=samples.filter(sample=>sample?.status==='completed');

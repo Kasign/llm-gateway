@@ -73,7 +73,7 @@ test('Markdown report retains Job IDs and comparability wording', () => {
 });
 
 test('Decode research sample qualification requires long output, native timing and comparable conditions', async () => {
-  const { isResearchDecodeSampleEligible } = await import('../js/features/benchmark-repeat.mjs');
+  const { isResearchDecodeSampleEligible, researchDecodeSampleFailureReason } = await import('../js/features/benchmark-repeat.mjs');
   const base = {
     status: 'completed', output_tokens: 256, decode_tokens: 255,
     decode_ms: 12000, decode_tokens_per_sec: 21.25,
@@ -84,7 +84,9 @@ test('Decode research sample qualification requires long output, native timing a
   assert.equal(isResearchDecodeSampleEligible({ ...base, output_tokens: undefined }), false);
   assert.equal(isResearchDecodeSampleEligible({ ...base, decode_tokens: null }), false);
   assert.equal(isResearchDecodeSampleEligible({ ...base, decode_tokens: undefined }), false);
-  assert.equal(isResearchDecodeSampleEligible({ ...base, cache_state: 'unknown' }), false);
+  assert.equal(researchDecodeSampleFailureReason({ ...base, decode_tokens_per_sec: null }), 'native_decode_timing_unavailable');
+  assert.equal(researchDecodeSampleFailureReason({ ...base, output_tokens: 120 }), 'decode_output_tokens_below_minimum');
+  assert.equal(researchDecodeSampleFailureReason({ ...base, cache_state: 'unknown' }), 'cache_state_unknown');
   assert.equal(isResearchDecodeSampleEligible({ ...base, condition_status: 'partial', condition_missing: ['model_load_state_unknown'] }), false);
 });
 
