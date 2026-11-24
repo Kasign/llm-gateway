@@ -66,6 +66,82 @@ func benchmarkExperimentView(e *store.BenchmarkExperiment) map[string]interface{
 		"error_code":e.ErrorCode,"error_message":e.ErrorMessage,"started_at":e.StartedAt,"finished_at":e.FinishedAt,
 		"created_at":e.CreatedAt,"updated_at":e.UpdatedAt}
 }
+
+// benchmarkExperimentProfileParameter 是研究实验允许变更的 llama.cpp 档案字段。
+// 只接受有明确来源的 BackendRuntimeProfile 参数，不接受任意 JSON 路径。
+func benchmarkExperimentProfileParameter(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "threads", "threads_batch", "batch_size", "ubatch_size", "ctx_size",
+		"n_gpu_layers", "flash_attn", "cache_type_k", "cache_type_v":
+		return true
+	default:
+		return false
+	}
+}
+
+func benchmarkExperimentActualSnapshot(task *store.BenchmarkTask, changedParameter string) (map[string]interface{}, interface{}, error) {
+	if task == nil || strings.TrimSpace(task.ConfigJSON) == "" { return nil, nil, errors.New("benchmark condition snapshot is unavailable") }
+	if !benchmarkExperimentProfileParameter(changedParameter) { return nil, nil, errors.New("changed_parameter must be a supported llama.cpp runtime profile field") }
+	var snapshot map[string]interface{}
+	if err := json.Unmarshal([]byte(task.ConfigJSON), &snapshot); err != nil || snapshot == nil { return nil, nil, errors.New("benchmark condition snapshot is invalid") }
+	profile, ok := snapshot["backend_runtime_profile"].(map[string]interface{})
+	if !ok { return nil, nil, errors.New("benchmark job has no declared Backend runtime profile") }
+	parameters, ok := profile["parameters"].(map[string]interface{})
+	if !ok { return nil, nil, errors.New("benchmark runtime profile parameters are unavailable") }
+	actualValue, ok := parameters[changedParameter]
+	if !ok { return nil, nil, errors.New("benchmark job does not declare the experiment parameter value") }
+	delete(parameters, changedParameter)
+	// 档案 ID、版本、名称、来源和更新时间用于追溯，不是运行条件；只比较 Backend、Model 与实际参数。
+	snapshot["backend_runtime_profile"] = map[string]interface{}{
+		"backend": profile["backend"], "model_id": profile["model_id"], "parameters": parameters,
+	}
+	delete(snapshot, "condition_sha256")
+	delete(snapshot, "condition_status")
+	delete(snapshot, "condition_missing")
+	delete(snapshot, "model_key")
+	if identity, ok := snapshot["model_identity"].(map[string]interface{}); ok { delete(identity, "model_key") }
+	// Prompt 正文不落入 ConfigJSON；其 SHA256 是实际运行条件的一部分，必须纳入核对。
+	snapshot["prompt_sha256"] = task.PromptSHA256
+	return snapshot, actualValue, nil
+}
+
+func benchmarkExperimentExpectedValue(raw, group string) (interface{}, error) {
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil { return nil, errors.New("experiment parameter value is invalid") }
+	return value, nil
+}
+
+// validateBenchmarkExperimentJob 以服务端持久化的 Task.ConfigJSON 为准核对新 Job。
+// 只有声明参数的值符合分组，且剔除该参数后所有关联 Job 的完整快照一致，才允许关联。
+func validateBenchmarkExperimentJob(ctx context.Context, repo *store.BenchmarkRepo, experiment *store.BenchmarkExperiment, group string, task *store.BenchmarkTask) error {
+	if experiment == nil || task == nil { return errors.New("experiment or benchmark job is unavailable") }
+	if group != "baseline" && group != "candidate" { return errors.New("experiment group must be baseline or candidate") }
+	if task.Status != "running" && task.Status != "completed" { return errors.New("benchmark job is not in a usable state") }
+	actual, actualValue, err := benchmarkExperimentActualSnapshot(task, experiment.ChangedParameter)
+	if err != nil { return err }
+	expectedRaw := experiment.BaselineValueJSON
+	if group == "candidate" { expectedRaw = experiment.CandidateValueJSON }
+	expected, err := benchmarkExperimentExpectedValue(expectedRaw, group)
+	if err != nil { return err }
+	if !reflect.DeepEqual(actualValue, expected) { return errors.New("benchmark job runtime parameter does not match the selected experiment group") }
+	var baselineIDs, candidateIDs []string
+	if err := json.Unmarshal([]byte(experiment.BaselineJobIDsJSON), &baselineIDs); err != nil { return errors.New("experiment baseline job associations are invalid") }
+	if err := json.Unmarshal([]byte(experiment.CandidateJobIDsJSON), &candidateIDs); err != nil { return errors.New("experiment candidate job associations are invalid") }
+	for _, existing := range append(append([]string{}, baselineIDs...), candidateIDs...) {
+		previous, err := repo.GetTask(ctx, existing)
+		if err != nil { return errors.New("an existing experiment job cannot be read; refusing to mix unverifiable samples") }
+		previousSnapshot, previousValue, err := benchmarkExperimentActualSnapshot(previous, experiment.ChangedParameter)
+		if err != nil { return errors.New("an existing experiment job has incomplete runtime parameter evidence") }
+		previousGroup := "baseline"
+		previousExpectedRaw := experiment.BaselineValueJSON
+		for _, candidateID := range candidateIDs { if candidateID == existing { previousGroup = "candidate"; previousExpectedRaw = experiment.CandidateValueJSON; break } }
+		previousExpected, err := benchmarkExperimentExpectedValue(previousExpectedRaw, previousGroup)
+		if err != nil || !reflect.DeepEqual(previousValue, previousExpected) { return errors.New("an existing experiment job does not match its declared group") }
+		if !reflect.DeepEqual(actual, previousSnapshot) { return errors.New("benchmark job conditions differ beyond the declared experiment parameter") }
+	}
+	return nil
+}
+
 func (s *Server) benchmarkExperimentsAPI(w http.ResponseWriter,r *http.Request) {
 	if !s.requireAdmin(w,r){return};if s.benchmarkExperimentRepo==nil{jsonError(w,503,"research_unavailable","research experiment storage is unavailable");return}
 	w.Header().Set("Cache-Control","no-store")
@@ -107,6 +183,20 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 	}
 	if len(parts)==2&&parts[1]=="jobs"&&r.Method==http.MethodPost{
 		var in benchmarkExperimentJobRequest;if err:=decodeResearchJSON(w,r,&in);err!=nil{jsonError(w,400,"invalid_request","invalid experiment job JSON");return}
+		experiment, loadErr := s.benchmarkExperimentRepo.Get(r.Context(), id)
+		if loadErr != nil {
+			if errors.Is(loadErr, sql.ErrNoRows) { jsonError(w,404,"not_found","research experiment not found") } else { jsonError(w,500,"research_read_failed","failed to read research experiment") }
+			return
+		}
+		if s.benchmarkRepo == nil { jsonError(w,503,"benchmark_store_unavailable","benchmark task storage is unavailable"); return }
+		task, taskErr := s.benchmarkRepo.GetTask(r.Context(), in.JobID)
+		if taskErr != nil {
+			if errors.Is(taskErr, sql.ErrNoRows) { jsonError(w,404,"benchmark_job_not_found","benchmark job not found") } else { jsonError(w,500,"benchmark_read_failed","failed to read benchmark job") }
+			return
+		}
+		if err := validateBenchmarkExperimentJob(r.Context(), s.benchmarkRepo, experiment, in.Group, task); err != nil {
+			jsonError(w,400,"benchmark_job_not_comparable",err.Error()); return
+		}
 		if err:=s.benchmarkExperimentRepo.AddJob(r.Context(),id,in.Group,in.JobID);err!=nil{
 			if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found")}else{jsonError(w,400,"invalid_experiment_job",err.Error())};return}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok":true});return

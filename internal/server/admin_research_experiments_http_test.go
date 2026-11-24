@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/whl/llm-gateway/internal/store"
 )
 
 func TestDecodeResearchJSONStrictlyRejectsUnknownAndTrailingValues(t *testing.T) {
@@ -44,4 +46,37 @@ func TestValidateBenchmarkExperimentCreateRequestEnforcesSingleVariable(t *testi
 	if err:=validateBenchmarkExperimentCreateRequest(same);err==nil{t.Fatal("identical baseline and candidate values must be rejected")}
 	array:=base;array.BaselineCondition=json.RawMessage(`[]`)
 	if err:=validateBenchmarkExperimentCreateRequest(array);err==nil{t.Fatal("condition snapshots must be objects")}
+}
+
+
+func TestBenchmarkExperimentActualSnapshotRemovesOnlyDeclaredParameter(t *testing.T) {
+	base := map[string]interface{}{
+		"backend":"llama.cpp","model_key":"alias","model_id":"qwen","scenario":"performance",
+		"prompt_sha256":"prompt-a","condition_sha256":"fingerprint-a","condition_status":"complete",
+		"backend_runtime_profile":map[string]interface{}{
+			"profile_id":"baseline-id","profile_name":"Baseline","profile_version":1,"source":"user_declared","updated_at":"today",
+			"backend":"llama.cpp","model_id":"qwen","parameters":map[string]interface{}{"threads":float64(4),"ctx_size":float64(8192)},
+		},
+		"model_identity":map[string]interface{}{"model_key":"alias","sha256":"model-sha"},
+	}
+	encoded,_:=json.Marshal(base)
+	task:=&store.BenchmarkTask{ConfigJSON:string(encoded),PromptSHA256:"prompt-a"}
+	actual,value,err:=benchmarkExperimentActualSnapshot(task,"threads")
+	if err!=nil{t.Fatal(err)}
+	if value!=float64(4){t.Fatalf("actual value=%v",value)}
+	profile:=actual["backend_runtime_profile"].(map[string]interface{})
+	params:=profile["parameters"].(map[string]interface{})
+	if _,ok:=params["threads"];ok{t.Fatal("declared changed parameter must be excluded from baseline condition comparison")}
+	if params["ctx_size"]!=float64(8192){t.Fatal("non-target runtime parameter must remain in condition snapshot")}
+	if actual["prompt_sha256"]!="prompt-a"{t.Fatal("prompt SHA must be part of actual condition snapshot")}
+	if _,ok:=actual["condition_sha256"];ok{t.Fatal("derived condition fingerprint must not be compared as a raw condition")}
+}
+
+func TestBenchmarkExperimentProfileParameterWhitelist(t *testing.T) {
+	for _,name:=range []string{"threads","threads_batch","batch_size","ubatch_size","ctx_size","n_gpu_layers","flash_attn","cache_type_k","cache_type_v"}{
+		if !benchmarkExperimentProfileParameter(name){t.Fatalf("expected supported parameter %q",name)}
+	}
+	for _,name:=range []string{"temperature","model_id","arbitrary.path",""}{
+		if benchmarkExperimentProfileParameter(name){t.Fatalf("unexpected supported parameter %q",name)}
+	}
 }
