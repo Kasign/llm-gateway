@@ -507,6 +507,7 @@ try {
     await page.locator('#benchSuiteReport').count() === 1 &&
     !(await page.locator('#benchSuiteRunBtn').isVisible()) &&
     !(await page.locator('#benchToolRunBtn').isVisible()));
+  await clickTab(page, 'research', '研究');
   check('普通性能测试提供 1～20 次重复采样，默认 10 次',
     await page.locator('#benchRepeatCount').inputValue() === '10' &&
     await page.locator('#benchRepeatCount').getAttribute('min') === '1' &&
@@ -543,6 +544,7 @@ try {
   check('重复采样报告展示独立 Job ID 并提供 Markdown 复制，且不持久化提示词',
     repeatReportSmoke.reportVisible&&repeatReportSmoke.copyEnabled&&repeatReportSmoke.noPromptStored,
     repeatReportSmoke);
+  await clickTab(page, 'model-test', '模型测试');
   await page.locator('#modelTestTabSuite').click();
   check('一键四组测试独立 Tab 与工具、验收并列',
     await page.locator('#modelTestPanelSuite').isVisible() &&
