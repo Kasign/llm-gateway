@@ -26,7 +26,6 @@ func DefaultsLlamaCpp(c *config.Config) Params {
 // DefaultsOllama returns factory defaults for Ollama 路径。
 func DefaultsOllama(c *config.Config) Params {
 	var p Params
-	applyConfigGatewayFields(c, &p)
 	p.EnableThinking = sp("false")
 	p.KeepAlive = sp("24h")
 	// Ollama generate API 文档常见默认
