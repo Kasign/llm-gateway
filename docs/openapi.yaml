@@ -2071,6 +2071,21 @@ paths:
                   experiment: { $ref: "#/components/schemas/BenchmarkExperiment" }
         "404": { $ref: "#/components/responses/AdminError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      operationId: deleteResearchExperiment
+      tags: [Admin]
+      summary: 删除性能研究实验
+      description: 仅删除实验定义、Job 关联和比较报告；不删除 Benchmark Task/Run、请求审计或原始样本。queued / running 实验禁止删除。
+      security:
+        - AdminSessionBearer: []
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200": { description: 实验元数据已删除，Benchmark 历史保留 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/AdminError" }
+        "409": { description: 实验仍处于 queued / running 状态，不能删除 }
   /api/admin/research/experiments/{experiment_id}/state:
     patch:
       operationId: updateResearchExperimentState
