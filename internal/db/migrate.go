@@ -23,6 +23,7 @@ var requiredTables = []string{
 	"model_prices",
 	"benchmark_tasks",
 	"benchmark_runs",
+	"benchmark_experiments",
 }
 
 // Migrate 按分号拆分执行迁移文件，再跑 ensureColumns 做增量结构升级，并校验必需表存在。
@@ -204,6 +205,30 @@ func ensureColumns(ctx context.Context, db *sql.DB) error {
     REFERENCES benchmark_tasks(task_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return fmt.Errorf("schema upgrade failed (benchmark_runs): %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS benchmark_experiments (
+  experiment_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  name VARCHAR(160) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'draft',
+  changed_parameter VARCHAR(64) NOT NULL,
+  baseline_value_json LONGTEXT NOT NULL,
+  candidate_value_json LONGTEXT NOT NULL,
+  baseline_condition_json LONGTEXT NOT NULL,
+  candidate_condition_json LONGTEXT NOT NULL,
+  baseline_job_ids_json LONGTEXT NOT NULL,
+  candidate_job_ids_json LONGTEXT NOT NULL,
+  planned_samples TINYINT UNSIGNED NOT NULL DEFAULT 10,
+  report_json LONGTEXT NULL,
+  error_code VARCHAR(64) NULL,
+  error_message VARCHAR(512) NULL,
+  started_at DATETIME(6) NULL,
+  finished_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_benchmark_experiments_status_updated (status, updated_at),
+  INDEX idx_benchmark_experiments_created (created_at, experiment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return fmt.Errorf("schema upgrade failed (benchmark_experiments): %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS model_prices (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
