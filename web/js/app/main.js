@@ -375,7 +375,7 @@ async function openResearchExperiment(id){
         workflowAction='<p class="small muted">研究采样正在执行；每个 Benchmark Job 会自动关联到对应分组。</p>';
       }
     }else if(['interrupted','partial','failed','cancelled'].includes(e.status)){
-      workflowAction='<div class="btn-row"><span class="small muted">这是旧版实验，可选择分组继续追加采样：</span><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="baseline">继续 Baseline</button><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="candidate">继续 Candidate</button></div>';
+      workflowAction='<div class="btn-row"><span class="small muted">旧版实验恢复：先选择分组和匹配的运行参数档案，再执行采样。</span><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="baseline">选择 Baseline</button><button type="button" class="btn sm" data-research-continue="'+esc(e.experiment_id)+'" data-research-group="candidate">选择 Candidate</button><button type="button" class="btn sm" data-research-legacy-run>执行所选分组</button></div>';
     }
     root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><div class="btn-row"><span class="pill">'+esc(e.status)+'</span><button type="button" class="btn sm danger" data-research-delete="'+esc(e.experiment_id)+'" '+(active?'disabled title="运行中的实验不能删除"':'')+'>删除实验</button></div></div>'+
       '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
@@ -397,7 +397,15 @@ document.addEventListener('click',event=>{
   }
   const continueButton=event.target.closest('[data-research-continue]');
   if(continueButton){
-    startResearchExperimentGroup(continueButton.dataset.researchContinue,continueButton.dataset.researchGroup,{legacy:true}).catch(error=>{const status=$('benchRepeatStatus');if(status)status.textContent='研究采样启动失败：'+(error?.message||'未知错误');});
+    const experimentSelect=$('benchRepeatExperiment'),groupSelect=$('benchRepeatGroup');
+    if(experimentSelect)experimentSelect.value=continueButton.dataset.researchContinue;
+    if(groupSelect)groupSelect.value=continueButton.dataset.researchGroup;
+    const status=$('benchRepeatStatus');
+    if(status)status.textContent='已选择旧版实验 '+(continueButton.dataset.researchGroup==='baseline'?'Baseline':'Candidate')+' 分组；请选择对应运行参数档案后执行。';
+    return;
+  }
+  if(event.target.closest('[data-research-legacy-run]')){
+    runResearchExperimentRepeat().catch(error=>{const status=$('benchRepeatStatus');if(status)status.textContent=error?.message||'采样失败';});
     return;
   }
   const deleteButton=event.target.closest('[data-research-delete]');
@@ -3558,6 +3566,7 @@ async function finalizeResearchExperimentGroup(experimentID,group,workflow){
 }
 
 async function runResearchExperimentRepeat(options={}){
+  const details=document.querySelector('#research details');if(details)details.open=true;
   const status=$('benchRepeatStatus'),key=($('researchApiKey')?.value||'').trim();
   if(!key){if(status)status.textContent='请先填写研究工作区的客户端服务密钥。';$('researchApiKey')?.focus();return;}
   const experimentID=options.experimentID||$('benchRepeatExperiment')?.value||'';
