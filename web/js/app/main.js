@@ -2370,7 +2370,6 @@ async function loadBenchPanel(opts={}){
       '推理后端（API 流量）：<b>'+esc(be==='ollama'?'Ollama':be==='llamacpp'?'llama.cpp':be)+'</b> · '+
       '上游模型：<b><code>'+esc(name)+'</code></b>'+
       (gk?' · 网关模型键：<code>'+esc(gk)+'</code>':'');
-    await globalThis.BackendRuntimeProfiles?.loadBenchmarkOptions(be,name);
     updateBenchReqPreview(name);
     if(opts.resume!==false)await resumeBenchmarkSession();
     return {upstream:name,gatewayKey:gk};
