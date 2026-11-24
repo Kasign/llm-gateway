@@ -25,7 +25,7 @@ import {
 } from '../features/requests.js';
 import { exposeGlobals } from '../expose.js';
 import { benchmarkSuiteCaseHasRecoverableJob, benchmarkSuiteIsActiveStatus, benchmarkSuiteIsTerminalStatus, benchmarkSuiteStatusForReport, benchmarkSuiteTaskOutcome } from '../features/benchmark-suite-state.mjs';
-import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown } from '../features/benchmark-repeat.mjs';
+import { normalizeBenchmarkRepeatCount, buildBenchmarkRepeatMarkdown, isResearchDecodeSampleEligible } from '../features/benchmark-repeat.mjs';
 import { buildCandidateRuntimeProfile, parseResearchCandidateValue, RESEARCH_DECODE_PROMPT, RESEARCH_DECODE_REQUEST_PARAMS, RESEARCH_REQUIRED_PROFILE_PARAMETERS } from '../features/research-workflow.mjs';
 
 // 管理员 API Key 与 Web Session 分开保存；启动时仅回填密钥管理表单。
@@ -381,6 +381,7 @@ async function openResearchExperiment(id){
       '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
       '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code> · Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
       (workflow?'<p class="small muted">运行阶段：'+esc(workflow.phase||'unknown')+' · Baseline 档案：'+esc(workflow.baseline_profile_name||workflow.baseline_profile_id||'—')+' · Candidate 档案：'+esc(workflow.candidate_profile_name||workflow.candidate_profile_id||'—')+'</p>':'')+
+      (workflow?'<p>有效 Decode 样本：Baseline '+esc(workflow.baseline_valid_samples||0)+' / '+esc(e.planned_samples)+' · Candidate '+esc(workflow.candidate_valid_samples||0)+' / '+esc(e.planned_samples)+'</p>':'')+
       '<p>已关联任务：Baseline '+esc((e.baseline_job_ids||[]).length)+' · Candidate '+esc((e.candidate_job_ids||[]).length)+'</p>'+
       workflowAction+
       (canCompare&&!workflow?'<div class="btn-row"><button type="button" class="btn sm" data-research-compare="'+esc(e.experiment_id)+'">计算 / 刷新比较报告</button><span id="researchCompareStatus" class="small muted" role="status"></span></div>':'')+
@@ -3513,14 +3514,19 @@ function readBenchmarkRepeatReport(){try{const raw=localStorage.getItem(BENCH_RE
 function writeBenchmarkRepeatReport(report){localStorage.setItem(BENCH_REPEAT_STORAGE_KEY,JSON.stringify(report));}
 function benchmarkRepeatSampleFromWrap(wrap,index){
  const job=benchJobPayload(wrap),analysis=wrap?.analysis||job.analysis||{},timings=analysis.throughput?.llama_timings||analysis.llama_timings||analysis.model_timings||{},inputTokens=job.input_tokens,profile=job.condition_snapshot?.backend_runtime_profile||{};
- return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',runtime_profile_id:profile.profile_id||'',runtime_profile_name:profile.profile_name||'',runtime_profile_version:profile.profile_version??null,runtime_profile_source:profile.source||'',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
+ return{index,job_id:job.job_id||'',request_id:job.request_id||'',status:String(job.status||'unknown'),condition_status:job.condition_status||'unknown',condition_sha256:job.condition_sha256||'',condition_missing:Array.isArray(job.condition_missing)?job.condition_missing:[],model:job.model_id||job.model_key||job.llama_model||'unknown',runtime_profile_id:profile.profile_id||'',runtime_profile_name:profile.profile_name||'',runtime_profile_version:profile.profile_version??null,runtime_profile_source:profile.source||'',latency_ms:job.latency_ms??null,ttft_ms:job.ttft_ms??null,input_tokens:inputTokens??null,output_tokens:job.output_tokens??null,output_tokens_per_sec:analysis.throughput?.output_tokens_per_sec??null,prompt_ms:timings.prompt_ms??null,prompt_tokens_per_sec:timings.prompt_per_second??null,decode_ms:timings.predicted_ms??null,decode_tokens:timings.predicted_n??null,decode_tokens_per_sec:timings.predicted_per_second??null,cache_n:timings.cache_n??null,prompt_n:timings.prompt_n??null,cache_state:benchmarkCacheClassification(timings,inputTokens),error:job.error||job.error_code||''};
 }
 function renderBenchmarkRepeatReport(report=readBenchmarkRepeatReport()){
  const output=$('benchRepeatReport'),status=$('benchRepeatStatus'),copy=$('benchRepeatCopyBtn');if(!output)return;
  if(!report){output.textContent='尚未执行重复采样。';if(status)status.textContent='默认 10 次；每次独立保存到 Benchmark 历史。';if(copy)copy.disabled=true;return;}
  output.textContent=buildBenchmarkRepeatMarkdown(report);
- const completed=(report.samples||[]).filter(item=>item.status==='completed').length;
- if(status)status.textContent='状态：'+(report.status||'unknown')+' · 服务端完成 '+completed+'/'+report.requested_count+' 次 · 已记录 '+(report.samples||[]).length+' 次尝试';
+ const samples=report.samples||[],completed=samples.filter(item=>item.status==='completed').length;
+ if(status){
+  if(report.workflow?.version===1){
+   const qualified=samples.filter(item=>isResearchDecodeSampleEligible(item,report.workflow.min_output_tokens||256)).length;
+   status.textContent='状态：'+(report.status||'unknown')+' · 有效 Decode 样本 '+qualified+'/'+report.requested_count+' · 已尝试 '+samples.length+'/'+(report.max_attempts||report.requested_count);
+  }else status.textContent='状态：'+(report.status||'unknown')+' · 服务端完成 '+completed+'/'+report.requested_count+' 次 · 已记录 '+samples.length+' 次尝试';
+ }
  if(copy)copy.disabled=!(report.samples||[]).length;
 }
 async function copyBenchmarkRepeatReport(){
@@ -3538,15 +3544,26 @@ async function startResearchExperimentGroup(experimentID,group,{legacy=false}={}
   if(!profileID)throw new Error('实验没有可用的 '+group+' 运行参数档案。');
   const experimentSelect=$('benchRepeatExperiment');if(experimentSelect)experimentSelect.value=experimentID;
   const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value=group;
-  const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(experiment.planned_samples||10);
-  return runResearchExperimentRepeat({experimentID,group,profileID,workflow,legacy});
+  const planned=Number(experiment.planned_samples||10);
+  const alreadyValid=Number(workflow?.[group+'_valid_samples']||0);
+  const remaining=Math.max(1,planned-alreadyValid);
+  const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(remaining);
+  return runResearchExperimentRepeat({experimentID,group,profileID,workflow,legacy,targetCount:remaining});
 }
 
 async function finalizeResearchExperimentGroup(experimentID,group,workflow){
   const latest=await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID));
   const experiment=latest.experiment||{},samplingReport=experiment.report||{};
-  const completed=samplingReport.status==='completed';
-  const nextWorkflow={...(samplingReport.workflow||workflow||{}),phase:group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending')};
+  const currentWorkflow=samplingReport.workflow||workflow||{};
+  const minimumOutputTokens=Number(currentWorkflow.min_output_tokens||256);
+  const currentValid=(samplingReport.samples||[]).filter(sample=>isResearchDecodeSampleEligible(sample,minimumOutputTokens)).length;
+  const previousValid=Number(currentWorkflow[group+'_valid_samples']||0);
+  const totalValid=previousValid+currentValid;
+  const planned=Number(currentWorkflow.planned_samples||experiment.planned_samples||10);
+  const completed=totalValid>=planned;
+  const previousAttempts=Number(currentWorkflow[group+'_attempted_samples']||0);
+  const nextWorkflow={...currentWorkflow,[group+'_valid_samples']:totalValid,[group+'_attempted_samples']:previousAttempts+(samplingReport.samples||[]).length,
+    phase:group==='baseline'?(completed?'awaiting_candidate':'baseline_pending'):(completed?'candidate_complete':'candidate_pending')};
   const report={...samplingReport,workflow:nextWorkflow};
   await api('/api/admin/research/experiments/'+encodeURIComponent(experimentID)+'/state',{
     method:'PATCH',headers:{'Content-Type':'application/json'},
@@ -3597,7 +3614,10 @@ async function runResearchExperimentRepeat(options={}){
       throw new Error(group+' 分组声明值为 '+JSON.stringify(expected)+'，但当前档案 '+experiment.name+' 的 '+experiment.changed_parameter+'='+JSON.stringify(parameters[experiment.changed_parameter])+'；拒绝创建 Benchmark Job。');
     }
     const activeWorkflow=workflow?.version===1?{...workflow,phase:group==='baseline'?'baseline_running':'candidate_running'}:workflow;
-    const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(experiment.planned_samples||10);
+    const planned=Number(experiment.planned_samples||10);
+    const alreadyValid=Number(workflow?.[group+'_valid_samples']||0);
+    const targetCount=options.targetCount??Math.max(1,planned-alreadyValid);
+    const countInput=$('benchRepeatCount');if(countInput)countInput.value=String(targetCount);
     const experimentSelect=$('benchRepeatExperiment');if(experimentSelect)experimentSelect.value=experimentID;
     const groupSelect=$('benchRepeatGroup');if(groupSelect)groupSelect.value=group;
     if($('researchPrompt'))$('researchPrompt').value=prompt;
@@ -3620,6 +3640,9 @@ async function runBenchmarkRepeat(){
  benchRepeatExperimentGroup=$('benchRepeatGroup')?.value||'baseline';
  const fixedParams={...collectBenchParams(),...(researchExecutionContext?.params||{})},fixedPrompt=researchExecutionContext?.prompt||$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[],...(researchExecutionContext?.workflow?{workflow:researchExecutionContext.workflow}:{})};
  let baselineConditionHash='',baselineModel='';
+ const researchDecodeMode=researchExecutionContext?.workflow?.version===1;
+ const maxAttempts=researchDecodeMode?count*3:count;
+ report.max_attempts=maxAttempts;
  benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
  if(benchRepeatExperimentID){
@@ -3634,8 +3657,10 @@ async function runBenchmarkRepeat(){
  }
  setBenchRunning(false);renderBenchmarkRepeatReport(report);
  try{
-  for(let index=1;index<=count;index++){
-   if(benchRepeatCancelRequested)break;const status=$('benchRepeatStatus');if(status)status.textContent='正在执行第 '+index+'/'+count+' 次串行采样…';
+  for(let index=1;index<=maxAttempts;index++){
+   if(benchRepeatCancelRequested)break;const status=$('benchRepeatStatus');
+   const validSoFar=researchDecodeMode?report.samples.filter(sample=>isResearchDecodeSampleEligible(sample,researchExecutionContext?.workflow?.min_output_tokens||256)).length:0;
+   if(status)status.textContent=researchDecodeMode?'正在执行串行采样：有效 Decode 样本 '+validSoFar+'/'+count+'，已尝试 '+(index-1)+'/'+maxAttempts+'…':'正在执行第 '+index+'/'+count+' 次串行采样…';
    applyBenchParams(fixedParams);if($('benchPrompt')&&!researchExecutionContext)$('benchPrompt').value=fixedPrompt;persistBenchParams();
    const previousJobID=readBenchStore().jobId||'';benchRepeatCurrentJobID='';benchRepeatInRequest=true;
    await runBenchmark('performance');benchRepeatInRequest=false;benchRepeatCurrentJobID='';
@@ -3662,12 +3687,16 @@ async function runBenchmarkRepeat(){
    report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
    if(benchRepeatAssociationError){report.status='failed';report.error=benchRepeatAssociationError;writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);break;}
    if(['running','cancelling'].includes(sample.status)||sample.status==='unknown'){report.status='interrupted';break;}
+   if(researchDecodeMode&&report.samples.filter(item=>isResearchDecodeSampleEligible(item,researchExecutionContext?.workflow?.min_output_tokens||256)).length>=count)break;
   }
  }catch(error){report.error=error?.message||'重复采样执行失败';report.status='failed';}
  finally{
   benchRepeatInRequest=false;benchRepeatCurrentJobID='';benchRepeatActive=false;report.finished_at=new Date().toISOString();
   if(benchRepeatCancelRequested)report.status='cancelled';
-  else if(!report.status||report.status==='running')report.status=report.samples.length===count?(report.samples.every(s=>s.status==='completed')?'completed':'completed_with_failures'):'partial';
+  else if(!report.status||report.status==='running'){
+    if(researchDecodeMode)report.status=report.samples.filter(sample=>isResearchDecodeSampleEligible(sample,researchExecutionContext?.workflow?.min_output_tokens||256)).length>=count?'completed':'completed_with_failures';
+    else report.status=report.samples.length===count?(report.samples.every(s=>s.status==='completed')?'completed':'completed_with_failures'):'partial';
+  }
   try{writeBenchmarkRepeatReport(report);}catch(error){report.error=(report.error?report.error+'；':'')+'报告保存失败：'+error.message;}
   if(benchRepeatExperimentID){
     try{await api('/api/admin/research/experiments/'+encodeURIComponent(benchRepeatExperimentID)+'/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:report.status==='completed'?'completed':(report.status==='cancelled'?'cancelled':(report.status==='failed'?'failed':'partial')),report,finished_at:report.finished_at})});}

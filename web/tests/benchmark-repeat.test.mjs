@@ -71,3 +71,28 @@ test('Markdown report retains Job IDs and comparability wording', () => {
   assert.match(markdown, /条件指纹一致/);
   assert.match(markdown, /冷缓存/);
 });
+
+test('Decode research sample qualification requires long output, native timing and comparable conditions', async () => {
+  const { isResearchDecodeSampleEligible } = await import('../js/features/benchmark-repeat.mjs');
+  const base = {
+    status: 'completed', output_tokens: 256, decode_tokens: 255,
+    decode_ms: 12000, decode_tokens_per_sec: 21.25,
+    cache_state: 'full', condition_status: 'complete', condition_sha256: 'same'
+  };
+  assert.equal(isResearchDecodeSampleEligible(base), true);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, output_tokens: 255 }), false);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, decode_tokens: null }), false);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, cache_state: 'unknown' }), false);
+  assert.equal(isResearchDecodeSampleEligible({ ...base, condition_status: 'partial', condition_missing: ['model_load_state_unknown'] }), false);
+});
+
+test('Decode research summary excludes short and non-comparable samples from effective count', () => {
+  const samples = [
+    { status: 'completed', output_tokens: 256, decode_tokens: 255, decode_ms: 12000, decode_tokens_per_sec: 20, cache_state: 'full', condition_status: 'complete', condition_sha256: 'same' },
+    { status: 'completed', output_tokens: 120, decode_tokens: 119, decode_ms: 5000, decode_tokens_per_sec: 24, cache_state: 'full', condition_status: 'complete', condition_sha256: 'same' }
+  ];
+  const summary = summarizeBenchmarkRepeat(samples, { requireDecodeTiming: true });
+  assert.equal(summary.completed_count, 2);
+  assert.equal(summary.decode_eligible_count, 1);
+  assert.equal(summary.comparable_count, 1);
+});

@@ -17,10 +17,22 @@ function traceabilityOnlyMissing(missing=[]){
   const allowed=new Set(['model_sha256_unknown','gateway_revision_unknown','gateway_build_cleanliness_unknown']);
   return missing.every(item=>allowed.has(item));
 }
-export function summarizeBenchmarkRepeat(samples=[]){
-  const completed=samples.filter(sample=>sample?.status==='completed'),groups=new Map();
+export function isResearchDecodeSampleEligible(sample,minimumOutputTokens=256){
+  if(sample?.status!=='completed'||sample?.condition_mismatch===true)return false;
+  if(Number(sample?.output_tokens)<minimumOutputTokens||Number(sample?.decode_tokens)<=0||
+    Number(sample?.decode_ms)<=0||Number(sample?.decode_tokens_per_sec)<=0)return false;
+  if(!['cold','partial','full'].includes(sample?.cache_state))return false;
+  if(String(sample?.condition_sha256||'').trim()==='')return false;
+  return sample?.condition_status==='complete'||
+    (sample?.condition_status==='partial'&&traceabilityOnlyMissing(sample?.condition_missing));
+}
+export function summarizeBenchmarkRepeat(samples=[],options={}){
+  const completed=samples.filter(sample=>sample?.status==='completed');
+  const decodeEligible=options.requireDecodeTiming?completed.filter(sample=>isResearchDecodeSampleEligible(sample,options.minimumOutputTokens||256)):completed;
+  const metricSamples=options.requireDecodeTiming?decodeEligible:completed;
+  const groups=new Map();
   const conditionMismatch=completed.some(sample=>sample?.condition_mismatch===true);
-  const eligible=completed.filter(sample=>(sample?.condition_status==='complete'||(sample?.condition_status==='partial'&&traceabilityOnlyMissing(sample.condition_missing)))&&String(sample.condition_sha256||'').trim()!=='');
+  const eligible=metricSamples.filter(sample=>(sample?.condition_status==='complete'||(sample?.condition_status==='partial'&&traceabilityOnlyMissing(sample.condition_missing)))&&String(sample.condition_sha256||'').trim()!=='');
   for(const sample of eligible){
     const key=String(sample.condition_sha256).trim();
     if(!groups.has(key))groups.set(key,[]);
@@ -44,15 +56,15 @@ export function summarizeBenchmarkRepeat(samples=[]){
     }
   }
   const limited=comparable.some(sample=>Array.isArray(sample.condition_missing)&&sample.condition_missing.length>0);
-  return{completed_count:completed.length,attempted_count:samples.length,comparable_count:comparable.length,condition_group_count:groups.size,comparability_level:comparable.length?(limited?'limited':'strict'):'not_comparable',cache_metrics:cacheMetrics};
+  return{completed_count:completed.length,decode_eligible_count:decodeEligible.length,attempted_count:samples.length,comparable_count:comparable.length,condition_group_count:groups.size,comparability_level:comparable.length?(limited?'limited':'strict'):'not_comparable',cache_metrics:cacheMetrics};
 }
 function display(value){return value==null||!Number.isFinite(Number(value))?'—':Number(value).toFixed(2);}
 export function buildBenchmarkRepeatMarkdown(report){
   if(!report)return'尚无重复采样报告。';
-  const samples=Array.isArray(report.samples)?report.samples:[],summary=summarizeBenchmarkRepeat(samples);
+  const samples=Array.isArray(report.samples)?report.samples:[],decodeResearch=report.workflow?.version===1,summary=summarizeBenchmarkRepeat(samples,{requireDecodeTiming:decodeResearch,minimumOutputTokens:report.workflow?.min_output_tokens||256});
   const metricLabels=[['latency_ms','总耗时','ms'],['ttft_ms','TTFT','ms'],['output_tokens_per_sec','输出吞吐','tok/s'],['prompt_tokens_per_sec','Prompt 吞吐','tok/s'],['decode_tokens_per_sec','Decode 吞吐','tok/s']];
   const levelLabel={strict:'严格可比',limited:'有限可比（追溯信息不完整）',not_comparable:'不可比较'};
-  const lines=['# Benchmark 串行重复采样报告','','- 状态：'+(report.status||'unknown'),'- 计划次数：'+(report.requested_count??'unknown'),'- 实际尝试：'+summary.attempted_count,'- 服务端完成：'+summary.completed_count,'- 同条件可比样本：'+summary.comparable_count,'- 可比等级：'+(levelLabel[summary.comparability_level]||'不可比较'),'- 条件指纹分组：'+summary.condition_group_count,'- 开始时间：'+(report.started_at||'unknown'),'- 结束时间：'+(report.finished_at||'进行中'),report.error?'- 执行错误：'+report.error:'','','## 指标汇总（按缓存状态分组；仅统计条件指纹一致且运行条件满足要求的 completed 样本）','','| 缓存状态 | 指标 | 有效样本数 | 最小值 | 中位数 | 最大值 |','|---|---|---:|---:|---:|---:|'];
+  const lines=['# Benchmark 串行重复采样报告','','- 状态：'+(report.status||'unknown'),'- 目标样本数：'+(report.requested_count??'unknown'),decodeResearch?'- Decode 有效样本：'+summary.decode_eligible_count:'- 服务端完成：'+summary.completed_count,'- 实际尝试：'+summary.attempted_count+(report.max_attempts?' / '+report.max_attempts:''),'- 同条件可比样本：'+summary.comparable_count,'- 可比等级：'+(levelLabel[summary.comparability_level]||'不可比较'),'- 条件指纹分组：'+summary.condition_group_count,'- 开始时间：'+(report.started_at||'unknown'),'- 结束时间：'+(report.finished_at||'进行中'),report.error?'- 执行错误：'+report.error:'','','## 指标汇总（按缓存状态分组；仅统计条件指纹一致且运行条件满足要求的 completed 样本）','','| 缓存状态 | 指标 | 有效样本数 | 最小值 | 中位数 | 最大值 |','|---|---|---:|---:|---:|---:|'];
   const cacheLabels={cold:'冷缓存',partial:'部分命中',full:'全命中',unknown:'未知',inconsistent:'证据不一致'};
   for(const [cacheKey,group] of Object.entries(summary.cache_metrics)){
     for(const [key,label,unit] of metricLabels){
@@ -67,6 +79,6 @@ export function buildBenchmarkRepeatMarkdown(report){
     const runtimeProfile=sample.runtime_profile_id?((sample.runtime_profile_name||sample.runtime_profile_id)+'@v'+(sample.runtime_profile_version??'?')):'未知';
     lines.push('| '+sample.index+' | '+(sample.condition_mismatch?'completed（条件变化）':(sample.status||'unknown'))+' | '+(sample.job_id||'—')+' | '+runtimeProfile+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
   }
-  lines.push('','说明：每条记录对应独立 Benchmark Job。指标汇总只纳入服务端状态 completed、运行条件完整或仅缺少模型 SHA / Gateway Revision / 构建洁净状态等追溯信息，且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。模型加载状态、Backend 版本、硬件、模型标识或完整 Backend 运行参数档案缺失时仍不纳入比较。');
+  lines.push('','说明：每条记录对应独立 Benchmark Job。'+(decodeResearch?'Decode 优化实验只把输出 Token 数达到 '+(report.workflow?.min_output_tokens||256)+'、具有 llama.cpp 原生 Decode timing、条件可比且缓存状态明确的样本计入有效样本；最多自动尝试目标次数的 3 倍。':'')+'指标汇总只纳入服务端状态 completed、运行条件完整或仅缺少模型 SHA / Gateway Revision / 构建洁净状态等追溯信息，且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。模型加载状态、Backend 版本、硬件、模型标识或完整 Backend 运行参数档案缺失时仍不纳入比较。');
   return lines.join('\n');
 }
