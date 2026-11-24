@@ -3478,7 +3478,13 @@ async function runBenchmarkRepeat(){
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
  if(benchRepeatExperimentID){
   try{await api('/api/admin/research/experiments/'+encodeURIComponent(benchRepeatExperimentID)+'/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'running',started_at:report.started_at})});}
-  catch(error){const status=$('benchRepeatStatus');if(status)status.textContent='实验状态更新失败：'+(error?.message||'未知错误');}
+  catch(error){
+    report.status='failed';report.error='实验状态更新失败，未创建任何 Benchmark Job：'+(error?.message||'未知错误');report.finished_at=new Date().toISOString();
+    try{writeBenchmarkRepeatReport(report);}catch{}
+    benchRepeatActive=false;benchRepeatExperimentID='';benchRepeatAssociationError='';
+    setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);renderBenchmarkRepeatReport(report);
+    return;
+  }
  }
  setBenchRunning(false);renderBenchmarkRepeatReport(report);
  try{
