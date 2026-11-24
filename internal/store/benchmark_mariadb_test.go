@@ -265,6 +265,22 @@ func TestBenchmarkExperimentRepoMariaDB(t *testing.T) {
 	if err!=nil||got.Status!="completed"||got.ReportJSON==""||got.FinishedAt==nil {
 		t.Fatalf("updated experiment = %+v err=%v",got,err)
 	}
+	// Gateway 重启后，运行中的实验必须进入 interrupted，已完成实验不能被覆盖。
+	runningID := id + "-running"
+	runningExperiment := experiment
+	runningExperiment.ExperimentID = runningID
+	runningExperiment.Name = "重启恢复状态验证"
+	runningExperiment.Status = "running"
+	if err := repo.Create(ctx, runningExperiment); err != nil { t.Fatalf("create running experiment: %v", err) }
+	defer func(){ _, _ = db.ExecContext(context.Background(),"DELETE FROM benchmark_experiments WHERE experiment_id=?",runningID) }()
+	interruptedCount, err := repo.MarkRunningInterrupted(ctx)
+	if err != nil || interruptedCount != 1 {
+		t.Fatalf("mark running experiments interrupted: count=%d err=%v", interruptedCount, err)
+	}
+	recovered, err := repo.Get(ctx, runningID)
+	if err != nil || recovered.Status != "interrupted" || recovered.ErrorCode != "gateway_restarted" || recovered.FinishedAt == nil {
+		t.Fatalf("recovered experiment = %+v err=%v", recovered, err)
+	}
 	if err:=repo.AddJob(ctx,id,"invalid","job");err==nil { t.Fatal("invalid experiment group must be rejected") }
 	if err:=repo.Create(ctx,BenchmarkExperiment{ExperimentID:id+"-invalid",Name:"bad",ChangedParameter:"x",BaselineValueJSON:"{",CandidateValueJSON:"1"});err==nil {
 		t.Fatal("invalid JSON snapshot must be rejected")

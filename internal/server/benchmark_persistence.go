@@ -84,6 +84,14 @@ func (s *Server) recoverBenchmarkTasks(ctx context.Context) {
 	if count > 0 {
 		applog.Infof("benchmark recovery: marked %d task(s) interrupted", count)
 	}
+	if s.benchmarkExperimentRepo != nil {
+		experimentCount, experimentErr := s.benchmarkExperimentRepo.MarkRunningInterrupted(ctx)
+		if experimentErr != nil {
+			applog.Printf("benchmark experiment recovery failed: %v", experimentErr)
+		} else if experimentCount > 0 {
+			applog.Infof("benchmark experiment recovery: marked %d experiment(s) interrupted", experimentCount)
+		}
+	}
 }
 
 // benchmarkGetFromStore 在内存任务被清理或 Gateway 重启后，从持久化 Task/Run 恢复摘要。

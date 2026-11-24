@@ -209,3 +209,23 @@ func (r *BenchmarkExperimentRepo) UpdateState(ctx context.Context,id,status,repo
 	}
 	return nil
 }
+
+// MarkRunningInterrupted 在 Gateway 启动恢复时结束上次进程遗留的运行中实验。
+// 实验执行由浏览器驱动，进程重启后无法安全续跑；保留已关联 Job 与报告，不自动重放。
+func (r *BenchmarkExperimentRepo) MarkRunningInterrupted(ctx context.Context) (int64, error) {
+	if err := r.ready(); err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	res, err := r.db.ExecContext(ctx, `UPDATE benchmark_experiments
+		SET status='interrupted',
+			error_code='gateway_restarted',
+			error_message='Gateway restarted while experiment was active',
+			finished_at=COALESCE(finished_at,?),
+			updated_at=?
+		WHERE status='running'`, now, now)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
