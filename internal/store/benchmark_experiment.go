@@ -12,24 +12,24 @@ import (
 // BenchmarkExperiment 记录一次有明确单变量声明的性能研究实验。
 // Job ID 仅作为关联引用，不建立级联外键，避免 Benchmark 历史清理删除实验本身。
 type BenchmarkExperiment struct {
-	ExperimentID       string
-	Name               string
-	Status             string
-	ChangedParameter   string
-	BaselineValueJSON  string
-	CandidateValueJSON string
-	BaselineConditionJSON  string
-	CandidateConditionJSON string
-	BaselineJobIDsJSON string
-	CandidateJobIDsJSON string
-	PlannedSamples     int
-	ReportJSON         string
-	ErrorCode          string
-	ErrorMessage       string
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ExperimentID string `json:"experiment_id"`
+	Name string `json:"name"`
+	Status string `json:"status"`
+	ChangedParameter string `json:"changed_parameter"`
+	BaselineValueJSON string `json:"baseline_value_json"`
+	CandidateValueJSON string `json:"candidate_value_json"`
+	BaselineConditionJSON string `json:"baseline_condition_json"`
+	CandidateConditionJSON string `json:"candidate_condition_json"`
+	BaselineJobIDsJSON string `json:"baseline_job_ids_json"`
+	CandidateJobIDsJSON string `json:"candidate_job_ids_json"`
+	PlannedSamples int `json:"planned_samples"`
+	ReportJSON string `json:"report_json,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // BenchmarkExperimentRepo 管理研究实验元数据；原始性能样本仍由 BenchmarkRepo 管理。

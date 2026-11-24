@@ -1999,6 +1999,125 @@ paths:
           $ref: "#/components/responses/AdminError"
         "405":
           $ref: "#/components/responses/AdminError"
+  /api/admin/research/experiments:
+    get:
+      operationId: listResearchExperiments
+      tags: [Admin]
+      summary: 查询性能研究实验
+      security: [{ AdminSessionBearer: [] }]
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [draft, queued, running, partial, completed, failed, cancelled, interrupted] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        "200":
+          description: 研究实验列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/BenchmarkExperiment" } }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createResearchExperiment
+      tags: [Admin]
+      summary: 创建单变量性能研究实验
+      security: [{ AdminSessionBearer: [] }]
+      x-authentication-requirements: [valid admin web session]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BenchmarkExperimentCreate" }
+      responses:
+        "201":
+          description: 已创建实验
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiment]
+                properties:
+                  experiment: { $ref: "#/components/schemas/BenchmarkExperiment" }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/research/experiments/{experiment_id}:
+    get:
+      operationId: getResearchExperiment
+      tags: [Admin]
+      summary: 读取性能研究实验详情
+      security: [{ AdminSessionBearer: [] }]
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 实验详情
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiment]
+                properties:
+                  experiment: { $ref: "#/components/schemas/BenchmarkExperiment" }
+        "404": { $ref: "#/components/responses/AdminError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/research/experiments/{experiment_id}/state:
+    patch:
+      operationId: updateResearchExperimentState
+      tags: [Admin]
+      summary: 更新研究实验状态和分析报告
+      security: [{ AdminSessionBearer: [] }]
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [draft, queued, running, partial, completed, failed, cancelled, interrupted] }
+                report: { type: object, nullable: true }
+                error_code: { type: string, maxLength: 64 }
+                error_message: { type: string, maxLength: 512 }
+                started_at: { type: string, format: date-time, nullable: true }
+                finished_at: { type: string, format: date-time, nullable: true }
+      responses:
+        "200": { description: 状态已更新 }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "404": { $ref: "#/components/responses/AdminError" }
+  /api/admin/research/experiments/{experiment_id}/jobs:
+    post:
+      operationId: addResearchExperimentJob
+      tags: [Admin]
+      summary: 将 Benchmark Job 关联到实验分组
+      security: [{ AdminSessionBearer: [] }]
+      x-authentication-requirements: [valid admin web session]
+      parameters:
+        - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group, job_id]
+              properties:
+                group: { type: string, enum: [baseline, candidate] }
+                job_id: { type: string, maxLength: 64 }
+      responses:
+        "200": { description: Job 已关联；重复关联幂等 }
+        "400": { $ref: "#/components/responses/AdminError" }
+        "404": { $ref: "#/components/responses/AdminError" }
   /api/admin/backend-runtime-profiles:
     get:
       operationId: getApiAdminBackendRuntimeProfiles
@@ -3909,6 +4028,39 @@ components:
           required: [id]
           properties:
             id: { type: string, minLength: 1, maxLength: 64 }
+    BenchmarkExperiment:
+      type: object
+      required: [experiment_id, name, status, changed_parameter, baseline_value, candidate_value, baseline_condition, candidate_condition, baseline_job_ids, candidate_job_ids, planned_samples, created_at, updated_at]
+      properties:
+        experiment_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [draft, queued, running, partial, completed, failed, cancelled, interrupted] }
+        changed_parameter: { type: string }
+        baseline_value: {}
+        candidate_value: {}
+        baseline_condition: { type: object }
+        candidate_condition: { type: object }
+        baseline_job_ids: { type: array, items: { type: string } }
+        candidate_job_ids: { type: array, items: { type: string } }
+        planned_samples: { type: integer, minimum: 1, maximum: 20 }
+        report: { type: object, nullable: true }
+        error_code: { type: string, nullable: true }
+        error_message: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    BenchmarkExperimentCreate:
+      type: object
+      required: [name, changed_parameter, baseline_value, candidate_value, baseline_condition, candidate_condition]
+      properties:
+        name: { type: string, maxLength: 160 }
+        changed_parameter: { type: string, maxLength: 64 }
+        baseline_value: {}
+        candidate_value: {}
+        baseline_condition: { type: object }
+        candidate_condition: { type: object }
+        planned_samples: { type: integer, minimum: 1, maximum: 20, default: 10 }
     BackendRuntimeProfile:
       type: object
       required: [id, name, backend, model_id, version, source, parameters, updated_at]

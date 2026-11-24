@@ -52,6 +52,7 @@ type Server struct {
 	keys     *auth.Repo     // API Key 仓库：管理调用方的密钥、限速、过期时间
 	logs     *store.Repo    // 请求日志仓库：每次 AI 请求的详细记录（耗时、token、状态等）
 	benchmarkRepo *store.BenchmarkRepo // Benchmark Task/Run 元数据仓库；正文仍由请求审计按配置保存。
+	benchmarkExperimentRepo *store.BenchmarkExperimentRepo // 研究实验元数据仓库，关联 Benchmark Job 但不拥有原始样本。
 	audit    *audit.Writer  // 审计写入器：异步批量把日志写进数据库（不阻塞请求）
 	settings *settings.Repo // 设置仓库：管理员在后台保存的上游配置、推理参数等
 	// —— 外部服务客户端 ——
@@ -153,6 +154,7 @@ func New(cfg *config.Config, dbx *sql.DB) *Server {
 	srv := &Server{
 		cfg: cfg, db: dbx, models: model.NewRepo(dbx), keys: auth.NewRepo(dbx), logs: logsRepo,
 		benchmarkRepo: store.NewBenchmarkRepo(dbx),
+		benchmarkExperimentRepo: store.NewBenchmarkExperimentRepo(dbx),
 		audit:    audit.NewWriter(logsRepo, 0),                                                                                                   // 审计写入器（异步批量写日志）
 		settings: settings.NewRepo(dbx),                                                                                                          // 设置仓库
 		llama:    llama.New(cfg.Llama.BaseURL, time.Duration(cfg.Llama.RequestTimeout)*time.Second, cfg.Llama.Backend, cfg.Llama.UpstreamAPIKey), // llama.cpp 客户端
@@ -330,7 +332,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/inference-params/reset", s.inferenceParamsResetAPI)   // 重置推理参数为默认
 	mux.HandleFunc("/api/admin/inference-params", s.inferenceParamsAPI)              // 读取/保存推理参数
 	mux.HandleFunc("/api/admin/backend-runtime-profiles/", s.backendRuntimeProfileActionAPI) // 删除 Backend 运行参数档案
-	mux.HandleFunc("/api/admin/backend-runtime-profiles", s.backendRuntimeProfilesAPI)       // 读取/保存 Backend 运行参数档案
+	mux.HandleFunc("/api/admin/backend-runtime-profiles", s.backendRuntimeProfilesAPI)
+	mux.HandleFunc("/api/admin/research/experiments/", s.benchmarkExperimentActionAPI)
+	mux.HandleFunc("/api/admin/research/experiments", s.benchmarkExperimentsAPI)       // 读取/保存 Backend 运行参数档案
 	mux.HandleFunc("/api/admin/audit/metrics", s.auditMetricsAPI)                     // 查看审计队列的只读聚合指标
 	mux.HandleFunc("/api/admin/retention/status", s.requestRetentionStatusAPI)           // 查看请求日志保留策略的只读运行状态
 

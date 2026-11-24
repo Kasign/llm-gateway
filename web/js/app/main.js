@@ -42,6 +42,7 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
   b.classList.add('active');
   const tabPanel=$(b.dataset.tab);if(tabPanel)tabPanel.classList.add('active');
   if(b.dataset.tab==='model-test'){loadBenchPanel().catch(()=>{});renderBenchmarkSuiteReport();renderBenchmarkRepeatReport();}
+  if(b.dataset.tab==='research')loadResearchExperiments().catch(()=>{});
   if(b.dataset.tab==='models-local')loadLocalModelsPanel().catch(()=>{});
   if(b.dataset.tab==='models-download')loadDownloadPanel({refreshCatalog:true}).catch(()=>{});
   if(b.dataset.tab==='models-inference'){globalThis.InferenceParams?.load().catch(()=>{});globalThis.BackendRuntimeProfiles?.load().catch(()=>{});}
@@ -208,6 +209,35 @@ async function inferenceOp(backend,action,{model_id='',model_key=''}={},title){
     return null;
   }
 }
+
+async function loadResearchExperiments(){
+  const status=$('researchStatus'),rows=$('researchRows');if(!status||!rows)return;
+  status.textContent='正在读取研究实验…';
+  try{
+    const result=await api('/api/admin/research/experiments?limit=50&offset=0');
+    const items=Array.isArray(result.items)?result.items:[];
+    rows.innerHTML=items.length?items.map(item=>{
+      const jobs=(item.baseline_job_ids||[]).length+(item.candidate_job_ids||[]).length;
+      return '<tr><td><button type="button" class="btn link sm" data-research-open="'+esc(item.experiment_id)+'">'+esc(item.name)+'</button></td><td>'+esc(item.changed_parameter)+'</td><td>'+esc(item.status)+'</td><td>'+esc(item.planned_samples)+'</td><td>'+esc(jobs)+'</td><td>'+esc(item.updated_at||'—')+'</td></tr>';
+    }).join(''):'<tr><td colspan="6" class="muted">暂无研究实验。后续创建实验后会在此保留记录。</td></tr>';
+    status.textContent='共 '+Number(result.total||0)+' 项研究实验';
+  }catch(error){rows.innerHTML='<tr><td colspan="6" class="muted">研究数据读取失败</td></tr>';status.textContent='读取失败：'+(error?.message||'未知错误');}
+}
+async function openResearchExperiment(id){
+  const root=$('researchDetail');if(!root)return;root.hidden=false;root.textContent='正在读取实验详情…';
+  try{
+    const result=await api('/api/admin/research/experiments/'+encodeURIComponent(id)),e=result.experiment||{};
+    const jobs=[...(e.baseline_job_ids||[]).map(x=>'Baseline: '+x),...(e.candidate_job_ids||[]).map(x=>'Candidate: '+x)];
+    root.innerHTML='<div class="card-head"><div><h3>'+esc(e.name)+'</h3><p class="small muted">实验 ID：'+esc(e.experiment_id)+'</p></div><span class="pill">'+esc(e.status)+'</span></div>'+
+      '<p>单变量：'+esc(e.changed_parameter)+'；计划样本：'+esc(e.planned_samples)+'</p>'+
+      '<p>Baseline 值：<code>'+esc(JSON.stringify(e.baseline_value))+'</code></p><p>Candidate 值：<code>'+esc(JSON.stringify(e.candidate_value))+'</code></p>'+
+      '<p>关联 Job：</p><ul>'+jobs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+
+      (e.report?'<pre>'+esc(JSON.stringify(e.report,null,2))+'</pre>':'<p class="small muted">尚无分析报告</p>');
+  }catch(error){root.textContent='读取实验详情失败：'+(error?.message||'未知错误');}
+}
+document.addEventListener('click',event=>{const button=event.target.closest('[data-research-open]');if(button)openResearchExperiment(button.dataset.researchOpen).catch(()=>{});});
+$('researchRefresh')?.addEventListener('click',()=>loadResearchExperiments().catch(()=>{}));
+
 function goTab(name){
   if(name==='account'&&globalThis.openAccountSettings){globalThis.openAccountSettings();return}
   const btn=document.querySelector('.nav button[data-tab="'+name+'"]');

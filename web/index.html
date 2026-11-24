@@ -52,6 +52,7 @@
       <button type="button" data-tab="keys"><span class="dot"></span>服务密钥</button>
       <button type="button" data-tab="requests"><span class="dot"></span>调用记录</button>
       <button type="button" data-tab="model-test"><span class="dot"></span>模型测试</button>
+      <button type="button" data-tab="research"><span class="dot"></span>研究</button>
       <button type="button" data-tab="providers"><span class="dot"></span>远程 Provider</button>
     </nav>
     <div class="sidebar-bottom">
@@ -117,6 +118,20 @@
             <button type="button" class="btn sm ghost" onclick="goTab('requests')">全部</button>
           </div>
           <div id="dashRecentRequests"></div>
+        </div>
+      </section>
+
+
+      <!-- Research -->
+      <section id="research" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>性能研究</h2><p>围绕单变量实验组织基线组与候选组；原始推理样本仍由 Benchmark 保存。</p></div>
+            <button type="button" class="btn sm ghost" id="researchRefresh">刷新</button>
+          </div>
+          <div id="researchStatus" class="msg muted" role="status" aria-live="polite">正在读取研究实验…</div>
+          <div class="table-wrap"><table><thead><tr><th>实验名称</th><th>变化参数</th><th>状态</th><th>计划样本</th><th>已关联 Job</th><th>更新时间</th></tr></thead><tbody id="researchRows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table></div>
+          <div id="researchDetail" class="card compact" hidden></div>
         </div>
       </section>
 
