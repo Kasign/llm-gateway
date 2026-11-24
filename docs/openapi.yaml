@@ -2124,7 +2124,7 @@ paths:
         "400": { $ref: "#/components/responses/AdminError" }
         "404": { $ref: "#/components/responses/AdminError" }
   /api/admin/research/experiments/{experiment_id}/compare:
-    get:
+    post:
       operationId: compareResearchExperiment
       tags: [Admin]
       summary: 基于真实 Benchmark Job 比较单变量研究实验

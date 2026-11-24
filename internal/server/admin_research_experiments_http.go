@@ -183,7 +183,8 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 			if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found")}else{jsonError(w,400,"invalid_experiment_state",err.Error())};return}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok":true});return
 	}
-	if len(parts)==2&&parts[1]=="compare"&&r.Method==http.MethodGet{
+	if len(parts)==2&&parts[1]=="compare"{
+		if r.Method!=http.MethodPost{w.Header().Set("Allow",http.MethodPost);jsonError(w,405,"method_not_allowed","research comparison requires POST");return}
 		e,err:=s.benchmarkExperimentRepo.Get(r.Context(),id)
 		if errors.Is(err,sql.ErrNoRows){jsonError(w,404,"not_found","research experiment not found");return}
 		if err!=nil{jsonError(w,500,"research_read_failed","failed to read research experiment");return}
