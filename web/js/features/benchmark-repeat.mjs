@@ -81,11 +81,13 @@ export function buildBenchmarkRepeatMarkdown(report){
     }
   }
   if(!Object.keys(summary.cache_metrics).length)lines.push('| — | 暂无可比样本 | 0 | — | — | — |');
-  lines.push('','## 单次任务','','| 次数 | 状态 | Job ID | 运行档案 | 缓存 | 条件状态 | 输入/输出 Token | 总耗时 ms | TTFT ms | Prompt ms | Decode ms | 输出 tok/s | 错误 |','|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|');
+  lines.push('','## 单次任务','','| 次数 | 状态 | Job ID | 运行档案 | 缓存 | 条件状态 | 输入/输出 Token | 总耗时 ms | TTFT ms | Prompt ms / tok/s | Decode Token / ms / tok/s | 输出 tok/s | Decode 排除原因 | 错误 |','|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|');
+  const exclusionLabels={decode_output_tokens_below_minimum:'输出 Token 数不足',native_decode_timing_unavailable:'缺少原生 Decode timing',cache_state_unknown:'缓存状态未知',condition_fingerprint_missing:'缺少条件指纹',condition_not_comparable:'运行条件不可比较',condition_mismatch:'运行条件发生变化'};
   for(const sample of samples){
     const error=String(sample.error||'').replace(/\|/g,'\\|');
     const runtimeProfile=sample.runtime_profile_id?((sample.runtime_profile_name||sample.runtime_profile_id)+'@v'+(sample.runtime_profile_version??'?')):'未知';
-    lines.push('| '+sample.index+' | '+(sample.condition_mismatch?'completed（条件变化）':(sample.status||'unknown'))+' | '+(sample.job_id||'—')+' | '+runtimeProfile+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' | '+display(sample.decode_ms)+' | '+display(sample.output_tokens_per_sec)+' | '+error+' |');
+    const exclusion=exclusionLabels[sample.decode_exclusion_reason]||sample.decode_exclusion_reason||'—';
+    lines.push('| '+sample.index+' | '+(sample.condition_mismatch?'completed（条件变化）':(sample.status||'unknown'))+' | '+(sample.job_id||'—')+' | '+runtimeProfile+' | '+(cacheLabels[sample.cache_state]||sample.cache_state||'未知')+' | '+(sample.condition_status||'unknown')+' | '+(sample.input_tokens??'—')+'/'+(sample.output_tokens??'—')+' | '+display(sample.latency_ms)+' | '+display(sample.ttft_ms)+' | '+display(sample.prompt_ms)+' / '+display(sample.prompt_tokens_per_sec)+' | '+(sample.decode_tokens??'—')+' / '+display(sample.decode_ms)+' / '+display(sample.decode_tokens_per_sec)+' | '+display(sample.output_tokens_per_sec)+' | '+exclusion+' | '+error+' |');
   }
   lines.push('','说明：每条记录对应独立 Benchmark Job。'+(decodeResearch?'Decode 优化实验只把输出 Token 数达到 '+(report.workflow?.min_output_tokens||256)+'、具有 llama.cpp 原生 Decode timing、条件可比且缓存状态明确的样本计入有效样本；最多自动尝试目标次数的 3 倍。':'')+'指标汇总只纳入服务端状态 completed、运行条件完整或仅缺少模型 SHA / Gateway Revision / 构建洁净状态等追溯信息，且 condition_sha256 相同、非空的样本；不同缓存状态分开列示。模型加载状态、Backend 版本、硬件、模型标识或完整 Backend 运行参数档案缺失时仍不纳入比较。');
   return lines.join('\n');

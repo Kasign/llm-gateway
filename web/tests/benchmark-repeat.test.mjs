@@ -100,3 +100,20 @@ test('Decode research summary excludes short and non-comparable samples from eff
   assert.equal(summary.decode_eligible_count, 1);
   assert.equal(summary.comparable_count, 1);
 });
+
+
+test('Decode 报告逐样本展示 Prompt/Decode 速度和排除原因', () => {
+  const markdown = buildBenchmarkRepeatMarkdown({
+    status: 'sample_not_eligible', requested_count: 5,
+    workflow: { version: 1, min_output_tokens: 256 },
+    samples: [{ index: 1, status: 'completed', job_id: 'decode-job-1', input_tokens: 1200, output_tokens: 128,
+      latency_ms: 9000, ttft_ms: 800, prompt_ms: 500, prompt_tokens_per_sec: 2400,
+      decode_tokens: 127, decode_ms: 8200, decode_tokens_per_sec: 15.5,
+      output_tokens_per_sec: 15.2, cache_state: 'cold', condition_status: 'complete',
+      decode_exclusion_reason: 'decode_output_tokens_below_minimum' }]
+  });
+  assert.match(markdown, /Prompt ms \/ tok\/s/);
+  assert.match(markdown, /Decode Token \/ ms \/ tok\/s/);
+  assert.match(markdown, /输出 Token 数不足/);
+  assert.match(markdown, /15.50/);
+});
