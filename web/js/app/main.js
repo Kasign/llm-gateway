@@ -3428,7 +3428,7 @@ async function runBenchmarkRepeat(){
    if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
    const sample=benchmarkRepeatSampleFromWrap(wrap,index);
-   if(benchRepeatAssociationError)sample.experiment_association_error=benchRepeatAssociationError;
+   if(benchRepeatAssociationError){sample.experiment_association_error=benchRepeatAssociationError;sample.error=sample.error||benchRepeatAssociationError;}
    if(sample.status==='completed'){
     if(!baselineModel){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
     else if(sample.model!==baselineModel||(baselineConditionHash&&sample.condition_sha256!==baselineConditionHash)){
@@ -3437,6 +3437,7 @@ async function runBenchmarkRepeat(){
     }
    }
    report.samples.push(sample);writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);
+   if(benchRepeatAssociationError){report.status='failed';report.error=benchRepeatAssociationError;writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);break;}
    if(['running','cancelling'].includes(sample.status)||sample.status==='unknown'){report.status='interrupted';break;}
   }
  }catch(error){report.error=error?.message||'重复采样执行失败';report.status='failed';}
