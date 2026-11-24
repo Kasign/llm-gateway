@@ -210,6 +210,24 @@ async function inferenceOp(backend,action,{model_id='',model_key=''}={},title){
   }
 }
 
+
+async function createResearchExperiment(event){
+  event.preventDefault();const message=$('researchCreateMessage');if(message)message.textContent='正在创建…';
+  try{
+    const parse=(id)=>JSON.parse($(id)?.value||'');
+    const baselineCondition=parse('researchBaselineCondition'),candidateCondition=parse('researchCandidateCondition');
+    if(!baselineCondition||typeof baselineCondition!=='object'||Array.isArray(baselineCondition)||!candidateCondition||typeof candidateCondition!=='object'||Array.isArray(candidateCondition))throw new Error('两组其余条件必须是 JSON 对象');
+    const body={name:$('researchName').value.trim(),changed_parameter:$('researchChangedParameter').value.trim(),
+      baseline_value:parse('researchBaselineValue'),candidate_value:parse('researchCandidateValue'),
+      baseline_condition:baselineCondition,candidate_condition:candidateCondition,planned_samples:Number($('researchPlannedSamples').value||10)};
+    const result=await api('/api/admin/research/experiments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(message)message.textContent='实验已创建：'+result.experiment.experiment_id;
+    $('researchCreateForm')?.reset();await loadResearchExperiments();
+    const select=$('benchRepeatExperiment');if(select)select.value=result.experiment.experiment_id;
+  }catch(error){if(message)message.textContent='创建失败：'+(error?.message||'请检查输入');}
+}
+$('researchCreateForm')?.addEventListener('submit',createResearchExperiment);
+
 async function loadResearchExperiments(){
   const status=$('researchStatus'),rows=$('researchRows');if(!status||!rows)return;
   status.textContent='正在读取研究实验…';
@@ -220,6 +238,8 @@ async function loadResearchExperiments(){
       const jobs=(item.baseline_job_ids||[]).length+(item.candidate_job_ids||[]).length;
       return '<tr><td><button type="button" class="btn link sm" data-research-open="'+esc(item.experiment_id)+'">'+esc(item.name)+'</button></td><td>'+esc(item.changed_parameter)+'</td><td>'+esc(item.status)+'</td><td>'+esc(item.planned_samples)+'</td><td>'+esc(jobs)+'</td><td>'+esc(item.updated_at||'—')+'</td></tr>';
     }).join(''):'<tr><td colspan="6" class="muted">暂无研究实验。后续创建实验后会在此保留记录。</td></tr>';
+    const selector=$('benchRepeatExperiment');
+    if(selector){const previous=selector.value;selector.innerHTML='<option value="">仅保存 Benchmark 历史</option>'+items.map(item=>'<option value="'+esc(item.experiment_id)+'">'+esc(item.name)+'（'+esc(item.status)+'）</option>').join('');if(items.some(item=>item.experiment_id===previous))selector.value=previous;}
     status.textContent='共 '+Number(result.total||0)+' 项研究实验';
   }catch(error){rows.innerHTML='<tr><td colspan="6" class="muted">研究数据读取失败</td></tr>';status.textContent='读取失败：'+(error?.message||'未知错误');}
 }
@@ -1834,6 +1854,9 @@ let benchRepeatActive=false;
 let benchRepeatCancelRequested=false;
 let benchRepeatInRequest=false;
 let benchRepeatCurrentJobID='';
+let benchRepeatExperimentID='';
+let benchRepeatExperimentGroup='baseline';
+let benchRepeatAssociationError='';
 const BENCH_REPEAT_STORAGE_KEY='llm-gateway.bench-repeat.v1';
 function setBenchRunning(running){
   const ids=['benchRunBtn','benchSuiteRunBtn','benchToolRunBtn','benchToolForceRunBtn','benchAcceptanceRunBtn'];
@@ -3277,6 +3300,11 @@ async function runBenchmark(scenario='performance'){
     const jobId=start.job_id,t0=Date.now();
     writeBenchStore({jobId});
     if(benchRepeatActive){
+      benchRepeatAssociationError='';
+      if(benchRepeatExperimentID){
+        try{await api('/api/admin/research/experiments/'+encodeURIComponent(benchRepeatExperimentID)+'/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:benchRepeatExperimentGroup,job_id:jobId})});}
+        catch(error){benchRepeatAssociationError='Job 已创建但实验关联失败：'+(error?.message||'未知错误');const repeatStatus=$('benchRepeatStatus');if(repeatStatus)repeatStatus.textContent=benchRepeatAssociationError;}
+      }
       benchRepeatCurrentJobID=jobId;
       if(benchRepeatCancelRequested){
         await api('/api/benchmark/'+encodeURIComponent(jobId),{method:'DELETE'});
@@ -3319,11 +3347,17 @@ async function runBenchmarkRepeat(){
  if(benchRepeatActive)return;let count;
  try{count=normalizeBenchmarkRepeatCount($('benchRepeatCount')?.value);}catch(error){const status=$('benchRepeatStatus');if(status)status.textContent=error.message;$('benchRepeatCount')?.focus();return;}
  const clientKey=($('modelTestApiKey')?.value||'').trim();if(!clientKey){const status=$('benchRepeatStatus');if(status)status.textContent='请先输入客户端服务密钥。';$('modelTestApiKey')?.focus();return;}
- if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。每次都会独立保存任务；期间请勿发送其他推理请求。可以随时停止。继续？'))return;
- const fixedParams=collectBenchParams(),fixedPrompt=$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,samples:[]};
+ if(!confirm('将按当前模型和推理参数串行执行 '+count+' 次普通性能 Benchmark。'+($('benchRepeatExperiment')?.value?'本次 Job 会自动关联到所选研究实验和分组。':'')+'期间请勿发送其他推理请求。可以随时停止。继续？'))return;
+ benchRepeatExperimentID=$('benchRepeatExperiment')?.value||'';
+ benchRepeatExperimentGroup=$('benchRepeatGroup')?.value||'baseline';
+ const fixedParams=collectBenchParams(),fixedPrompt=$('benchPrompt')?.value||'',report={version:1,status:'running',requested_count:count,started_at:new Date().toISOString(),finished_at:null,experiment_id:benchRepeatExperimentID||null,experiment_group:benchRepeatExperimentID?benchRepeatExperimentGroup:null,samples:[]};
  let baselineConditionHash='',baselineModel='';
  benchRepeatActive=true;benchRepeatCancelRequested=false;benchRepeatInRequest=false;benchRepeatCurrentJobID='';setBenchmarkRepeatControlsDisabled(true);
  try{writeBenchmarkRepeatReport(report);}catch(error){benchRepeatActive=false;setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);const status=$('benchRepeatStatus');if(status)status.textContent='无法保存采样报告：'+(error?.message||'浏览器存储不可用');return;}
+ if(benchRepeatExperimentID){
+  try{await api('/api/admin/research/experiments/'+encodeURIComponent(benchRepeatExperimentID)+'/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'running',started_at:report.started_at})});}
+  catch(error){const status=$('benchRepeatStatus');if(status)status.textContent='实验状态更新失败：'+(error?.message||'未知错误');}
+ }
  setBenchRunning(false);renderBenchmarkRepeatReport(report);
  try{
   for(let index=1;index<=count;index++){
@@ -3343,6 +3377,7 @@ async function runBenchmarkRepeat(){
    if(!currentJobID||currentJobID===previousJobID){report.samples.push({index,job_id:'',status:'failed',cache_state:'unknown',error:'未能创建新的 Benchmark 任务；请查看单次测试结果区域。'});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);continue;}
    let wrap;try{wrap=await api('/api/benchmark/'+encodeURIComponent(currentJobID));}catch(error){report.samples.push({index,job_id:currentJobID,status:'unknown',cache_state:'unknown',error:'任务详情读取失败：'+(error?.message||'未知错误')});writeBenchmarkRepeatReport(report);renderBenchmarkRepeatReport(report);report.status='interrupted';break;}
    const sample=benchmarkRepeatSampleFromWrap(wrap,index);
+   if(benchRepeatAssociationError)sample.experiment_association_error=benchRepeatAssociationError;
    if(sample.status==='completed'){
     if(!baselineModel){baselineConditionHash=sample.condition_sha256;baselineModel=sample.model;}
     else if(sample.model!==baselineModel||(baselineConditionHash&&sample.condition_sha256!==baselineConditionHash)){
@@ -3359,6 +3394,11 @@ async function runBenchmarkRepeat(){
   if(benchRepeatCancelRequested)report.status='cancelled';
   else if(!report.status||report.status==='running')report.status=report.samples.length===count?(report.samples.every(s=>s.status==='completed')?'completed':'completed_with_failures'):'partial';
   try{writeBenchmarkRepeatReport(report);}catch(error){report.error=(report.error?report.error+'；':'')+'报告保存失败：'+error.message;}
+  if(benchRepeatExperimentID){
+    try{await api('/api/admin/research/experiments/'+encodeURIComponent(benchRepeatExperimentID)+'/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:report.status==='completed'?'completed':(report.status==='cancelled'?'cancelled':(report.status==='failed'?'failed':'partial')),report,finished_at:report.finished_at})});}
+    catch(error){report.error=(report.error?'；':'')+'实验报告同步失败：'+(error?.message||'未知错误');try{writeBenchmarkRepeatReport(report);}catch{}}
+  }
+  benchRepeatExperimentID='';benchRepeatAssociationError='';
   setBenchmarkRepeatControlsDisabled(false);setBenchRunning(false);renderBenchmarkRepeatReport(report);loadBenchHistory().catch(()=>{});
  }
 }

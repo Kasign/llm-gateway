@@ -129,6 +129,26 @@
             <div><h2>性能研究</h2><p>围绕单变量实验组织基线组与候选组；原始推理样本仍由 Benchmark 保存。</p></div>
             <button type="button" class="btn sm ghost" id="researchRefresh">刷新</button>
           </div>
+          <details class="card compact" open>
+            <summary>创建单变量实验</summary>
+            <form id="researchCreateForm" class="param-field-list">
+              <div class="row">
+                <div class="field"><label for="researchName">实验名称</label><input id="researchName" maxlength="160" required placeholder="例如：线程数 4 与 6 的性能对比"></div>
+                <div class="field"><label for="researchChangedParameter">唯一变化参数</label><input id="researchChangedParameter" maxlength="64" required placeholder="例如 threads"></div>
+                <div class="field"><label for="researchPlannedSamples">每组计划样本数</label><input id="researchPlannedSamples" type="number" min="1" max="20" value="10" required></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="researchBaselineValue">Baseline 参数值（JSON）</label><input id="researchBaselineValue" value="4" required></div>
+                <div class="field"><label for="researchCandidateValue">Candidate 参数值（JSON）</label><input id="researchCandidateValue" value="6" required></div>
+              </div>
+              <div class="row">
+                <div class="field"><label for="researchBaselineCondition">Baseline 其余条件快照（JSON 对象）</label><textarea id="researchBaselineCondition" rows="3">{}</textarea></div>
+                <div class="field"><label for="researchCandidateCondition">Candidate 其余条件快照（JSON 对象）</label><textarea id="researchCandidateCondition" rows="3">{}</textarea></div>
+              </div>
+              <p class="small muted">两组快照应保持模型、提示词、Token 上限、缓存策略和服务环境一致；只允许上方声明的参数不同。当前表单只保存实验定义，不会自动修改 Backend 运行参数。</p>
+              <div class="btn-row"><button type="submit" class="btn primary">创建实验</button><span id="researchCreateMessage" class="small muted" role="status"></span></div>
+            </form>
+          </details>
           <div id="researchStatus" class="msg muted" role="status" aria-live="polite">正在读取研究实验…</div>
           <div class="table-wrap"><table><thead><tr><th>实验名称</th><th>变化参数</th><th>状态</th><th>计划样本</th><th>已关联 Job</th><th>更新时间</th></tr></thead><tbody id="researchRows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table></div>
           <div id="researchDetail" class="card compact" hidden></div>
@@ -551,6 +571,10 @@
             <button type="button" class="btn primary" id="benchRunBtn" onclick="runBenchmark()">单次测试</button>
             <label class="small" for="benchRepeatCount">重复次数</label>
             <input id="benchRepeatCount" type="number" min="1" max="20" step="1" value="10" style="width:88px" aria-describedby="benchRepeatHint">
+            <label class="small" for="benchRepeatExperiment">关联研究实验</label>
+            <select id="benchRepeatExperiment" style="max-width:220px"><option value="">仅保存 Benchmark 历史</option></select>
+            <label class="small" for="benchRepeatGroup">实验分组</label>
+            <select id="benchRepeatGroup" style="max-width:130px"><option value="baseline">Baseline</option><option value="candidate">Candidate</option></select>
             <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runBenchmarkRepeat()">开始串行采样</button>
             <button type="button" class="btn danger" id="benchStopBtn" onclick="stopBenchmark()" disabled>停止任务</button>
           </div>
