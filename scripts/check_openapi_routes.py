@@ -40,6 +40,11 @@ ROUTE_FAMILIES = {
     "/api/admin/backend-runtime-profiles/": (
         "/api/admin/backend-runtime-profiles/{profile_id}",
     ),
+    "/api/admin/research/experiments/": (
+        "/api/admin/research/experiments/{experiment_id}",
+        "/api/admin/research/experiments/{experiment_id}/state",
+        "/api/admin/research/experiments/{experiment_id}/jobs",
+    ),
     "/api/admin/keys/": (
         "/api/admin/keys/{id}",
         "/api/admin/keys/{id}/disable",

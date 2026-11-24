@@ -2004,7 +2004,8 @@ paths:
       operationId: listResearchExperiments
       tags: [Admin]
       summary: 查询性能研究实验
-      security: [{ AdminSessionBearer: [] }]
+      security:
+        - AdminSessionBearer: []
       x-authentication-requirements: [valid admin web session]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [draft, queued, running, partial, completed, failed, cancelled, interrupted] } }
@@ -2028,7 +2029,8 @@ paths:
       operationId: createResearchExperiment
       tags: [Admin]
       summary: 创建单变量性能研究实验
-      security: [{ AdminSessionBearer: [] }]
+      security:
+        - AdminSessionBearer: []
       x-authentication-requirements: [valid admin web session]
       requestBody:
         required: true
@@ -2052,7 +2054,8 @@ paths:
       operationId: getResearchExperiment
       tags: [Admin]
       summary: 读取性能研究实验详情
-      security: [{ AdminSessionBearer: [] }]
+      security:
+        - AdminSessionBearer: []
       x-authentication-requirements: [valid admin web session]
       parameters:
         - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
@@ -2073,7 +2076,8 @@ paths:
       operationId: updateResearchExperimentState
       tags: [Admin]
       summary: 更新研究实验状态和分析报告
-      security: [{ AdminSessionBearer: [] }]
+      security:
+        - AdminSessionBearer: []
       x-authentication-requirements: [valid admin web session]
       parameters:
         - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
@@ -2100,7 +2104,8 @@ paths:
       operationId: addResearchExperimentJob
       tags: [Admin]
       summary: 将 Benchmark Job 关联到实验分组
-      security: [{ AdminSessionBearer: [] }]
+      security:
+        - AdminSessionBearer: []
       x-authentication-requirements: [valid admin web session]
       parameters:
         - { name: experiment_id, in: path, required: true, schema: { type: string, maxLength: 64 } }
