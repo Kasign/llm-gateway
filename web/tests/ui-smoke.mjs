@@ -27,6 +27,8 @@ const report = {
   expectedProviderFailures: [],
   expectedSilentPollFailures: [],
   unexpectedDialogs: [],
+  browserLifecycle: [],
+  researchDeleteTrace: [],
   layouts: [],
   notes: [
     '测试运行真实 Gateway、MariaDB、Redis 和 Chromium。',
@@ -97,6 +99,19 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(10000);
+  const traceBrowserLifecycle = (event, detail = null) => {
+    const entry = { event, at: new Date().toISOString(), detail };
+    report.browserLifecycle.push(entry);
+    process.stdout.write('[browser-lifecycle] ' + JSON.stringify(entry) + '\\n');
+  };
+  browser.on('disconnected', () => traceBrowserLifecycle('browser-disconnected'));
+  page.on('close', () => traceBrowserLifecycle('page-closed'));
+  page.on('crash', () => traceBrowserLifecycle('page-crashed'));
+  page.on('requestfailed', request => {
+    if (request.url().includes('/research-smoke-interrupted')) {
+      traceBrowserLifecycle('research-delete-request-failed', { method: request.method(), url: request.url(), error: request.failure()?.errorText || null });
+    }
+  });
 
   page.on('pageerror', error => report.pageErrors.push(String(error && (error.stack || error.message) || error)));
   page.on('console', message => {
@@ -126,14 +141,22 @@ try {
     report.consoleErrors.push(messageText);
   });
   
-  page.on('dialog', dialog => {
-    if (expectedResearchDeleteDialog && dialog.type() === 'confirm') {
+  page.on('dialog', async dialog => {
+    const expected = expectedResearchDeleteDialog && dialog.type() === 'confirm';
+    traceBrowserLifecycle('dialog', { type: dialog.type(), message: dialog.message(), expected });
+    if (expected) {
       expectedResearchDeleteDialog = false;
-      dialog.accept().catch(() => {});
+      try {
+        await dialog.accept();
+        traceBrowserLifecycle('research-delete-confirm-accepted');
+      } catch (error) {
+        traceBrowserLifecycle('research-delete-confirm-accept-failed', String(error));
+        throw error;
+      }
       return;
     }
     report.unexpectedDialogs.push(dialog.type() + ': ' + dialog.message());
-    dialog.dismiss().catch(() => {});
+    await dialog.dismiss().catch(error => traceBrowserLifecycle('unexpected-dialog-dismiss-failed', String(error)));
   });
   page.on('response', response => {
     const url = response.url();
@@ -309,10 +332,21 @@ try {
     await page.locator('#benchRepeatGroup').inputValue()==='candidate'&&
     await page.locator('#research').evaluate(el=>el.classList.contains('active')));
   expectedResearchDeleteDialog = true;
-  const deleteResponse=page.waitForResponse(response=>response.url().endsWith('/research-smoke-interrupted')&&response.request().method()==='DELETE');
+  traceBrowserLifecycle('research-delete-click-start', { pageUrl: page.url(), pageClosed: page.isClosed() });
+  const deleteResponse = page.waitForResponse(
+    response => response.url().endsWith('/research-smoke-interrupted') && response.request().method() === 'DELETE',
+    { timeout: 10000 }
+  ).then(response => ({ response }), error => ({ error: String(error && (error.stack || error.message) || error) }));
   await page.locator('[data-research-delete="research-smoke-interrupted"]').click();
-  const deleteResult=await deleteResponse;
-  check('研究实验删除只调用实验 DELETE API',researchDeleteCount===1&&deleteResult.status()===200);
+  traceBrowserLifecycle('research-delete-click-finished', { pageUrl: page.url(), pageClosed: page.isClosed(), requestCount: researchDeleteCount });
+  const deleteOutcome = await deleteResponse;
+  if (deleteOutcome.error) {
+    traceBrowserLifecycle('research-delete-response-wait-failed', deleteOutcome.error);
+    throw new Error('研究实验 DELETE 响应未完成：' + deleteOutcome.error);
+  }
+  const deleteResult = deleteOutcome.response;
+  traceBrowserLifecycle('research-delete-response-received', { status: deleteResult.status(), requestCount: researchDeleteCount });
+  check('研究实验删除只调用实验 DELETE API', researchDeleteCount === 1 && deleteResult.status() === 200);
 
   await page.route('**/api/benchmark**', async route => {
     const url = new URL(route.request().url());
