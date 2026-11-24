@@ -523,23 +523,23 @@ try {
     !(await page.locator('#benchSuiteRunBtn').isVisible()) &&
     !(await page.locator('#benchToolRunBtn').isVisible()));
   await clickTab(page, 'research', '研究');
-  check('普通性能测试提供 1～20 次重复采样，默认 10 次',
-    await page.locator('#benchRepeatCount').inputValue() === '10' &&
-    await page.locator('#benchRepeatCount').getAttribute('min') === '1' &&
-    await page.locator('#benchRepeatCount').getAttribute('max') === '20' &&
-    await page.locator('#benchRepeatRunBtn').isVisible() &&
+  check('Decode 实验每组提供 5～20 次采样，默认 10 次',
+    await page.locator('#researchPlannedSamples').inputValue() === '10' &&
+    await page.locator('#researchPlannedSamples').getAttribute('min') === '5' &&
+    await page.locator('#researchPlannedSamples').getAttribute('max') === '20' &&
+    await page.locator('#researchCreateRunBtn').isVisible() &&
+    !(await page.locator('#benchRepeatRunBtn').isVisible()) &&
     await page.locator('#benchRepeatReport').isVisible());
-  await page.locator('#benchRepeatCount').fill('0');
-  await page.locator('#benchRepeatRunBtn').click();
-  const repeatCountValidity = await page.locator('#benchRepeatCount').evaluate(el => ({
+  await page.locator('#researchPlannedSamples').fill('4');
+  const repeatCountValidity = await page.locator('#researchPlannedSamples').evaluate(el => ({
     rangeUnderflow: el.validity.rangeUnderflow,
     valid: el.checkValidity()
   }));
-  check('重复采样通过原生数字输入约束拒绝范围外次数且不提交任务',
+  check('Decode 实验拒绝低于 5 次的样本计划且不创建 Job',
     repeatCountValidity.rangeUnderflow && !repeatCountValidity.valid &&
-    !(await page.locator('#benchStopBtn').isEnabled()) &&
+    !(await page.locator('#researchStopBtn').isEnabled()) &&
     researchBenchmarkCreateCount === 0, repeatCountValidity);
-  await page.locator('#benchRepeatCount').fill('10');
+  await page.locator('#researchPlannedSamples').fill('10');
   const repeatReportSmoke = await page.evaluate(() => {
     const key='llm-gateway.bench-repeat.v1';
     const previous=localStorage.getItem(key);
