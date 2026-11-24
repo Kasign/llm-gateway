@@ -266,8 +266,8 @@ try {
     await route.continue();
   });
   await clickTab(page,'research','研究');
-  await page.locator('#researchRuntimeProfile option[value="profile-candidate"]').waitFor();
-  await page.locator('#benchRepeatExperiment option[value="research-smoke-1"]').waitFor();
+  await page.locator('#researchRuntimeProfile option[value="profile-candidate"]').waitFor({ state: 'attached' });
+  await page.locator('#benchRepeatExperiment option[value="research-smoke-1"]').waitFor({ state: 'attached' });
   await page.locator('#researchApiKey').fill('smoke-client-key');
   await page.locator('#researchPrompt').fill('Research smoke prompt');
   await page.locator('#researchRuntimeProfile').selectOption('profile-candidate');
