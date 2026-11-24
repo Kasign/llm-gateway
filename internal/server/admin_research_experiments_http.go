@@ -106,7 +106,7 @@ func benchmarkExperimentActualSnapshot(task *store.BenchmarkTask, changedParamet
 	return snapshot, actualValue, nil
 }
 
-func benchmarkExperimentExpectedValue(raw, group string) (interface{}, error) {
+func benchmarkExperimentExpectedValue(raw string) (interface{}, error) {
 	var value interface{}
 	if err := json.Unmarshal([]byte(raw), &value); err != nil { return nil, errors.New("experiment parameter value is invalid") }
 	return value, nil
@@ -117,12 +117,11 @@ func benchmarkExperimentExpectedValue(raw, group string) (interface{}, error) {
 func validateBenchmarkExperimentJob(ctx context.Context, repo *store.BenchmarkRepo, experiment *store.BenchmarkExperiment, group string, task *store.BenchmarkTask) error {
 	if experiment == nil || task == nil { return errors.New("experiment or benchmark job is unavailable") }
 	if group != "baseline" && group != "candidate" { return errors.New("experiment group must be baseline or candidate") }
-	if task.Status != "running" && task.Status != "completed" { return errors.New("benchmark job is not in a usable state") }
 	actual, actualValue, err := benchmarkExperimentActualSnapshot(task, experiment.ChangedParameter)
 	if err != nil { return err }
 	expectedRaw := experiment.BaselineValueJSON
 	if group == "candidate" { expectedRaw = experiment.CandidateValueJSON }
-	expected, err := benchmarkExperimentExpectedValue(expectedRaw, group)
+	expected, err := benchmarkExperimentExpectedValue(expectedRaw)
 	if err != nil { return err }
 	if !reflect.DeepEqual(actualValue, expected) { return errors.New("benchmark job runtime parameter does not match the selected experiment group") }
 	var baselineIDs, candidateIDs []string
@@ -136,7 +135,7 @@ func validateBenchmarkExperimentJob(ctx context.Context, repo *store.BenchmarkRe
 		previousGroup := "baseline"
 		previousExpectedRaw := experiment.BaselineValueJSON
 		for _, candidateID := range candidateIDs { if candidateID == existing { previousGroup = "candidate"; previousExpectedRaw = experiment.CandidateValueJSON; break } }
-		previousExpected, err := benchmarkExperimentExpectedValue(previousExpectedRaw, previousGroup)
+		previousExpected, err := benchmarkExperimentExpectedValue(previousExpectedRaw)
 		if err != nil || !reflect.DeepEqual(previousValue, previousExpected) { return errors.New("an existing experiment job does not match its declared group") }
 		if !reflect.DeepEqual(actual, previousSnapshot) { return errors.New("benchmark job conditions differ beyond the declared experiment parameter") }
 	}
@@ -209,6 +208,7 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 			if errors.Is(taskErr, sql.ErrNoRows) { jsonError(w,404,"benchmark_job_not_found","benchmark job not found") } else { jsonError(w,500,"benchmark_read_failed","failed to read benchmark job") }
 			return
 		}
+		if task.Status != "running" && task.Status != "completed" { jsonError(w,400,"benchmark_job_not_comparable","benchmark job is not in a usable state"); return }
 		if err := validateBenchmarkExperimentJob(r.Context(), s.benchmarkRepo, experiment, in.Group, task); err != nil {
 			jsonError(w,400,"benchmark_job_not_comparable",err.Error()); return
 		}

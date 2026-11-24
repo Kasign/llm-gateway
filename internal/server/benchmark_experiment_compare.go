@@ -72,8 +72,10 @@ func benchmarkExperimentMetricsForRun(task *store.BenchmarkTask,run store.Benchm
 func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store.BenchmarkExperiment)(map[string]interface{},error){
  if s.benchmarkRepo==nil{return nil,errors.New("benchmark repository is unavailable")}
  groups:=map[string][]string{}
- if err:=json.Unmarshal([]byte(e.BaselineJobIDsJSON),&groups["baseline"]);err!=nil{return nil,err}
- if err:=json.Unmarshal([]byte(e.CandidateJobIDsJSON),&groups["candidate"]);err!=nil{return nil,err}
+ var baselineIDs,candidateIDs []string
+ if err:=json.Unmarshal([]byte(e.BaselineJobIDsJSON),&baselineIDs);err!=nil{return nil,err}
+ if err:=json.Unmarshal([]byte(e.CandidateJobIDsJSON),&candidateIDs);err!=nil{return nil,err}
+ groups["baseline"],groups["candidate"]=baselineIDs,candidateIDs
  if len(groups["baseline"])==0||len(groups["candidate"])==0{return map[string]interface{}{"status":"insufficient_data","conclusion":"insufficient_data","comparability_level":"not_comparable","reason":"both baseline and candidate groups require associated Jobs"},nil}
  byCache:=map[string]map[string][]benchmarkExperimentObservedSample{"baseline":{},"candidate":{}}
  excluded:=make([]map[string]string,0);attempted:=map[string]int{"baseline":0,"candidate":0};limited:=false
