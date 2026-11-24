@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -201,4 +202,78 @@ func TestBenchmarkRepoMariaDB(t *testing.T) {
 	if err != nil || len(raceRuns) != 1 || raceRuns[0].Status != "completed" {
 		t.Fatalf("race runs = %+v, err=%v; want completed", raceRuns, err)
 	}
+}
+
+
+func TestBenchmarkExperimentRepoMariaDB(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("MYSQL_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("MYSQL_TEST_DSN is required for MariaDB Benchmark experiment repository integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil { t.Fatalf("open MariaDB: %v", err) }
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil { t.Fatalf("ping MariaDB: %v", err) }
+	var databaseName string
+	if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil { t.Fatalf("read database: %v", err) }
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing Benchmark experiment test against non-test database %q", databaseName)
+	}
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok { t.Fatal("resolve source file for migration schema") }
+	schema, err := os.ReadFile(filepath.Join(filepath.Dir(sourceFile), "../../migrations/001_init.sql"))
+	if err != nil { t.Fatalf("read migration schema: %v", err) }
+	for _, statement := range strings.Split(string(schema), ";") {
+		statement = strings.TrimSpace(statement)
+		if statement == "" { continue }
+		if _, err := db.ExecContext(ctx, statement); err != nil { t.Fatalf("apply test schema: %v", err) }
+	}
+
+	now := time.Now()
+	id := fmt.Sprintf("experiment-test-%d", now.UnixNano())
+	repo := NewBenchmarkExperimentRepo(db)
+	experiment := BenchmarkExperiment{
+		ExperimentID: id, Name: "线程数单变量对照", Status: "draft", ChangedParameter: "n_threads",
+		BaselineValueJSON: "4", CandidateValueJSON: "6",
+		BaselineConditionJSON: `{"model":"test-model","prompt_sha256":"abc"}`,
+		CandidateConditionJSON: `{"model":"test-model","prompt_sha256":"abc"}`,
+		BaselineJobIDsJSON: "[]", CandidateJobIDsJSON: "[]", PlannedSamples: 3,
+	}
+	if err := repo.Create(ctx, experiment); err != nil { t.Fatalf("create experiment: %v", err) }
+	defer func(){ _, _ = db.ExecContext(context.Background(),"DELETE FROM benchmark_experiments WHERE experiment_id=?",id) }()
+
+	if err := repo.AddJob(ctx,id,"baseline","baseline-job-1"); err != nil { t.Fatalf("add baseline job: %v",err) }
+	if err := repo.AddJob(ctx,id,"baseline","baseline-job-1"); err != nil { t.Fatalf("repeat baseline job association: %v",err) }
+	if err := repo.AddJob(ctx,id,"candidate","candidate-job-1"); err != nil { t.Fatalf("add candidate job: %v",err) }
+	got,err:=repo.Get(ctx,id)
+	if err!=nil { t.Fatalf("get experiment: %v",err) }
+	var baselineIDs,candidateIDs []string
+	if err:=json.Unmarshal([]byte(got.BaselineJobIDsJSON),&baselineIDs);err!=nil { t.Fatalf("decode baseline jobs: %v",err) }
+	if err:=json.Unmarshal([]byte(got.CandidateJobIDsJSON),&candidateIDs);err!=nil { t.Fatalf("decode candidate jobs: %v",err) }
+	if len(baselineIDs)!=1||baselineIDs[0]!="baseline-job-1"||len(candidateIDs)!=1||candidateIDs[0]!="candidate-job-1" {
+		t.Fatalf("unexpected experiment job associations: baseline=%v candidate=%v",baselineIDs,candidateIDs)
+	}
+	listed,total,err:=repo.List(ctx,"draft",10,0)
+	if err!=nil||total<1||len(listed)==0 { t.Fatalf("list experiments: total=%d rows=%d err=%v",total,len(listed),err) }
+	if _,_,err:=repo.List(ctx,"draft",101,0);err==nil { t.Fatal("experiment list must reject limit above 100") }
+	if err:=repo.UpdateState(ctx,id,"completed",`{"qualification":"not_comparable","sample_count":2}`,"","",nil,&now);err!=nil {
+		t.Fatalf("update experiment state: %v",err)
+	}
+	got,err=repo.Get(ctx,id)
+	if err!=nil||got.Status!="completed"||got.ReportJSON==""||got.FinishedAt==nil {
+		t.Fatalf("updated experiment = %+v err=%v",got,err)
+	}
+	if err:=repo.AddJob(ctx,id,"invalid","job");err==nil { t.Fatal("invalid experiment group must be rejected") }
+	if err:=repo.Create(ctx,BenchmarkExperiment{ExperimentID:id+"-invalid",Name:"bad",ChangedParameter:"x",BaselineValueJSON:"{",CandidateValueJSON:"1"});err==nil {
+		t.Fatal("invalid JSON snapshot must be rejected")
+	}
+	// 实验关联是追溯引用而非级联外键：清理 Benchmark Task 不应删除研究记录。
+	taskID:=id+"-task"
+	task:=BenchmarkTask{TaskID:taskID,Scenario:"performance",Status:"completed",StartedAt:now,FinishedAt:&now}
+	run:=BenchmarkRun{RunID:taskID,TaskID:taskID,RunNo:1,RequestID:taskID,Status:"completed",StartedAt:now,FinishedAt:&now}
+	if err:=NewBenchmarkRepo(db).CreateTaskAndRun(ctx,task,run);err!=nil { t.Fatalf("create referenced benchmark task: %v",err) }
+	if _,err:=db.ExecContext(ctx,"DELETE FROM benchmark_tasks WHERE task_id=?",taskID);err!=nil { t.Fatalf("delete referenced benchmark task: %v",err) }
+	if _,err:=repo.Get(ctx,id);err!=nil { t.Fatalf("experiment must survive benchmark task cleanup: %v",err) }
 }
