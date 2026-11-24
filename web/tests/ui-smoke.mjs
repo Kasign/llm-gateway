@@ -337,7 +337,7 @@ try {
     response => response.url().endsWith('/research-smoke-interrupted') && response.request().method() === 'DELETE',
     { timeout: 10000 }
   ).then(response => ({ response }), error => ({ error: String(error && (error.stack || error.message) || error) }));
-  await page.locator('[data-research-delete="research-smoke-interrupted"]').click();
+  await page.locator('#researchDetail [data-research-delete="research-smoke-interrupted"]').click();
   traceBrowserLifecycle('research-delete-click-finished', { pageUrl: page.url(), pageClosed: page.isClosed(), requestCount: researchDeleteCount });
   const deleteOutcome = await deleteResponse;
   if (deleteOutcome.error) {
