@@ -117,6 +117,17 @@ func benchmarkExperimentExpectedValue(raw string) (interface{}, error) {
 
 // validateBenchmarkExperimentJob 以服务端持久化的 Task.ConfigJSON 为准核对新 Job。
 // 只有声明参数的值符合分组，且剔除该参数后所有关联 Job 的完整快照一致，才允许关联。
+// benchmarkExperimentJobAssociable 允许把失败/取消/中断的已持久化 Job 关联到实验，
+// 以保留完整执行证据；统计比较仍只纳入 completed Job。
+func benchmarkExperimentJobAssociable(status string) bool {
+	switch status {
+	case "running", "cancelling", "completed", "failed", "cancelled", "interrupted":
+		return true
+	default:
+		return false
+	}
+}
+
 func validateBenchmarkExperimentJob(ctx context.Context, repo *store.BenchmarkRepo, experiment *store.BenchmarkExperiment, group string, task *store.BenchmarkTask) error {
 	if experiment == nil || task == nil { return errors.New("experiment or benchmark job is unavailable") }
 	if group != "baseline" && group != "candidate" { return errors.New("experiment group must be baseline or candidate") }
@@ -227,7 +238,11 @@ func (s *Server) benchmarkExperimentActionAPI(w http.ResponseWriter,r *http.Requ
 			if errors.Is(taskErr, sql.ErrNoRows) { jsonError(w,404,"benchmark_job_not_found","benchmark job not found") } else { jsonError(w,500,"benchmark_read_failed","failed to read benchmark job") }
 			return
 		}
-		if task.Status != "running" && task.Status != "completed" { jsonError(w,400,"benchmark_job_not_comparable","benchmark job is not in a usable state"); return }
+		// 失败、取消和中断的 Job 也属于本次实验的执行证据，应保留关联；
+		// 比较阶段只把 completed 样本纳入统计，不应在关联阶段丢弃失败样本。
+		if !benchmarkExperimentJobAssociable(task.Status) {
+			jsonError(w,400,"benchmark_job_not_comparable","benchmark job has an unsupported state for research association"); return
+		}
 		if err := validateBenchmarkExperimentJob(r.Context(), s.benchmarkRepo, experiment, in.Group, task); err != nil {
 			jsonError(w,400,"benchmark_job_not_comparable",err.Error()); return
 		}
