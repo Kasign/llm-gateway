@@ -191,7 +191,7 @@
             <select id="benchRepeatExperiment" style="max-width:220px"><option value="">仅保存 Benchmark 历史</option></select>
             <label class="small" for="benchRepeatGroup">实验分组</label>
             <select id="benchRepeatGroup" style="max-width:130px"><option value="baseline">Baseline</option><option value="candidate">Candidate</option></select>
-            <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runBenchmarkRepeat()">开始串行采样</button>
+            <button type="button" class="btn" id="benchRepeatRunBtn" onclick="runResearchExperimentRepeat()">开始串行采样</button>
               <button type="button" class="btn danger" id="researchStopBtn" onclick="stopBenchmark()" disabled>停止研究采样</button>
             </div>
                       <p id="benchRepeatHint" class="small muted">1～20 次，默认 10 次；每次独立保存任务，固定当前推理参数，串行执行。</p>
