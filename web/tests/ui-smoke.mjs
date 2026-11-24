@@ -268,6 +268,10 @@ try {
   await page.locator('[data-research-open="research-smoke-interrupted"]').click();
   await page.locator('[data-research-continue="research-smoke-interrupted"][data-research-group="candidate"]').click();
   check('研究工作区独立承载运行参数档案和实验采样',
+    await page.locator('#research #backendRuntimeProfilesRoot').count()===1&&
+    await page.locator('#models-inference #backendRuntimeProfilesRoot').count()===0&&
+    await page.locator('#research #benchRepeatRunBtn').count()===1&&
+    await page.locator('#model-test #benchRepeatRunBtn').count()===0&&
     await page.locator('#researchRuntimeProfile').count()===1&&
     await page.locator('#researchApiKey').count()===1&&
     await page.locator('#benchRepeatExperiment').inputValue()==='research-smoke-interrupted'&&
