@@ -9,7 +9,11 @@ import (
  "github.com/whl/llm-gateway/internal/store"
 )
 
-const ( benchmarkExperimentMinimumSamples = 5; benchmarkExperimentMaterialDeltaPercent = 5.0 )
+const (
+ benchmarkExperimentMinimumSamples = 5
+ benchmarkExperimentMinimumOutputTokens = 256
+ benchmarkExperimentMaterialDeltaPercent = 5.0
+)
 type benchmarkExperimentObservedSample struct { JobID string; Metrics map[string]float64 }
 type benchmarkExperimentMetricStats struct { Count int `json:"count"`; Min float64 `json:"min"`; Median float64 `json:"median"`; P95 float64 `json:"p95"`; Max float64 `json:"max"` }
 
@@ -51,6 +55,22 @@ func benchmarkExperimentMetricConclusion(base,candidate benchmarkExperimentMetri
  if math.Abs(md)<threshold&&math.Abs(pd)<threshold{return "no_material_change",md,pd}
  return "inconclusive",md,pd
 }
+func benchmarkExperimentSampleExclusionReason(run store.BenchmarkRun, analysis *RequestAnalysis) string {
+ if run.OutputTokens == nil || *run.OutputTokens < benchmarkExperimentMinimumOutputTokens {
+  return "decode_output_tokens_below_minimum"
+ }
+ if analysis == nil || analysis.Throughput.ModelTimings == nil {
+  return "native_decode_timing_unavailable"
+ }
+ timings := analysis.Throughput.ModelTimings
+ if timings.PredictedN == nil || *timings.PredictedN <= 0 ||
+  timings.PredictedMS == nil || *timings.PredictedMS <= 0 ||
+  timings.PredictedPerSecond == nil || *timings.PredictedPerSecond <= 0 {
+  return "native_decode_timing_incomplete"
+ }
+ return ""
+}
+
 func benchmarkExperimentMetricsForRun(task *store.BenchmarkTask,run store.BenchmarkRun,analysis *RequestAnalysis)(map[string]float64,string){
  metrics:=map[string]float64{}
  if task.LatencyMeasured{metrics["latency_ms"]=float64(task.LatencyMS)}
@@ -96,6 +116,9 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
    if run.Status!="completed"{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"run_not_completed"});continue}
    var analysis *RequestAnalysis
    if s.logs!=nil{if raw,readErr:=s.logs.GetRequestAnalysis(ctx,run.RequestID);readErr==nil&&raw!=""{analysis,_=decodeRequestAnalysis(raw)}}
+   if reason:=benchmarkExperimentSampleExclusionReason(run,analysis);reason!=""{
+    excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":reason});continue
+   }
    metrics,cache:=benchmarkExperimentMetricsForRun(task,run,analysis)
    if cache!="cold"&&cache!="partial"&&cache!="full"{excluded=append(excluded,map[string]string{"job_id":jobID,"group":group,"reason":"cache_state_"+cache});continue}
    byCache[group][cache]=append(byCache[group][cache],benchmarkExperimentObservedSample{JobID:jobID,Metrics:metrics})
@@ -125,7 +148,15 @@ func (s *Server) buildBenchmarkExperimentComparison(ctx context.Context,e *store
  conclusion:=benchmarkExperimentOverallConclusion(conclusions)
  comparability:="strict";if limited||len(excluded)>0{comparability="limited"};if len(cacheGroups)==0{comparability="not_comparable"}
  status:="completed";if len(excluded)>0||conclusion=="insufficient_data"||conclusion=="inconclusive"{status="partial"}
- return map[string]interface{}{"status":status,"conclusion":conclusion,"comparability_level":comparability,"changed_parameter":e.ChangedParameter,"baseline_value":json.RawMessage(e.BaselineValueJSON),"candidate_value":json.RawMessage(e.CandidateValueJSON),"minimum_samples_per_metric":benchmarkExperimentMinimumSamples,"material_delta_threshold_percent":benchmarkExperimentMaterialDeltaPercent,"attempted":attempted,"cache_groups":cacheGroups,"excluded_samples":excluded},nil
+ decodeConclusions:=make([]string,0)
+ for _,group:=range cacheGroups{
+  groupMap,ok:=group.(map[string]interface{});if !ok{continue}
+  metricsMap,ok:=groupMap["metrics"].(map[string]interface{});if !ok{continue}
+  decodeMetric,ok:=metricsMap["decode_tokens_per_sec"].(map[string]interface{});if !ok{continue}
+  if value,ok:=decodeMetric["conclusion"].(string);ok{decodeConclusions=append(decodeConclusions,value)}
+ }
+ primaryConclusion:=benchmarkExperimentOverallConclusion(decodeConclusions)
+ return map[string]interface{}{"status":status,"conclusion":conclusion,"primary_metric":"decode_tokens_per_sec","primary_conclusion":primaryConclusion,"minimum_output_tokens":benchmarkExperimentMinimumOutputTokens,"comparability_level":comparability,"changed_parameter":e.ChangedParameter,"baseline_value":json.RawMessage(e.BaselineValueJSON),"candidate_value":json.RawMessage(e.CandidateValueJSON),"minimum_samples_per_metric":benchmarkExperimentMinimumSamples,"material_delta_threshold_percent":benchmarkExperimentMaterialDeltaPercent,"attempted":attempted,"cache_groups":cacheGroups,"excluded_samples":excluded},nil
 }
 
 

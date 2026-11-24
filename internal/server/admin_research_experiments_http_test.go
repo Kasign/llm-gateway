@@ -170,3 +170,23 @@ func TestValidateBenchmarkExperimentJobAcceptsMatchingRuntimeProfileAndRejectsWr
 	}
 }
 
+
+func TestBenchmarkExperimentSampleExclusionRequiresSustainedNativeDecodeEvidence(t *testing.T) {
+ outputTokens:=int64(256)
+ decodeSteps:=int64(255)
+ decodeMS:=float64(12000)
+ decodeTPS:=float64(21.25)
+ run:=store.BenchmarkRun{OutputTokens:&outputTokens}
+ analysis:=&RequestAnalysis{Throughput:RequestThroughput{ModelTimings:&RequestModelTimings{
+  PredictedN:&decodeSteps,PredictedMS:&decodeMS,PredictedPerSecond:&decodeTPS,
+ }}}
+ if reason:=benchmarkExperimentSampleExclusionReason(run,analysis);reason!=""{t.Fatalf("valid Decode sample excluded: %s",reason)}
+ short:=int64(255);run.OutputTokens=&short
+ if reason:=benchmarkExperimentSampleExclusionReason(run,analysis);reason!="decode_output_tokens_below_minimum"{t.Fatalf("short sample reason=%q",reason)}
+ run.OutputTokens=nil
+ if reason:=benchmarkExperimentSampleExclusionReason(run,analysis);reason!="decode_output_tokens_below_minimum"{t.Fatalf("missing output count reason=%q",reason)}
+ run.OutputTokens=&outputTokens
+ if reason:=benchmarkExperimentSampleExclusionReason(run,nil);reason!="native_decode_timing_unavailable"{t.Fatalf("missing analysis reason=%q",reason)}
+ incomplete:=&RequestAnalysis{Throughput:RequestThroughput{ModelTimings:&RequestModelTimings{PredictedN:&decodeSteps}}}
+ if reason:=benchmarkExperimentSampleExclusionReason(run,incomplete);reason!="native_decode_timing_incomplete"{t.Fatalf("incomplete timing reason=%q",reason)}
+}
